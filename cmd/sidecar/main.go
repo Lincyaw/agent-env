@@ -1,9 +1,14 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"log"
+	"net/http"
 	"os"
+	"os/signal"
+	"syscall"
+	"time"
 
 	"github.com/Lincyaw/agent-env/pkg/sidecar"
 )
@@ -24,7 +29,30 @@ func main() {
 	}
 
 	server := sidecar.NewServer(workspaceDir, port)
-	if err := server.Start(); err != nil {
-		log.Fatalf("Failed to start server: %v", err)
+
+	// Setup signal handling for graceful shutdown
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	// Start server in a goroutine
+	go func() {
+		if err := server.Start(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Failed to start server: %v", err)
+		}
+	}()
+
+	log.Println("Sidecar server started, waiting for shutdown signal")
+
+	// Wait for interrupt signal
+	<-ctx.Done()
+	log.Println("Shutting down gracefully...")
+
+	// Give server 10 seconds to finish current requests
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := server.Shutdown(shutdownCtx); err != nil {
+		log.Printf("Server shutdown error: %v", err)
 	}
+	log.Println("Server stopped")
 }

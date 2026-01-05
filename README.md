@@ -29,11 +29,13 @@ The system implements a control plane and data plane separation:
 - Go 1.25+
 - Docker
 - kubectl
-- minikube (for testing)
+- minikube (for local testing) or access to a Kubernetes cluster
 
 ## Quick Start
 
-### 1. Build Docker Images
+### Option 1: Deploy to Minikube (Local Development)
+
+#### 1. Build Docker Images
 
 ```bash
 make docker-build
@@ -43,19 +45,19 @@ This builds:
 - `arl-operator:latest` - The Kubernetes operator
 - `arl-sidecar:latest` - The sidecar agent
 
-### 2. Start Minikube
+#### 2. Start Minikube
 
 ```bash
 make minikube-start
 ```
 
-### 3. Load Images into Minikube
+#### 3. Load Images into Minikube
 
 ```bash
 make minikube-load-images
 ```
 
-### 4. Deploy to Kubernetes
+#### 4. Deploy to Kubernetes
 
 ```bash
 make deploy
@@ -66,13 +68,43 @@ This will:
 - Deploy the operator to `arl-system` namespace
 - Set up RBAC
 
-### 5. Create Sample Resources
+#### 5. Create Sample Resources
 
 ```bash
 kubectl apply -f config/samples/
 ```
 
-### 6. Verify Deployment
+### Option 2: Deploy to Standard Kubernetes Cluster
+
+#### 1. Build and Push Images
+
+```bash
+# Build and push images to registry
+make k8s-build-push
+
+# Or use custom registry
+REGISTRY=your-registry.com/your-namespace make k8s-build-push
+```
+
+This builds and pushes:
+- `10.10.10.240/library/arl-operator:latest`
+- `10.10.10.240/library/arl-sidecar:latest`
+
+#### 2. Deploy to Cluster
+
+```bash
+# Deploy CRDs and operator
+make k8s-deploy
+```
+
+#### 3. Create Sample Resources
+
+```bash
+# Use K8s-specific samples (with proper image registry)
+kubectl apply -f config/samples/
+```
+
+### Verify Deployment
 
 ```bash
 # Check operator is running
@@ -226,6 +258,8 @@ make logs
 
 ## Clean Up
 
+### Minikube
+
 ```bash
 # Remove sample resources
 make undeploy-samples
@@ -235,6 +269,16 @@ make undeploy
 
 # Delete minikube cluster
 make minikube-delete
+```
+
+### Standard Kubernetes
+
+```bash
+# Remove sample resources
+kubectl delete -f config/samples/
+
+# Remove operator and CRDs
+make k8s-undeploy
 ```
 
 ## Architecture Details

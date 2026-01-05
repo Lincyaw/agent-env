@@ -19,10 +19,10 @@ const (
 type SandboxSpec struct {
 	// PoolRef is the name of the WarmPool to allocate from
 	PoolRef string `json:"poolRef"`
-	
+
 	// KeepAlive indicates whether to keep the pod after task completion
 	KeepAlive bool `json:"keepAlive,omitempty"`
-	
+
 	// Resources specifies the resource requirements
 	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
 }
@@ -31,16 +31,16 @@ type SandboxSpec struct {
 type SandboxStatus struct {
 	// Phase is the current lifecycle phase
 	Phase SandboxPhase `json:"phase,omitempty"`
-	
+
 	// PodName is the name of the bound pod
 	PodName string `json:"podName,omitempty"`
-	
+
 	// PodIP is the IP address of the bound pod
 	PodIP string `json:"podIP,omitempty"`
-	
+
 	// WorkDir is the working directory in the sandbox
 	WorkDir string `json:"workDir,omitempty"`
-	
+
 	// Conditions represent the latest available observations
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }

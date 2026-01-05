@@ -1,8 +1,15 @@
 # Makefile for ARL-Infra
 
-# Image names
-OPERATOR_IMG ?= arl-operator:latest
-SIDECAR_IMG ?= arl-sidecar:latest
+# Image registry for standard K8s deployment
+REGISTRY ?= 10.10.10.240/library
+
+# Image names for minikube (local)
+OPERATOR_IMG_LOCAL ?= arl-operator:latest
+SIDECAR_IMG_LOCAL ?= arl-sidecar:latest
+
+# Image names for standard K8s (with registry)
+OPERATOR_IMG ?= $(REGISTRY)/arl-operator:latest
+SIDECAR_IMG ?= $(REGISTRY)/arl-sidecar:latest
 
 # Minikube context
 MINIKUBE_PROFILE ?= minikube
@@ -41,15 +48,25 @@ build: build-operator build-sidecar ## Build all binaries
 ##@ Docker
 
 .PHONY: docker-build-operator
-docker-build-operator: ## Build operator Docker image
-	docker build -t $(OPERATOR_IMG) -f Dockerfile.operator .
+docker-build-operator: ## Build operator Docker image for minikube
+	docker build -t $(OPERATOR_IMG_LOCAL) -f Dockerfile.operator .
 
 .PHONY: docker-build-sidecar
-docker-build-sidecar: ## Build sidecar Docker image
-	docker build -t $(SIDECAR_IMG) -f Dockerfile.sidecar .
+docker-build-sidecar: ## Build sidecar Docker image for minikube
+	docker build -t $(SIDECAR_IMG_LOCAL) -f Dockerfile.sidecar .
 
 .PHONY: docker-build
-docker-build: docker-build-operator docker-build-sidecar ## Build all Docker images
+docker-build: docker-build-operator docker-build-sidecar ## Build all Docker images for minikube
+
+.PHONY: docker-build-k8s
+docker-build-k8s: ## Build and tag Docker images for standard K8s
+	docker build -t $(OPERATOR_IMG) -f Dockerfile.operator .
+	docker build -t $(SIDECAR_IMG) -f Dockerfile.sidecar .
+
+.PHONY: docker-push
+docker-push: ## Push Docker images to registry
+	docker push $(OPERATOR_IMG)
+	docker push $(SIDECAR_IMG)
 
 ##@ Minikube
 
@@ -59,8 +76,8 @@ minikube-start: ## Start minikube
 
 .PHONY: minikube-load-images
 minikube-load-images: ## Load images into minikube
-	minikube -p $(MINIKUBE_PROFILE) image load $(OPERATOR_IMG)
-	minikube -p $(MINIKUBE_PROFILE) image load $(SIDECAR_IMG)
+	minikube -p $(MINIKUBE_PROFILE) image load $(OPERATOR_IMG_LOCAL)
+	minikube -p $(MINIKUBE_PROFILE) image load $(SIDECAR_IMG_LOCAL)
 
 .PHONY: minikube-stop
 minikube-stop: ## Stop minikube
@@ -98,6 +115,20 @@ undeploy-samples: ## Remove sample resources
 
 .PHONY: deploy
 deploy: install-crds deploy-operator ## Deploy CRDs and operator
+
+##@ Standard K8s Deployment
+
+.PHONY: k8s-build-push
+k8s-build-push: docker-build-k8s docker-push ## Build and push images for K8s
+
+.PHONY: k8s-deploy
+k8s-deploy: install-crds ## Deploy to standard K8s cluster
+	kubectl apply -f config/operator/deployment-k8s.yaml
+
+.PHONY: k8s-undeploy
+k8s-undeploy: ## Remove from standard K8s cluster
+	kubectl delete -f config/operator/deployment-k8s.yaml --ignore-not-found=true
+	$(MAKE) uninstall-crds
 
 .PHONY: undeploy
 undeploy: undeploy-samples undeploy-operator uninstall-crds ## Remove all resources

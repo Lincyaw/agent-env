@@ -1,13 +1,7 @@
 package controller
 
 import (
-	"bytes"
 	"context"
-	"encoding/json"
-	"fmt"
-	"io"
-	"net/http"
-	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -18,23 +12,26 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	arlv1alpha1 "github.com/Lincyaw/agent-env/api/v1alpha1"
-	"github.com/Lincyaw/agent-env/pkg/sidecar"
+	"github.com/Lincyaw/agent-env/pkg/config"
+	"github.com/Lincyaw/agent-env/pkg/interfaces"
+	"github.com/Lincyaw/agent-env/pkg/middleware"
 )
 
 const (
-	SidecarPort       = 8080
-	WorkspaceDir      = "/workspace"
-	PoolLabelKey      = "arl.infra.io/pool"
-	SandboxLabelKey   = "arl.infra.io/sandbox"
-	StatusLabelKey    = "arl.infra.io/status"
-	StatusIdle        = "idle"
-	StatusAllocated   = "allocated"
+	PoolLabelKey    = "arl.infra.io/pool"
+	SandboxLabelKey = "arl.infra.io/sandbox"
+	StatusLabelKey  = "arl.infra.io/status"
+	StatusIdle      = "idle"
+	StatusAllocated = "allocated"
 )
 
 // WarmPoolReconciler reconciles a WarmPool object
 type WarmPoolReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme     *runtime.Scheme
+	Config     *config.Config
+	Metrics    interfaces.MetricsCollector
+	Middleware *middleware.Chain
 }
 
 // +kubebuilder:rbac:groups=arl.infra.io,resources=warmpools,verbs=get;list;watch;create;update;patch;delete
@@ -44,6 +41,18 @@ type WarmPoolReconciler struct {
 
 // Reconcile manages the WarmPool lifecycle
 func (r *WarmPoolReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	// Execute middleware chain if enabled
+	if r.Middleware != nil {
+		if err := r.Middleware.ExecuteBefore(ctx, req); err != nil {
+			return ctrl.Result{}, err
+		}
+		defer r.Middleware.ExecuteAfter(ctx, req, nil)
+	}
+
+	return r.reconcile(ctx, req)
+}
+
+func (r *WarmPoolReconciler) reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
 	// Fetch the WarmPool instance
@@ -57,7 +66,7 @@ func (r *WarmPoolReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 
 	// List all pods belonging to this pool
 	podList := &corev1.PodList{}
-	if err := r.List(ctx, podList, 
+	if err := r.List(ctx, podList,
 		client.InNamespace(req.Namespace),
 		client.MatchingLabels{PoolLabelKey: pool.Name}); err != nil {
 		return ctrl.Result{}, err
@@ -81,13 +90,18 @@ func (r *WarmPoolReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	totalPods := readyIdle + allocated
 	needed := pool.Spec.Replicas - readyIdle
 
-	logger.Info("Pool status", 
+	logger.Info("Pool status",
 		"pool", pool.Name,
 		"desired", pool.Spec.Replicas,
 		"ready", readyIdle,
 		"allocated", allocated,
 		"total", totalPods,
 		"needed", needed)
+
+	// Record metrics
+	if r.Metrics != nil {
+		r.Metrics.RecordPoolUtilization(pool.Name, readyIdle, allocated)
+	}
 
 	// Create new pods if needed
 	if needed > 0 {
@@ -109,7 +123,8 @@ func (r *WarmPoolReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 
 	// Requeue to maintain the pool
-	return ctrl.Result{RequeueAfter: 10 * time.Second}, nil
+	requeueDelay := r.Config.DefaultRequeueDelay
+	return ctrl.Result{RequeueAfter: requeueDelay}, nil
 }
 
 // constructPod creates a Pod from the WarmPool template
@@ -138,19 +153,19 @@ func (r *WarmPoolReconciler) constructPod(pool *arlv1alpha1.WarmPool) *corev1.Po
 	if !hasSidecar {
 		// Add default sidecar container
 		sidecarContainer := corev1.Container{
-			Name:  "sidecar",
-			Image: "arl-sidecar:latest",
+			Name:            "sidecar",
+			Image:           "arl-sidecar:latest",
 			ImagePullPolicy: corev1.PullIfNotPresent,
 			Ports: []corev1.ContainerPort{
 				{
-					ContainerPort: SidecarPort,
+					ContainerPort: int32(r.Config.SidecarPort),
 					Protocol:      corev1.ProtocolTCP,
 				},
 			},
 			VolumeMounts: []corev1.VolumeMount{
 				{
 					Name:      "workspace",
-					MountPath: WorkspaceDir,
+					MountPath: r.Config.WorkspaceDir,
 				},
 			},
 		}
@@ -189,71 +204,7 @@ func (r *WarmPoolReconciler) SetupWithManager(mgr ctrl.Manager) error {
 		Complete(r)
 }
 
-// SidecarClient provides methods to communicate with the sidecar
-type SidecarClient struct {
-	httpClient *http.Client
-}
-
-// NewSidecarClient creates a new sidecar client
-func NewSidecarClient() *SidecarClient {
-	return &SidecarClient{
-		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
-		},
-	}
-}
-
-// UpdateFiles sends file update request to sidecar
-func (c *SidecarClient) UpdateFiles(podIP string, req *sidecar.FileRequest) (*sidecar.FileResponse, error) {
-	url := fmt.Sprintf("http://%s:%d/files", podIP, SidecarPort)
-	resp := &sidecar.FileResponse{}
-	if err := c.doRequest(url, req, resp); err != nil {
-		return nil, err
-	}
-	return resp, nil
-}
-
-// Execute sends execute request to sidecar
-func (c *SidecarClient) Execute(podIP string, req *sidecar.ExecRequest) (*sidecar.ExecLog, error) {
-	url := fmt.Sprintf("http://%s:%d/execute", podIP, SidecarPort)
-	resp := &sidecar.ExecLog{}
-	if err := c.doRequest(url, req, resp); err != nil {
-		return nil, err
-	}
-	return resp, nil
-}
-
-// Reset sends reset request to sidecar
-func (c *SidecarClient) Reset(podIP string, req *sidecar.ResetRequest) (*sidecar.ResetResponse, error) {
-	url := fmt.Sprintf("http://%s:%d/reset", podIP, SidecarPort)
-	resp := &sidecar.ResetResponse{}
-	if err := c.doRequest(url, req, resp); err != nil {
-		return nil, err
-	}
-	return resp, nil
-}
-
-// doRequest performs HTTP request to sidecar
-func (c *SidecarClient) doRequest(url string, reqBody interface{}, respBody interface{}) error {
-	data, err := json.Marshal(reqBody)
-	if err != nil {
-		return fmt.Errorf("failed to marshal request: %w", err)
-	}
-
-	resp, err := c.httpClient.Post(url, "application/json", bytes.NewReader(data))
-	if err != nil {
-		return fmt.Errorf("failed to send request: %w", err)
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("request failed with status %d: %s", resp.StatusCode, string(body))
-	}
-
-	if err := json.NewDecoder(resp.Body).Decode(respBody); err != nil {
-		return fmt.Errorf("failed to decode response: %w", err)
-	}
-
-	return nil
+// Name returns the controller name for logging
+func (r *WarmPoolReconciler) Name() string {
+	return "WarmPool"
 }

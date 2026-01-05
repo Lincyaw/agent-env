@@ -26,16 +26,16 @@ const (
 type TaskStep struct {
 	// Name is the step identifier
 	Name string `json:"name"`
-	
+
 	// Type is the step type (FilePatch or Command)
 	Type StepType `json:"type"`
-	
+
 	// Content is the patch content (for FilePatch type)
 	Content string `json:"content,omitempty"`
-	
+
 	// Command is the command to execute (for Command type)
 	Command []string `json:"command,omitempty"`
-	
+
 	// Env is the environment variables for the command
 	Env map[string]string `json:"env,omitempty"`
 }
@@ -44,10 +44,10 @@ type TaskStep struct {
 type TaskSpec struct {
 	// SandboxRef is the name of the Sandbox to execute in
 	SandboxRef string `json:"sandboxRef"`
-	
+
 	// Timeout is the maximum execution time
 	Timeout metav1.Duration `json:"timeout,omitempty"`
-	
+
 	// Steps is the sequence of operations to execute
 	Steps []TaskStep `json:"steps"`
 }
@@ -56,25 +56,25 @@ type TaskSpec struct {
 type TaskStatus struct {
 	// State is the current execution state
 	State TaskState `json:"state,omitempty"`
-	
+
 	// ExitCode is the exit code of the last command
 	ExitCode int32 `json:"exitCode,omitempty"`
-	
+
 	// Stdout is the standard output
 	Stdout string `json:"stdout,omitempty"`
-	
+
 	// Stderr is the standard error output
 	Stderr string `json:"stderr,omitempty"`
-	
+
 	// Duration is the execution duration
 	Duration metav1.Duration `json:"duration,omitempty"`
-	
+
 	// StartTime is when the task started
 	StartTime *metav1.Time `json:"startTime,omitempty"`
-	
+
 	// CompletionTime is when the task completed
 	CompletionTime *metav1.Time `json:"completionTime,omitempty"`
-	
+
 	// Conditions represent the latest available observations
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }

@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"fmt"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -13,12 +14,18 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	arlv1alpha1 "github.com/Lincyaw/agent-env/api/v1alpha1"
+	"github.com/Lincyaw/agent-env/pkg/config"
+	"github.com/Lincyaw/agent-env/pkg/interfaces"
+	"github.com/Lincyaw/agent-env/pkg/middleware"
 )
 
 // SandboxReconciler reconciles a Sandbox object
 type SandboxReconciler struct {
 	client.Client
-	Scheme *runtime.Scheme
+	Scheme     *runtime.Scheme
+	Config     *config.Config
+	Metrics    interfaces.MetricsCollector
+	Middleware *middleware.Chain
 }
 
 // +kubebuilder:rbac:groups=arl.infra.io,resources=sandboxes,verbs=get;list;watch;create;update;patch;delete
@@ -27,15 +34,29 @@ type SandboxReconciler struct {
 
 // Reconcile manages the Sandbox lifecycle
 func (r *SandboxReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	// Execute middleware chain if enabled
+	if r.Middleware != nil {
+		if err := r.Middleware.ExecuteBefore(ctx, req); err != nil {
+			return ctrl.Result{}, err
+		}
+		defer r.Middleware.ExecuteAfter(ctx, req, nil)
+	}
+
+	return r.reconcile(ctx, req)
+}
+
+func (r *SandboxReconciler) reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
 	// Fetch the Sandbox instance
 	sandbox := &arlv1alpha1.Sandbox{}
 	if err := r.Get(ctx, req.NamespacedName, sandbox); err != nil {
 		if errors.IsNotFound(err) {
+			// Object not found, could have been deleted after reconcile request
 			return ctrl.Result{}, nil
 		}
-		return ctrl.Result{}, err
+		// Error reading the object - requeue the request
+		return ctrl.Result{}, fmt.Errorf("failed to get Sandbox: %w", err)
 	}
 
 	// If already bound and ready, nothing to do
@@ -59,8 +80,8 @@ func (r *SandboxReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		// Find a running pod
 		var selectedPod *corev1.Pod
 		for i := range podList.Items {
-			if podList.Items[i].Status.Phase == corev1.PodRunning && 
-			   podList.Items[i].DeletionTimestamp == nil {
+			if podList.Items[i].Status.Phase == corev1.PodRunning &&
+				podList.Items[i].DeletionTimestamp == nil {
 				selectedPod = &podList.Items[i]
 				break
 			}
@@ -90,13 +111,19 @@ func (r *SandboxReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		sandbox.Status.Phase = arlv1alpha1.SandboxPhaseBound
 		sandbox.Status.PodName = selectedPod.Name
 		sandbox.Status.PodIP = selectedPod.Status.PodIP
-		sandbox.Status.WorkDir = WorkspaceDir
+		sandbox.Status.WorkDir = r.Config.WorkspaceDir
 
 		if err := r.Status().Update(ctx, sandbox); err != nil {
 			return ctrl.Result{}, err
 		}
 
-		logger.Info("Bound sandbox to pod", 
+		// Record metrics
+		if r.Metrics != nil {
+			allocationTime := time.Since(time.Now())
+			r.Metrics.RecordSandboxAllocation(sandbox.Spec.PoolRef, allocationTime)
+		}
+
+		logger.Info("Bound sandbox to pod",
 			"sandbox", sandbox.Name,
 			"pod", selectedPod.Name)
 
@@ -132,7 +159,7 @@ func (r *SandboxReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		if allReady {
 			sandbox.Status.Phase = arlv1alpha1.SandboxPhaseReady
 			sandbox.Status.PodIP = pod.Status.PodIP
-			
+
 			if err := r.Status().Update(ctx, sandbox); err != nil {
 				return ctrl.Result{}, err
 			}
@@ -141,7 +168,8 @@ func (r *SandboxReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 			return ctrl.Result{}, nil
 		}
 
-		return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
+		checkInterval := r.Config.SandboxCheckInterval
+		return ctrl.Result{RequeueAfter: checkInterval}, nil
 	}
 
 	return ctrl.Result{}, nil
@@ -152,6 +180,11 @@ func (r *SandboxReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&arlv1alpha1.Sandbox{}).
 		Complete(r)
+}
+
+// Name returns the controller name for logging
+func (r *SandboxReconciler) Name() string {
+	return "Sandbox"
 }
 
 // findCondition finds a condition by type

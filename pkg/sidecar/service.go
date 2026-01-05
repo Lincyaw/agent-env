@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 )
@@ -19,10 +20,35 @@ type FileRequest struct {
 	Patch    string
 }
 
+// GetBasePath implements interfaces.FileUpdateRequest
+func (r *FileRequest) GetBasePath() string {
+	return r.BasePath
+}
+
+// GetFiles implements interfaces.FileUpdateRequest
+func (r *FileRequest) GetFiles() map[string]string {
+	return r.Files
+}
+
+// GetPatch implements interfaces.FileUpdateRequest
+func (r *FileRequest) GetPatch() string {
+	return r.Patch
+}
+
 // FileResponse indicates success or failure
 type FileResponse struct {
 	Success bool
 	Message string
+}
+
+// IsSuccess implements interfaces.FileUpdateResponse
+func (r *FileResponse) IsSuccess() bool {
+	return r.Success
+}
+
+// GetMessage implements interfaces.FileUpdateResponse
+func (r *FileResponse) GetMessage() string {
+	return r.Message
 }
 
 // ExecRequest specifies a command to execute
@@ -34,12 +60,52 @@ type ExecRequest struct {
 	TimeoutSeconds int32
 }
 
+// GetCommand implements interfaces.ExecRequest
+func (r *ExecRequest) GetCommand() []string {
+	return r.Command
+}
+
+// GetEnv implements interfaces.ExecRequest
+func (r *ExecRequest) GetEnv() map[string]string {
+	return r.Env
+}
+
+// GetWorkingDir implements interfaces.ExecRequest
+func (r *ExecRequest) GetWorkingDir() string {
+	return r.WorkingDir
+}
+
+// GetTimeout implements interfaces.ExecRequest
+func (r *ExecRequest) GetTimeout() int32 {
+	return r.TimeoutSeconds
+}
+
 // ExecLog streams output from command execution
 type ExecLog struct {
 	Stdout   string
 	Stderr   string
 	ExitCode int32
 	Done     bool
+}
+
+// GetStdout implements interfaces.ExecResponse
+func (r *ExecLog) GetStdout() string {
+	return r.Stdout
+}
+
+// GetStderr implements interfaces.ExecResponse
+func (r *ExecLog) GetStderr() string {
+	return r.Stderr
+}
+
+// GetExitCode implements interfaces.ExecResponse
+func (r *ExecLog) GetExitCode() int32 {
+	return r.ExitCode
+}
+
+// IsDone implements interfaces.ExecResponse
+func (r *ExecLog) IsDone() bool {
+	return r.Done
 }
 
 // SignalRequest specifies a signal to send
@@ -59,10 +125,25 @@ type ResetRequest struct {
 	PreserveFiles bool
 }
 
+// ShouldPreserveFiles implements interfaces.ResetRequest
+func (r *ResetRequest) ShouldPreserveFiles() bool {
+	return r.PreserveFiles
+}
+
 // ResetResponse indicates success or failure
 type ResetResponse struct {
 	Success bool
 	Message string
+}
+
+// IsSuccess implements interfaces.ResetResponse
+func (r *ResetResponse) IsSuccess() bool {
+	return r.Success
+}
+
+// GetMessage implements interfaces.ResetResponse
+func (r *ResetResponse) GetMessage() string {
+	return r.Message
 }
 
 // AgentService implements the sidecar functionality
@@ -98,7 +179,7 @@ func (s *AgentService) UpdateFiles(ctx context.Context, req *FileRequest) (*File
 	for path, content := range req.Files {
 		fullPath := filepath.Join(basePath, path)
 		dir := filepath.Dir(fullPath)
-		
+
 		if err := os.MkdirAll(dir, 0755); err != nil {
 			return &FileResponse{
 				Success: false,
@@ -115,7 +196,7 @@ func (s *AgentService) UpdateFiles(ctx context.Context, req *FileRequest) (*File
 	}
 
 	// TODO: Apply patch if provided (would need patch utility)
-	
+
 	return &FileResponse{
 		Success: true,
 		Message: fmt.Sprintf("successfully updated %d files", len(req.Files)),
@@ -185,24 +266,38 @@ func (s *AgentService) Execute(ctx context.Context, req *ExecRequest, stream cha
 		s.processes[cmd.Process.Pid] = cmd
 	}
 
+	// Use WaitGroup to ensure all goroutines complete
+	var wg sync.WaitGroup
+	wg.Add(2)
+
 	// Read stdout
 	go func() {
+		defer wg.Done()
 		scanner := bufio.NewScanner(stdout)
 		for scanner.Scan() {
-			stream <- &ExecLog{
+			select {
+			case stream <- &ExecLog{
 				Stdout: scanner.Text() + "\n",
 				Done:   false,
+			}:
+			case <-ctx.Done():
+				return
 			}
 		}
 	}()
 
 	// Read stderr
 	go func() {
+		defer wg.Done()
 		scanner := bufio.NewScanner(stderr)
 		for scanner.Scan() {
-			stream <- &ExecLog{
+			select {
+			case stream <- &ExecLog{
 				Stderr: scanner.Text() + "\n",
 				Done:   false,
+			}:
+			case <-ctx.Done():
+				return
 			}
 		}
 	}()
@@ -210,7 +305,9 @@ func (s *AgentService) Execute(ctx context.Context, req *ExecRequest, stream cha
 	// Apply timeout if specified
 	if req.TimeoutSeconds > 0 {
 		timer := time.AfterFunc(time.Duration(req.TimeoutSeconds)*time.Second, func() {
-			cmd.Process.Kill()
+			if cmd.Process != nil {
+				cmd.Process.Kill()
+			}
 		})
 		defer timer.Stop()
 	}
@@ -225,8 +322,13 @@ func (s *AgentService) Execute(ctx context.Context, req *ExecRequest, stream cha
 		}
 	}
 
+	// Wait for all output to be read
+	wg.Wait()
+
 	// Remove from processes map
-	delete(s.processes, cmd.Process.Pid)
+	if cmd.Process != nil {
+		delete(s.processes, cmd.Process.Pid)
+	}
 
 	stream <- &ExecLog{
 		ExitCode: exitCode,
@@ -309,12 +411,12 @@ func (s *AgentService) Reset(ctx context.Context, req *ResetRequest) (*ResetResp
 // ExecuteSync is a synchronous version of Execute
 func (s *AgentService) ExecuteSync(ctx context.Context, req *ExecRequest) (*ExecLog, error) {
 	stream := make(chan *ExecLog, 100)
-	
+
 	go s.Execute(ctx, req, stream)
-	
+
 	var result ExecLog
 	var stdout, stderr strings.Builder
-	
+
 	for log := range stream {
 		if log.Stdout != "" {
 			stdout.WriteString(log.Stdout)
@@ -327,9 +429,9 @@ func (s *AgentService) ExecuteSync(ctx context.Context, req *ExecRequest) (*Exec
 			result.Done = true
 		}
 	}
-	
+
 	result.Stdout = stdout.String()
 	result.Stderr = stderr.String()
-	
+
 	return &result, nil
 }

@@ -1,0 +1,103 @@
+apiVersion: skaffold/v4beta11
+kind: Config
+metadata:
+  name: arl-infra
+
+# Default build configuration
+build:
+  artifacts:
+  - image: arl-operator
+    docker:
+      dockerfile: Dockerfile.operator
+  - image: arl-sidecar
+    docker:
+      dockerfile: Dockerfile.sidecar
+  tagPolicy:
+    gitCommit: {}
+
+# Default deploy configuration (for minikube)
+deploy:
+  kubectl:
+    manifests:
+    - config/crd/*.yaml
+    - config/operator/deployment.yaml
+
+# Profiles for different environments
+profiles:
+# Profile for standard Kubernetes with registry
+- name: k8s
+  build:
+    artifacts:
+    - image: 10.10.10.240/library/arl-operator
+      docker:
+        dockerfile: Dockerfile.operator
+    - image: 10.10.10.240/library/arl-sidecar
+      docker:
+        dockerfile: Dockerfile.sidecar
+    tagPolicy:
+      sha256: {}
+  deploy:
+    kubectl:
+      manifests:
+      - config/crd/*.yaml
+      - config/operator/deployment-k8s.yaml
+
+# Profile for development with auto-sync and rebuild
+- name: dev
+  activation:
+  - command: dev
+  build:
+    artifacts:
+    - image: arl-operator
+      docker:
+        dockerfile: Dockerfile.operator
+      sync:
+        manual:
+        - src: 'cmd/**/*.go'
+          dest: /app
+        - src: 'pkg/**/*.go'
+          dest: /app
+    - image: arl-sidecar
+      docker:
+        dockerfile: Dockerfile.sidecar
+      sync:
+        manual:
+        - src: 'cmd/sidecar/**/*.go'
+          dest: /app
+        - src: 'pkg/sidecar/**/*.go'
+          dest: /app
+  deploy:
+    kubectl:
+      manifests:
+      - config/crd/*.yaml
+      - config/operator/deployment.yaml
+
+# Profile for deploying samples
+- name: with-samples
+  deploy:
+    kubectl:
+      manifests:
+      - config/crd/*.yaml
+      - config/operator/deployment.yaml
+      - config/samples/*.yaml
+
+# Profile for K8s with samples
+- name: k8s-with-samples
+  build:
+    artifacts:
+    - image: 10.10.10.240/library/arl-operator
+      docker:
+        dockerfile: Dockerfile.operator
+    - image: 10.10.10.240/library/arl-sidecar
+      docker:
+        dockerfile: Dockerfile.sidecar
+    tagPolicy:
+      sha256: {}
+  deploy:
+    kubectl:
+      manifests:
+      - config/crd/*.yaml
+      - config/operator/deployment-k8s.yaml
+      - config/samples/warmpool-k8s.yaml
+      - config/samples/sandbox-k8s.yaml
+      - config/samples/task-k8s.yaml

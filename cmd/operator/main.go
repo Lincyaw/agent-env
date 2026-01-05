@@ -13,7 +13,12 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	arlv1alpha1 "github.com/Lincyaw/agent-env/api/v1alpha1"
+	"github.com/Lincyaw/agent-env/pkg/client"
+	"github.com/Lincyaw/agent-env/pkg/config"
 	"github.com/Lincyaw/agent-env/pkg/controller"
+	"github.com/Lincyaw/agent-env/pkg/interfaces"
+	"github.com/Lincyaw/agent-env/pkg/metrics"
+	"github.com/Lincyaw/agent-env/pkg/middleware"
 )
 
 var (
@@ -36,7 +41,7 @@ func main() {
 	flag.BoolVar(&enableLeaderElection, "leader-elect", false,
 		"Enable leader election for controller manager. "+
 			"Enabling this will ensure there is only one active controller manager.")
-	
+
 	opts := zap.Options{
 		Development: true,
 	}
@@ -45,11 +50,26 @@ func main() {
 
 	ctrl.SetLogger(zap.New(zap.UseFlagOptions(&opts)))
 
+	// Load configuration
+	cfg := config.LoadFromEnv()
+	if metricsAddr != "" {
+		cfg.MetricsAddr = metricsAddr
+	}
+	if probeAddr != "" {
+		cfg.ProbeAddr = probeAddr
+	}
+	cfg.EnableLeaderElection = enableLeaderElection
+
+	if err := cfg.Validate(); err != nil {
+		setupLog.Error(err, "invalid configuration")
+		os.Exit(1)
+	}
+
 	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
 		Scheme:                 scheme,
-		Metrics:                metricsserver.Options{BindAddress: metricsAddr},
-		HealthProbeBindAddress: probeAddr,
-		LeaderElection:         enableLeaderElection,
+		Metrics:                metricsserver.Options{BindAddress: cfg.MetricsAddr},
+		HealthProbeBindAddress: cfg.ProbeAddr,
+		LeaderElection:         cfg.EnableLeaderElection,
 		LeaderElectionID:       "arl-operator.infra.io",
 	})
 	if err != nil {
@@ -57,32 +77,74 @@ func main() {
 		os.Exit(1)
 	}
 
-	// Setup WarmPool controller
-	if err = (&controller.WarmPoolReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "WarmPool")
-		os.Exit(1)
+	// Initialize shared dependencies
+	var metricsCollector interfaces.MetricsCollector
+	if cfg.EnableMetrics {
+		metricsCollector = metrics.NewPrometheusCollector()
+		setupLog.Info("metrics collection enabled")
+	} else {
+		metricsCollector = &interfaces.NoOpMetricsCollector{}
+		setupLog.Info("metrics collection disabled")
 	}
 
-	// Setup Sandbox controller
-	if err = (&controller.SandboxReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "Sandbox")
-		os.Exit(1)
+	sidecarClient := client.NewHTTPSidecarClient(cfg.SidecarPort, cfg.HTTPClientTimeout)
+
+	// Setup middleware chains for each controller
+	warmPoolMiddleware := middleware.NewChain()
+	sandboxMiddleware := middleware.NewChain()
+	taskMiddleware := middleware.NewChain()
+
+	if cfg.EnableMiddleware {
+		// Add logging hooks
+		warmPoolMiddleware.AddBefore(middleware.NewLoggingHook("WarmPool")).
+			AddAfter(middleware.NewLoggingHook("WarmPool"))
+		sandboxMiddleware.AddBefore(middleware.NewLoggingHook("Sandbox")).
+			AddAfter(middleware.NewLoggingHook("Sandbox"))
+		taskMiddleware.AddBefore(middleware.NewLoggingHook("Task")).
+			AddAfter(middleware.NewLoggingHook("Task"))
+
+		// Add metrics hooks
+		warmPoolMiddleware.AddBefore(middleware.NewMetricsHook("WarmPool", metricsCollector)).
+			AddAfter(middleware.NewMetricsHook("WarmPool", metricsCollector))
+		sandboxMiddleware.AddBefore(middleware.NewMetricsHook("Sandbox", metricsCollector)).
+			AddAfter(middleware.NewMetricsHook("Sandbox", metricsCollector))
+		taskMiddleware.AddBefore(middleware.NewMetricsHook("Task", metricsCollector)).
+			AddAfter(middleware.NewMetricsHook("Task", metricsCollector))
 	}
 
-	// Setup Task controller
-	if err = (&controller.TaskReconciler{
-		Client:        mgr.GetClient(),
-		Scheme:        mgr.GetScheme(),
-		SidecarClient: controller.NewSidecarClient(),
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "Task")
-		os.Exit(1)
+	// Register controllers using the registrar pattern
+	controllers := []interfaces.ControllerRegistrar{
+		&controller.WarmPoolReconciler{
+			Client:     mgr.GetClient(),
+			Scheme:     mgr.GetScheme(),
+			Config:     cfg,
+			Metrics:    metricsCollector,
+			Middleware: warmPoolMiddleware,
+		},
+		&controller.SandboxReconciler{
+			Client:     mgr.GetClient(),
+			Scheme:     mgr.GetScheme(),
+			Config:     cfg,
+			Metrics:    metricsCollector,
+			Middleware: sandboxMiddleware,
+		},
+		&controller.TaskReconciler{
+			Client:        mgr.GetClient(),
+			Scheme:        mgr.GetScheme(),
+			Config:        cfg,
+			SidecarClient: sidecarClient,
+			Metrics:       metricsCollector,
+			Middleware:    taskMiddleware,
+		},
+	}
+
+	// Setup all controllers
+	for _, c := range controllers {
+		if err := c.SetupWithManager(mgr); err != nil {
+			setupLog.Error(err, "unable to create controller", "controller", c.Name())
+			os.Exit(1)
+		}
+		setupLog.Info("registered controller", "controller", c.Name())
 	}
 
 	// Add health checks

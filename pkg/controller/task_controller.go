@@ -13,6 +13,9 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	arlv1alpha1 "github.com/Lincyaw/agent-env/api/v1alpha1"
+	"github.com/Lincyaw/agent-env/pkg/config"
+	"github.com/Lincyaw/agent-env/pkg/interfaces"
+	"github.com/Lincyaw/agent-env/pkg/middleware"
 	"github.com/Lincyaw/agent-env/pkg/sidecar"
 )
 
@@ -20,7 +23,10 @@ import (
 type TaskReconciler struct {
 	client.Client
 	Scheme        *runtime.Scheme
-	SidecarClient *SidecarClient
+	Config        *config.Config
+	SidecarClient interfaces.SidecarClient
+	Metrics       interfaces.MetricsCollector
+	Middleware    *middleware.Chain
 }
 
 // +kubebuilder:rbac:groups=arl.infra.io,resources=tasks,verbs=get;list;watch;create;update;patch;delete
@@ -29,6 +35,18 @@ type TaskReconciler struct {
 
 // Reconcile manages the Task lifecycle
 func (r *TaskReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	// Execute middleware chain if enabled
+	if r.Middleware != nil {
+		if err := r.Middleware.ExecuteBefore(ctx, req); err != nil {
+			return ctrl.Result{}, err
+		}
+		defer r.Middleware.ExecuteAfter(ctx, req, nil)
+	}
+
+	return r.reconcile(ctx, req)
+}
+
+func (r *TaskReconciler) reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
 	// Fetch the Task instance
@@ -41,8 +59,8 @@ func (r *TaskReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 	}
 
 	// If already completed, nothing to do
-	if task.Status.State == arlv1alpha1.TaskStateSucceeded || 
-	   task.Status.State == arlv1alpha1.TaskStateFailed {
+	if task.Status.State == arlv1alpha1.TaskStateSucceeded ||
+		task.Status.State == arlv1alpha1.TaskStateFailed {
 		return ctrl.Result{}, nil
 	}
 
@@ -79,9 +97,14 @@ func (r *TaskReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		if err := r.Status().Update(ctx, task); err != nil {
 			return ctrl.Result{}, err
 		}
+
+		// Record state change
+		if r.Metrics != nil {
+			r.Metrics.RecordTaskState(task.Namespace, task.Name, string(arlv1alpha1.TaskStateRunning))
+		}
 	}
 
-	logger.Info("Executing task", 
+	logger.Info("Executing task",
 		"task", task.Name,
 		"sandbox", sandbox.Name,
 		"pod", sandbox.Status.PodName,
@@ -97,22 +120,23 @@ func (r *TaskReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		switch step.Type {
 		case arlv1alpha1.StepTypeFilePatch:
 			// Update files
-			resp, err := r.SidecarClient.UpdateFiles(sandbox.Status.PodIP, &sidecar.FileRequest{
+			fileReq := &sidecar.FileRequest{
 				BasePath: sandbox.Status.WorkDir,
 				Files:    parseFiles(step.Content),
 				Patch:    step.Content,
-			})
+			}
+			resp, err := r.SidecarClient.UpdateFiles(ctx, sandbox.Status.PodIP, fileReq)
 			if err != nil {
 				stderr.WriteString("Failed to update files: " + err.Error() + "\n")
 				exitCode = 1
 				break
 			}
-			if !resp.Success {
-				stderr.WriteString("File update failed: " + resp.Message + "\n")
+			if !resp.IsSuccess() {
+				stderr.WriteString("File update failed: " + resp.GetMessage() + "\n")
 				exitCode = 1
 				break
 			}
-			stdout.WriteString("Files updated: " + resp.Message + "\n")
+			stdout.WriteString("Files updated: " + resp.GetMessage() + "\n")
 
 		case arlv1alpha1.StepTypeCommand:
 			// Execute command
@@ -121,20 +145,21 @@ func (r *TaskReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 				timeout = int32(task.Spec.Timeout.Duration.Seconds())
 			}
 
-			resp, err := r.SidecarClient.Execute(sandbox.Status.PodIP, &sidecar.ExecRequest{
+			execReq := &sidecar.ExecRequest{
 				Command:        step.Command,
 				Env:            step.Env,
 				WorkingDir:     sandbox.Status.WorkDir,
 				TimeoutSeconds: timeout,
-			})
+			}
+			resp, err := r.SidecarClient.Execute(ctx, sandbox.Status.PodIP, execReq)
 			if err != nil {
 				stderr.WriteString("Failed to execute command: " + err.Error() + "\n")
 				exitCode = 1
 				break
 			}
-			stdout.WriteString(resp.Stdout)
-			stderr.WriteString(resp.Stderr)
-			exitCode = resp.ExitCode
+			stdout.WriteString(resp.GetStdout())
+			stderr.WriteString(resp.GetStderr())
+			exitCode = resp.GetExitCode()
 			if exitCode != 0 {
 				break
 			}
@@ -167,6 +192,15 @@ func (r *TaskReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		return ctrl.Result{}, err
 	}
 
+	// Record metrics
+	if r.Metrics != nil {
+		if task.Status.StartTime != nil {
+			duration := now.Time.Sub(task.Status.StartTime.Time)
+			r.Metrics.RecordTaskDuration(task.Namespace, task.Name, duration)
+		}
+		r.Metrics.RecordTaskState(task.Namespace, task.Name, string(task.Status.State))
+	}
+
 	logger.Info("Task completed",
 		"task", task.Name,
 		"state", task.Status.State,
@@ -180,6 +214,11 @@ func (r *TaskReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&arlv1alpha1.Task{}).
 		Complete(r)
+}
+
+// Name returns the controller name for logging
+func (r *TaskReconciler) Name() string {
+	return "Task"
 }
 
 // parseFiles parses file content from a simple format
@@ -198,6 +237,6 @@ func parseFiles(content string) map[string]string {
 	//   --- a/file.py
 	//   +++ b/file.py
 	//   @@ content @@
-	
+
 	return files
 }

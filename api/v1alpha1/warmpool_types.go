@@ -9,7 +9,7 @@ import (
 type WarmPoolSpec struct {
 	// Replicas is the number of idle pods to maintain
 	Replicas int32 `json:"replicas"`
-	
+
 	// Template is the pod template for the warm pool
 	Template corev1.PodTemplateSpec `json:"template"`
 }
@@ -18,10 +18,10 @@ type WarmPoolSpec struct {
 type WarmPoolStatus struct {
 	// ReadyReplicas is the number of ready idle pods
 	ReadyReplicas int32 `json:"readyReplicas"`
-	
+
 	// AllocatedReplicas is the number of pods allocated to sandboxes
 	AllocatedReplicas int32 `json:"allocatedReplicas"`
-	
+
 	// Conditions represent the latest available observations of the pool's state
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
 }
