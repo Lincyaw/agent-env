@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"context"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -333,19 +332,4 @@ func (s *AgentService) ExecuteSync(ctx context.Context, req *ExecRequest) (*Exec
 	result.Stderr = stderr.String()
 	
 	return &result, nil
-}
-
-// ReadOutput reads from a reader and sends to channel
-func readOutput(reader io.Reader, stream chan<- *ExecLog, isStderr bool) {
-	scanner := bufio.NewScanner(reader)
-	for scanner.Scan() {
-		log := &ExecLog{Done: false}
-		text := scanner.Text() + "\n"
-		if isStderr {
-			log.Stderr = text
-		} else {
-			log.Stdout = text
-		}
-		stream <- log
-	}
 }

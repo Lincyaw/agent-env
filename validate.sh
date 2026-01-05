@@ -26,7 +26,6 @@ print_info() {
 
 # Test 1: Check Go code compiles
 echo "Test 1: Compiling Go code..."
-cd /home/runner/work/agent-env/agent-env
 go build -o /tmp/operator ./cmd/operator/main.go || { print_error "Operator build failed"; exit 1; }
 go build -o /tmp/sidecar ./cmd/sidecar/main.go || { print_error "Sidecar build failed"; exit 1; }
 print_success "Both binaries compiled successfully"

@@ -183,16 +183,21 @@ func (r *TaskReconciler) SetupWithManager(mgr ctrl.Manager) error {
 }
 
 // parseFiles parses file content from a simple format
-// Expected format: filename:content pairs separated by newlines
+// TODO: Implement proper patch file parsing for production use
+// Current implementation: This is a placeholder that returns empty map.
+// File content should be provided via the Files map in FileRequest instead.
 func parseFiles(content string) map[string]string {
 	files := make(map[string]string)
 	if content == "" {
 		return files
 	}
 
-	// Simple parsing - in production, this would parse proper patches
-	// For now, just treat the whole content as a single file update
-	// This is a placeholder for actual patch parsing logic
+	// Placeholder implementation
+	// In production, this should parse unified diff format or custom patch format
+	// Example expected format:
+	//   --- a/file.py
+	//   +++ b/file.py
+	//   @@ content @@
 	
 	return files
 }
