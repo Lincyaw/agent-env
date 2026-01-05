@@ -1,0 +1,88 @@
+---
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: arl-system
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: arl-operator
+  namespace: arl-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: arl-operator-role
+rules:
+- apiGroups: ["arl.infra.io"]
+  resources: ["warmpools", "sandboxes", "tasks"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: ["arl.infra.io"]
+  resources: ["warmpools/status", "sandboxes/status", "tasks/status"]
+  verbs: ["get", "update", "patch"]
+- apiGroups: [""]
+  resources: ["pods"]
+  verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+- apiGroups: [""]
+  resources: ["pods/status"]
+  verbs: ["get"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: arl-operator-rolebinding
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: arl-operator-role
+subjects:
+- kind: ServiceAccount
+  name: arl-operator
+  namespace: arl-system
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: arl-operator
+  namespace: arl-system
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: arl-operator
+  template:
+    metadata:
+      labels:
+        app: arl-operator
+    spec:
+      serviceAccountName: arl-operator
+      containers:
+      - name: manager
+        image: arl-operator:latest
+        imagePullPolicy: IfNotPresent
+        command:
+        - /operator
+        args:
+        - --leader-elect=false
+        - --metrics-bind-address=:8080
+        - --health-probe-bind-address=:8081
+        resources:
+          limits:
+            cpu: 500m
+            memory: 512Mi
+          requests:
+            cpu: 100m
+            memory: 128Mi
+        livenessProbe:
+          httpGet:
+            path: /healthz
+            port: 8081
+          initialDelaySeconds: 15
+          periodSeconds: 20
+        readinessProbe:
+          httpGet:
+            path: /readyz
+            port: 8081
+          initialDelaySeconds: 5
+          periodSeconds: 10

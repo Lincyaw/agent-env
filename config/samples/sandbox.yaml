@@ -1,0 +1,12 @@
+---
+apiVersion: arl.infra.io/v1alpha1
+kind: Sandbox
+metadata:
+  name: session-agent-001
+spec:
+  poolRef: python-3.9-std
+  keepAlive: true
+  resources:
+    requests:
+      cpu: "500m"
+      memory: "512Mi"

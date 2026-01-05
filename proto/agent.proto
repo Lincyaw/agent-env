@@ -1,0 +1,73 @@
+syntax = "proto3";
+
+package arl.sidecar;
+
+option go_package = "github.com/Lincyaw/agent-env/pkg/sidecar/pb";
+
+// AgentService provides file operations, process control, and environment management
+service AgentService {
+  // UpdateFiles applies file patches or overwrites
+  rpc UpdateFiles(FileRequest) returns (FileResponse);
+  
+  // Execute runs a command (Job mode) or starts a background service (Service mode)
+  rpc Execute(ExecRequest) returns (stream ExecLog);
+  
+  // SignalProcess sends signals (SIGTERM/SIGKILL) to processes
+  rpc SignalProcess(SignalRequest) returns (SignalResponse);
+  
+  // Reset cleans the workspace
+  rpc Reset(ResetRequest) returns (ResetResponse);
+}
+
+// FileRequest contains file operations to perform
+message FileRequest {
+  string base_path = 1;
+  map<string, string> files = 2;  // path -> content
+  string patch = 3;  // Optional: unified diff format
+}
+
+// FileResponse indicates success or failure of file operations
+message FileResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// ExecRequest specifies a command to execute
+message ExecRequest {
+  repeated string command = 1;
+  map<string, string> env = 2;
+  string working_dir = 3;
+  bool background = 4;  // true for Service mode, false for Job mode
+  int32 timeout_seconds = 5;
+}
+
+// ExecLog streams output from command execution
+message ExecLog {
+  string stdout = 1;
+  string stderr = 2;
+  int32 exit_code = 3;
+  bool done = 4;
+}
+
+// SignalRequest specifies a signal to send to a process
+message SignalRequest {
+  int32 pid = 1;
+  string signal = 2;  // e.g., "SIGTERM", "SIGKILL"
+}
+
+// SignalResponse indicates success or failure of signal operation
+message SignalResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+// ResetRequest triggers workspace cleanup
+message ResetRequest {
+  bool preserve_files = 1;  // Keep files but kill processes
+}
+
+// ResetResponse indicates success or failure of reset operation
+message ResetResponse {
+  bool success = 1;
+  string message = 2;
+}

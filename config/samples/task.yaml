@@ -1,0 +1,18 @@
+---
+apiVersion: arl.infra.io/v1alpha1
+kind: Task
+metadata:
+  name: task-test-feature-x
+spec:
+  sandboxRef: session-agent-001
+  timeout: 30s
+  steps:
+    - name: create_file
+      type: FilePatch
+      content: |
+        print("Hello from ARL!")
+    - name: run_python
+      type: Command
+      command: ["python", "-c", "print('Task executed successfully')"]
+      env:
+        DEBUG: "true"

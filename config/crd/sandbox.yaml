@@ -1,0 +1,84 @@
+---
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: sandboxes.arl.infra.io
+spec:
+  group: arl.infra.io
+  names:
+    kind: Sandbox
+    listKind: SandboxList
+    plural: sandboxes
+    singular: sandbox
+  scope: Namespaced
+  versions:
+  - name: v1alpha1
+    additionalPrinterColumns:
+    - jsonPath: .status.phase
+      name: Phase
+      type: string
+    - jsonPath: .status.podName
+      name: Pod
+      type: string
+    schema:
+      openAPIV3Schema:
+        description: Sandbox is the Schema for the sandboxes API
+        properties:
+          apiVersion:
+            type: string
+          kind:
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: SandboxSpec defines the desired state of Sandbox
+            properties:
+              keepAlive:
+                type: boolean
+              poolRef:
+                type: string
+              resources:
+                type: object
+                x-kubernetes-preserve-unknown-fields: true
+            required:
+            - poolRef
+            type: object
+          status:
+            description: SandboxStatus defines the observed state of Sandbox
+            properties:
+              conditions:
+                items:
+                  properties:
+                    lastTransitionTime:
+                      format: date-time
+                      type: string
+                    message:
+                      type: string
+                    reason:
+                      type: string
+                    status:
+                      type: string
+                    type:
+                      type: string
+                  required:
+                  - lastTransitionTime
+                  - message
+                  - reason
+                  - status
+                  - type
+                  type: object
+                type: array
+              phase:
+                type: string
+              podIP:
+                type: string
+              podName:
+                type: string
+              workDir:
+                type: string
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
