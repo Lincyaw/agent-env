@@ -1,0 +1,70 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "arl-operator.fullname" . }}
+  labels:
+    {{- include "arl-operator.labels" . | nindent 4 }}
+rules:
+  - apiGroups:
+      - arl.infra.io
+    resources:
+      - warmpools
+      - sandboxes
+      - tasks
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - arl.infra.io
+    resources:
+      - warmpools/status
+      - sandboxes/status
+      - tasks/status
+    verbs:
+      - get
+      - patch
+      - update
+  - apiGroups:
+      - arl.infra.io
+    resources:
+      - warmpools/finalizers
+      - sandboxes/finalizers
+      - tasks/finalizers
+    verbs:
+      - update
+  - apiGroups:
+      - ""
+    resources:
+      - pods
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch
+  - apiGroups:
+      - ""
+    resources:
+      - events
+    verbs:
+      - create
+      - patch
+  - apiGroups:
+      - coordination.k8s.io
+    resources:
+      - leases
+    verbs:
+      - create
+      - delete
+      - get
+      - list
+      - patch
+      - update
+      - watch

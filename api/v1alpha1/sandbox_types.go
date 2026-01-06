@@ -25,6 +25,11 @@ type SandboxSpec struct {
 
 	// Resources specifies the resource requirements
 	Resources corev1.ResourceRequirements `json:"resources,omitempty"`
+
+	// IdleTimeoutSeconds is the maximum time in seconds a sandbox can be idle before cleanup
+	// +kubebuilder:validation:Minimum=0
+	// +optional
+	IdleTimeoutSeconds *int32 `json:"idleTimeoutSeconds,omitempty"`
 }
 
 // SandboxStatus defines the observed state of Sandbox
@@ -40,6 +45,10 @@ type SandboxStatus struct {
 
 	// WorkDir is the working directory in the sandbox
 	WorkDir string `json:"workDir,omitempty"`
+
+	// LastTaskTime is when the last task completed on this sandbox
+	// +optional
+	LastTaskTime *metav1.Time `json:"lastTaskTime,omitempty"`
 
 	// Conditions represent the latest available observations
 	Conditions []metav1.Condition `json:"conditions,omitempty"`

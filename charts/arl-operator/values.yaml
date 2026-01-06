@@ -1,0 +1,89 @@
+# Default values for arl-operator
+# This is a YAML-formatted file.
+
+replicaCount: 1
+
+image:
+  repository: arl-operator
+  pullPolicy: IfNotPresent
+  tag: "latest"
+
+sidecar:
+  image:
+    repository: arl-sidecar
+    pullPolicy: IfNotPresent
+    tag: "latest"
+  port: 8080
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""
+
+podAnnotations: {}
+
+podSecurityContext: {}
+
+securityContext: {}
+
+resources:
+  limits:
+    cpu: 500m
+    memory: 256Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
+
+# Operator configuration
+operator:
+  metricsAddr: ":8080"
+  probeAddr: ":8081"
+  enableLeaderElection: true
+  enableWebhooks: false
+  enableMetrics: true
+  enableMiddleware: true
+  workspaceDir: "/workspace"
+  httpClientTimeout: "30s"
+
+# Pool configuration
+pool:
+  defaultReplicas: 3
+  defaultRequeueDelay: "10s"
+  sandboxCheckInterval: "2s"
+
+# Cleanup configuration
+cleanup:
+  enableAutoCleanup: true
+  taskRetentionDays: 30
+  sandboxIdleTimeoutSeconds: 3600
+  ttlCheckInterval: "30s"
+
+# ClickHouse configuration (for audit logging)
+clickhouse:
+  # Enable the ClickHouse subchart dependency
+  enabled: false
+  # External ClickHouse configuration (used when subchart is disabled)
+  external:
+    host: ""
+    port: 9000
+  # ClickHouse connection settings
+  database: "arl"
+  username: "default"
+  password: ""
+  batchSize: 100
+  flushInterval: "10s"
+
+# CRD installation
+crds:
+  install: true
+  keep: true

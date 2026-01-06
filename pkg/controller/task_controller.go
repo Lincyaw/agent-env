@@ -26,6 +26,7 @@ type TaskReconciler struct {
 	Config        *config.Config
 	SidecarClient interfaces.SidecarClient
 	Metrics       interfaces.MetricsCollector
+	AuditWriter   interfaces.AuditWriter
 	Middleware    *middleware.Chain
 }
 
@@ -235,6 +236,38 @@ func (r *TaskReconciler) reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 
 	if err := r.Status().Update(ctx, task); err != nil {
 		return ctrl.Result{}, err
+	}
+
+	// Update sandbox LastTaskTime
+	sandbox.Status.LastTaskTime = &now
+	if err := r.Status().Update(ctx, sandbox); err != nil {
+		logger.Error(err, "Failed to update sandbox LastTaskTime")
+	}
+
+	// Write audit log if no TTL is set (TTL controller handles audit for TTL tasks)
+	if r.AuditWriter != nil && task.Spec.TTLSecondsAfterFinished == nil {
+		record := interfaces.TaskAuditRecord{
+			TraceID:    task.Spec.TraceID,
+			Namespace:  task.Namespace,
+			Name:       task.Name,
+			SandboxRef: task.Spec.SandboxRef,
+			State:      string(task.Status.State),
+			ExitCode:   task.Status.ExitCode,
+			Duration:   task.Status.Duration.Duration.String(),
+			StepCount:  len(task.Spec.Steps),
+		}
+		if task.Status.StartTime != nil {
+			record.StartTime = task.Status.StartTime.Format("2006-01-02T15:04:05Z07:00")
+		}
+		if task.Status.CompletionTime != nil {
+			record.CompletionTime = task.Status.CompletionTime.Format("2006-01-02T15:04:05Z07:00")
+		}
+		if err := r.AuditWriter.WriteTaskCompletion(ctx, record); err != nil {
+			logger.Error(err, "Failed to write task audit record")
+			if r.Metrics != nil {
+				r.Metrics.RecordAuditWriteError("task")
+			}
+		}
 	}
 
 	// Record metrics

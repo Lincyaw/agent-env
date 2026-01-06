@@ -1,0 +1,43 @@
+{{- if or .Values.clickhouse.enabled .Values.clickhouse.external.host }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "arl-operator.fullname" . }}-audit-schema
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "arl-operator.labels" . | nindent 4 }}
+data:
+  init.sql: |
+    -- Task audit table
+    CREATE TABLE IF NOT EXISTS {{ .Values.clickhouse.database }}.task_audit (
+        trace_id String,
+        namespace String,
+        name String,
+        sandbox_ref String,
+        state String,
+        exit_code Int32,
+        duration String,
+        start_time DateTime64(3),
+        completion_time DateTime64(3),
+        step_count Int32,
+        timestamp DateTime64(3) DEFAULT now64(3)
+    ) ENGINE = MergeTree()
+    PARTITION BY toYYYYMMDD(timestamp)
+    ORDER BY (timestamp, namespace, name)
+    TTL timestamp + INTERVAL {{ .Values.cleanup.taskRetentionDays }} DAY;
+
+    -- Sandbox audit table
+    CREATE TABLE IF NOT EXISTS {{ .Values.clickhouse.database }}.sandbox_audit (
+        trace_id String,
+        namespace String,
+        name String,
+        pool_ref String,
+        phase String,
+        pod_name String,
+        event String,
+        timestamp DateTime64(3) DEFAULT now64(3)
+    ) ENGINE = MergeTree()
+    PARTITION BY toYYYYMMDD(timestamp)
+    ORDER BY (timestamp, namespace, name)
+    TTL timestamp + INTERVAL {{ .Values.cleanup.taskRetentionDays }} DAY;
+{{- end }}

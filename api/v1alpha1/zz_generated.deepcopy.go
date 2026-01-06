@@ -150,6 +150,11 @@ func (in *SandboxList) DeepCopyObject() runtime.Object {
 func (in *SandboxSpec) DeepCopyInto(out *SandboxSpec) {
 	*out = *in
 	in.Resources.DeepCopyInto(&out.Resources)
+	if in.IdleTimeoutSeconds != nil {
+		in, out := &in.IdleTimeoutSeconds, &out.IdleTimeoutSeconds
+		*out = new(int32)
+		**out = **in
+	}
 }
 
 // DeepCopy for SandboxSpec
@@ -165,6 +170,10 @@ func (in *SandboxSpec) DeepCopy() *SandboxSpec {
 // DeepCopyInto for SandboxStatus
 func (in *SandboxStatus) DeepCopyInto(out *SandboxStatus) {
 	*out = *in
+	if in.LastTaskTime != nil {
+		in, out := &in.LastTaskTime, &out.LastTaskTime
+		*out = (*in).DeepCopy()
+	}
 	if in.Conditions != nil {
 		out.Conditions = make([]metav1.Condition, len(in.Conditions))
 		for i := range in.Conditions {
@@ -244,6 +253,11 @@ func (in *TaskSpec) DeepCopyInto(out *TaskSpec) {
 		for i := range in.Steps {
 			in.Steps[i].DeepCopyInto(&out.Steps[i])
 		}
+	}
+	if in.TTLSecondsAfterFinished != nil {
+		in, out := &in.TTLSecondsAfterFinished, &out.TTLSecondsAfterFinished
+		*out = new(int32)
+		**out = **in
 	}
 }
 

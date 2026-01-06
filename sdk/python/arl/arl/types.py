@@ -14,6 +14,7 @@ class TaskStep(TypedDict, total=False):
         workDir: Working directory (optional)
         path: File path (for FilePatch type)
         content: File content (for FilePatch type)
+        traceID: Optional trace ID for distributed tracing
     """
 
     name: str
@@ -25,3 +26,5 @@ class TaskStep(TypedDict, total=False):
     # For FilePatch steps
     path: str
     content: str
+    # For distributed tracing
+    traceID: str

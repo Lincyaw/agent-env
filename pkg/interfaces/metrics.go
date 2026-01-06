@@ -23,6 +23,18 @@ type MetricsCollector interface {
 
 	// IncrementReconcileErrors increments reconciliation error counter
 	IncrementReconcileErrors(controller string)
+
+	// RecordTaskCleanup records task cleanup events
+	RecordTaskCleanup(namespace, state string)
+
+	// RecordSandboxIdleDuration records sandbox idle duration
+	RecordSandboxIdleDuration(namespace string, duration time.Duration)
+
+	// RecordAuditWriteError records audit write errors
+	RecordAuditWriteError(resourceType string)
+
+	// RecordResourceAge records resource age
+	RecordResourceAge(resourceType, namespace string, age time.Duration)
 }
 
 // NoOpMetricsCollector is a no-op implementation for when metrics are disabled
@@ -35,3 +47,9 @@ func (n *NoOpMetricsCollector) RecordPoolUtilization(poolName string, ready, all
 func (n *NoOpMetricsCollector) RecordSandboxAllocation(poolName string, duration time.Duration) {}
 func (n *NoOpMetricsCollector) IncrementReconcileTotal(controller, result string)               {}
 func (n *NoOpMetricsCollector) IncrementReconcileErrors(controller string)                      {}
+func (n *NoOpMetricsCollector) RecordTaskCleanup(namespace, state string)                       {}
+func (n *NoOpMetricsCollector) RecordSandboxIdleDuration(namespace string, duration time.Duration) {
+}
+func (n *NoOpMetricsCollector) RecordAuditWriteError(resourceType string) {}
+func (n *NoOpMetricsCollector) RecordResourceAge(resourceType, namespace string, age time.Duration) {
+}

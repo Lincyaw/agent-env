@@ -36,6 +36,8 @@ properties:
         type: array
       timeout:
         type: string
+      traceID:
+        type: string
       ttlSecondsAfterFinished:
         format: int32
         minimum: 0

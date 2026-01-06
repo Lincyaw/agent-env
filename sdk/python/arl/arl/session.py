@@ -156,11 +156,12 @@ class SandboxSession:
 
         raise RuntimeError(f"Sandbox '{self.sandbox_name}' not ready after {self.timeout}s")
 
-    def execute(self, steps: list[TaskStep]) -> dict[str, Any]:
+    def execute(self, steps: list[TaskStep], trace_id: str | None = None) -> dict[str, Any]:
         """Execute task steps in the sandbox.
 
         Args:
             steps: List of task steps to execute
+            trace_id: Optional trace ID for distributed tracing (e.g., uuid.uuid4())
 
         Returns:
             Task resource dictionary with status
@@ -173,7 +174,7 @@ class SandboxSession:
 
         task_name = f"{self.sandbox_name}-task-{int(time.time() * 1000)}"
 
-        task_body = {
+        task_body: dict[str, Any] = {
             "apiVersion": "arl.infra.io/v1alpha1",
             "kind": "Task",
             "metadata": {
@@ -185,6 +186,10 @@ class SandboxSession:
                 "steps": steps,
             },
         }
+
+        # Add trace ID if provided
+        if trace_id is not None:
+            task_body["spec"]["traceID"] = trace_id
 
         # Create task resource
         self.custom_api.create_namespaced_custom_object(
