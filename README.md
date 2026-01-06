@@ -171,6 +171,57 @@ spec:
       command: ["python", "-c", "print('Success!')"]
 ```
 
+## Python SDK
+
+ARL Infrastructure provides a Python SDK for programmatic access to ARL resources. The SDK is auto-generated from CRD OpenAPI schemas and includes high-level wrappers for common operations.
+
+### Installation
+
+```bash
+cd sdk/python/arl-client
+pip install -e .
+```
+
+Or install directly from the repository:
+
+```bash
+pip install git+https://github.com/Lincyaw/agent-env.git#subdirectory=sdk/python/arl-client
+```
+
+### Quick Start
+
+```python
+from arl_client.session import SandboxSession
+
+# Using context manager (recommended)
+with SandboxSession("python-3.9-std", namespace="default") as session:
+    result = session.execute([
+        {
+            "name": "write_script",
+            "type": "FilePatch",
+            "path": "/workspace/hello.py",
+            "content": "print('Hello from ARL!')"
+        },
+        {
+            "name": "run_script",
+            "type": "Command",
+            "command": ["python", "/workspace/hello.py"]
+        }
+    ])
+    
+    print(f"Output: {result['status']['stdout']}")
+    print(f"Exit Code: {result['status']['exitCode']}")
+```
+
+### Features
+
+- **Auto-generated models**: Type-safe Python models for all ARL resources
+- **High-level wrappers**: `SandboxSession` context manager for easy resource management
+- **Kubernetes integration**: Built on official Kubernetes Python client
+- **Complete examples**: See `examples/python/` for usage patterns
+
+For detailed SDK documentation, see [sdk/python/arl-client/README.md](sdk/python/arl-client/README.md).
+
 ## API Reference
 
 ### WarmPool
@@ -223,6 +274,26 @@ Execution unit with file operations and commands.
 ```bash
 make build
 ```
+
+### Code Generation
+
+Generate CRD manifests and Python SDK:
+
+```bash
+# Generate CRD manifests from Go types
+make manifests
+
+# Generate deepcopy code
+make generate
+
+# Generate Python SDK from CRDs (requires Docker)
+make sdk-python
+```
+
+The Python SDK is auto-generated from CRD OpenAPI schemas using:
+1. `controller-gen` - Generates CRD manifests with OpenAPI schemas
+2. Custom script - Creates unified OpenAPI specification
+3. `openapi-generator` - Generates Python client code
 
 ### Run Locally
 
