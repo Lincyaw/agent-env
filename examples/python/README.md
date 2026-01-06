@@ -46,13 +46,13 @@ uv run python run_all_examples.py
 ### Context Manager (Recommended)
 
 ```python
-from arl.session import SandboxSession
+from arl import SandboxSession
 
 with SandboxSession("python-3.9-std", namespace="default") as session:
     result = session.execute([...])
 ```
 
-### Task Steps
+### Task Steps (via Kubernetes CRD)
 
 ```python
 # FilePatch: Create/modify files
@@ -71,4 +71,59 @@ with SandboxSession("python-3.9-std", namespace="default") as session:
     "workDir": "/workspace",
     "env": {"DEBUG": "true"}
 }
+```
+
+### Streaming Execution (Direct gRPC)
+
+For real-time output streaming, use the direct gRPC methods:
+
+```python
+from arl import SandboxSession
+
+with SandboxSession("python-3.9-std") as session:
+    # Stream execution output in real-time
+    for log in session.execute_stream(["python", "-c", "print('hello')"]):
+        print(log.stdout, end="")
+        if log.done:
+            print(f"Exit code: {log.exit_code}")
+```
+
+### Interactive Shell
+
+For interactive shell sessions:
+
+```python
+from arl import SandboxSession
+
+with SandboxSession("python-3.9-std") as session:
+    with session.interactive_shell() as shell:
+        # Run commands interactively
+        shell.send_data("echo hello\n")
+        for output in shell.read_output():
+            print(output.data, end="")
+            if output.closed:
+                break
+        
+        # Send Ctrl+C
+        shell.send_signal("SIGINT")
+```
+
+### Direct Sidecar Client
+
+For low-level sidecar access:
+
+```python
+from arl import SidecarClient
+
+# Connect directly to sidecar (requires pod IP)
+with SidecarClient("10.0.0.1:9090") as client:
+    # Update files
+    client.update_files("/workspace", {"test.py": "print('hello')"})
+    
+    # Execute with streaming
+    for log in client.execute_stream(["python", "test.py"]):
+        print(log.stdout, end="")
+    
+    # Reset workspace
+    client.reset()
 ```

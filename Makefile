@@ -42,12 +42,27 @@ check: fmt vet tidy ## Run all code quality checks
 	uv run ruff check --fix . --unsafe-fixes
 
 .PHONY: proto
-proto: ## Generate gRPC code from proto files
+proto: proto-go proto-python ## Generate gRPC code from proto files
+
+.PHONY: proto-go
+proto-go: ## Generate Go gRPC code from proto files
 	@mkdir -p pkg/pb
 	protoc --go_out=. --go_opt=paths=source_relative \
 		--go-grpc_out=. --go-grpc_opt=paths=source_relative \
 		proto/agent.proto
 	@mv proto/*.pb.go pkg/pb/ 2>/dev/null || true
+
+.PHONY: proto-python
+proto-python: ## Generate Python gRPC code from proto files
+	@mkdir -p sdk/python/arl/arl/pb
+	python -m grpc_tools.protoc -I. \
+		--python_out=sdk/python/arl/arl/pb \
+		--pyi_out=sdk/python/arl/arl/pb \
+		--grpc_python_out=sdk/python/arl/arl/pb \
+		proto/agent.proto
+	@touch sdk/python/arl/arl/pb/__init__.py
+	@# Fix imports in generated files
+	@sed -i 's/from proto import agent_pb2/from arl.pb.proto import agent_pb2/g' sdk/python/arl/arl/pb/proto/agent_pb2_grpc.py 2>/dev/null || true
 
 .PHONY: generate
 generate: proto ## Generate deepcopy code and gRPC code
