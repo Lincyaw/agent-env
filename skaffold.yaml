@@ -15,12 +15,15 @@ build:
   tagPolicy:
     gitCommit: {}
 
+# Default manifests
+manifests:
+  rawYaml:
+  - config/crd/*.yaml
+  - config/operator/deployment.yaml
+
 # Default deploy configuration (for minikube)
 deploy:
-  kubectl:
-    manifests:
-    - config/crd/*.yaml
-    - config/operator/deployment.yaml
+  kubectl: {}
 
 # Profiles for different environments
 profiles:
@@ -36,11 +39,12 @@ profiles:
         dockerfile: Dockerfile.sidecar
     tagPolicy:
       sha256: {}
+  manifests:
+    rawYaml:
+    - config/crd/*.yaml
+    - config/operator/deployment-k8s.yaml
   deploy:
-    kubectl:
-      manifests:
-      - config/crd/*.yaml
-      - config/operator/deployment-k8s.yaml
+    kubectl: {}
 
 # Profile for development with auto-sync and rebuild
 - name: dev
@@ -66,20 +70,22 @@ profiles:
           dest: /app
         - src: 'pkg/sidecar/**/*.go'
           dest: /app
+  manifests:
+    rawYaml:
+    - config/crd/*.yaml
+    - config/operator/deployment.yaml
   deploy:
-    kubectl:
-      manifests:
-      - config/crd/*.yaml
-      - config/operator/deployment.yaml
+    kubectl: {}
 
 # Profile for deploying samples
 - name: with-samples
+  manifests:
+    rawYaml:
+    - config/crd/*.yaml
+    - config/operator/deployment.yaml
+    - config/samples/*.yaml
   deploy:
-    kubectl:
-      manifests:
-      - config/crd/*.yaml
-      - config/operator/deployment.yaml
-      - config/samples/*.yaml
+    kubectl: {}
 
 # Profile for K8s with samples
 - name: k8s-with-samples
@@ -93,11 +99,10 @@ profiles:
         dockerfile: Dockerfile.sidecar
     tagPolicy:
       sha256: {}
+  manifests:
+    rawYaml:
+    - config/crd/*.yaml
+    - config/operator/deployment-k8s.yaml
+    - config/samples/*.yaml
   deploy:
-    kubectl:
-      manifests:
-      - config/crd/*.yaml
-      - config/operator/deployment-k8s.yaml
-      - config/samples/warmpool-k8s.yaml
-      - config/samples/sandbox-k8s.yaml
-      - config/samples/task-k8s.yaml
+    kubectl: {}

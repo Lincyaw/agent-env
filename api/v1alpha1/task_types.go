@@ -33,8 +33,14 @@ type TaskStep struct {
 	// Content is the patch content (for FilePatch type)
 	Content string `json:"content,omitempty"`
 
+	// Path is the file path for FilePatch operations
+	Path string `json:"path,omitempty"`
+
 	// Command is the command to execute (for Command type)
 	Command []string `json:"command,omitempty"`
+
+	// WorkDir is the working directory for the command
+	WorkDir string `json:"workDir,omitempty"`
 
 	// Env is the environment variables for the command
 	Env map[string]string `json:"env,omitempty"`
@@ -50,6 +56,17 @@ type TaskSpec struct {
 
 	// Steps is the sequence of operations to execute
 	Steps []TaskStep `json:"steps"`
+
+	// Retries is the number of times to retry on failure
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=10
+	// +optional
+	Retries int32 `json:"retries,omitempty"`
+
+	// TTLSecondsAfterFinished is the time to live after completion
+	// +kubebuilder:validation:Minimum=0
+	// +optional
+	TTLSecondsAfterFinished *int32 `json:"ttlSecondsAfterFinished,omitempty"`
 }
 
 // TaskStatus defines the observed state of Task

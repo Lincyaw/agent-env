@@ -1,0 +1,65 @@
+---
+apiVersion: arl.infra.io/v1alpha1
+kind: WarmPool
+metadata:
+  name: python-pool
+spec:
+  replicas: 2
+  template:
+    metadata:
+      labels:
+        app: arl-sandbox
+    spec:
+      containers:
+        - name: executor
+          image: python:3.9-slim
+          command: ["/bin/sh", "-c", "sleep infinity"]
+          volumeMounts:
+            - name: workspace
+              mountPath: /workspace
+        - name: sidecar
+          image: arl-sidecar:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+          volumeMounts:
+            - name: workspace
+              mountPath: /workspace
+      volumes:
+        - name: workspace
+          emptyDir: {}
+---
+apiVersion: arl.infra.io/v1alpha1
+kind: Sandbox
+metadata:
+  name: test-sandbox
+spec:
+  poolRef: python-pool
+  keepAlive: true
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "128Mi"
+---
+apiVersion: arl.infra.io/v1alpha1
+kind: Task
+metadata:
+  name: hello-task
+spec:
+  sandboxRef: test-sandbox
+  timeout: 60s
+  steps:
+    - name: create_script
+      type: FilePatch
+      path: /workspace/hello.py
+      content: |
+        print("=" * 50)
+        print("Hello from ARL Infrastructure!")
+        print("This task is running in a sandboxed environment")
+        print("=" * 50)
+    
+    - name: execute_script
+      type: Command
+      command: ["python", "/workspace/hello.py"]
+      env:
+        TEST_ENV: "production"

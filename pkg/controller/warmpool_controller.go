@@ -73,29 +73,33 @@ func (r *WarmPoolReconciler) reconcile(ctx context.Context, req ctrl.Request) (c
 	}
 
 	// Count idle and allocated pods
-	var readyIdle, allocated int32
+	var readyIdle, totalIdle, allocated, totalPods int32
 	for _, pod := range podList.Items {
 		if pod.DeletionTimestamp != nil {
 			continue
 		}
+		totalPods++ // Count all non-deleted pods
 		status := pod.Labels[StatusLabelKey]
-		if status == StatusIdle && pod.Status.Phase == corev1.PodRunning {
-			readyIdle++
+		if status == StatusIdle {
+			totalIdle++ // Count all idle pods (including pending/creating)
+			if pod.Status.Phase == corev1.PodRunning {
+				readyIdle++
+			}
 		} else if status == StatusAllocated {
 			allocated++
 		}
 	}
 
-	// Calculate how many pods to create
-	totalPods := readyIdle + allocated
-	needed := pool.Spec.Replicas - readyIdle
+	// Calculate how many pods to create - only create if total idle < desired
+	needed := pool.Spec.Replicas - totalIdle
 
 	logger.Info("Pool status",
 		"pool", pool.Name,
 		"desired", pool.Spec.Replicas,
 		"ready", readyIdle,
+		"totalIdle", totalIdle,
 		"allocated", allocated,
-		"total", totalPods,
+		"totalPods", totalPods,
 		"needed", needed)
 
 	// Record metrics

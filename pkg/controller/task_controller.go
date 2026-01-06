@@ -119,10 +119,20 @@ func (r *TaskReconciler) reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 
 		switch step.Type {
 		case arlv1alpha1.StepTypeFilePatch:
-			// Update files
+			// Create or update file
+			if step.Path == "" {
+				stderr.WriteString("FilePatch step requires 'path' field\n")
+				exitCode = 1
+				break
+			}
+
+			files := map[string]string{
+				step.Path: step.Content,
+			}
+
 			fileReq := &sidecar.FileRequest{
 				BasePath: sandbox.Status.WorkDir,
-				Files:    parseFiles(step.Content),
+				Files:    files,
 				Patch:    step.Content,
 			}
 			resp, err := r.SidecarClient.UpdateFiles(ctx, sandbox.Status.PodIP, fileReq)
@@ -136,7 +146,7 @@ func (r *TaskReconciler) reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 				exitCode = 1
 				break
 			}
-			stdout.WriteString("Files updated: " + resp.GetMessage() + "\n")
+			stdout.WriteString("File created: " + step.Path + "\n")
 
 		case arlv1alpha1.StepTypeCommand:
 			// Execute command
@@ -145,10 +155,15 @@ func (r *TaskReconciler) reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 				timeout = int32(task.Spec.Timeout.Duration.Seconds())
 			}
 
+			workDir := sandbox.Status.WorkDir
+			if step.WorkDir != "" {
+				workDir = step.WorkDir
+			}
+
 			execReq := &sidecar.ExecRequest{
 				Command:        step.Command,
 				Env:            step.Env,
-				WorkingDir:     sandbox.Status.WorkDir,
+				WorkingDir:     workDir,
 				TimeoutSeconds: timeout,
 			}
 			resp, err := r.SidecarClient.Execute(ctx, sandbox.Status.PodIP, execReq)
@@ -206,7 +221,49 @@ func (r *TaskReconciler) reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		"state", task.Status.State,
 		"exitCode", exitCode)
 
+	// Handle sandbox cleanup if keepAlive is false
+	if !sandbox.Spec.KeepAlive {
+		// Check if all tasks for this sandbox are complete
+		allComplete, err := r.areAllTasksComplete(ctx, sandbox)
+		if err != nil {
+			logger.Error(err, "Failed to check task completion status")
+		} else if allComplete {
+			logger.Info("All tasks complete for non-keepAlive sandbox, marking for deletion",
+				"sandbox", sandbox.Name)
+			// Note: Actual deletion should be handled by sandbox controller
+			// We just update a condition here
+			sandbox.Status.Conditions = append(sandbox.Status.Conditions, metav1.Condition{
+				Type:               "ReadyForCleanup",
+				Status:             metav1.ConditionTrue,
+				Reason:             "AllTasksComplete",
+				Message:            "All tasks completed, sandbox can be deleted",
+				LastTransitionTime: metav1.Now(),
+			})
+			if err := r.Status().Update(ctx, sandbox); err != nil {
+				logger.Error(err, "Failed to update sandbox status")
+			}
+		}
+	}
+
 	return ctrl.Result{}, nil
+}
+
+// areAllTasksComplete checks if all tasks referencing a sandbox are complete
+func (r *TaskReconciler) areAllTasksComplete(ctx context.Context, sandbox *arlv1alpha1.Sandbox) (bool, error) {
+	taskList := &arlv1alpha1.TaskList{}
+	if err := r.List(ctx, taskList, client.InNamespace(sandbox.Namespace)); err != nil {
+		return false, err
+	}
+
+	for _, task := range taskList.Items {
+		if task.Spec.SandboxRef == sandbox.Name {
+			if task.Status.State != arlv1alpha1.TaskStateSucceeded &&
+				task.Status.State != arlv1alpha1.TaskStateFailed {
+				return false, nil
+			}
+		}
+	}
+	return true, nil
 }
 
 // SetupWithManager sets up the controller with the Manager
@@ -219,24 +276,4 @@ func (r *TaskReconciler) SetupWithManager(mgr ctrl.Manager) error {
 // Name returns the controller name for logging
 func (r *TaskReconciler) Name() string {
 	return "Task"
-}
-
-// parseFiles parses file content from a simple format
-// TODO: Implement proper patch file parsing for production use
-// Current implementation: This is a placeholder that returns empty map.
-// File content should be provided via the Files map in FileRequest instead.
-func parseFiles(content string) map[string]string {
-	files := make(map[string]string)
-	if content == "" {
-		return files
-	}
-
-	// Placeholder implementation
-	// In production, this should parse unified diff format or custom patch format
-	// Example expected format:
-	//   --- a/file.py
-	//   +++ b/file.py
-	//   @@ content @@
-
-	return files
 }

@@ -29,6 +29,7 @@ type WarmPoolStatus struct {
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
 // +kubebuilder:resource:scope=Namespaced
+// +kubebuilder:validation:XValidation:rule="self.metadata.name.matches('^[a-z0-9]([-a-z0-9]*[a-z0-9])?$')",message="WarmPool name must be a valid DNS label (lowercase alphanumeric and hyphens only, no dots)"
 
 // WarmPool is the Schema for the warmpools API
 type WarmPool struct {

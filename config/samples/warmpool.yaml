@@ -10,7 +10,6 @@ spec:
       labels:
         app: arl-sandbox
     spec:
-      runtimeClassName: gvisor
       containers:
         - name: executor
           image: python:3.9-slim

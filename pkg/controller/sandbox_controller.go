@@ -59,8 +59,20 @@ func (r *SandboxReconciler) reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, fmt.Errorf("failed to get Sandbox: %w", err)
 	}
 
-	// If already bound and ready, nothing to do
+	// If already bound and ready, nothing to do (unless marked for cleanup)
 	if sandbox.Status.Phase == arlv1alpha1.SandboxPhaseReady {
+		// Check if sandbox should be cleaned up
+		if !sandbox.Spec.KeepAlive {
+			cleanupCond := findCondition(sandbox.Status.Conditions, "ReadyForCleanup")
+			if cleanupCond != nil && cleanupCond.Status == metav1.ConditionTrue {
+				logger.Info("Deleting non-keepAlive sandbox after task completion",
+					"sandbox", sandbox.Name)
+				if err := r.Delete(ctx, sandbox); err != nil {
+					return ctrl.Result{}, fmt.Errorf("failed to delete sandbox: %w", err)
+				}
+				return ctrl.Result{}, nil
+			}
+		}
 		return ctrl.Result{}, nil
 	}
 

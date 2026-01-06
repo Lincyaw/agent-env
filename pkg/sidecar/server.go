@@ -25,6 +25,8 @@ func NewServer(workspaceDir string, port int) *Server {
 	}
 
 	mux.HandleFunc("/health", srv.handleHealth)
+	mux.HandleFunc("/healthz", srv.handleHealthz)
+	mux.HandleFunc("/readyz", srv.handleReadyz)
 	mux.HandleFunc("/files", srv.handleFiles)
 	mux.HandleFunc("/execute", srv.handleExecute)
 	mux.HandleFunc("/signal", srv.handleSignal)
@@ -56,6 +58,24 @@ func (s *Server) Shutdown(ctx context.Context) error {
 func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(map[string]string{"status": "healthy"})
+}
+
+func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
+	// Kubernetes health check endpoint
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("ok"))
+}
+
+func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
+	// Kubernetes readiness check endpoint
+	// Check if service is ready to handle requests
+	if s.service == nil {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		w.Write([]byte("service not ready"))
+		return
+	}
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte("ok"))
 }
 
 func (s *Server) handleFiles(w http.ResponseWriter, r *http.Request) {

@@ -18,6 +18,36 @@ MINIKUBE_PROFILE ?= minikube
 help: ## Display this help
 	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_-]+:.*?##/ { printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
 
+##@ Skaffold (Recommended)
+
+.PHONY: dev
+dev: ## Start development mode with auto-rebuild (minikube)
+	skaffold dev --profile=dev
+
+.PHONY: run
+run: ## Build and deploy once (minikube)
+	skaffold run
+
+.PHONY: run-samples
+run-samples: ## Build and deploy with samples (minikube)
+	skaffold run --profile=with-samples
+
+.PHONY: k8s-run
+k8s-run: ## Build, push and deploy to standard K8s
+	skaffold run --profile=k8s
+
+.PHONY: k8s-run-samples
+k8s-run-samples: ## Build, push and deploy to K8s with samples
+	skaffold run --profile=k8s-with-samples
+
+.PHONY: delete
+delete: ## Delete deployed resources
+	skaffold delete || true
+
+.PHONY: k8s-delete
+k8s-delete: ## Delete deployed resources from K8s
+	skaffold delete --profile=k8s || true
+
 ##@ Development
 
 .PHONY: fmt
@@ -74,11 +104,6 @@ docker-push: ## Push Docker images to registry
 minikube-start: ## Start minikube
 	minikube start --profile=$(MINIKUBE_PROFILE) --driver=docker --cpus=4 --memory=8192
 
-.PHONY: minikube-load-images
-minikube-load-images: ## Load images into minikube
-	minikube -p $(MINIKUBE_PROFILE) image load $(OPERATOR_IMG_LOCAL)
-	minikube -p $(MINIKUBE_PROFILE) image load $(SIDECAR_IMG_LOCAL)
-
 .PHONY: minikube-stop
 minikube-stop: ## Stop minikube
 	minikube stop --profile=$(MINIKUBE_PROFILE)
@@ -123,11 +148,11 @@ k8s-build-push: docker-build-k8s docker-push ## Build and push images for K8s
 
 .PHONY: k8s-deploy
 k8s-deploy: install-crds ## Deploy to standard K8s cluster
-	kubectl apply -f config/operator/deployment-k8s.yaml
+	kubectl apply -f config/operator/deployment.yaml
 
 .PHONY: k8s-undeploy
 k8s-undeploy: ## Remove from standard K8s cluster
-	kubectl delete -f config/operator/deployment-k8s.yaml --ignore-not-found=true
+	kubectl delete -f config/operator/deployment.yaml --ignore-not-found=true
 	$(MAKE) uninstall-crds
 
 .PHONY: undeploy
@@ -149,9 +174,13 @@ logs: ## Show operator logs
 ##@ All-in-one
 
 .PHONY: all
-all: tidy build docker-build ## Build everything
+all: tidy build docker-build ## Build everything (legacy)
 
 .PHONY: quickstart
-quickstart: docker-build minikube-load-images deploy ## Quick start: build, load, and deploy
+quickstart: minikube-start run-samples ## Quick start: start minikube and deploy with samples
 	@echo "ARL-Infra deployed successfully!"
-	@echo "Try: kubectl apply -f config/samples/"
+	@echo "Check resources: kubectl get warmpools,sandboxes,tasks"
+
+.PHONY: quickstart-dev
+quickstart-dev: minikube-start dev ## Quick start in development mode with auto-reload
+	@echo "Starting development mode..."

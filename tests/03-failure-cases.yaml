@@ -1,0 +1,32 @@
+---
+apiVersion: arl.infra.io/v1alpha1
+kind: Task
+metadata:
+  name: failing-task
+spec:
+  sandboxRef: test-sandbox
+  timeout: 30s
+  steps:
+    - name: will_succeed
+      type: Command
+      command: ["echo", "This step works"]
+    
+    - name: will_fail
+      type: Command
+      command: ["sh", "-c", "echo 'About to fail' && exit 42"]
+    
+    - name: should_not_run
+      type: Command
+      command: ["echo", "This should not execute"]
+---
+apiVersion: arl.infra.io/v1alpha1
+kind: Task
+metadata:
+  name: nonexistent-sandbox-task
+spec:
+  sandboxRef: does-not-exist
+  timeout: 30s
+  steps:
+    - name: test
+      type: Command
+      command: ["echo", "hello"]
