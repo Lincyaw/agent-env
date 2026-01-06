@@ -31,6 +31,12 @@ type TaskAuditRecord struct {
 	StartTime      string
 	CompletionTime string
 	StepCount      int
+	// Input is the JSON-serialized task steps (input commands/content)
+	Input string
+	// Stdout is the standard output from task execution
+	Stdout string
+	// Stderr is the standard error output from task execution
+	Stderr string
 }
 
 // SandboxAuditRecord represents a sandbox audit log entry

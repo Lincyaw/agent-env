@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -91,6 +92,12 @@ func (r *TTLReconciler) reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 
 	// Write audit record before deletion
 	if r.AuditWriter != nil {
+		// Serialize steps (input) to JSON
+		inputJSON, err := json.Marshal(task.Spec.Steps)
+		if err != nil {
+			logger.Error(err, "Failed to marshal task steps to JSON for audit")
+		}
+
 		record := interfaces.TaskAuditRecord{
 			TraceID:    task.Spec.TraceID,
 			Namespace:  task.Namespace,
@@ -100,6 +107,9 @@ func (r *TTLReconciler) reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 			ExitCode:   task.Status.ExitCode,
 			Duration:   task.Status.Duration.Duration.String(),
 			StepCount:  len(task.Spec.Steps),
+			Input:      string(inputJSON),
+			Stdout:     task.Status.Stdout,
+			Stderr:     task.Status.Stderr,
 		}
 		if task.Status.StartTime != nil {
 			record.StartTime = task.Status.StartTime.Format(auditTimeFormat)

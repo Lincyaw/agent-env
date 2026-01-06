@@ -170,8 +170,8 @@ func (w *ClickHouseWriter) flushTaskRecordsLocked() error {
 	stmt, err := tx.Prepare(`
 		INSERT INTO task_audit (
 			trace_id, namespace, name, sandbox_ref, state, exit_code,
-			duration, start_time, completion_time, step_count
-		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			duration, start_time, completion_time, step_count, input, stdout, stderr
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`)
 	if err != nil {
 		tx.Rollback()
@@ -182,7 +182,7 @@ func (w *ClickHouseWriter) flushTaskRecordsLocked() error {
 	for _, r := range w.taskRecords {
 		if _, err := stmt.Exec(
 			r.TraceID, r.Namespace, r.Name, r.SandboxRef, r.State, r.ExitCode,
-			r.Duration, r.StartTime, r.CompletionTime, r.StepCount,
+			r.Duration, r.StartTime, r.CompletionTime, r.StepCount, r.Input, r.Stdout, r.Stderr,
 		); err != nil {
 			tx.Rollback()
 			return fmt.Errorf("failed to insert task audit record: %w", err)

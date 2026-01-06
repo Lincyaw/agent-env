@@ -15,6 +15,9 @@ CREATE TABLE IF NOT EXISTS task_audit (
     start_time DateTime64(3),
     completion_time DateTime64(3),
     step_count Int32,
+    input String,
+    stdout String,
+    stderr String,
     timestamp DateTime64(3) DEFAULT now64(3)
 ) ENGINE = MergeTree()
 PARTITION BY toYYYYMMDD(timestamp)

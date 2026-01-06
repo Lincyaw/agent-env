@@ -2,6 +2,7 @@ package controller
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"time"
 
@@ -246,6 +247,12 @@ func (r *TaskReconciler) reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 
 	// Write audit log if no TTL is set (TTL controller handles audit for TTL tasks)
 	if r.AuditWriter != nil && task.Spec.TTLSecondsAfterFinished == nil {
+		// Serialize steps (input) to JSON
+		inputJSON, err := json.Marshal(task.Spec.Steps)
+		if err != nil {
+			logger.Error(err, "Failed to marshal task steps to JSON for audit")
+		}
+
 		record := interfaces.TaskAuditRecord{
 			TraceID:    task.Spec.TraceID,
 			Namespace:  task.Namespace,
@@ -255,6 +262,9 @@ func (r *TaskReconciler) reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 			ExitCode:   task.Status.ExitCode,
 			Duration:   task.Status.Duration.Duration.String(),
 			StepCount:  len(task.Spec.Steps),
+			Input:      string(inputJSON),
+			Stdout:     task.Status.Stdout,
+			Stderr:     task.Status.Stderr,
 		}
 		if task.Status.StartTime != nil {
 			record.StartTime = task.Status.StartTime.Format(auditTimeFormat)
