@@ -1,5 +1,7 @@
 """gRPC client for direct sidecar communication."""
 
+import queue
+import threading
 from collections.abc import Iterator
 from typing import Any
 
@@ -320,33 +322,30 @@ class ShellSession:
 
 
 class _ShellInputIterator:
-    """Iterator for sending ShellInput messages."""
+    """Iterator for sending ShellInput messages using a thread-safe queue."""
 
     def __init__(self) -> None:
         """Initialize the iterator."""
-        self._queue: list[agent_pb2.ShellInput] = []
+        self._queue: queue.Queue[agent_pb2.ShellInput | None] = queue.Queue()
         self._closed = False
 
     def send(self, msg: agent_pb2.ShellInput) -> None:
         """Add a message to the queue."""
         if not self._closed:
-            self._queue.append(msg)
+            self._queue.put(msg)
 
     def close(self) -> None:
-        """Mark the iterator as closed."""
+        """Mark the iterator as closed and unblock waiting consumers."""
         self._closed = True
+        self._queue.put(None)  # Sentinel to unblock get()
 
     def __iter__(self) -> "_ShellInputIterator":
         """Return self as iterator."""
         return self
 
     def __next__(self) -> agent_pb2.ShellInput:
-        """Get the next message."""
-        while not self._queue and not self._closed:
-            import time
-            time.sleep(0.01)  # Brief sleep to avoid busy waiting
-
-        if self._queue:
-            return self._queue.pop(0)
-
-        raise StopIteration
+        """Get the next message (blocks until available)."""
+        msg = self._queue.get(timeout=1.0)  # 1 second timeout to check closed status
+        if msg is None or self._closed:
+            raise StopIteration
+        return msg
