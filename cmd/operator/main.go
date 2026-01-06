@@ -13,6 +13,7 @@ import (
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 
 	arlv1alpha1 "github.com/Lincyaw/agent-env/api/v1alpha1"
+	"github.com/Lincyaw/agent-env/pkg/audit"
 	"github.com/Lincyaw/agent-env/pkg/client"
 	"github.com/Lincyaw/agent-env/pkg/config"
 	"github.com/Lincyaw/agent-env/pkg/controller"
@@ -87,12 +88,36 @@ func main() {
 		setupLog.Info("metrics collection disabled")
 	}
 
+	// Initialize audit writer
+	var auditWriter interfaces.AuditWriter
+	if cfg.ClickHouseEnabled {
+		chWriter, err := audit.NewClickHouseWriter(audit.ClickHouseConfig{
+			Addr:          cfg.ClickHouseAddr,
+			Database:      cfg.ClickHouseDatabase,
+			Username:      cfg.ClickHouseUsername,
+			Password:      cfg.ClickHousePassword,
+			BatchSize:     cfg.ClickHouseBatchSize,
+			FlushInterval: cfg.ClickHouseFlushInterval,
+		})
+		if err != nil {
+			setupLog.Error(err, "failed to initialize ClickHouse audit writer, using no-op")
+			auditWriter = audit.NewNoOpWriter()
+		} else {
+			auditWriter = chWriter
+			setupLog.Info("ClickHouse audit writer enabled")
+		}
+	} else {
+		auditWriter = audit.NewNoOpWriter()
+		setupLog.Info("audit logging disabled")
+	}
+
 	sidecarClient := client.NewHTTPSidecarClient(cfg.SidecarPort, cfg.HTTPClientTimeout)
 
 	// Setup middleware chains for each controller
 	warmPoolMiddleware := middleware.NewChain()
 	sandboxMiddleware := middleware.NewChain()
 	taskMiddleware := middleware.NewChain()
+	ttlMiddleware := middleware.NewChain()
 
 	if cfg.EnableMiddleware {
 		// Add logging hooks
@@ -102,6 +127,8 @@ func main() {
 			AddAfter(middleware.NewLoggingHook("Sandbox"))
 		taskMiddleware.AddBefore(middleware.NewLoggingHook("Task")).
 			AddAfter(middleware.NewLoggingHook("Task"))
+		ttlMiddleware.AddBefore(middleware.NewLoggingHook("TTL")).
+			AddAfter(middleware.NewLoggingHook("TTL"))
 
 		// Add metrics hooks
 		warmPoolMiddleware.AddBefore(middleware.NewMetricsHook("WarmPool", metricsCollector)).
@@ -110,6 +137,8 @@ func main() {
 			AddAfter(middleware.NewMetricsHook("Sandbox", metricsCollector))
 		taskMiddleware.AddBefore(middleware.NewMetricsHook("Task", metricsCollector)).
 			AddAfter(middleware.NewMetricsHook("Task", metricsCollector))
+		ttlMiddleware.AddBefore(middleware.NewMetricsHook("TTL", metricsCollector)).
+			AddAfter(middleware.NewMetricsHook("TTL", metricsCollector))
 	}
 
 	// Register controllers using the registrar pattern
@@ -122,11 +151,12 @@ func main() {
 			Middleware: warmPoolMiddleware,
 		},
 		&controller.SandboxReconciler{
-			Client:     mgr.GetClient(),
-			Scheme:     mgr.GetScheme(),
-			Config:     cfg,
-			Metrics:    metricsCollector,
-			Middleware: sandboxMiddleware,
+			Client:      mgr.GetClient(),
+			Scheme:      mgr.GetScheme(),
+			Config:      cfg,
+			Metrics:     metricsCollector,
+			AuditWriter: auditWriter,
+			Middleware:  sandboxMiddleware,
 		},
 		&controller.TaskReconciler{
 			Client:        mgr.GetClient(),
@@ -134,8 +164,22 @@ func main() {
 			Config:        cfg,
 			SidecarClient: sidecarClient,
 			Metrics:       metricsCollector,
+			AuditWriter:   auditWriter,
 			Middleware:    taskMiddleware,
 		},
+	}
+
+	// Add TTL controller if auto cleanup is enabled
+	if cfg.EnableAutoCleanup {
+		controllers = append(controllers, &controller.TTLReconciler{
+			Client:      mgr.GetClient(),
+			Scheme:      mgr.GetScheme(),
+			Config:      cfg,
+			AuditWriter: auditWriter,
+			Metrics:     metricsCollector,
+			Middleware:  ttlMiddleware,
+		})
+		setupLog.Info("TTL controller enabled for automatic task cleanup")
 	}
 
 	// Setup all controllers

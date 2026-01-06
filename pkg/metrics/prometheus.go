@@ -10,12 +10,16 @@ import (
 
 // PrometheusCollector implements interfaces.MetricsCollector using Prometheus
 type PrometheusCollector struct {
-	taskDuration      *prometheus.HistogramVec
-	taskStateCounter  *prometheus.CounterVec
-	poolUtilization   *prometheus.GaugeVec
-	sandboxAllocation prometheus.Histogram
-	reconcileTotal    *prometheus.CounterVec
-	reconcileErrors   *prometheus.CounterVec
+	taskDuration        *prometheus.HistogramVec
+	taskStateCounter    *prometheus.CounterVec
+	poolUtilization     *prometheus.GaugeVec
+	sandboxAllocation   prometheus.Histogram
+	reconcileTotal      *prometheus.CounterVec
+	reconcileErrors     *prometheus.CounterVec
+	taskCleanupTotal    *prometheus.CounterVec
+	sandboxIdleDuration *prometheus.HistogramVec
+	auditWriteErrors    *prometheus.CounterVec
+	resourceAge         *prometheus.HistogramVec
 }
 
 // NewPrometheusCollector creates a new Prometheus metrics collector
@@ -64,6 +68,36 @@ func NewPrometheusCollector() interfaces.MetricsCollector {
 			},
 			[]string{"controller"},
 		),
+		taskCleanupTotal: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "arl_task_cleanup_total",
+				Help: "Total number of tasks cleaned up",
+			},
+			[]string{"namespace", "state"},
+		),
+		sandboxIdleDuration: prometheus.NewHistogramVec(
+			prometheus.HistogramOpts{
+				Name:    "arl_sandbox_idle_duration_seconds",
+				Help:    "Duration of sandbox idle time in seconds",
+				Buckets: []float64{10, 60, 300, 600, 1800, 3600, 7200},
+			},
+			[]string{"namespace"},
+		),
+		auditWriteErrors: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "arl_audit_write_errors_total",
+				Help: "Total number of audit write errors",
+			},
+			[]string{"resource_type"},
+		),
+		resourceAge: prometheus.NewHistogramVec(
+			prometheus.HistogramOpts{
+				Name:    "arl_resource_age_seconds",
+				Help:    "Age of resources in seconds",
+				Buckets: []float64{60, 300, 600, 1800, 3600, 7200, 14400, 28800, 86400},
+			},
+			[]string{"resource_type", "namespace"},
+		),
 	}
 
 	// Register metrics with controller-runtime metrics registry
@@ -74,6 +108,10 @@ func NewPrometheusCollector() interfaces.MetricsCollector {
 		c.sandboxAllocation,
 		c.reconcileTotal,
 		c.reconcileErrors,
+		c.taskCleanupTotal,
+		c.sandboxIdleDuration,
+		c.auditWriteErrors,
+		c.resourceAge,
 	)
 
 	return c
@@ -108,4 +146,24 @@ func (c *PrometheusCollector) IncrementReconcileTotal(controller, result string)
 // IncrementReconcileErrors increments reconciliation error counter
 func (c *PrometheusCollector) IncrementReconcileErrors(controller string) {
 	c.reconcileErrors.WithLabelValues(controller).Inc()
+}
+
+// RecordTaskCleanup records task cleanup events
+func (c *PrometheusCollector) RecordTaskCleanup(namespace, state string) {
+	c.taskCleanupTotal.WithLabelValues(namespace, state).Inc()
+}
+
+// RecordSandboxIdleDuration records sandbox idle duration
+func (c *PrometheusCollector) RecordSandboxIdleDuration(namespace string, duration time.Duration) {
+	c.sandboxIdleDuration.WithLabelValues(namespace).Observe(duration.Seconds())
+}
+
+// RecordAuditWriteError records audit write errors
+func (c *PrometheusCollector) RecordAuditWriteError(resourceType string) {
+	c.auditWriteErrors.WithLabelValues(resourceType).Inc()
+}
+
+// RecordResourceAge records resource age
+func (c *PrometheusCollector) RecordResourceAge(resourceType, namespace string, age time.Duration) {
+	c.resourceAge.WithLabelValues(resourceType, namespace).Observe(age.Seconds())
 }

@@ -1,6 +1,10 @@
 properties:
   spec:
     properties:
+      idleTimeoutSeconds:
+        format: int32
+        minimum: 0
+        type: integer
       keepAlive:
         type: boolean
       poolRef:
@@ -79,6 +83,9 @@ properties:
             - type
           type: object
         type: array
+      lastTaskTime:
+        format: date-time
+        type: string
       phase:
         type: string
       podIP:

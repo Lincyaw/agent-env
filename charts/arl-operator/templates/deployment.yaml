@@ -1,0 +1,116 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "arl-operator.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "arl-operator.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "arl-operator.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      {{- with .Values.podAnnotations }}
+      annotations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      labels:
+        {{- include "arl-operator.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "arl-operator.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.podSecurityContext | nindent 8 }}
+      containers:
+        - name: operator
+          securityContext:
+            {{- toYaml .Values.securityContext | nindent 12 }}
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          args:
+            - --metrics-bind-address={{ .Values.operator.metricsAddr }}
+            - --health-probe-bind-address={{ .Values.operator.probeAddr }}
+            {{- if .Values.operator.enableLeaderElection }}
+            - --leader-elect
+            {{- end }}
+          env:
+            - name: SIDECAR_PORT
+              value: "{{ .Values.sidecar.port }}"
+            - name: WORKSPACE_DIR
+              value: "{{ .Values.operator.workspaceDir }}"
+            - name: HTTP_CLIENT_TIMEOUT
+              value: "{{ .Values.operator.httpClientTimeout }}"
+            - name: DEFAULT_POOL_REPLICAS
+              value: "{{ .Values.pool.defaultReplicas }}"
+            - name: ENABLE_WEBHOOKS
+              value: "{{ .Values.operator.enableWebhooks }}"
+            - name: ENABLE_METRICS
+              value: "{{ .Values.operator.enableMetrics }}"
+            - name: ENABLE_MIDDLEWARE
+              value: "{{ .Values.operator.enableMiddleware }}"
+            - name: ENABLE_AUTO_CLEANUP
+              value: "{{ .Values.cleanup.enableAutoCleanup }}"
+            - name: TASK_RETENTION_DAYS
+              value: "{{ .Values.cleanup.taskRetentionDays }}"
+            - name: SANDBOX_IDLE_TIMEOUT_SECONDS
+              value: "{{ .Values.cleanup.sandboxIdleTimeoutSeconds }}"
+            - name: TTL_CHECK_INTERVAL
+              value: "{{ .Values.cleanup.ttlCheckInterval }}"
+            {{- if or .Values.clickhouse.enabled .Values.clickhouse.external.host }}
+            - name: CLICKHOUSE_ENABLED
+              value: "true"
+            - name: CLICKHOUSE_ADDR
+              value: {{ include "arl-operator.clickhouseAddr" . | quote }}
+            - name: CLICKHOUSE_DATABASE
+              value: "{{ .Values.clickhouse.database }}"
+            - name: CLICKHOUSE_USERNAME
+              value: "{{ .Values.clickhouse.username }}"
+            - name: CLICKHOUSE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "arl-operator.fullname" . }}-clickhouse
+                  key: password
+                  optional: true
+            - name: CLICKHOUSE_BATCH_SIZE
+              value: "{{ .Values.clickhouse.batchSize }}"
+            - name: CLICKHOUSE_FLUSH_INTERVAL
+              value: "{{ .Values.clickhouse.flushInterval }}"
+            {{- end }}
+          ports:
+            - name: metrics
+              containerPort: 8080
+              protocol: TCP
+            - name: health
+              containerPort: 8081
+              protocol: TCP
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: health
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: health
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.resources | nindent 12 }}
+      {{- with .Values.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}

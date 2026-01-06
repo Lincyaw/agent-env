@@ -11,6 +11,7 @@ import (
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
 
 	arlv1alpha1 "github.com/Lincyaw/agent-env/api/v1alpha1"
@@ -19,13 +20,18 @@ import (
 	"github.com/Lincyaw/agent-env/pkg/middleware"
 )
 
+const (
+	sandboxFinalizer = "arl.infra.io/sandbox-finalizer"
+)
+
 // SandboxReconciler reconciles a Sandbox object
 type SandboxReconciler struct {
 	client.Client
-	Scheme     *runtime.Scheme
-	Config     *config.Config
-	Metrics    interfaces.MetricsCollector
-	Middleware *middleware.Chain
+	Scheme      *runtime.Scheme
+	Config      *config.Config
+	Metrics     interfaces.MetricsCollector
+	AuditWriter interfaces.AuditWriter
+	Middleware  *middleware.Chain
 }
 
 // +kubebuilder:rbac:groups=arl.infra.io,resources=sandboxes,verbs=get;list;watch;create;update;patch;delete
@@ -59,21 +65,23 @@ func (r *SandboxReconciler) reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, fmt.Errorf("failed to get Sandbox: %w", err)
 	}
 
-	// If already bound and ready, nothing to do (unless marked for cleanup)
-	if sandbox.Status.Phase == arlv1alpha1.SandboxPhaseReady {
-		// Check if sandbox should be cleaned up
-		if !sandbox.Spec.KeepAlive {
-			cleanupCond := findCondition(sandbox.Status.Conditions, "ReadyForCleanup")
-			if cleanupCond != nil && cleanupCond.Status == metav1.ConditionTrue {
-				logger.Info("Deleting non-keepAlive sandbox after task completion",
-					"sandbox", sandbox.Name)
-				if err := r.Delete(ctx, sandbox); err != nil {
-					return ctrl.Result{}, fmt.Errorf("failed to delete sandbox: %w", err)
-				}
-				return ctrl.Result{}, nil
-			}
+	// Handle deletion with finalizer
+	if !sandbox.DeletionTimestamp.IsZero() {
+		return r.handleDeletion(ctx, sandbox)
+	}
+
+	// Add finalizer if not present
+	if !controllerutil.ContainsFinalizer(sandbox, sandboxFinalizer) {
+		controllerutil.AddFinalizer(sandbox, sandboxFinalizer)
+		if err := r.Update(ctx, sandbox); err != nil {
+			return ctrl.Result{}, fmt.Errorf("failed to add finalizer: %w", err)
 		}
-		return ctrl.Result{}, nil
+		return ctrl.Result{Requeue: true}, nil
+	}
+
+	// If already bound and ready, check for idle timeout and cleanup
+	if sandbox.Status.Phase == arlv1alpha1.SandboxPhaseReady {
+		return r.handleReadySandbox(ctx, sandbox)
 	}
 
 	// If pending, try to bind to a pod
@@ -197,6 +205,132 @@ func (r *SandboxReconciler) SetupWithManager(mgr ctrl.Manager) error {
 // Name returns the controller name for logging
 func (r *SandboxReconciler) Name() string {
 	return "Sandbox"
+}
+
+// handleReadySandbox handles a sandbox that is in Ready phase
+func (r *SandboxReconciler) handleReadySandbox(ctx context.Context, sandbox *arlv1alpha1.Sandbox) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+
+	// Check if sandbox should be cleaned up (non-keepAlive after task completion)
+	if !sandbox.Spec.KeepAlive {
+		cleanupCond := findCondition(sandbox.Status.Conditions, "ReadyForCleanup")
+		if cleanupCond != nil && cleanupCond.Status == metav1.ConditionTrue {
+			logger.Info("Deleting non-keepAlive sandbox after task completion",
+				"sandbox", sandbox.Name)
+			if err := r.Delete(ctx, sandbox); err != nil {
+				return ctrl.Result{}, fmt.Errorf("failed to delete sandbox: %w", err)
+			}
+			return ctrl.Result{}, nil
+		}
+	}
+
+	// Check for idle timeout
+	idleTimeout := r.getIdleTimeout(sandbox)
+	if idleTimeout > 0 && sandbox.Status.LastTaskTime != nil {
+		idleDuration := time.Since(sandbox.Status.LastTaskTime.Time)
+		if idleDuration >= idleTimeout {
+			logger.Info("Sandbox idle timeout exceeded, deleting",
+				"sandbox", sandbox.Name,
+				"idleDuration", idleDuration,
+				"idleTimeout", idleTimeout)
+
+			// Record idle duration metric
+			if r.Metrics != nil {
+				r.Metrics.RecordSandboxIdleDuration(sandbox.Namespace, idleDuration)
+			}
+
+			if err := r.Delete(ctx, sandbox); err != nil {
+				return ctrl.Result{}, fmt.Errorf("failed to delete idle sandbox: %w", err)
+			}
+			return ctrl.Result{}, nil
+		}
+
+		// Requeue to check again after remaining timeout
+		remaining := idleTimeout - idleDuration
+		return ctrl.Result{RequeueAfter: remaining}, nil
+	}
+
+	// Requeue periodically to check idle status
+	return ctrl.Result{RequeueAfter: r.Config.SandboxCheckInterval}, nil
+}
+
+// handleDeletion handles sandbox deletion with finalizer
+func (r *SandboxReconciler) handleDeletion(ctx context.Context, sandbox *arlv1alpha1.Sandbox) (ctrl.Result, error) {
+	logger := log.FromContext(ctx)
+
+	if !controllerutil.ContainsFinalizer(sandbox, sandboxFinalizer) {
+		return ctrl.Result{}, nil
+	}
+
+	logger.Info("Handling sandbox deletion", "sandbox", sandbox.Name)
+
+	// Return pod to WarmPool (mark as idle, remove sandbox label)
+	if sandbox.Status.PodName != "" {
+		pod := &corev1.Pod{}
+		if err := r.Get(ctx, client.ObjectKey{
+			Namespace: sandbox.Namespace,
+			Name:      sandbox.Status.PodName,
+		}, pod); err == nil {
+			// Update pod labels to return to pool
+			if pod.Labels != nil {
+				pod.Labels[StatusLabelKey] = StatusIdle
+				delete(pod.Labels, SandboxLabelKey)
+				if err := r.Update(ctx, pod); err != nil {
+					logger.Error(err, "Failed to return pod to pool", "pod", pod.Name)
+				} else {
+					logger.Info("Returned pod to pool", "pod", pod.Name)
+				}
+			}
+		} else if !errors.IsNotFound(err) {
+			return ctrl.Result{}, fmt.Errorf("failed to get pod: %w", err)
+		}
+	}
+
+	// Record idle duration metric if applicable
+	if r.Metrics != nil && sandbox.Status.LastTaskTime != nil {
+		idleDuration := time.Since(sandbox.Status.LastTaskTime.Time)
+		r.Metrics.RecordSandboxIdleDuration(sandbox.Namespace, idleDuration)
+	}
+
+	// Write audit record
+	if r.AuditWriter != nil {
+		record := interfaces.SandboxAuditRecord{
+			Namespace: sandbox.Namespace,
+			Name:      sandbox.Name,
+			PoolRef:   sandbox.Spec.PoolRef,
+			Phase:     string(sandbox.Status.Phase),
+			PodName:   sandbox.Status.PodName,
+			Event:     "deleted",
+		}
+		if err := r.AuditWriter.WriteSandboxEvent(ctx, record); err != nil {
+			logger.Error(err, "Failed to write sandbox audit record")
+			if r.Metrics != nil {
+				r.Metrics.RecordAuditWriteError("sandbox")
+			}
+		}
+	}
+
+	// Remove finalizer
+	controllerutil.RemoveFinalizer(sandbox, sandboxFinalizer)
+	if err := r.Update(ctx, sandbox); err != nil {
+		return ctrl.Result{}, fmt.Errorf("failed to remove finalizer: %w", err)
+	}
+
+	logger.Info("Sandbox deleted successfully", "sandbox", sandbox.Name)
+	return ctrl.Result{}, nil
+}
+
+// getIdleTimeout returns the idle timeout for the sandbox
+func (r *SandboxReconciler) getIdleTimeout(sandbox *arlv1alpha1.Sandbox) time.Duration {
+	// Use sandbox-specific timeout if set
+	if sandbox.Spec.IdleTimeoutSeconds != nil {
+		return time.Duration(*sandbox.Spec.IdleTimeoutSeconds) * time.Second
+	}
+	// Fall back to config default
+	if r.Config.SandboxIdleTimeoutSeconds > 0 {
+		return time.Duration(r.Config.SandboxIdleTimeoutSeconds) * time.Second
+	}
+	return 0
 }
 
 // findCondition finds a condition by type

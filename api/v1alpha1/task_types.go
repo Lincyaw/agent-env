@@ -67,6 +67,10 @@ type TaskSpec struct {
 	// +kubebuilder:validation:Minimum=0
 	// +optional
 	TTLSecondsAfterFinished *int32 `json:"ttlSecondsAfterFinished,omitempty"`
+
+	// TraceID is an optional identifier for distributed tracing
+	// +optional
+	TraceID string `json:"traceID,omitempty"`
 }
 
 // TaskStatus defines the observed state of Task
