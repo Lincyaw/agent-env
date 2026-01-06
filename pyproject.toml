@@ -1,5 +1,5 @@
 [tool.uv.workspace]
-members = ["sdk/python/arl-client", "sdk/python/arl-wrapper"]
+members = ["sdk/python/arl"]
 
 [project]
 name = "agent-env"

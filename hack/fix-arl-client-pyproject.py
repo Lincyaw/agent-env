@@ -39,7 +39,7 @@ version = "{version}"
 description = "{description} - Auto-generated OpenAPI client"
 readme = "README.md"
 requires-python = ">=3.8"
-license = {{text = "Apache-2.0"}}
+license = "Apache-2.0"
 authors = [
     {{name = "ARL Infrastructure", email = "team@openapitools.org"}}
 ]

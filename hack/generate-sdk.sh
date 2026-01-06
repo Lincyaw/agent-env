@@ -7,7 +7,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 CRD_DIR="${PROJECT_ROOT}/config/crd"
 OPENAPI_DIR="${PROJECT_ROOT}/openapi"
-SDK_DIR="${PROJECT_ROOT}/sdk/python/arl-client"
+SDK_DIR="${PROJECT_ROOT}/sdk/python/arl/arl/arl_client"
 TEMPLATE_FILE="${OPENAPI_DIR}/template.yaml"
 
 echo "==> Generating Python SDK from CRD OpenAPI schemas"
@@ -46,10 +46,14 @@ mkdir -p "${SDK_DIR}"
 
 echo "Generating Python client..."
 
+# Generate to temporary directory first
+TEMP_DIR=$(mktemp -d)
+trap "rm -rf ${TEMP_DIR}" EXIT
+
 docker run --rm \
     --user "$(id -u):$(id -g)" \
     -v "${OPENAPI_DIR}:/openapi" \
-    -v "${SDK_DIR}:/output" \
+    -v "${TEMP_DIR}:/output" \
     openapitools/openapi-generator-cli:v7.12.0 generate \
     -i "/openapi/arl-api.yaml" \
     -g python \
@@ -59,11 +63,20 @@ docker run --rm \
 
 echo "==> Post-processing generated files"
 
-# Fix pyproject.toml to use modern [project] table format (for uv compatibility)
-python3 "${SCRIPT_DIR}/fix-arl-client-pyproject.py" "${SDK_DIR}/pyproject.toml"
+# Remove old generated code
+rm -rf "${SDK_DIR}"
+
+# Create _client directory and move only the Python package code
+mkdir -p "${SDK_DIR}"
+mv "${TEMP_DIR}/arl_client/"* "${SDK_DIR}/"
+
+# Clean up any __pycache__ that might have been created
+find "${SDK_DIR}" -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || true
+
+# Fix imports to use relative imports instead of absolute arl_client imports
+echo "==> Fixing imports to use relative imports"
+python3 "${SCRIPT_DIR}/fix-arl-client-imports.py" "${SDK_DIR}"
 
 echo "==> Python SDK generation complete"
 echo "    Output: ${SDK_DIR}"
-echo ""
-echo "Note: Custom wrapper code is in sdk/python/arl-wrapper/"
-echo "      Auto-generated client code is in sdk/python/arl-client/"
+echo "    Auto-generated client code integrated into arl package"

@@ -1,0 +1,81 @@
+[project]
+name = "arl"
+version = "0.1.0"
+description = "ARL Infrastructure - Python SDK for Kubernetes-based Agent Runtime Layer"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "Apache-2.0"}
+authors = [
+    {name = "ARL Infrastructure Team"}
+]
+keywords = ["kubernetes", "operator", "agent", "runtime", "sandbox", "task-execution"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+]
+dependencies = [
+    "kubernetes>=28.0.0",
+    "urllib3>=1.25.3,<3.0.0",
+    "python-dateutil>=2.8.2",
+    "pydantic>=2",
+    "typing-extensions>=4.7.1",
+]
+
+[project.urls]
+Homepage = "https://github.com/Lincyaw/agent-env"
+Repository = "https://github.com/Lincyaw/agent-env"
+Documentation = "https://github.com/Lincyaw/agent-env/tree/main/docs"
+Issues = "https://github.com/Lincyaw/agent-env/issues"
+
+[project.optional-dependencies]
+dev = [
+    "ruff>=0.8.0",
+    "mypy>=1.13.0",
+    "pytest>=7.2.1",
+    "pytest-cov>=2.8.1",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["arl"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes
+    "I",    # isort
+    "B",    # flake8-bugbear
+    "UP",   # pyupgrade
+    "RUF",  # ruff-specific rules
+]
+ignore = [
+    "E501", # line too long (handled by formatter)
+]
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+disallow_untyped_defs = true
+
+[[tool.mypy.overrides]]
+module = "kubernetes.*"
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = "arl.arl_client.*"
+ignore_errors = true

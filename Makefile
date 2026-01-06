@@ -74,6 +74,25 @@ manifests: ## Generate CRD manifests
 sdk-python: manifests ## Generate Python SDK from CRDs
 	./hack/generate-sdk.sh
 
+##@ Python SDK Publishing
+
+.PHONY: build-sdk
+build-sdk: sdk-python ## Build Python SDK package
+	cd sdk/python/arl && uv build
+
+.PHONY: publish-test
+publish-test: build-sdk ## Publish to Test PyPI (requires UV_PUBLISH_TOKEN)
+	cd sdk/python/arl && uv publish --publish-url https://test.pypi.org/legacy/
+
+.PHONY: publish
+publish: build-sdk ## Publish to Production PyPI (requires UV_PUBLISH_TOKEN)
+	cd sdk/python/arl && uv publish
+
+.PHONY: clean-sdk
+clean-sdk: ## Clean Python SDK build artifacts
+	rm -rf sdk/python/arl/dist sdk/python/arl/build sdk/python/arl/*.egg-info
+	rm -rf sdk/python/arl/arl/arl_client
+
 ##@ Build
 
 .PHONY: build-operator
