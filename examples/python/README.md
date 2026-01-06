@@ -1,152 +1,69 @@
 # ARL Python SDK Examples
 
-This directory contains examples demonstrating various features of the ARL Python SDK.
-
-# ARL Python SDK Examples
-
-This directory contains examples demonstrating various features of the ARL Python SDK.
+Examples demonstrating ARL Python SDK features.
 
 ## Prerequisites
 
-1. **Install dependencies using uv:**
+1. Install dependencies:
    ```bash
    cd examples/python
    uv sync
    ```
 
-2. Ensure you have access to a Kubernetes cluster with ARL infrastructure deployed
-3. Configure kubectl to access your cluster
-4. Create a WarmPool named `python-39-std`
+2. Access to Kubernetes cluster with ARL infrastructure
+3. Create a WarmPool named `python-39-std`
 
 ## Running Examples
 
-### Individual Examples
-
-Each example demonstrates a specific feature and can be run independently:
-
 ```bash
 cd examples/python
 
-# Basic serial execution
+# Individual examples
 uv run python 01_basic_execution.py
-
-# Multi-step data pipeline
 uv run python 02_multi_step_pipeline.py
-
-# Environment variables
 uv run python 03_environment_variables.py
-
-# Working directory
 uv run python 04_working_directory.py
-
-# Error handling
 uv run python 05_error_handling.py
-
-# Long-running tasks
 uv run python 06_long_running_task.py
-
-# Sandbox reuse (host-like behavior)
 uv run python 07_sandbox_reuse.py
-```
 
-### Run All Examples
-
-Run all examples as tests:
-
-```bash
-cd examples/python
+# Run all examples
 uv run python run_all_examples.py
 ```
 
-## Examples Overview
+## Examples
 
-### 01. Basic Execution (`01_basic_execution.py`)
-
-Simple example showing how to:
-- Create a sandbox using a context manager
-- Execute serial steps
-- Read task output
-
-### 02. Multi-Step Pipeline (`02_multi_step_pipeline.py`)
-
-Demonstrates data processing pipeline:
-- Create data files
-- Process data with Python scripts
-- Pass data between steps
-- Verify output
-
-### 03. Environment Variables (`03_environment_variables.py`)
-
-Shows environment variable usage:
-- Set custom environment variables
-- Access variables in commands
-- Combine system and custom variables
-
-### 04. Working Directory (`04_working_directory.py`)
-
-Working directory management:
-- Set custom working directory
-- Create subdirectories
-- Work with relative paths
-
-### 05. Error Handling (`05_error_handling.py`)
-
-Error handling scenarios:
-- Task execution failures
-- Invalid commands
-- Retry logic
-
-### 06. Long-Running Task (`06_long_running_task.py`)
-
-Long-running task execution:
-- Tasks with longer execution time
-- Setting timeouts
-- Tracking duration
-
-### 07. Sandbox Reuse (`07_sandbox_reuse.py`)
-
-Host-like behavior with sandbox reuse:
-- Keep sandbox alive between tasks
-- Serial task execution in same environment
-- State persistence across tasks
+- **01_basic_execution.py**: Create sandbox, execute steps, read output
+- **02_multi_step_pipeline.py**: Data processing pipeline with multiple steps
+- **03_environment_variables.py**: Custom environment variables
+- **04_working_directory.py**: Working directory management
+- **05_error_handling.py**: Error handling and retries
+- **06_long_running_task.py**: Long-running tasks with timeouts
+- **07_sandbox_reuse.py**: Sandbox reuse for serial tasks
 
 ## Common Patterns
 
-### Using Context Manager (Recommended)
+### Context Manager (Recommended)
 
 ```python
-from arl_client.session import SandboxSession
+from arl.session import SandboxSession
 
 with SandboxSession("python-3.9-std", namespace="default") as session:
     result = session.execute([...])
-    # Sandbox automatically cleaned up on exit
-```
-
-### Manual Management
-
-```python
-session = SandboxSession("python-3.9-std", keep_alive=True)
-session.create_sandbox()
-try:
-    result = session.execute([...])
-finally:
-    session.delete_sandbox()
 ```
 
 ### Task Steps
 
-**FilePatch Step:**
 ```python
+# FilePatch: Create/modify files
 {
     "name": "write_file",
     "type": "FilePatch",
     "path": "/workspace/script.py",
     "content": "print('Hello')"
 }
-```
 
-**Command Step:**
-```python
+# Command: Execute commands
 {
     "name": "run_script",
     "type": "Command",
@@ -155,9 +72,3 @@ finally:
     "env": {"DEBUG": "true"}
 }
 ```
-
-## Troubleshooting
-
-- **Connection errors**: Ensure kubectl is configured and you can access the cluster
-- **Pool not found**: Verify the WarmPool exists with `kubectl get warmpools`
-- **Timeout errors**: Increase the timeout parameter or check sandbox/task status manually

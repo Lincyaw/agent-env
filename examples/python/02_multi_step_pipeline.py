@@ -19,19 +19,19 @@ def main() -> None:
     with SandboxSession(pool_ref="python-39-std", namespace="default") as session:
         # Create and execute a data processing pipeline
         steps: list[TaskStep] = [
-                # Step 1: Create input data
-                {
-                    "name": "create_data",
-                    "type": "FilePatch",
-                    "path": "/workspace/data.txt",
-                    "content": "apple\nbanana\ncherry\ndate\neggplant",
-                },
-                # Step 2: Create processing script
-                {
-                    "name": "create_processor",
-                    "type": "FilePatch",
-                    "path": "/workspace/process.py",
-                    "content": """#!/usr/bin/env python3
+            # Step 1: Create input data
+            {
+                "name": "create_data",
+                "type": "FilePatch",
+                "path": "/workspace/data.txt",
+                "content": "apple\nbanana\ncherry\ndate\neggplant",
+            },
+            # Step 2: Create processing script
+            {
+                "name": "create_processor",
+                "type": "FilePatch",
+                "path": "/workspace/process.py",
+                "content": """#!/usr/bin/env python3
 with open('/workspace/data.txt', 'r') as f:
     items = f.read().strip().split('\\n')
 
@@ -45,20 +45,20 @@ with open('/workspace/output.txt', 'w') as f:
 
 print("Processing completed!")
 """,
-                },
-                # Step 3: Run the processor
-                {
-                    "name": "run_processor",
-                    "type": "Command",
-                    "command": ["python3", "/workspace/process.py"],
-                },
-                # Step 4: Verify output
-                {
-                    "name": "verify_output",
-                    "type": "Command",
-                    "command": ["cat", "/workspace/output.txt"],
-                },
-            ]
+            },
+            # Step 3: Run the processor
+            {
+                "name": "run_processor",
+                "type": "Command",
+                "command": ["python3", "/workspace/process.py"],
+            },
+            # Step 4: Verify output
+            {
+                "name": "verify_output",
+                "type": "Command",
+                "command": ["cat", "/workspace/output.txt"],
+            },
+        ]
 
         result = session.execute(steps)
 

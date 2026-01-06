@@ -75,7 +75,11 @@ find "${SDK_DIR}" -type d -name "__pycache__" -exec rm -rf {} + 2>/dev/null || t
 
 # Fix imports to use relative imports instead of absolute arl_client imports
 echo "==> Fixing imports to use relative imports"
-python3 "${SCRIPT_DIR}/fix-arl-client-imports.py" "${SDK_DIR}"
+find "${SDK_DIR}" -type f -name "*.py" -exec sed -i \
+    -e 's/^from arl_client import /from . import /g' \
+    -e 's/^from arl_client\.\([^ ]*\) import /from .\1 import /g' \
+    -e 's/^import arl_client\.\([^ ]*\)$/from . import \1/g' \
+    {} +
 
 echo "==> Python SDK generation complete"
 echo "    Output: ${SDK_DIR}"

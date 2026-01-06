@@ -141,7 +141,11 @@ class SandboxSession:
                     return
                 elif phase == "Failed":
                     conditions: list[dict[str, Any]] = status.get("conditions", [])
-                    msg: str = conditions[0].get("message", "Unknown error") if conditions else "Unknown error"
+                    msg: str = (
+                        conditions[0].get("message", "Unknown error")
+                        if conditions
+                        else "Unknown error"
+                    )
                     raise RuntimeError(f"Sandbox failed to start: {msg}")
 
             except client.ApiException as e:
@@ -266,7 +270,12 @@ class SandboxSession:
         self.create_sandbox()
         return self
 
-    def __exit__(self, exc_type: type[BaseException] | None, exc_val: BaseException | None, exc_tb: object | None) -> None:
+    def __exit__(
+        self,
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: object | None,
+    ) -> None:
         """Exit context manager - cleanup sandbox unless keep_alive=True."""
         if not self.keep_alive:
             self.delete_sandbox()

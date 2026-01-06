@@ -248,12 +248,12 @@ def test_example() -> None:
     # Copy quality check scripts (placeholder - in real use, copy from skill)
     create_file(
         scripts_dir / "check_quality.py",
-        '# Copy check_quality.py from python skill\n',
+        "# Copy check_quality.py from python skill\n",
     )
 
     create_file(
         scripts_dir / "autofix.py",
-        '# Copy autofix.py from python skill\n',
+        "# Copy autofix.py from python skill\n",
     )
 
     print(f"\n✅ Project '{project_name}' created successfully!")

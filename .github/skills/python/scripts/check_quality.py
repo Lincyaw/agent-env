@@ -12,6 +12,7 @@ from typing import NamedTuple
 
 class CheckResult(NamedTuple):
     """Result of a single check."""
+
     name: str
     passed: bool
     output: str

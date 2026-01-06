@@ -17,20 +17,20 @@ def main() -> None:
 
     with SandboxSession(pool_ref="python-39-std", namespace="default") as session:
         steps: list[TaskStep] = [
-                {
-                    "name": "test_env",
-                    "type": "Command",
-                    "command": [
-                        "sh",
-                        "-c",
-                        "echo USER=$USER; echo HOME=$HOME; echo MY_VAR=$MY_VAR; echo API_KEY=$API_KEY",
-                    ],
-                    "env": {
-                        "MY_VAR": "custom_value",
-                        "API_KEY": "secret_key_123",
-                    },
-                }
-            ]
+            {
+                "name": "test_env",
+                "type": "Command",
+                "command": [
+                    "sh",
+                    "-c",
+                    "echo USER=$USER; echo HOME=$HOME; echo MY_VAR=$MY_VAR; echo API_KEY=$API_KEY",
+                ],
+                "env": {
+                    "MY_VAR": "custom_value",
+                    "API_KEY": "secret_key_123",
+                },
+            }
+        ]
 
         result = session.execute(steps)
 

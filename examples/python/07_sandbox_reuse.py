@@ -17,9 +17,7 @@ def main() -> None:
     print("=" * 60)
 
     # Create session with keep_alive=True
-    session = SandboxSession(
-        pool_ref="python-39-std", namespace="default", keep_alive=True
-    )
+    session = SandboxSession(pool_ref="python-39-std", namespace="default", keep_alive=True)
 
     try:
         # Manually create sandbox

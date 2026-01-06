@@ -100,9 +100,7 @@ def clean_schema(schema: dict[str, Any]):
     if "items" in schema and isinstance(schema["items"], dict):
         clean_schema(schema["items"])
 
-    if "additionalProperties" in schema and isinstance(
-        schema["additionalProperties"], dict
-    ):
+    if "additionalProperties" in schema and isinstance(schema["additionalProperties"], dict):
         clean_schema(schema["additionalProperties"])
 
 
@@ -193,9 +191,7 @@ def extract_nested_schemas(
             continue
 
         # Check if this is an array of objects
-        if prop_schema.get("type") == "array" and isinstance(
-            prop_schema.get("items"), dict
-        ):
+        if prop_schema.get("type") == "array" and isinstance(prop_schema.get("items"), dict):
             items = prop_schema["items"]
             if items.get("type") == "object" and "properties" in items:
                 # Determine schema name from property name
@@ -204,9 +200,7 @@ def extract_nested_schemas(
                     schema_name = "TaskStep"
                 else:
                     # Convert snake_case or camelCase to PascalCase, remove trailing 's'
-                    schema_name = "".join(
-                        word.capitalize() for word in prop_name.split("_")
-                    )
+                    schema_name = "".join(word.capitalize() for word in prop_name.split("_"))
                     if schema_name.endswith("s") and len(schema_name) > 1:
                         schema_name = schema_name[:-1]
 
@@ -221,9 +215,7 @@ def extract_nested_schemas(
                     schemas[schema_name] = schema_copy
 
                     # Replace with reference
-                    prop_schema["items"] = {
-                        "$ref": f"#/components/schemas/{schema_name}"
-                    }
+                    prop_schema["items"] = {"$ref": f"#/components/schemas/{schema_name}"}
 
             # Don't recurse too deep to avoid extracting too many Kubernetes internal schemas
             extract_nested_schemas(prop_schema, schemas, prefix)

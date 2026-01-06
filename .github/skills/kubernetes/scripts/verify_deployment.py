@@ -13,38 +13,27 @@ import time
 def run_kubectl(args: list[str]) -> str:
     """Run kubectl command and return output."""
     try:
-        result = subprocess.run(
-            ['kubectl'] + args,
-            capture_output=True,
-            text=True,
-            check=True
-        )
+        result = subprocess.run(["kubectl"] + args, capture_output=True, text=True, check=True)
         return result.stdout
     except subprocess.CalledProcessError as e:
         print(f"Error running kubectl: {e.stderr}", file=sys.stderr)
         raise
 
-def get_deployment_status(name: str, namespace: str = 'default') -> dict:
+
+def get_deployment_status(name: str, namespace: str = "default") -> dict:
     """Get deployment status as JSON."""
-    output = run_kubectl([
-        'get', 'deployment', name,
-        '-n', namespace,
-        '-o', 'json'
-    ])
+    output = run_kubectl(["get", "deployment", name, "-n", namespace, "-o", "json"])
     return json.loads(output)
 
-def get_pods_for_deployment(name: str, namespace: str = 'default') -> list[dict]:
-    """Get all pods belonging to a deployment."""
-    output = run_kubectl([
-        'get', 'pods',
-        '-n', namespace,
-        '-l', f'app={name}',
-        '-o', 'json'
-    ])
-    data = json.loads(output)
-    return data.get('items', [])
 
-def verify_deployment(name: str, namespace: str = 'default', timeout: int = 300) -> bool:
+def get_pods_for_deployment(name: str, namespace: str = "default") -> list[dict]:
+    """Get all pods belonging to a deployment."""
+    output = run_kubectl(["get", "pods", "-n", namespace, "-l", f"app={name}", "-o", "json"])
+    data = json.loads(output)
+    return data.get("items", [])
+
+
+def verify_deployment(name: str, namespace: str = "default", timeout: int = 300) -> bool:
     """
     Verify deployment is healthy and all pods are ready.
 
@@ -64,14 +53,16 @@ def verify_deployment(name: str, namespace: str = 'default', timeout: int = 300)
         try:
             # Get deployment status
             deployment = get_deployment_status(name, namespace)
-            status = deployment.get('status', {})
+            status = deployment.get("status", {})
 
-            desired = status.get('replicas', 0)
-            ready = status.get('readyReplicas', 0)
-            updated = status.get('updatedReplicas', 0)
-            available = status.get('availableReplicas', 0)
+            desired = status.get("replicas", 0)
+            ready = status.get("readyReplicas", 0)
+            updated = status.get("updatedReplicas", 0)
+            available = status.get("availableReplicas", 0)
 
-            print(f"  Replicas - Desired: {desired}, Ready: {ready}, Updated: {updated}, Available: {available}")
+            print(
+                f"  Replicas - Desired: {desired}, Ready: {ready}, Updated: {updated}, Available: {available}"
+            )
 
             # Check if deployment is ready
             if desired > 0 and ready == desired and updated == desired and available == desired:
@@ -80,13 +71,13 @@ def verify_deployment(name: str, namespace: str = 'default', timeout: int = 300)
                 all_healthy = True
 
                 for pod in pods:
-                    pod_name = pod['metadata']['name']
-                    phase = pod['status'].get('phase', 'Unknown')
+                    pod_name = pod["metadata"]["name"]
+                    phase = pod["status"].get("phase", "Unknown")
 
-                    container_statuses = pod['status'].get('containerStatuses', [])
-                    containers_ready = all(cs.get('ready', False) for cs in container_statuses)
+                    container_statuses = pod["status"].get("containerStatuses", [])
+                    containers_ready = all(cs.get("ready", False) for cs in container_statuses)
 
-                    if phase != 'Running' or not containers_ready:
+                    if phase != "Running" or not containers_ready:
                         print(f"  ⚠️  Pod {pod_name}: phase={phase}, ready={containers_ready}")
                         all_healthy = False
                     else:
@@ -105,13 +96,14 @@ def verify_deployment(name: str, namespace: str = 'default', timeout: int = 300)
     print(f"❌ Timeout waiting for deployment '{name}' to be ready", file=sys.stderr)
     return False
 
-if __name__ == '__main__':
+
+if __name__ == "__main__":
     if len(sys.argv) < 2:
         print("Usage: verify_deployment.py <deployment-name> [namespace] [timeout]")
         sys.exit(1)
 
     deployment_name = sys.argv[1]
-    namespace = sys.argv[2] if len(sys.argv) > 2 else 'default'
+    namespace = sys.argv[2] if len(sys.argv) > 2 else "default"
     timeout = int(sys.argv[3]) if len(sys.argv) > 3 else 300
 
     success = verify_deployment(deployment_name, namespace, timeout)
