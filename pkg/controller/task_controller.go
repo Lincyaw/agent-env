@@ -126,8 +126,38 @@ func (r *TaskReconciler) reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 				break
 			}
 
+			// Convert absolute path to relative if needed
+			filePath := step.Path
+			if strings.HasPrefix(filePath, sandbox.Status.WorkDir+"/") {
+				filePath = strings.TrimPrefix(filePath, sandbox.Status.WorkDir+"/")
+			} else if strings.HasPrefix(filePath, "/") {
+				// If it's an absolute path not in workdir, use it as-is
+				// and set BasePath to empty
+				files := map[string]string{
+					filePath: step.Content,
+				}
+				fileReq := &sidecar.FileRequest{
+					BasePath: "",
+					Files:    files,
+					Patch:    step.Content,
+				}
+				resp, err := r.SidecarClient.UpdateFiles(ctx, sandbox.Status.PodIP, fileReq)
+				if err != nil {
+					stderr.WriteString("Failed to update files: " + err.Error() + "\n")
+					exitCode = 1
+					break
+				}
+				if !resp.IsSuccess() {
+					stderr.WriteString("File update failed: " + resp.GetMessage() + "\n")
+					exitCode = 1
+					break
+				}
+				stdout.WriteString("File created: " + step.Path + "\n")
+				continue
+			}
+
 			files := map[string]string{
-				step.Path: step.Content,
+				filePath: step.Content,
 			}
 
 			fileReq := &sidecar.FileRequest{

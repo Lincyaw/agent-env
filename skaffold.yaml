@@ -23,7 +23,11 @@ manifests:
 
 # Default deploy configuration (for minikube)
 deploy:
-  kubectl: {}
+  kubectl:
+    flags:
+      apply:
+      - --server-side=true
+      - --force-conflicts=true
 
 # Profiles for different environments
 profiles:
@@ -44,7 +48,11 @@ profiles:
     - config/crd/*.yaml
     - config/operator/deployment-k8s.yaml
   deploy:
-    kubectl: {}
+    kubectl:
+      flags:
+        apply:
+        - --server-side=true
+        - --force-conflicts=true
 
 # Profile for development with auto-sync and rebuild
 - name: dev
@@ -75,7 +83,11 @@ profiles:
     - config/crd/*.yaml
     - config/operator/deployment.yaml
   deploy:
-    kubectl: {}
+    kubectl:
+      flags:
+        apply:
+        - --server-side=true
+        - --force-conflicts=true
 
 # Profile for deploying samples
 - name: with-samples
@@ -85,7 +97,11 @@ profiles:
     - config/operator/deployment.yaml
     - config/samples/*.yaml
   deploy:
-    kubectl: {}
+    kubectl:
+      flags:
+        apply:
+        - --server-side=true
+        - --force-conflicts=true
 
 # Profile for K8s with samples
 - name: k8s-with-samples
@@ -105,4 +121,8 @@ profiles:
     - config/operator/deployment-k8s.yaml
     - config/samples/*.yaml
   deploy:
-    kubectl: {}
+    kubectl:
+      flags:
+        apply:
+        - --server-side=true
+        - --force-conflicts=true

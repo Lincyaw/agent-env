@@ -629,6 +629,125 @@ When deployments fail:
 9. Verify warmpool has ready pods: `kubectl get warmpool <name> -o jsonpath='{.status.readyReplicas}'`
 10. Check for resource conflicts: Multiple controllers, duplicate resources
 
+## Project-Specific Notes
+
+### Testing Environment Cleanup
+
+**IMPORTANT: Always clean up test resources before running tests:**
+
+```bash
+# Delete all existing tasks (they don't auto-delete)
+kubectl delete tasks --all
+
+# Delete test sandboxes
+kubectl delete sandboxes --all
+
+# Optional: Restart warmpool to get fresh pods
+kubectl delete pods -l app=arl-sandbox
+# Operator will recreate pods automatically
+
+# Verify cleanup
+kubectl get tasks,sandboxes,pods
+```
+
+**Why cleanup is important:**
+- Tasks remain in terminal state (Succeeded/Failed) and accumulate
+- Old task status may interfere with new test results
+- Sandbox allocations may exhaust warmpool capacity
+- File changes in pods persist across tasks if using same sandbox
+
+### FilePatch Path Handling
+
+**CRITICAL: FilePatch paths are relative to workDir (`/workspace` by default):**
+
+```yaml
+# CORRECT - relative path
+steps:
+  - name: create_script
+    type: FilePatch
+    path: hello.py           # Creates /workspace/hello.py
+    content: "print('hello')"
+
+# CORRECT - absolute path (creates outside workspace)
+steps:
+  - name: create_script
+    type: FilePatch
+    path: /tmp/test.py       # Creates /tmp/test.py
+    content: "print('hello')"
+
+# WRONG - this will create /workspace/workspace/hello.py
+steps:
+  - name: create_script
+    type: FilePatch
+    path: /workspace/hello.py  # DON'T use full workspace path
+    content: "print('hello')"
+```
+
+### WarmPool Image Registry
+
+**Remember to use correct image registry:**
+
+```yaml
+# For local testing with private registry
+spec:
+  template:
+    spec:
+      containers:
+        - name: sidecar
+          image: 10.10.10.240/library/arl-sidecar:latest
+          imagePullPolicy: IfNotPresent  # Important for local registry
+```
+
+The operator automatically updates images when deployed via `make k8s-run`.
+
+### Task Step Behavior
+
+**Important task execution characteristics:**
+
+1. **Steps execute sequentially** - if one fails, remaining steps are skipped
+2. **FilePatch creates files** but doesn't execute them
+3. **Command steps need explicit paths** - use full path or workDir
+4. **Environment variables** are only set for specific steps, not globally
+5. **WorkDir defaults to `/workspace`** - change with `workDir` field
+
+```yaml
+# Example showing proper step sequencing
+steps:
+  - name: create_script
+    type: FilePatch
+    path: test.py
+    content: |
+      import os
+      print(f"Current dir: {os.getcwd()}")
+  
+  - name: run_script
+    type: Command
+    command: ["python", "/workspace/test.py"]  # Use full path
+    env:
+      MY_VAR: "value"  # Only available in this step
+```
+
+### Rebuilding After Code Changes
+
+**After modifying operator or sidecar code:**
+
+```bash
+# 1. Format and check code
+make fmt && make vet
+
+# 2. Rebuild and push images
+make docker-build docker-push
+
+# 3. Restart operator to use new image
+kubectl rollout restart deployment -n arl-system arl-operator
+
+# 4. Delete old warmpool pods to get new sidecar
+kubectl delete pods -l app=arl-sandbox
+
+# 5. Verify new images are running
+kubectl get pods -o jsonpath='{.items[*].spec.containers[*].image}' | tr ' ' '\n' | grep arl
+```
+
 ## Best Practices
 
 ### Use Validation Before Apply

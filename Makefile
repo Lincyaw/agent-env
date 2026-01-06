@@ -116,7 +116,7 @@ minikube-delete: ## Delete minikube cluster
 
 .PHONY: install-crds
 install-crds: ## Install CRDs
-	kubectl apply -f config/crd/
+	kubectl apply --server-side=true --force-conflicts -f config/crd/
 
 .PHONY: uninstall-crds
 uninstall-crds: ## Uninstall CRDs
@@ -124,7 +124,7 @@ uninstall-crds: ## Uninstall CRDs
 
 .PHONY: deploy-operator
 deploy-operator: ## Deploy operator
-	kubectl apply -f config/operator/deployment.yaml
+	kubectl apply --server-side=true --force-conflicts -f config/operator/deployment.yaml
 
 .PHONY: undeploy-operator
 undeploy-operator: ## Remove operator
@@ -132,7 +132,7 @@ undeploy-operator: ## Remove operator
 
 .PHONY: deploy-samples
 deploy-samples: ## Deploy sample resources
-	kubectl apply -f config/samples/
+	kubectl apply --server-side=true --force-conflicts -f config/samples/
 
 .PHONY: undeploy-samples
 undeploy-samples: ## Remove sample resources
@@ -148,7 +148,7 @@ k8s-build-push: docker-build-k8s docker-push ## Build and push images for K8s
 
 .PHONY: k8s-deploy
 k8s-deploy: install-crds ## Deploy to standard K8s cluster
-	kubectl apply -f config/operator/deployment.yaml
+	kubectl apply --server-side=true --force-conflicts -f config/operator/deployment.yaml
 
 .PHONY: k8s-undeploy
 k8s-undeploy: ## Remove from standard K8s cluster
