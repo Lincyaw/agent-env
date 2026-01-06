@@ -979,3 +979,122 @@ steps:
 **就这么简单！** 🎉
 
 有问题可以查看详细日志：`kubectl logs -n arl-system -l app=arl-operator`
+
+---
+
+## 🐍 Python SDK
+
+ARL-Infra 提供了 Python SDK，方便通过代码操作资源，无需手动编写 YAML。
+
+### 安装
+
+```bash
+cd sdk/python/arl-client
+pip install -e .
+```
+
+或直接从仓库安装：
+
+```bash
+pip install git+https://github.com/Lincyaw/agent-env.git#subdirectory=sdk/python/arl-client
+```
+
+### 快速示例
+
+```python
+from arl_client.session import SandboxSession
+
+# 使用上下文管理器（推荐）
+with SandboxSession("python-pool", namespace="default") as session:
+    result = session.execute([
+        {
+            "name": "write_script",
+            "type": "FilePatch",
+            "path": "/workspace/hello.py",
+            "content": "print('你好，来自 ARL!')"
+        },
+        {
+            "name": "run_script",
+            "type": "Command",
+            "command": ["python", "/workspace/hello.py"]
+        }
+    ])
+    
+    print(f"输出: {result['status']['stdout']}")
+    print(f"退出码: {result['status']['exitCode']}")
+```
+
+### SDK 特性
+
+- **自动生成的模型**: 所有 ARL 资源的类型安全 Python 模型
+- **高层封装**: `SandboxSession` 上下文管理器，自动管理资源
+- **Kubernetes 集成**: 基于官方 Kubernetes Python 客户端
+- **完整示例**: 查看 `examples/python/` 了解更多用法
+
+### 批量任务示例
+
+```python
+from concurrent.futures import ThreadPoolExecutor
+from arl_client.session import SandboxSession
+
+def execute_task(task_id):
+    with SandboxSession("python-pool", namespace="default") as session:
+        result = session.execute([
+            {
+                "name": "write",
+                "type": "FilePatch",
+                "path": f"/workspace/task_{task_id}.py",
+                "content": f"print('任务 {task_id} 完成')"
+            },
+            {
+                "name": "run",
+                "type": "Command",
+                "command": ["python", f"/workspace/task_{task_id}.py"]
+            }
+        ])
+        return result
+
+# 并行执行 5 个任务
+with ThreadPoolExecutor(max_workers=3) as executor:
+    futures = [executor.submit(execute_task, i) for i in range(5)]
+    results = [f.result() for f in futures]
+```
+
+### 错误处理
+
+```python
+from arl_client.session import SandboxSession
+
+try:
+    with SandboxSession("python-pool", namespace="default") as session:
+        result = session.execute(
+            steps=[...],
+            timeout="30s"
+        )
+        
+        if result['status']['state'] == 'Failed':
+            print(f"任务失败: {result['status']['stderr']}")
+        
+except TimeoutError:
+    print("任务超时")
+except RuntimeError as e:
+    print(f"执行错误: {e}")
+```
+
+更多示例和文档，请查看：
+- SDK 文档: `sdk/python/arl-client/README.md`
+- Python 示例: `examples/python/`
+
+---
+
+**开发者工具** 🛠️
+
+如果需要重新生成 SDK（修改 CRD 后）：
+
+```bash
+# 重新生成 CRD manifests
+make manifests
+
+# 重新生成 Python SDK
+make sdk-python
+```
