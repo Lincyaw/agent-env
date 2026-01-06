@@ -16,7 +16,7 @@ def main() -> None:
     print("Example: Long-Running Task")
     print("=" * 60)
 
-    with SandboxSession(pool_ref="python-39-std", namespace="default") as session:
+    with SandboxSession(pool_ref="python-39-std", namespace="default", timeout=60) as session:
         result = session.execute(
             [
                 # Create a script that takes time to execute
@@ -46,7 +46,6 @@ print("Total execution time: ~5 seconds")
                     "command": ["python3", "/workspace/long_task.py"],
                 },
             ],
-            timeout="60s",  # Allow up to 60 seconds
         )
 
         status = result.get("status", {})

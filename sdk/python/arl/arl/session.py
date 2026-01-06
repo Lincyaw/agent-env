@@ -88,6 +88,7 @@ class SandboxSession:
             },
             "spec": {
                 "poolRef": self.pool_ref,
+                "keepAlive": self.keep_alive,
             },
         }
 
