@@ -62,6 +62,18 @@ vet: ## Run go vet
 tidy: ## Run go mod tidy
 	go mod tidy
 
+.PHONY: generate
+generate: ## Generate deepcopy code
+	go run sigs.k8s.io/controller-tools/cmd/controller-gen object:headerFile="hack/boilerplate.go.txt" paths="./api/..."
+
+.PHONY: manifests
+manifests: ## Generate CRD manifests
+	go run sigs.k8s.io/controller-tools/cmd/controller-gen crd:maxDescLen=0 paths="./api/..." output:crd:artifacts:config=config/crd
+
+.PHONY: sdk-python
+sdk-python: manifests ## Generate Python SDK from CRDs
+	./hack/generate-sdk.sh
+
 ##@ Build
 
 .PHONY: build-operator
