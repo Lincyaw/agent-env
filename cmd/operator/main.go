@@ -111,7 +111,7 @@ func main() {
 		setupLog.Info("audit logging disabled")
 	}
 
-	sidecarClient := client.NewHTTPSidecarClient(cfg.SidecarPort, cfg.HTTPClientTimeout)
+	sidecarClient := client.NewGRPCSidecarClient(cfg.SidecarGRPCPort, cfg.HTTPClientTimeout)
 
 	// Setup middleware chains for each controller
 	warmPoolMiddleware := middleware.NewChain()

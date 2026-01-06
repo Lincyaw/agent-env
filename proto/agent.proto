@@ -2,9 +2,11 @@ syntax = "proto3";
 
 package arl.sidecar;
 
-option go_package = "github.com/Lincyaw/agent-env/pkg/sidecar/pb";
+option go_package = "github.com/Lincyaw/agent-env/pkg/pb";
 
 // AgentService provides file operations, process control, and environment management
+// Note: RPC method numbers 6-20 are reserved for future observation interfaces
+// (e.g., ReadFile, ListDirectory, GetProcessStatus, etc.)
 service AgentService {
   // UpdateFiles applies file patches or overwrites
   rpc UpdateFiles(FileRequest) returns (FileResponse);
@@ -17,6 +19,9 @@ service AgentService {
   
   // Reset cleans the workspace
   rpc Reset(ResetRequest) returns (ResetResponse);
+  
+  // InteractiveShell provides bidirectional streaming for interactive shell sessions
+  rpc InteractiveShell(stream ShellInput) returns (stream ShellOutput);
 }
 
 // FileRequest contains file operations to perform
@@ -70,4 +75,22 @@ message ResetRequest {
 message ResetResponse {
   bool success = 1;
   string message = 2;
+}
+
+// ShellInput represents input to an interactive shell session
+message ShellInput {
+  oneof input {
+    string data = 1;      // Stdin data to send to the shell
+    string signal = 2;    // Signal to send (e.g., "SIGINT" for Ctrl+C)
+  }
+  bool resize = 3;        // Terminal resize event
+  int32 rows = 4;         // Terminal rows (used with resize)
+  int32 cols = 5;         // Terminal columns (used with resize)
+}
+
+// ShellOutput represents output from an interactive shell session
+message ShellOutput {
+  string data = 1;        // Stdout/stderr data from the shell
+  int32 exit_code = 2;    // Exit code (set when shell exits)
+  bool closed = 3;        // True when shell session has ended
 }

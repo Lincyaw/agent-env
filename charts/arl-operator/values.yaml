@@ -13,7 +13,8 @@ sidecar:
     repository: arl-sidecar
     pullPolicy: IfNotPresent
     tag: "latest"
-  port: 8080
+  httpPort: 8080
+  grpcPort: 9090
 
 imagePullSecrets: []
 nameOverride: ""

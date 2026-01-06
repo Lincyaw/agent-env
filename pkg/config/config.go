@@ -9,7 +9,8 @@ import (
 // Config holds the operator configuration
 type Config struct {
 	// Sidecar configuration
-	SidecarPort       int
+	SidecarHTTPPort   int
+	SidecarGRPCPort   int
 	WorkspaceDir      string
 	HTTPClientTimeout time.Duration
 
@@ -48,7 +49,8 @@ type Config struct {
 // DefaultConfig returns the default configuration
 func DefaultConfig() *Config {
 	return &Config{
-		SidecarPort:               8080,
+		SidecarHTTPPort:           8080,
+		SidecarGRPCPort:           9090,
 		WorkspaceDir:              "/workspace",
 		HTTPClientTimeout:         30 * time.Second,
 		DefaultPoolReplicas:       3,
@@ -79,9 +81,15 @@ func DefaultConfig() *Config {
 func LoadFromEnv() *Config {
 	cfg := DefaultConfig()
 
-	if port := os.Getenv("SIDECAR_PORT"); port != "" {
+	if port := os.Getenv("SIDECAR_HTTP_PORT"); port != "" {
 		if p, err := strconv.Atoi(port); err == nil {
-			cfg.SidecarPort = p
+			cfg.SidecarHTTPPort = p
+		}
+	}
+
+	if port := os.Getenv("SIDECAR_GRPC_PORT"); port != "" {
+		if p, err := strconv.Atoi(port); err == nil {
+			cfg.SidecarGRPCPort = p
 		}
 	}
 

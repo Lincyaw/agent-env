@@ -9,14 +9,20 @@ type SidecarClient interface {
 	// UpdateFiles sends file update request to sidecar
 	UpdateFiles(ctx context.Context, podIP string, req FileUpdateRequest) (FileUpdateResponse, error)
 
-	// Execute sends command execution request to sidecar
+	// Execute sends command execution request to sidecar and returns aggregated result
 	Execute(ctx context.Context, podIP string, req ExecRequest) (ExecResponse, error)
+
+	// ExecuteStream sends command execution request and streams output via channel
+	ExecuteStream(ctx context.Context, podIP string, req ExecRequest) (<-chan ExecResponse, error)
 
 	// Reset sends reset request to sidecar
 	Reset(ctx context.Context, podIP string, req ResetRequest) (ResetResponse, error)
 
 	// HealthCheck checks if sidecar is healthy
 	HealthCheck(ctx context.Context, podIP string) error
+
+	// Close cleans up any resources (e.g., gRPC connections)
+	Close() error
 }
 
 // FileUpdateRequest represents a file update request

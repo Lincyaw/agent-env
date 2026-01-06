@@ -39,8 +39,10 @@ spec:
             - --leader-elect
             {{- end }}
           env:
-            - name: SIDECAR_PORT
-              value: "{{ .Values.sidecar.port }}"
+            - name: SIDECAR_HTTP_PORT
+              value: "{{ .Values.sidecar.httpPort }}"
+            - name: SIDECAR_GRPC_PORT
+              value: "{{ .Values.sidecar.grpcPort }}"
             - name: WORKSPACE_DIR
               value: "{{ .Values.operator.workspaceDir }}"
             - name: HTTP_CLIENT_TIMEOUT

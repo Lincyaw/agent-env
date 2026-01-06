@@ -41,8 +41,16 @@ check: fmt vet tidy ## Run all code quality checks
 	uv run ruff format .
 	uv run ruff check --fix . --unsafe-fixes
 
+.PHONY: proto
+proto: ## Generate gRPC code from proto files
+	@mkdir -p pkg/pb
+	protoc --go_out=. --go_opt=paths=source_relative \
+		--go-grpc_out=. --go-grpc_opt=paths=source_relative \
+		proto/agent.proto
+	@mv proto/*.pb.go pkg/pb/ 2>/dev/null || true
+
 .PHONY: generate
-generate: ## Generate deepcopy code
+generate: proto ## Generate deepcopy code and gRPC code
 	go run sigs.k8s.io/controller-tools/cmd/controller-gen object:headerFile="hack/boilerplate.go.txt" paths="./api/..."
 
 .PHONY: manifests

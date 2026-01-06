@@ -10,6 +10,7 @@ RUN go mod download
 # Copy source code
 COPY api/ api/
 COPY pkg/sidecar/ pkg/sidecar/
+COPY pkg/pb/ pkg/pb/
 COPY cmd/sidecar/ cmd/sidecar/
 
 # Build
@@ -26,7 +27,7 @@ COPY --from=builder /workspace/sidecar .
 
 RUN mkdir -p /workspace
 
-EXPOSE 8080
+EXPOSE 8080 9090
 
 ENTRYPOINT ["/app/sidecar"]
-CMD ["--workspace=/workspace", "--port=8080"]
+CMD ["--workspace=/workspace", "--http-port=8080", "--grpc-port=9090"]
