@@ -1,7 +1,6 @@
 package sidecar
 
 import (
-	"bufio"
 	"context"
 	"fmt"
 	"io"
@@ -173,56 +172,37 @@ func (s *GRPCServer) InteractiveShell(stream grpc.BidiStreamingServer[pb.ShellIn
 	}
 
 	var wg sync.WaitGroup
-	done := make(chan struct{})
 
-	// Read stdout and stderr
+	// Read stdout and stderr using blocking reads
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
-		reader := bufio.NewReader(stdout)
 		buf := make([]byte, 4096)
 		for {
-			select {
-			case <-done:
+			n, err := stdout.Read(buf)
+			if n > 0 {
+				if sendErr := stream.Send(&pb.ShellOutput{Data: string(buf[:n])}); sendErr != nil {
+					return
+				}
+			}
+			if err != nil {
 				return
-			default:
-				n, err := reader.Read(buf)
-				if n > 0 {
-					if sendErr := stream.Send(&pb.ShellOutput{Data: string(buf[:n])}); sendErr != nil {
-						return
-					}
-				}
-				if err == io.EOF {
-					return
-				}
-				if err != nil {
-					return
-				}
 			}
 		}
 	}()
 
 	go func() {
 		defer wg.Done()
-		reader := bufio.NewReader(stderr)
 		buf := make([]byte, 4096)
 		for {
-			select {
-			case <-done:
+			n, err := stderr.Read(buf)
+			if n > 0 {
+				if sendErr := stream.Send(&pb.ShellOutput{Data: string(buf[:n])}); sendErr != nil {
+					return
+				}
+			}
+			if err != nil {
 				return
-			default:
-				n, err := reader.Read(buf)
-				if n > 0 {
-					if sendErr := stream.Send(&pb.ShellOutput{Data: string(buf[:n])}); sendErr != nil {
-						return
-					}
-				}
-				if err == io.EOF {
-					return
-				}
-				if err != nil {
-					return
-				}
 			}
 		}
 	}()
@@ -275,7 +255,6 @@ func (s *GRPCServer) InteractiveShell(stream grpc.BidiStreamingServer[pb.ShellIn
 		}
 	}
 
-	close(done)
 	wg.Wait()
 
 	// Send final message with exit code

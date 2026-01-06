@@ -233,15 +233,14 @@ func (c *GRPCSidecarClient) Reset(ctx context.Context, podIP string, req interfa
 	}, nil
 }
 
-// HealthCheck checks if sidecar is healthy via HTTP
+// HealthCheck checks if sidecar is healthy by verifying gRPC connection state
 func (c *GRPCSidecarClient) HealthCheck(ctx context.Context, podIP string) error {
-	// Health check is still done via HTTP
 	conn, err := c.getOrCreateConn(podIP)
 	if err != nil {
 		return fmt.Errorf("health check failed: cannot connect to %s: %w", podIP, err)
 	}
 
-	// Simple connection check - if we can connect, it's healthy
+	// Check connection state
 	state := conn.GetState()
 	if state.String() == "SHUTDOWN" {
 		return fmt.Errorf("connection to %s is shutdown", podIP)
