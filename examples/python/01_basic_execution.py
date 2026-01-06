@@ -6,10 +6,10 @@ Demonstrates:
 - Getting task results
 """
 
-from arl_client.session import SandboxSession
+from arl import SandboxSession, TaskStep
 
 
-def main():
+def main() -> None:
     """Execute basic serial steps."""
     print("=" * 60)
     print("Example: Basic Serial Execution")
@@ -17,27 +17,28 @@ def main():
 
     # Using context manager (automatically cleans up)
     with SandboxSession(pool_ref="python-39-std", namespace="default") as session:
+        # Define task steps with proper type annotations
+        steps: list[TaskStep] = [
+            {
+                "name": "step1_create_file",
+                "type": "FilePatch",
+                "path": "/workspace/config.txt",
+                "content": "API_KEY=test123\nDEBUG=true",
+            },
+            {
+                "name": "step2_read_file",
+                "type": "Command",
+                "command": ["cat", "/workspace/config.txt"],
+            },
+            {
+                "name": "step3_count_lines",
+                "type": "Command",
+                "command": ["sh", "-c", "cat /workspace/config.txt | wc -l"],
+            },
+        ]
+
         # Execute serial steps
-        result = session.execute(
-            [
-                {
-                    "name": "step1_create_file",
-                    "type": "FilePatch",
-                    "path": "/workspace/config.txt",
-                    "content": "API_KEY=test123\nDEBUG=true",
-                },
-                {
-                    "name": "step2_read_file",
-                    "type": "Command",
-                    "command": ["cat", "/workspace/config.txt"],
-                },
-                {
-                    "name": "step3_count_lines",
-                    "type": "Command",
-                    "command": ["sh", "-c", "cat /workspace/config.txt | wc -l"],
-                },
-            ]
-        )
+        result = session.execute(steps)
 
         # Check results
         status = result.get("status", {})

@@ -6,24 +6,24 @@ This script extracts schemas from CRD YAML files and merges them with the templa
 
 import sys
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any
 
 import yaml
 
 
-def load_yaml(file_path: Path) -> Dict[str, Any]:
+def load_yaml(file_path: Path) -> dict[str, Any]:
     """Load YAML file."""
-    with open(file_path, "r") as f:
+    with open(file_path) as f:
         return yaml.safe_load(f)
 
 
-def save_yaml(data: Dict[str, Any], file_path: Path):
+def save_yaml(data: dict[str, Any], file_path: Path):
     """Save data as YAML file."""
     with open(file_path, "w") as f:
         yaml.dump(data, f, default_flow_style=False, sort_keys=False)
 
 
-def extract_crd_schema(crd_data: Dict[str, Any], resource_name: str) -> Dict[str, Any]:
+def extract_crd_schema(crd_data: dict[str, Any], resource_name: str) -> dict[str, Any]:
     """Extract OpenAPI schema from CRD."""
     try:
         schema = crd_data["spec"]["versions"][0]["schema"]["openAPIV3Schema"]
@@ -84,10 +84,10 @@ def extract_crd_schema(crd_data: Dict[str, Any], resource_name: str) -> Dict[str
         return {}
 
 
-def clean_schema(schema: Dict[str, Any]):
+def clean_schema(schema: dict[str, Any]):
     """Remove Kubernetes-specific fields from schema."""
     # Remove x-kubernetes-* extensions
-    keys_to_remove = [k for k in schema.keys() if k.startswith("x-kubernetes-")]
+    keys_to_remove = [k for k in schema if k.startswith("x-kubernetes-")]
     for key in keys_to_remove:
         del schema[key]
 
@@ -106,9 +106,72 @@ def clean_schema(schema: Dict[str, Any]):
         clean_schema(schema["additionalProperties"])
 
 
+def enhance_task_step_schema(schema: dict[str, Any]):
+    """Add enhanced documentation and examples for TaskStep schema."""
+    if "properties" not in schema:
+        return
+
+    props = schema["properties"]
+
+    # Add descriptions for each field
+    if "name" in props:
+        props["name"]["description"] = "Step identifier (unique within the task)"
+        props["name"]["example"] = "step1_write_file"
+
+    if "type" in props:
+        props["type"]["description"] = (
+            "Step type - either 'FilePatch' (create/modify files) or 'Command' (execute commands)"
+        )
+        props["type"]["enum"] = ["FilePatch", "Command"]
+        props["type"]["example"] = "Command"
+
+    if "content" in props:
+        props["content"]["description"] = (
+            "File content to write (required for FilePatch steps, ignored for Command steps)"
+        )
+        props["content"]["example"] = "print('Hello, World!')"
+
+    if "path" in props:
+        props["path"]["description"] = (
+            "File path to create or modify (required for FilePatch steps, ignored for Command steps)"
+        )
+        props["path"]["example"] = "/workspace/script.py"
+
+    if "command" in props:
+        props["command"]["description"] = (
+            "Command and arguments to execute (required for Command steps, ignored for FilePatch steps)"
+        )
+        props["command"]["example"] = ["python", "script.py", "--verbose"]
+
+    if "workDir" in props:
+        props["workDir"]["description"] = (
+            "Working directory for command execution (optional, only for Command steps)"
+        )
+        props["workDir"]["example"] = "/workspace"
+
+    if "env" in props:
+        props["env"]["description"] = (
+            "Environment variables as key-value pairs (optional, only for Command steps)"
+        )
+        props["env"]["example"] = {"DEBUG": "1", "API_KEY": "secret"}
+
+    # Add overall description
+    schema["description"] = """Task step definition. Each step can be either:
+
+1. **FilePatch**: Create or modify a file
+   - Required: name, type="FilePatch", path, content
+   - Example: {"name": "write", "type": "FilePatch", "path": "/workspace/test.py", "content": "print('test')"}
+
+2. **Command**: Execute a command
+   - Required: name, type="Command", command
+   - Optional: workDir, env
+   - Example: {"name": "run", "type": "Command", "command": ["python", "test.py"], "env": {"DEBUG": "1"}}
+"""
+
+
 def extract_nested_schemas(
-    spec_schema: Dict[str, Any],
-    schemas: Dict[str, Any],
+    spec_schema: dict[str, Any],
+    schemas: dict[str, Any],
     prefix: str = "",
     max_depth: int = 1,
     current_depth: int = 0,
@@ -150,6 +213,11 @@ def extract_nested_schemas(
                 if schema_name not in schemas:
                     schema_copy = items.copy()
                     clean_schema(schema_copy)
+
+                    # Enhance specific schemas
+                    if schema_name == "TaskStep":
+                        enhance_task_step_schema(schema_copy)
+
                     schemas[schema_name] = schema_copy
 
                     # Replace with reference
@@ -162,8 +230,8 @@ def extract_nested_schemas(
 
 
 def merge_schemas(
-    template: Dict[str, Any], crd_schemas: Dict[str, Dict[str, Any]]
-) -> Dict[str, Any]:
+    template: dict[str, Any], crd_schemas: dict[str, dict[str, Any]]
+) -> dict[str, Any]:
     """Merge CRD schemas into OpenAPI template."""
     result = template.copy()
 
@@ -174,7 +242,7 @@ def merge_schemas(
         result["components"]["schemas"] = {}
 
     # Merge all CRD schemas
-    for resource_type, schemas in crd_schemas.items():
+    for _resource_type, schemas in crd_schemas.items():
         for schema_name, schema_def in schemas.items():
             # Override placeholder schemas from template
             result["components"]["schemas"][schema_name] = schema_def

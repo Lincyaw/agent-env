@@ -17,23 +17,30 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict, Field, StrictStr
+from pydantic import BaseModel, ConfigDict, Field, StrictStr, field_validator
 from typing import Any, ClassVar, Dict, List, Optional
 from typing import Optional, Set
 from typing_extensions import Self
 
 class TaskStep(BaseModel):
     """
-    TaskStep
+    Task step definition. Each step can be either:  1. **FilePatch**: Create or modify a file    - Required: name, type=\"FilePatch\", path, content    - Example: {\"name\": \"write\", \"type\": \"FilePatch\", \"path\": \"/workspace/test.py\", \"content\": \"print('test')\"}  2. **Command**: Execute a command    - Required: name, type=\"Command\", command    - Optional: workDir, env    - Example: {\"name\": \"run\", \"type\": \"Command\", \"command\": [\"python\", \"test.py\"], \"env\": {\"DEBUG\": \"1\"}} 
     """ # noqa: E501
-    command: Optional[List[StrictStr]] = None
-    content: Optional[StrictStr] = None
-    env: Optional[Dict[str, StrictStr]] = None
-    name: StrictStr
-    path: Optional[StrictStr] = None
-    type: StrictStr
-    work_dir: Optional[StrictStr] = Field(default=None, alias="workDir")
+    command: Optional[List[StrictStr]] = Field(default=None, description="Command and arguments to execute (required for Command steps, ignored for FilePatch steps)")
+    content: Optional[StrictStr] = Field(default=None, description="File content to write (required for FilePatch steps, ignored for Command steps)")
+    env: Optional[Dict[str, StrictStr]] = Field(default=None, description="Environment variables as key-value pairs (optional, only for Command steps)")
+    name: StrictStr = Field(description="Step identifier (unique within the task)")
+    path: Optional[StrictStr] = Field(default=None, description="File path to create or modify (required for FilePatch steps, ignored for Command steps)")
+    type: StrictStr = Field(description="Step type - either 'FilePatch' (create/modify files) or 'Command' (execute commands)")
+    work_dir: Optional[StrictStr] = Field(default=None, description="Working directory for command execution (optional, only for Command steps)", alias="workDir")
     __properties: ClassVar[List[str]] = ["command", "content", "env", "name", "path", "type", "workDir"]
+
+    @field_validator('type')
+    def type_validate_enum(cls, value):
+        """Validates the enum"""
+        if value not in set(['FilePatch', 'Command']):
+            raise ValueError("must be one of enum values ('FilePatch', 'Command')")
+        return value
 
     model_config = ConfigDict(
         populate_by_name=True,

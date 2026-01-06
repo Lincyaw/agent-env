@@ -35,14 +35,19 @@ class TestSandboxSpec(unittest.TestCase):
         model = SandboxSpec()
         if include_optional:
             return SandboxSpec(
-                pool_ref = '',
                 keep_alive = True,
-                resources = arl_client.models.resource_requirements.ResourceRequirements(
+                pool_ref = '',
+                resources = arl_client.models.sandbox_spec_resources.SandboxSpec_resources(
+                    claims = [
+                        arl_client.models.sandbox_spec_resources_claims_inner.SandboxSpec_resources_claims_inner(
+                            name = '', 
+                            request = '', )
+                        ], 
                     limits = {
-                        'key' : ''
+                        'key' : null
                         }, 
                     requests = {
-                        'key' : ''
+                        'key' : null
                         }, )
             )
         else:

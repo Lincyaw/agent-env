@@ -4,11 +4,8 @@ Initialize a new Python project with best practices.
 Sets up project structure, configuration, and development tools.
 """
 
-import subprocess
 import sys
 from pathlib import Path
-from typing import Optional
-
 
 PYPROJECT_TEMPLATE = """[project]
 name = "{project_name}"
@@ -187,57 +184,54 @@ def create_file(path: Path, content: str) -> None:
     print(f"✅ Created: {path}")
 
 
-def create_project(project_name: str, path: Optional[str] = None) -> None:
+def create_project(project_name: str, path: str | None = None) -> None:
     """Create a new Python project with best practices."""
-    if path:
-        project_dir = Path(path)
-    else:
-        project_dir = Path.cwd() / project_name
-    
+    project_dir = Path(path) if path else Path.cwd() / project_name
+
     print(f"🚀 Creating Python project: {project_name}")
     print(f"📁 Location: {project_dir}\n")
-    
+
     # Create directory structure
     src_dir = project_dir / "src" / project_name
     tests_dir = project_dir / "tests"
     scripts_dir = project_dir / "scripts"
-    
+
     for directory in [src_dir, tests_dir, scripts_dir]:
         directory.mkdir(parents=True, exist_ok=True)
-    
+
     # Create configuration files
     create_file(
         project_dir / "pyproject.toml",
         PYPROJECT_TEMPLATE.format(project_name=project_name),
     )
-    
+
     create_file(
         project_dir / "README.md",
         README_TEMPLATE.format(project_name=project_name),
     )
-    
+
     create_file(
         project_dir / ".gitignore",
         GITIGNORE_TEMPLATE,
     )
-    
+
     # Create source files
     create_file(
         src_dir / "__init__.py",
         f'"""The {project_name} package."""\n\n__version__ = "0.1.0"\n',
     )
-    
+
     create_file(
         src_dir / "core.py",
         '"""Core functionality."""\n\n\ndef example() -> str:\n    """Example function."""\n    return "Hello, World!"\n',
     )
-    
+
     # Create test files
     create_file(
         tests_dir / "__init__.py",
         "",
     )
-    
+
     create_file(
         tests_dir / "test_core.py",
         f'''"""Tests for core functionality."""
@@ -250,23 +244,23 @@ def test_example() -> None:
     assert example() == "Hello, World!"
 ''',
     )
-    
+
     # Copy quality check scripts (placeholder - in real use, copy from skill)
     create_file(
         scripts_dir / "check_quality.py",
         '# Copy check_quality.py from python skill\n',
     )
-    
+
     create_file(
         scripts_dir / "autofix.py",
         '# Copy autofix.py from python skill\n',
     )
-    
+
     print(f"\n✅ Project '{project_name}' created successfully!")
-    print(f"\n📋 Next steps:")
+    print("\n📋 Next steps:")
     print(f"   cd {project_dir}")
-    print(f"   uv sync")
-    print(f"   uv run pytest")
+    print("   uv sync")
+    print("   uv run pytest")
 
 
 def main():
@@ -274,10 +268,10 @@ def main():
     if len(sys.argv) < 2:
         print("Usage: python init_project.py <project-name> [path]")
         sys.exit(1)
-    
+
     project_name = sys.argv[1]
     path = sys.argv[2] if len(sys.argv) > 2 else None
-    
+
     create_project(project_name, path)
 
 

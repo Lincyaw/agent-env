@@ -14,3 +14,14 @@
 
 - use `uv run python` to run Python scripts
 - use `uv add <package>` to install Python packages
+- Use Pydantic models; never pass raw dictionaries for business data
+- Error handling: Raise exceptions instead of returning error codes
+- **Type hints**: Use modern syntax (`dict`, `list`, `tuple`, `set`) instead of deprecated `typing.Dict`, `typing.List`, etc. Use `|` for unions instead of `Union[]`
+  - ✅ `def func(data: dict[str, int]) -> list[str] | None:`
+  - ❌ `def func(data: Dict[str, int]) -> Optional[List[str]]:`
+- **Python package management**: Use `uv` exclusively (not pip/poetry/conda)
+- **Code quality checks are mandatory before committing**: `make check`
+- DO NOT write .md documents unless user specifically requests it
+- Use type hints extensively; avoid `Any` type
+- This is a new project; refactor code aggressively to maintain high quality, no backward compatibility needed
+- Do not add comments everywhere, only where necessary for clarity/design rationale

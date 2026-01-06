@@ -183,16 +183,3 @@ test-integration: ## Run integration tests with minikube
 logs: ## Show operator logs
 	kubectl logs -n arl-system -l app=arl-operator --tail=100 -f
 
-##@ All-in-one
-
-.PHONY: all
-all: tidy build docker-build ## Build everything (legacy)
-
-.PHONY: quickstart
-quickstart: minikube-start run-samples ## Quick start: start minikube and deploy with samples
-	@echo "ARL-Infra deployed successfully!"
-	@echo "Check resources: kubectl get warmpools,sandboxes,tasks"
-
-.PHONY: quickstart-dev
-quickstart-dev: minikube-start dev ## Quick start in development mode with auto-reload
-	@echo "Starting development mode..."

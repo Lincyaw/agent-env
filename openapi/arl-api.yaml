@@ -337,24 +337,59 @@ components:
           items:
             type: string
           type: array
+          description: Command and arguments to execute (required for Command steps,
+            ignored for FilePatch steps)
+          example:
+          - python
+          - script.py
+          - --verbose
         content:
           type: string
+          description: File content to write (required for FilePatch steps, ignored
+            for Command steps)
+          example: print('Hello, World!')
         env:
           additionalProperties:
             type: string
           type: object
+          description: Environment variables as key-value pairs (optional, only for
+            Command steps)
+          example:
+            DEBUG: '1'
+            API_KEY: secret
         name:
           type: string
+          description: Step identifier (unique within the task)
+          example: step1_write_file
         path:
           type: string
+          description: File path to create or modify (required for FilePatch steps,
+            ignored for Command steps)
+          example: /workspace/script.py
         type:
           type: string
+          description: Step type - either 'FilePatch' (create/modify files) or 'Command'
+            (execute commands)
+          enum:
+          - FilePatch
+          - Command
+          example: Command
         workDir:
           type: string
+          description: Working directory for command execution (optional, only for
+            Command steps)
+          example: /workspace
       required:
       - name
       - type
       type: object
+      description: "Task step definition. Each step can be either:\n\n1. **FilePatch**:\
+        \ Create or modify a file\n   - Required: name, type=\"FilePatch\", path,\
+        \ content\n   - Example: {\"name\": \"write\", \"type\": \"FilePatch\", \"\
+        path\": \"/workspace/test.py\", \"content\": \"print('test')\"}\n\n2. **Command**:\
+        \ Execute a command\n   - Required: name, type=\"Command\", command\n   -\
+        \ Optional: workDir, env\n   - Example: {\"name\": \"run\", \"type\": \"Command\"\
+        , \"command\": [\"python\", \"test.py\"], \"env\": {\"DEBUG\": \"1\"}}\n"
     TaskStatus:
       properties:
         completionTime:

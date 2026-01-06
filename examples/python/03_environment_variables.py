@@ -6,18 +6,17 @@ Demonstrates:
 - Combining system and custom variables
 """
 
-from arl_client.session import SandboxSession
+from arl import SandboxSession, TaskStep
 
 
-def main():
+def main() -> None:
     """Use custom environment variables in commands."""
     print("=" * 60)
     print("Example: Environment Variables")
     print("=" * 60)
 
     with SandboxSession(pool_ref="python-39-std", namespace="default") as session:
-        result = session.execute(
-            [
+        steps: list[TaskStep] = [
                 {
                     "name": "test_env",
                     "type": "Command",
@@ -32,9 +31,10 @@ def main():
                     },
                 }
             ]
-        )
 
-        status = result.get("status", {})
+        result = session.execute(steps)
+
+        status = result.get("status", {}) if result else {}
         print(f"\n✓ Task State: {status.get('state')}")
         print(f"✓ Environment Variables:\n{status.get('stdout')}")
 

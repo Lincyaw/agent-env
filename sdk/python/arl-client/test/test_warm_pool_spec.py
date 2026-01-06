@@ -36,32 +36,1106 @@ class TestWarmPoolSpec(unittest.TestCase):
         if include_optional:
             return WarmPoolSpec(
                 replicas = 56,
-                template = arl_client.models.pod_template_spec.PodTemplateSpec(
-                    metadata = arl_client.models.object_meta.ObjectMeta(
-                        name = '', 
-                        namespace = '', 
-                        labels = {
+                template = arl_client.models.warm_pool_spec_template.WarmPoolSpec_template(
+                    metadata = arl_client.models.metadata.metadata(), 
+                    spec = arl_client.models.warm_pool_spec_template_spec.WarmPoolSpec_template_spec(
+                        active_deadline_seconds = 56, 
+                        affinity = arl_client.models.warm_pool_spec_template_spec_affinity.WarmPoolSpec_template_spec_affinity(
+                            node_affinity = arl_client.models.warm_pool_spec_template_spec_affinity_node_affinity.WarmPoolSpec_template_spec_affinity_nodeAffinity(
+                                preferred_during_scheduling_ignored_during_execution = [
+                                    arl_client.models.warm_pool_spec_template_spec_affinity_node_affinity_preferred_during_scheduling_ignored_during_execution_inner.WarmPoolSpec_template_spec_affinity_nodeAffinity_preferredDuringSchedulingIgnoredDuringExecution_inner(
+                                        preference = arl_client.models.warm_pool_spec_template_spec_affinity_node_affinity_preferred_during_scheduling_ignored_during_execution_inner_preference.WarmPoolSpec_template_spec_affinity_nodeAffinity_preferredDuringSchedulingIgnoredDuringExecution_inner_preference(
+                                            match_expressions = [
+                                                arl_client.models.warm_pool_spec_template_spec_affinity_node_affinity_preferred_during_scheduling_ignored_during_execution_inner_preference_match_expressions_inner.WarmPoolSpec_template_spec_affinity_nodeAffinity_preferredDuringSchedulingIgnoredDuringExecution_inner_preference_matchExpressions_inner(
+                                                    key = '', 
+                                                    operator = '', 
+                                                    values = [
+                                                        ''
+                                                        ], )
+                                                ], 
+                                            match_fields = [
+                                                arl_client.models.warm_pool_spec_template_spec_affinity_node_affinity_preferred_during_scheduling_ignored_during_execution_inner_preference_match_expressions_inner.WarmPoolSpec_template_spec_affinity_nodeAffinity_preferredDuringSchedulingIgnoredDuringExecution_inner_preference_matchExpressions_inner(
+                                                    key = '', 
+                                                    operator = '', )
+                                                ], ), 
+                                        weight = 56, )
+                                    ], 
+                                required_during_scheduling_ignored_during_execution = arl_client.models.warm_pool_spec_template_spec_affinity_node_affinity_required_during_scheduling_ignored_during_execution.WarmPoolSpec_template_spec_affinity_nodeAffinity_requiredDuringSchedulingIgnoredDuringExecution(
+                                    node_selector_terms = [
+                                        arl_client.models.warm_pool_spec_template_spec_affinity_node_affinity_preferred_during_scheduling_ignored_during_execution_inner_preference.WarmPoolSpec_template_spec_affinity_nodeAffinity_preferredDuringSchedulingIgnoredDuringExecution_inner_preference()
+                                        ], ), ), 
+                            pod_affinity = arl_client.models.warm_pool_spec_template_spec_affinity_pod_affinity.WarmPoolSpec_template_spec_affinity_podAffinity(), 
+                            pod_anti_affinity = arl_client.models.warm_pool_spec_template_spec_affinity_pod_affinity.WarmPoolSpec_template_spec_affinity_podAffinity(), ), 
+                        automount_service_account_token = True, 
+                        containers = [
+                            arl_client.models.warm_pool_spec_template_spec_containers_inner.WarmPoolSpec_template_spec_containers_inner(
+                                args = [
+                                    ''
+                                    ], 
+                                command = [
+                                    ''
+                                    ], 
+                                env = [
+                                    arl_client.models.warm_pool_spec_template_spec_containers_inner_env_inner.WarmPoolSpec_template_spec_containers_inner_env_inner(
+                                        name = '', 
+                                        value = '', 
+                                        value_from = arl_client.models.warm_pool_spec_template_spec_containers_inner_env_inner_value_from.WarmPoolSpec_template_spec_containers_inner_env_inner_valueFrom(
+                                            config_map_key_ref = arl_client.models.warm_pool_spec_template_spec_containers_inner_env_inner_value_from_config_map_key_ref.WarmPoolSpec_template_spec_containers_inner_env_inner_valueFrom_configMapKeyRef(
+                                                key = '', 
+                                                name = '', 
+                                                optional = True, ), 
+                                            field_ref = arl_client.models.warm_pool_spec_template_spec_containers_inner_env_inner_value_from_field_ref.WarmPoolSpec_template_spec_containers_inner_env_inner_valueFrom_fieldRef(
+                                                api_version = '', 
+                                                field_path = '', ), 
+                                            file_key_ref = arl_client.models.warm_pool_spec_template_spec_containers_inner_env_inner_value_from_file_key_ref.WarmPoolSpec_template_spec_containers_inner_env_inner_valueFrom_fileKeyRef(
+                                                key = '', 
+                                                optional = True, 
+                                                path = '', 
+                                                volume_name = '', ), 
+                                            resource_field_ref = arl_client.models.warm_pool_spec_template_spec_containers_inner_env_inner_value_from_resource_field_ref.WarmPoolSpec_template_spec_containers_inner_env_inner_valueFrom_resourceFieldRef(
+                                                container_name = '', 
+                                                divisor = null, 
+                                                resource = '', ), 
+                                            secret_key_ref = arl_client.models.warm_pool_spec_template_spec_containers_inner_env_inner_value_from_config_map_key_ref.WarmPoolSpec_template_spec_containers_inner_env_inner_valueFrom_configMapKeyRef(
+                                                key = '', 
+                                                name = '', 
+                                                optional = True, ), ), )
+                                    ], 
+                                env_from = [
+                                    arl_client.models.warm_pool_spec_template_spec_containers_inner_env_from_inner.WarmPoolSpec_template_spec_containers_inner_envFrom_inner(
+                                        config_map_ref = arl_client.models.warm_pool_spec_template_spec_containers_inner_env_from_inner_config_map_ref.WarmPoolSpec_template_spec_containers_inner_envFrom_inner_configMapRef(
+                                            name = '', 
+                                            optional = True, ), 
+                                        prefix = '', 
+                                        secret_ref = arl_client.models.warm_pool_spec_template_spec_containers_inner_env_from_inner_config_map_ref.WarmPoolSpec_template_spec_containers_inner_envFrom_inner_configMapRef(
+                                            name = '', 
+                                            optional = True, ), )
+                                    ], 
+                                image = '', 
+                                image_pull_policy = '', 
+                                lifecycle = arl_client.models.warm_pool_spec_template_spec_containers_inner_lifecycle.WarmPoolSpec_template_spec_containers_inner_lifecycle(
+                                    post_start = arl_client.models.warm_pool_spec_template_spec_containers_inner_lifecycle_post_start.WarmPoolSpec_template_spec_containers_inner_lifecycle_postStart(
+                                        exec = arl_client.models.warm_pool_spec_template_spec_containers_inner_lifecycle_post_start_exec.WarmPoolSpec_template_spec_containers_inner_lifecycle_postStart_exec(), 
+                                        http_get = arl_client.models.warm_pool_spec_template_spec_containers_inner_lifecycle_post_start_http_get.WarmPoolSpec_template_spec_containers_inner_lifecycle_postStart_httpGet(
+                                            host = '', 
+                                            http_headers = [
+                                                arl_client.models.warm_pool_spec_template_spec_containers_inner_lifecycle_post_start_http_get_http_headers_inner.WarmPoolSpec_template_spec_containers_inner_lifecycle_postStart_httpGet_httpHeaders_inner(
+                                                    name = '', 
+                                                    value = '', )
+                                                ], 
+                                            path = '', 
+                                            port = null, 
+                                            scheme = '', ), 
+                                        sleep = arl_client.models.warm_pool_spec_template_spec_containers_inner_lifecycle_post_start_sleep.WarmPoolSpec_template_spec_containers_inner_lifecycle_postStart_sleep(
+                                            seconds = 56, ), 
+                                        tcp_socket = arl_client.models.warm_pool_spec_template_spec_containers_inner_lifecycle_post_start_tcp_socket.WarmPoolSpec_template_spec_containers_inner_lifecycle_postStart_tcpSocket(
+                                            host = '', 
+                                            port = null, ), ), 
+                                    pre_stop = arl_client.models.warm_pool_spec_template_spec_containers_inner_lifecycle_post_start.WarmPoolSpec_template_spec_containers_inner_lifecycle_postStart(), 
+                                    stop_signal = '', ), 
+                                liveness_probe = arl_client.models.warm_pool_spec_template_spec_containers_inner_liveness_probe.WarmPoolSpec_template_spec_containers_inner_livenessProbe(
+                                    failure_threshold = 56, 
+                                    grpc = arl_client.models.warm_pool_spec_template_spec_containers_inner_liveness_probe_grpc.WarmPoolSpec_template_spec_containers_inner_livenessProbe_grpc(
+                                        port = 56, 
+                                        service = '', ), 
+                                    initial_delay_seconds = 56, 
+                                    period_seconds = 56, 
+                                    success_threshold = 56, 
+                                    termination_grace_period_seconds = 56, 
+                                    timeout_seconds = 56, ), 
+                                name = '', 
+                                ports = [
+                                    arl_client.models.warm_pool_spec_template_spec_containers_inner_ports_inner.WarmPoolSpec_template_spec_containers_inner_ports_inner(
+                                        container_port = 56, 
+                                        host_ip = '', 
+                                        host_port = 56, 
+                                        name = '', 
+                                        protocol = 'TCP', )
+                                    ], 
+                                readiness_probe = arl_client.models.warm_pool_spec_template_spec_containers_inner_liveness_probe.WarmPoolSpec_template_spec_containers_inner_livenessProbe(
+                                    failure_threshold = 56, 
+                                    initial_delay_seconds = 56, 
+                                    period_seconds = 56, 
+                                    success_threshold = 56, 
+                                    termination_grace_period_seconds = 56, 
+                                    timeout_seconds = 56, ), 
+                                resize_policy = [
+                                    arl_client.models.warm_pool_spec_template_spec_containers_inner_resize_policy_inner.WarmPoolSpec_template_spec_containers_inner_resizePolicy_inner(
+                                        resource_name = '', 
+                                        restart_policy = '', )
+                                    ], 
+                                resources = arl_client.models.sandbox_spec_resources.SandboxSpec_resources(
+                                    claims = [
+                                        arl_client.models.sandbox_spec_resources_claims_inner.SandboxSpec_resources_claims_inner(
+                                            name = '', 
+                                            request = '', )
+                                        ], 
+                                    limits = {
+                                        'key' : null
+                                        }, 
+                                    requests = {
+                                        'key' : null
+                                        }, ), 
+                                restart_policy = '', 
+                                restart_policy_rules = [
+                                    arl_client.models.warm_pool_spec_template_spec_containers_inner_restart_policy_rules_inner.WarmPoolSpec_template_spec_containers_inner_restartPolicyRules_inner(
+                                        action = '', 
+                                        exit_codes = arl_client.models.warm_pool_spec_template_spec_containers_inner_restart_policy_rules_inner_exit_codes.WarmPoolSpec_template_spec_containers_inner_restartPolicyRules_inner_exitCodes(
+                                            operator = '', ), )
+                                    ], 
+                                security_context = arl_client.models.warm_pool_spec_template_spec_containers_inner_security_context.WarmPoolSpec_template_spec_containers_inner_securityContext(
+                                    allow_privilege_escalation = True, 
+                                    app_armor_profile = arl_client.models.warm_pool_spec_template_spec_containers_inner_security_context_app_armor_profile.WarmPoolSpec_template_spec_containers_inner_securityContext_appArmorProfile(
+                                        localhost_profile = '', 
+                                        type = '', ), 
+                                    capabilities = arl_client.models.warm_pool_spec_template_spec_containers_inner_security_context_capabilities.WarmPoolSpec_template_spec_containers_inner_securityContext_capabilities(
+                                        add = [
+                                            ''
+                                            ], 
+                                        drop = [
+                                            ''
+                                            ], ), 
+                                    privileged = True, 
+                                    proc_mount = '', 
+                                    read_only_root_filesystem = True, 
+                                    run_as_group = 56, 
+                                    run_as_non_root = True, 
+                                    run_as_user = 56, 
+                                    se_linux_options = arl_client.models.warm_pool_spec_template_spec_containers_inner_security_context_se_linux_options.WarmPoolSpec_template_spec_containers_inner_securityContext_seLinuxOptions(
+                                        level = '', 
+                                        role = '', 
+                                        type = '', 
+                                        user = '', ), 
+                                    seccomp_profile = arl_client.models.warm_pool_spec_template_spec_containers_inner_security_context_app_armor_profile.WarmPoolSpec_template_spec_containers_inner_securityContext_appArmorProfile(
+                                        localhost_profile = '', 
+                                        type = '', ), 
+                                    windows_options = arl_client.models.warm_pool_spec_template_spec_containers_inner_security_context_windows_options.WarmPoolSpec_template_spec_containers_inner_securityContext_windowsOptions(
+                                        gmsa_credential_spec = '', 
+                                        gmsa_credential_spec_name = '', 
+                                        host_process = True, 
+                                        run_as_user_name = '', ), ), 
+                                startup_probe = , 
+                                stdin = True, 
+                                stdin_once = True, 
+                                termination_message_path = '', 
+                                termination_message_policy = '', 
+                                tty = True, 
+                                volume_devices = [
+                                    arl_client.models.warm_pool_spec_template_spec_containers_inner_volume_devices_inner.WarmPoolSpec_template_spec_containers_inner_volumeDevices_inner(
+                                        device_path = '', 
+                                        name = '', )
+                                    ], 
+                                volume_mounts = [
+                                    arl_client.models.warm_pool_spec_template_spec_containers_inner_volume_mounts_inner.WarmPoolSpec_template_spec_containers_inner_volumeMounts_inner(
+                                        mount_path = '', 
+                                        mount_propagation = '', 
+                                        name = '', 
+                                        read_only = True, 
+                                        recursive_read_only = '', 
+                                        sub_path = '', 
+                                        sub_path_expr = '', )
+                                    ], 
+                                working_dir = '', )
+                            ], 
+                        dns_config = arl_client.models.warm_pool_spec_template_spec_dns_config.WarmPoolSpec_template_spec_dnsConfig(
+                            nameservers = [
+                                ''
+                                ], 
+                            options = [
+                                arl_client.models.warm_pool_spec_template_spec_dns_config_options_inner.WarmPoolSpec_template_spec_dnsConfig_options_inner(
+                                    name = '', 
+                                    value = '', )
+                                ], 
+                            searches = [
+                                ''
+                                ], ), 
+                        dns_policy = '', 
+                        enable_service_links = True, 
+                        ephemeral_containers = [
+                            arl_client.models.warm_pool_spec_template_spec_ephemeral_containers_inner.WarmPoolSpec_template_spec_ephemeralContainers_inner(
+                                image = '', 
+                                image_pull_policy = '', 
+                                name = '', 
+                                restart_policy = '', 
+                                stdin = True, 
+                                stdin_once = True, 
+                                target_container_name = '', 
+                                termination_message_path = '', 
+                                termination_message_policy = '', 
+                                tty = True, 
+                                working_dir = '', )
+                            ], 
+                        host_aliases = [
+                            arl_client.models.warm_pool_spec_template_spec_host_aliases_inner.WarmPoolSpec_template_spec_hostAliases_inner(
+                                hostnames = [
+                                    ''
+                                    ], 
+                                ip = '', )
+                            ], 
+                        host_ipc = True, 
+                        host_network = True, 
+                        host_pid = True, 
+                        host_users = True, 
+                        hostname = '', 
+                        hostname_override = '', 
+                        image_pull_secrets = [
+                            arl_client.models.warm_pool_spec_template_spec_image_pull_secrets_inner.WarmPoolSpec_template_spec_imagePullSecrets_inner(
+                                name = '', )
+                            ], 
+                        init_containers = [
+                            arl_client.models.warm_pool_spec_template_spec_containers_inner.WarmPoolSpec_template_spec_containers_inner(
+                                image = '', 
+                                image_pull_policy = '', 
+                                name = '', 
+                                restart_policy = '', 
+                                stdin = True, 
+                                stdin_once = True, 
+                                termination_message_path = '', 
+                                termination_message_policy = '', 
+                                tty = True, 
+                                working_dir = '', )
+                            ], 
+                        node_name = '', 
+                        node_selector = {
                             'key' : ''
                             }, 
-                        annotations = {
-                            'key' : ''
-                            }, ), 
-                    spec = arl_client.models.spec.spec(), )
+                        os = arl_client.models.warm_pool_spec_template_spec_os.WarmPoolSpec_template_spec_os(
+                            name = '', ), 
+                        overhead = {
+                            'key' : null
+                            }, 
+                        preemption_policy = '', 
+                        priority = 56, 
+                        priority_class_name = '', 
+                        readiness_gates = [
+                            arl_client.models.warm_pool_spec_template_spec_readiness_gates_inner.WarmPoolSpec_template_spec_readinessGates_inner(
+                                condition_type = '', )
+                            ], 
+                        resource_claims = [
+                            arl_client.models.warm_pool_spec_template_spec_resource_claims_inner.WarmPoolSpec_template_spec_resourceClaims_inner(
+                                name = '', 
+                                resource_claim_name = '', 
+                                resource_claim_template_name = '', )
+                            ], 
+                        resources = arl_client.models.sandbox_spec_resources.SandboxSpec_resources(), 
+                        restart_policy = '', 
+                        runtime_class_name = '', 
+                        scheduler_name = '', 
+                        scheduling_gates = [
+                            arl_client.models.warm_pool_spec_template_spec_os.WarmPoolSpec_template_spec_os(
+                                name = '', )
+                            ], 
+                        security_context = arl_client.models.warm_pool_spec_template_spec_security_context.WarmPoolSpec_template_spec_securityContext(
+                            fs_group = 56, 
+                            fs_group_change_policy = '', 
+                            run_as_group = 56, 
+                            run_as_non_root = True, 
+                            run_as_user = 56, 
+                            se_linux_change_policy = '', 
+                            supplemental_groups = [
+                                56
+                                ], 
+                            supplemental_groups_policy = '', 
+                            sysctls = [
+                                arl_client.models.warm_pool_spec_template_spec_containers_inner_lifecycle_post_start_http_get_http_headers_inner.WarmPoolSpec_template_spec_containers_inner_lifecycle_postStart_httpGet_httpHeaders_inner(
+                                    name = '', 
+                                    value = '', )
+                                ], ), 
+                        service_account = '', 
+                        service_account_name = '', 
+                        set_hostname_as_fqdn = True, 
+                        share_process_namespace = True, 
+                        subdomain = '', 
+                        termination_grace_period_seconds = 56, 
+                        tolerations = [
+                            arl_client.models.warm_pool_spec_template_spec_tolerations_inner.WarmPoolSpec_template_spec_tolerations_inner(
+                                effect = '', 
+                                key = '', 
+                                operator = '', 
+                                toleration_seconds = 56, 
+                                value = '', )
+                            ], 
+                        topology_spread_constraints = [
+                            arl_client.models.warm_pool_spec_template_spec_topology_spread_constraints_inner.WarmPoolSpec_template_spec_topologySpreadConstraints_inner(
+                                label_selector = arl_client.models.warm_pool_spec_template_spec_affinity_pod_affinity_preferred_during_scheduling_ignored_during_execution_inner_pod_affinity_term_label_selector.WarmPoolSpec_template_spec_affinity_podAffinity_preferredDuringSchedulingIgnoredDuringExecution_inner_podAffinityTerm_labelSelector(
+                                    match_labels = {
+                                        'key' : ''
+                                        }, ), 
+                                match_label_keys = [
+                                    ''
+                                    ], 
+                                max_skew = 56, 
+                                min_domains = 56, 
+                                node_affinity_policy = '', 
+                                node_taints_policy = '', 
+                                topology_key = '', 
+                                when_unsatisfiable = '', )
+                            ], 
+                        volumes = [
+                            arl_client.models.warm_pool_spec_template_spec_volumes_inner.WarmPoolSpec_template_spec_volumes_inner(
+                                aws_elastic_block_store = arl_client.models.warm_pool_spec_template_spec_volumes_inner_aws_elastic_block_store.WarmPoolSpec_template_spec_volumes_inner_awsElasticBlockStore(
+                                    fs_type = '', 
+                                    partition = 56, 
+                                    read_only = True, 
+                                    volume_id = '', ), 
+                                azure_disk = arl_client.models.warm_pool_spec_template_spec_volumes_inner_azure_disk.WarmPoolSpec_template_spec_volumes_inner_azureDisk(
+                                    caching_mode = '', 
+                                    disk_name = '', 
+                                    disk_uri = '', 
+                                    fs_type = 'ext4', 
+                                    kind = '', 
+                                    read_only = True, ), 
+                                azure_file = arl_client.models.warm_pool_spec_template_spec_volumes_inner_azure_file.WarmPoolSpec_template_spec_volumes_inner_azureFile(
+                                    read_only = True, 
+                                    secret_name = '', 
+                                    share_name = '', ), 
+                                cephfs = arl_client.models.warm_pool_spec_template_spec_volumes_inner_cephfs.WarmPoolSpec_template_spec_volumes_inner_cephfs(
+                                    monitors = [
+                                        ''
+                                        ], 
+                                    path = '', 
+                                    read_only = True, 
+                                    secret_file = '', 
+                                    user = '', ), 
+                                cinder = arl_client.models.warm_pool_spec_template_spec_volumes_inner_cinder.WarmPoolSpec_template_spec_volumes_inner_cinder(
+                                    fs_type = '', 
+                                    read_only = True, 
+                                    volume_id = '', ), 
+                                config_map = arl_client.models.warm_pool_spec_template_spec_volumes_inner_config_map.WarmPoolSpec_template_spec_volumes_inner_configMap(
+                                    default_mode = 56, 
+                                    items = [
+                                        arl_client.models.warm_pool_spec_template_spec_volumes_inner_config_map_items_inner.WarmPoolSpec_template_spec_volumes_inner_configMap_items_inner(
+                                            key = '', 
+                                            mode = 56, 
+                                            path = '', )
+                                        ], 
+                                    name = '', 
+                                    optional = True, ), 
+                                csi = arl_client.models.warm_pool_spec_template_spec_volumes_inner_csi.WarmPoolSpec_template_spec_volumes_inner_csi(
+                                    driver = '', 
+                                    fs_type = '', 
+                                    node_publish_secret_ref = arl_client.models.warm_pool_spec_template_spec_image_pull_secrets_inner.WarmPoolSpec_template_spec_imagePullSecrets_inner(
+                                        name = '', ), 
+                                    read_only = True, 
+                                    volume_attributes = {
+                                        'key' : ''
+                                        }, ), 
+                                downward_api = arl_client.models.warm_pool_spec_template_spec_volumes_inner_downward_api.WarmPoolSpec_template_spec_volumes_inner_downwardAPI(
+                                    default_mode = 56, ), 
+                                empty_dir = arl_client.models.warm_pool_spec_template_spec_volumes_inner_empty_dir.WarmPoolSpec_template_spec_volumes_inner_emptyDir(
+                                    medium = '', 
+                                    size_limit = null, ), 
+                                ephemeral = arl_client.models.warm_pool_spec_template_spec_volumes_inner_ephemeral.WarmPoolSpec_template_spec_volumes_inner_ephemeral(
+                                    volume_claim_template = arl_client.models.warm_pool_spec_template_spec_volumes_inner_ephemeral_volume_claim_template.WarmPoolSpec_template_spec_volumes_inner_ephemeral_volumeClaimTemplate(
+                                        metadata = arl_client.models.metadata.metadata(), 
+                                        spec = arl_client.models.warm_pool_spec_template_spec_volumes_inner_ephemeral_volume_claim_template_spec.WarmPoolSpec_template_spec_volumes_inner_ephemeral_volumeClaimTemplate_spec(
+                                            access_modes = [
+                                                ''
+                                                ], 
+                                            data_source = arl_client.models.warm_pool_spec_template_spec_volumes_inner_ephemeral_volume_claim_template_spec_data_source.WarmPoolSpec_template_spec_volumes_inner_ephemeral_volumeClaimTemplate_spec_dataSource(
+                                                api_group = '', 
+                                                kind = '', 
+                                                name = '', ), 
+                                            data_source_ref = arl_client.models.warm_pool_spec_template_spec_volumes_inner_ephemeral_volume_claim_template_spec_data_source_ref.WarmPoolSpec_template_spec_volumes_inner_ephemeral_volumeClaimTemplate_spec_dataSourceRef(
+                                                api_group = '', 
+                                                kind = '', 
+                                                name = '', 
+                                                namespace = '', ), 
+                                            selector = arl_client.models.warm_pool_spec_template_spec_affinity_pod_affinity_preferred_during_scheduling_ignored_during_execution_inner_pod_affinity_term_label_selector.WarmPoolSpec_template_spec_affinity_podAffinity_preferredDuringSchedulingIgnoredDuringExecution_inner_podAffinityTerm_labelSelector(), 
+                                            storage_class_name = '', 
+                                            volume_attributes_class_name = '', 
+                                            volume_mode = '', 
+                                            volume_name = '', ), ), ), 
+                                fc = arl_client.models.warm_pool_spec_template_spec_volumes_inner_fc.WarmPoolSpec_template_spec_volumes_inner_fc(
+                                    fs_type = '', 
+                                    lun = 56, 
+                                    read_only = True, 
+                                    target_wwns = [
+                                        ''
+                                        ], 
+                                    wwids = [
+                                        ''
+                                        ], ), 
+                                flex_volume = arl_client.models.warm_pool_spec_template_spec_volumes_inner_flex_volume.WarmPoolSpec_template_spec_volumes_inner_flexVolume(
+                                    driver = '', 
+                                    fs_type = '', 
+                                    read_only = True, ), 
+                                flocker = arl_client.models.warm_pool_spec_template_spec_volumes_inner_flocker.WarmPoolSpec_template_spec_volumes_inner_flocker(
+                                    dataset_name = '', 
+                                    dataset_uuid = '', ), 
+                                gce_persistent_disk = arl_client.models.warm_pool_spec_template_spec_volumes_inner_gce_persistent_disk.WarmPoolSpec_template_spec_volumes_inner_gcePersistentDisk(
+                                    fs_type = '', 
+                                    partition = 56, 
+                                    pd_name = '', 
+                                    read_only = True, ), 
+                                git_repo = arl_client.models.warm_pool_spec_template_spec_volumes_inner_git_repo.WarmPoolSpec_template_spec_volumes_inner_gitRepo(
+                                    directory = '', 
+                                    repository = '', 
+                                    revision = '', ), 
+                                glusterfs = arl_client.models.warm_pool_spec_template_spec_volumes_inner_glusterfs.WarmPoolSpec_template_spec_volumes_inner_glusterfs(
+                                    endpoints = '', 
+                                    path = '', 
+                                    read_only = True, ), 
+                                host_path = arl_client.models.warm_pool_spec_template_spec_volumes_inner_host_path.WarmPoolSpec_template_spec_volumes_inner_hostPath(
+                                    path = '', 
+                                    type = '', ), 
+                                image = arl_client.models.warm_pool_spec_template_spec_volumes_inner_image.WarmPoolSpec_template_spec_volumes_inner_image(
+                                    pull_policy = '', 
+                                    reference = '', ), 
+                                iscsi = arl_client.models.warm_pool_spec_template_spec_volumes_inner_iscsi.WarmPoolSpec_template_spec_volumes_inner_iscsi(
+                                    chap_auth_discovery = True, 
+                                    chap_auth_session = True, 
+                                    fs_type = '', 
+                                    initiator_name = '', 
+                                    iqn = '', 
+                                    iscsi_interface = 'default', 
+                                    lun = 56, 
+                                    portals = [
+                                        ''
+                                        ], 
+                                    read_only = True, 
+                                    target_portal = '', ), 
+                                name = '', 
+                                nfs = arl_client.models.warm_pool_spec_template_spec_volumes_inner_nfs.WarmPoolSpec_template_spec_volumes_inner_nfs(
+                                    path = '', 
+                                    read_only = True, 
+                                    server = '', ), 
+                                persistent_volume_claim = arl_client.models.warm_pool_spec_template_spec_volumes_inner_persistent_volume_claim.WarmPoolSpec_template_spec_volumes_inner_persistentVolumeClaim(
+                                    claim_name = '', 
+                                    read_only = True, ), 
+                                photon_persistent_disk = arl_client.models.warm_pool_spec_template_spec_volumes_inner_photon_persistent_disk.WarmPoolSpec_template_spec_volumes_inner_photonPersistentDisk(
+                                    fs_type = '', 
+                                    pd_id = '', ), 
+                                portworx_volume = arl_client.models.warm_pool_spec_template_spec_volumes_inner_portworx_volume.WarmPoolSpec_template_spec_volumes_inner_portworxVolume(
+                                    fs_type = '', 
+                                    read_only = True, 
+                                    volume_id = '', ), 
+                                projected = arl_client.models.warm_pool_spec_template_spec_volumes_inner_projected.WarmPoolSpec_template_spec_volumes_inner_projected(
+                                    default_mode = 56, 
+                                    sources = [
+                                        arl_client.models.warm_pool_spec_template_spec_volumes_inner_projected_sources_inner.WarmPoolSpec_template_spec_volumes_inner_projected_sources_inner(
+                                            cluster_trust_bundle = arl_client.models.warm_pool_spec_template_spec_volumes_inner_projected_sources_inner_cluster_trust_bundle.WarmPoolSpec_template_spec_volumes_inner_projected_sources_inner_clusterTrustBundle(
+                                                name = '', 
+                                                optional = True, 
+                                                path = '', 
+                                                signer_name = '', ), 
+                                            pod_certificate = arl_client.models.warm_pool_spec_template_spec_volumes_inner_projected_sources_inner_pod_certificate.WarmPoolSpec_template_spec_volumes_inner_projected_sources_inner_podCertificate(
+                                                certificate_chain_path = '', 
+                                                credential_bundle_path = '', 
+                                                key_path = '', 
+                                                key_type = '', 
+                                                max_expiration_seconds = 56, 
+                                                signer_name = '', 
+                                                user_annotations = {
+                                                    'key' : ''
+                                                    }, ), 
+                                            secret = arl_client.models.warm_pool_spec_template_spec_volumes_inner_projected_sources_inner_config_map.WarmPoolSpec_template_spec_volumes_inner_projected_sources_inner_configMap(
+                                                name = '', 
+                                                optional = True, ), 
+                                            service_account_token = arl_client.models.warm_pool_spec_template_spec_volumes_inner_projected_sources_inner_service_account_token.WarmPoolSpec_template_spec_volumes_inner_projected_sources_inner_serviceAccountToken(
+                                                audience = '', 
+                                                expiration_seconds = 56, 
+                                                path = '', ), )
+                                        ], ), 
+                                quobyte = arl_client.models.warm_pool_spec_template_spec_volumes_inner_quobyte.WarmPoolSpec_template_spec_volumes_inner_quobyte(
+                                    group = '', 
+                                    read_only = True, 
+                                    registry = '', 
+                                    tenant = '', 
+                                    user = '', 
+                                    volume = '', ), 
+                                rbd = arl_client.models.warm_pool_spec_template_spec_volumes_inner_rbd.WarmPoolSpec_template_spec_volumes_inner_rbd(
+                                    fs_type = '', 
+                                    image = '', 
+                                    keyring = '/etc/ceph/keyring', 
+                                    monitors = [
+                                        ''
+                                        ], 
+                                    pool = 'rbd', 
+                                    read_only = True, 
+                                    user = 'admin', ), 
+                                scale_io = arl_client.models.warm_pool_spec_template_spec_volumes_inner_scale_io.WarmPoolSpec_template_spec_volumes_inner_scaleIO(
+                                    fs_type = 'xfs', 
+                                    gateway = '', 
+                                    protection_domain = '', 
+                                    read_only = True, 
+                                    secret_ref = , 
+                                    ssl_enabled = True, 
+                                    storage_mode = 'ThinProvisioned', 
+                                    storage_pool = '', 
+                                    system = '', 
+                                    volume_name = '', ), 
+                                secret = arl_client.models.warm_pool_spec_template_spec_volumes_inner_secret.WarmPoolSpec_template_spec_volumes_inner_secret(
+                                    default_mode = 56, 
+                                    optional = True, 
+                                    secret_name = '', ), 
+                                storageos = arl_client.models.warm_pool_spec_template_spec_volumes_inner_storageos.WarmPoolSpec_template_spec_volumes_inner_storageos(
+                                    fs_type = '', 
+                                    read_only = True, 
+                                    volume_name = '', 
+                                    volume_namespace = '', ), 
+                                vsphere_volume = arl_client.models.warm_pool_spec_template_spec_volumes_inner_vsphere_volume.WarmPoolSpec_template_spec_volumes_inner_vsphereVolume(
+                                    fs_type = '', 
+                                    storage_policy_id = '', 
+                                    storage_policy_name = '', 
+                                    volume_path = '', ), )
+                            ], 
+                        workload_ref = arl_client.models.warm_pool_spec_template_spec_workload_ref.WarmPoolSpec_template_spec_workloadRef(
+                            name = '', 
+                            pod_group = '', 
+                            pod_group_replica_key = '', ), ), )
             )
         else:
             return WarmPoolSpec(
                 replicas = 56,
-                template = arl_client.models.pod_template_spec.PodTemplateSpec(
-                    metadata = arl_client.models.object_meta.ObjectMeta(
-                        name = '', 
-                        namespace = '', 
-                        labels = {
+                template = arl_client.models.warm_pool_spec_template.WarmPoolSpec_template(
+                    metadata = arl_client.models.metadata.metadata(), 
+                    spec = arl_client.models.warm_pool_spec_template_spec.WarmPoolSpec_template_spec(
+                        active_deadline_seconds = 56, 
+                        affinity = arl_client.models.warm_pool_spec_template_spec_affinity.WarmPoolSpec_template_spec_affinity(
+                            node_affinity = arl_client.models.warm_pool_spec_template_spec_affinity_node_affinity.WarmPoolSpec_template_spec_affinity_nodeAffinity(
+                                preferred_during_scheduling_ignored_during_execution = [
+                                    arl_client.models.warm_pool_spec_template_spec_affinity_node_affinity_preferred_during_scheduling_ignored_during_execution_inner.WarmPoolSpec_template_spec_affinity_nodeAffinity_preferredDuringSchedulingIgnoredDuringExecution_inner(
+                                        preference = arl_client.models.warm_pool_spec_template_spec_affinity_node_affinity_preferred_during_scheduling_ignored_during_execution_inner_preference.WarmPoolSpec_template_spec_affinity_nodeAffinity_preferredDuringSchedulingIgnoredDuringExecution_inner_preference(
+                                            match_expressions = [
+                                                arl_client.models.warm_pool_spec_template_spec_affinity_node_affinity_preferred_during_scheduling_ignored_during_execution_inner_preference_match_expressions_inner.WarmPoolSpec_template_spec_affinity_nodeAffinity_preferredDuringSchedulingIgnoredDuringExecution_inner_preference_matchExpressions_inner(
+                                                    key = '', 
+                                                    operator = '', 
+                                                    values = [
+                                                        ''
+                                                        ], )
+                                                ], 
+                                            match_fields = [
+                                                arl_client.models.warm_pool_spec_template_spec_affinity_node_affinity_preferred_during_scheduling_ignored_during_execution_inner_preference_match_expressions_inner.WarmPoolSpec_template_spec_affinity_nodeAffinity_preferredDuringSchedulingIgnoredDuringExecution_inner_preference_matchExpressions_inner(
+                                                    key = '', 
+                                                    operator = '', )
+                                                ], ), 
+                                        weight = 56, )
+                                    ], 
+                                required_during_scheduling_ignored_during_execution = arl_client.models.warm_pool_spec_template_spec_affinity_node_affinity_required_during_scheduling_ignored_during_execution.WarmPoolSpec_template_spec_affinity_nodeAffinity_requiredDuringSchedulingIgnoredDuringExecution(
+                                    node_selector_terms = [
+                                        arl_client.models.warm_pool_spec_template_spec_affinity_node_affinity_preferred_during_scheduling_ignored_during_execution_inner_preference.WarmPoolSpec_template_spec_affinity_nodeAffinity_preferredDuringSchedulingIgnoredDuringExecution_inner_preference()
+                                        ], ), ), 
+                            pod_affinity = arl_client.models.warm_pool_spec_template_spec_affinity_pod_affinity.WarmPoolSpec_template_spec_affinity_podAffinity(), 
+                            pod_anti_affinity = arl_client.models.warm_pool_spec_template_spec_affinity_pod_affinity.WarmPoolSpec_template_spec_affinity_podAffinity(), ), 
+                        automount_service_account_token = True, 
+                        containers = [
+                            arl_client.models.warm_pool_spec_template_spec_containers_inner.WarmPoolSpec_template_spec_containers_inner(
+                                args = [
+                                    ''
+                                    ], 
+                                command = [
+                                    ''
+                                    ], 
+                                env = [
+                                    arl_client.models.warm_pool_spec_template_spec_containers_inner_env_inner.WarmPoolSpec_template_spec_containers_inner_env_inner(
+                                        name = '', 
+                                        value = '', 
+                                        value_from = arl_client.models.warm_pool_spec_template_spec_containers_inner_env_inner_value_from.WarmPoolSpec_template_spec_containers_inner_env_inner_valueFrom(
+                                            config_map_key_ref = arl_client.models.warm_pool_spec_template_spec_containers_inner_env_inner_value_from_config_map_key_ref.WarmPoolSpec_template_spec_containers_inner_env_inner_valueFrom_configMapKeyRef(
+                                                key = '', 
+                                                name = '', 
+                                                optional = True, ), 
+                                            field_ref = arl_client.models.warm_pool_spec_template_spec_containers_inner_env_inner_value_from_field_ref.WarmPoolSpec_template_spec_containers_inner_env_inner_valueFrom_fieldRef(
+                                                api_version = '', 
+                                                field_path = '', ), 
+                                            file_key_ref = arl_client.models.warm_pool_spec_template_spec_containers_inner_env_inner_value_from_file_key_ref.WarmPoolSpec_template_spec_containers_inner_env_inner_valueFrom_fileKeyRef(
+                                                key = '', 
+                                                optional = True, 
+                                                path = '', 
+                                                volume_name = '', ), 
+                                            resource_field_ref = arl_client.models.warm_pool_spec_template_spec_containers_inner_env_inner_value_from_resource_field_ref.WarmPoolSpec_template_spec_containers_inner_env_inner_valueFrom_resourceFieldRef(
+                                                container_name = '', 
+                                                divisor = null, 
+                                                resource = '', ), 
+                                            secret_key_ref = arl_client.models.warm_pool_spec_template_spec_containers_inner_env_inner_value_from_config_map_key_ref.WarmPoolSpec_template_spec_containers_inner_env_inner_valueFrom_configMapKeyRef(
+                                                key = '', 
+                                                name = '', 
+                                                optional = True, ), ), )
+                                    ], 
+                                env_from = [
+                                    arl_client.models.warm_pool_spec_template_spec_containers_inner_env_from_inner.WarmPoolSpec_template_spec_containers_inner_envFrom_inner(
+                                        config_map_ref = arl_client.models.warm_pool_spec_template_spec_containers_inner_env_from_inner_config_map_ref.WarmPoolSpec_template_spec_containers_inner_envFrom_inner_configMapRef(
+                                            name = '', 
+                                            optional = True, ), 
+                                        prefix = '', 
+                                        secret_ref = arl_client.models.warm_pool_spec_template_spec_containers_inner_env_from_inner_config_map_ref.WarmPoolSpec_template_spec_containers_inner_envFrom_inner_configMapRef(
+                                            name = '', 
+                                            optional = True, ), )
+                                    ], 
+                                image = '', 
+                                image_pull_policy = '', 
+                                lifecycle = arl_client.models.warm_pool_spec_template_spec_containers_inner_lifecycle.WarmPoolSpec_template_spec_containers_inner_lifecycle(
+                                    post_start = arl_client.models.warm_pool_spec_template_spec_containers_inner_lifecycle_post_start.WarmPoolSpec_template_spec_containers_inner_lifecycle_postStart(
+                                        exec = arl_client.models.warm_pool_spec_template_spec_containers_inner_lifecycle_post_start_exec.WarmPoolSpec_template_spec_containers_inner_lifecycle_postStart_exec(), 
+                                        http_get = arl_client.models.warm_pool_spec_template_spec_containers_inner_lifecycle_post_start_http_get.WarmPoolSpec_template_spec_containers_inner_lifecycle_postStart_httpGet(
+                                            host = '', 
+                                            http_headers = [
+                                                arl_client.models.warm_pool_spec_template_spec_containers_inner_lifecycle_post_start_http_get_http_headers_inner.WarmPoolSpec_template_spec_containers_inner_lifecycle_postStart_httpGet_httpHeaders_inner(
+                                                    name = '', 
+                                                    value = '', )
+                                                ], 
+                                            path = '', 
+                                            port = null, 
+                                            scheme = '', ), 
+                                        sleep = arl_client.models.warm_pool_spec_template_spec_containers_inner_lifecycle_post_start_sleep.WarmPoolSpec_template_spec_containers_inner_lifecycle_postStart_sleep(
+                                            seconds = 56, ), 
+                                        tcp_socket = arl_client.models.warm_pool_spec_template_spec_containers_inner_lifecycle_post_start_tcp_socket.WarmPoolSpec_template_spec_containers_inner_lifecycle_postStart_tcpSocket(
+                                            host = '', 
+                                            port = null, ), ), 
+                                    pre_stop = arl_client.models.warm_pool_spec_template_spec_containers_inner_lifecycle_post_start.WarmPoolSpec_template_spec_containers_inner_lifecycle_postStart(), 
+                                    stop_signal = '', ), 
+                                liveness_probe = arl_client.models.warm_pool_spec_template_spec_containers_inner_liveness_probe.WarmPoolSpec_template_spec_containers_inner_livenessProbe(
+                                    failure_threshold = 56, 
+                                    grpc = arl_client.models.warm_pool_spec_template_spec_containers_inner_liveness_probe_grpc.WarmPoolSpec_template_spec_containers_inner_livenessProbe_grpc(
+                                        port = 56, 
+                                        service = '', ), 
+                                    initial_delay_seconds = 56, 
+                                    period_seconds = 56, 
+                                    success_threshold = 56, 
+                                    termination_grace_period_seconds = 56, 
+                                    timeout_seconds = 56, ), 
+                                name = '', 
+                                ports = [
+                                    arl_client.models.warm_pool_spec_template_spec_containers_inner_ports_inner.WarmPoolSpec_template_spec_containers_inner_ports_inner(
+                                        container_port = 56, 
+                                        host_ip = '', 
+                                        host_port = 56, 
+                                        name = '', 
+                                        protocol = 'TCP', )
+                                    ], 
+                                readiness_probe = arl_client.models.warm_pool_spec_template_spec_containers_inner_liveness_probe.WarmPoolSpec_template_spec_containers_inner_livenessProbe(
+                                    failure_threshold = 56, 
+                                    initial_delay_seconds = 56, 
+                                    period_seconds = 56, 
+                                    success_threshold = 56, 
+                                    termination_grace_period_seconds = 56, 
+                                    timeout_seconds = 56, ), 
+                                resize_policy = [
+                                    arl_client.models.warm_pool_spec_template_spec_containers_inner_resize_policy_inner.WarmPoolSpec_template_spec_containers_inner_resizePolicy_inner(
+                                        resource_name = '', 
+                                        restart_policy = '', )
+                                    ], 
+                                resources = arl_client.models.sandbox_spec_resources.SandboxSpec_resources(
+                                    claims = [
+                                        arl_client.models.sandbox_spec_resources_claims_inner.SandboxSpec_resources_claims_inner(
+                                            name = '', 
+                                            request = '', )
+                                        ], 
+                                    limits = {
+                                        'key' : null
+                                        }, 
+                                    requests = {
+                                        'key' : null
+                                        }, ), 
+                                restart_policy = '', 
+                                restart_policy_rules = [
+                                    arl_client.models.warm_pool_spec_template_spec_containers_inner_restart_policy_rules_inner.WarmPoolSpec_template_spec_containers_inner_restartPolicyRules_inner(
+                                        action = '', 
+                                        exit_codes = arl_client.models.warm_pool_spec_template_spec_containers_inner_restart_policy_rules_inner_exit_codes.WarmPoolSpec_template_spec_containers_inner_restartPolicyRules_inner_exitCodes(
+                                            operator = '', ), )
+                                    ], 
+                                security_context = arl_client.models.warm_pool_spec_template_spec_containers_inner_security_context.WarmPoolSpec_template_spec_containers_inner_securityContext(
+                                    allow_privilege_escalation = True, 
+                                    app_armor_profile = arl_client.models.warm_pool_spec_template_spec_containers_inner_security_context_app_armor_profile.WarmPoolSpec_template_spec_containers_inner_securityContext_appArmorProfile(
+                                        localhost_profile = '', 
+                                        type = '', ), 
+                                    capabilities = arl_client.models.warm_pool_spec_template_spec_containers_inner_security_context_capabilities.WarmPoolSpec_template_spec_containers_inner_securityContext_capabilities(
+                                        add = [
+                                            ''
+                                            ], 
+                                        drop = [
+                                            ''
+                                            ], ), 
+                                    privileged = True, 
+                                    proc_mount = '', 
+                                    read_only_root_filesystem = True, 
+                                    run_as_group = 56, 
+                                    run_as_non_root = True, 
+                                    run_as_user = 56, 
+                                    se_linux_options = arl_client.models.warm_pool_spec_template_spec_containers_inner_security_context_se_linux_options.WarmPoolSpec_template_spec_containers_inner_securityContext_seLinuxOptions(
+                                        level = '', 
+                                        role = '', 
+                                        type = '', 
+                                        user = '', ), 
+                                    seccomp_profile = arl_client.models.warm_pool_spec_template_spec_containers_inner_security_context_app_armor_profile.WarmPoolSpec_template_spec_containers_inner_securityContext_appArmorProfile(
+                                        localhost_profile = '', 
+                                        type = '', ), 
+                                    windows_options = arl_client.models.warm_pool_spec_template_spec_containers_inner_security_context_windows_options.WarmPoolSpec_template_spec_containers_inner_securityContext_windowsOptions(
+                                        gmsa_credential_spec = '', 
+                                        gmsa_credential_spec_name = '', 
+                                        host_process = True, 
+                                        run_as_user_name = '', ), ), 
+                                startup_probe = , 
+                                stdin = True, 
+                                stdin_once = True, 
+                                termination_message_path = '', 
+                                termination_message_policy = '', 
+                                tty = True, 
+                                volume_devices = [
+                                    arl_client.models.warm_pool_spec_template_spec_containers_inner_volume_devices_inner.WarmPoolSpec_template_spec_containers_inner_volumeDevices_inner(
+                                        device_path = '', 
+                                        name = '', )
+                                    ], 
+                                volume_mounts = [
+                                    arl_client.models.warm_pool_spec_template_spec_containers_inner_volume_mounts_inner.WarmPoolSpec_template_spec_containers_inner_volumeMounts_inner(
+                                        mount_path = '', 
+                                        mount_propagation = '', 
+                                        name = '', 
+                                        read_only = True, 
+                                        recursive_read_only = '', 
+                                        sub_path = '', 
+                                        sub_path_expr = '', )
+                                    ], 
+                                working_dir = '', )
+                            ], 
+                        dns_config = arl_client.models.warm_pool_spec_template_spec_dns_config.WarmPoolSpec_template_spec_dnsConfig(
+                            nameservers = [
+                                ''
+                                ], 
+                            options = [
+                                arl_client.models.warm_pool_spec_template_spec_dns_config_options_inner.WarmPoolSpec_template_spec_dnsConfig_options_inner(
+                                    name = '', 
+                                    value = '', )
+                                ], 
+                            searches = [
+                                ''
+                                ], ), 
+                        dns_policy = '', 
+                        enable_service_links = True, 
+                        ephemeral_containers = [
+                            arl_client.models.warm_pool_spec_template_spec_ephemeral_containers_inner.WarmPoolSpec_template_spec_ephemeralContainers_inner(
+                                image = '', 
+                                image_pull_policy = '', 
+                                name = '', 
+                                restart_policy = '', 
+                                stdin = True, 
+                                stdin_once = True, 
+                                target_container_name = '', 
+                                termination_message_path = '', 
+                                termination_message_policy = '', 
+                                tty = True, 
+                                working_dir = '', )
+                            ], 
+                        host_aliases = [
+                            arl_client.models.warm_pool_spec_template_spec_host_aliases_inner.WarmPoolSpec_template_spec_hostAliases_inner(
+                                hostnames = [
+                                    ''
+                                    ], 
+                                ip = '', )
+                            ], 
+                        host_ipc = True, 
+                        host_network = True, 
+                        host_pid = True, 
+                        host_users = True, 
+                        hostname = '', 
+                        hostname_override = '', 
+                        image_pull_secrets = [
+                            arl_client.models.warm_pool_spec_template_spec_image_pull_secrets_inner.WarmPoolSpec_template_spec_imagePullSecrets_inner(
+                                name = '', )
+                            ], 
+                        init_containers = [
+                            arl_client.models.warm_pool_spec_template_spec_containers_inner.WarmPoolSpec_template_spec_containers_inner(
+                                image = '', 
+                                image_pull_policy = '', 
+                                name = '', 
+                                restart_policy = '', 
+                                stdin = True, 
+                                stdin_once = True, 
+                                termination_message_path = '', 
+                                termination_message_policy = '', 
+                                tty = True, 
+                                working_dir = '', )
+                            ], 
+                        node_name = '', 
+                        node_selector = {
                             'key' : ''
                             }, 
-                        annotations = {
-                            'key' : ''
-                            }, ), 
-                    spec = arl_client.models.spec.spec(), ),
+                        os = arl_client.models.warm_pool_spec_template_spec_os.WarmPoolSpec_template_spec_os(
+                            name = '', ), 
+                        overhead = {
+                            'key' : null
+                            }, 
+                        preemption_policy = '', 
+                        priority = 56, 
+                        priority_class_name = '', 
+                        readiness_gates = [
+                            arl_client.models.warm_pool_spec_template_spec_readiness_gates_inner.WarmPoolSpec_template_spec_readinessGates_inner(
+                                condition_type = '', )
+                            ], 
+                        resource_claims = [
+                            arl_client.models.warm_pool_spec_template_spec_resource_claims_inner.WarmPoolSpec_template_spec_resourceClaims_inner(
+                                name = '', 
+                                resource_claim_name = '', 
+                                resource_claim_template_name = '', )
+                            ], 
+                        resources = arl_client.models.sandbox_spec_resources.SandboxSpec_resources(), 
+                        restart_policy = '', 
+                        runtime_class_name = '', 
+                        scheduler_name = '', 
+                        scheduling_gates = [
+                            arl_client.models.warm_pool_spec_template_spec_os.WarmPoolSpec_template_spec_os(
+                                name = '', )
+                            ], 
+                        security_context = arl_client.models.warm_pool_spec_template_spec_security_context.WarmPoolSpec_template_spec_securityContext(
+                            fs_group = 56, 
+                            fs_group_change_policy = '', 
+                            run_as_group = 56, 
+                            run_as_non_root = True, 
+                            run_as_user = 56, 
+                            se_linux_change_policy = '', 
+                            supplemental_groups = [
+                                56
+                                ], 
+                            supplemental_groups_policy = '', 
+                            sysctls = [
+                                arl_client.models.warm_pool_spec_template_spec_containers_inner_lifecycle_post_start_http_get_http_headers_inner.WarmPoolSpec_template_spec_containers_inner_lifecycle_postStart_httpGet_httpHeaders_inner(
+                                    name = '', 
+                                    value = '', )
+                                ], ), 
+                        service_account = '', 
+                        service_account_name = '', 
+                        set_hostname_as_fqdn = True, 
+                        share_process_namespace = True, 
+                        subdomain = '', 
+                        termination_grace_period_seconds = 56, 
+                        tolerations = [
+                            arl_client.models.warm_pool_spec_template_spec_tolerations_inner.WarmPoolSpec_template_spec_tolerations_inner(
+                                effect = '', 
+                                key = '', 
+                                operator = '', 
+                                toleration_seconds = 56, 
+                                value = '', )
+                            ], 
+                        topology_spread_constraints = [
+                            arl_client.models.warm_pool_spec_template_spec_topology_spread_constraints_inner.WarmPoolSpec_template_spec_topologySpreadConstraints_inner(
+                                label_selector = arl_client.models.warm_pool_spec_template_spec_affinity_pod_affinity_preferred_during_scheduling_ignored_during_execution_inner_pod_affinity_term_label_selector.WarmPoolSpec_template_spec_affinity_podAffinity_preferredDuringSchedulingIgnoredDuringExecution_inner_podAffinityTerm_labelSelector(
+                                    match_labels = {
+                                        'key' : ''
+                                        }, ), 
+                                match_label_keys = [
+                                    ''
+                                    ], 
+                                max_skew = 56, 
+                                min_domains = 56, 
+                                node_affinity_policy = '', 
+                                node_taints_policy = '', 
+                                topology_key = '', 
+                                when_unsatisfiable = '', )
+                            ], 
+                        volumes = [
+                            arl_client.models.warm_pool_spec_template_spec_volumes_inner.WarmPoolSpec_template_spec_volumes_inner(
+                                aws_elastic_block_store = arl_client.models.warm_pool_spec_template_spec_volumes_inner_aws_elastic_block_store.WarmPoolSpec_template_spec_volumes_inner_awsElasticBlockStore(
+                                    fs_type = '', 
+                                    partition = 56, 
+                                    read_only = True, 
+                                    volume_id = '', ), 
+                                azure_disk = arl_client.models.warm_pool_spec_template_spec_volumes_inner_azure_disk.WarmPoolSpec_template_spec_volumes_inner_azureDisk(
+                                    caching_mode = '', 
+                                    disk_name = '', 
+                                    disk_uri = '', 
+                                    fs_type = 'ext4', 
+                                    kind = '', 
+                                    read_only = True, ), 
+                                azure_file = arl_client.models.warm_pool_spec_template_spec_volumes_inner_azure_file.WarmPoolSpec_template_spec_volumes_inner_azureFile(
+                                    read_only = True, 
+                                    secret_name = '', 
+                                    share_name = '', ), 
+                                cephfs = arl_client.models.warm_pool_spec_template_spec_volumes_inner_cephfs.WarmPoolSpec_template_spec_volumes_inner_cephfs(
+                                    monitors = [
+                                        ''
+                                        ], 
+                                    path = '', 
+                                    read_only = True, 
+                                    secret_file = '', 
+                                    user = '', ), 
+                                cinder = arl_client.models.warm_pool_spec_template_spec_volumes_inner_cinder.WarmPoolSpec_template_spec_volumes_inner_cinder(
+                                    fs_type = '', 
+                                    read_only = True, 
+                                    volume_id = '', ), 
+                                config_map = arl_client.models.warm_pool_spec_template_spec_volumes_inner_config_map.WarmPoolSpec_template_spec_volumes_inner_configMap(
+                                    default_mode = 56, 
+                                    items = [
+                                        arl_client.models.warm_pool_spec_template_spec_volumes_inner_config_map_items_inner.WarmPoolSpec_template_spec_volumes_inner_configMap_items_inner(
+                                            key = '', 
+                                            mode = 56, 
+                                            path = '', )
+                                        ], 
+                                    name = '', 
+                                    optional = True, ), 
+                                csi = arl_client.models.warm_pool_spec_template_spec_volumes_inner_csi.WarmPoolSpec_template_spec_volumes_inner_csi(
+                                    driver = '', 
+                                    fs_type = '', 
+                                    node_publish_secret_ref = arl_client.models.warm_pool_spec_template_spec_image_pull_secrets_inner.WarmPoolSpec_template_spec_imagePullSecrets_inner(
+                                        name = '', ), 
+                                    read_only = True, 
+                                    volume_attributes = {
+                                        'key' : ''
+                                        }, ), 
+                                downward_api = arl_client.models.warm_pool_spec_template_spec_volumes_inner_downward_api.WarmPoolSpec_template_spec_volumes_inner_downwardAPI(
+                                    default_mode = 56, ), 
+                                empty_dir = arl_client.models.warm_pool_spec_template_spec_volumes_inner_empty_dir.WarmPoolSpec_template_spec_volumes_inner_emptyDir(
+                                    medium = '', 
+                                    size_limit = null, ), 
+                                ephemeral = arl_client.models.warm_pool_spec_template_spec_volumes_inner_ephemeral.WarmPoolSpec_template_spec_volumes_inner_ephemeral(
+                                    volume_claim_template = arl_client.models.warm_pool_spec_template_spec_volumes_inner_ephemeral_volume_claim_template.WarmPoolSpec_template_spec_volumes_inner_ephemeral_volumeClaimTemplate(
+                                        metadata = arl_client.models.metadata.metadata(), 
+                                        spec = arl_client.models.warm_pool_spec_template_spec_volumes_inner_ephemeral_volume_claim_template_spec.WarmPoolSpec_template_spec_volumes_inner_ephemeral_volumeClaimTemplate_spec(
+                                            access_modes = [
+                                                ''
+                                                ], 
+                                            data_source = arl_client.models.warm_pool_spec_template_spec_volumes_inner_ephemeral_volume_claim_template_spec_data_source.WarmPoolSpec_template_spec_volumes_inner_ephemeral_volumeClaimTemplate_spec_dataSource(
+                                                api_group = '', 
+                                                kind = '', 
+                                                name = '', ), 
+                                            data_source_ref = arl_client.models.warm_pool_spec_template_spec_volumes_inner_ephemeral_volume_claim_template_spec_data_source_ref.WarmPoolSpec_template_spec_volumes_inner_ephemeral_volumeClaimTemplate_spec_dataSourceRef(
+                                                api_group = '', 
+                                                kind = '', 
+                                                name = '', 
+                                                namespace = '', ), 
+                                            selector = arl_client.models.warm_pool_spec_template_spec_affinity_pod_affinity_preferred_during_scheduling_ignored_during_execution_inner_pod_affinity_term_label_selector.WarmPoolSpec_template_spec_affinity_podAffinity_preferredDuringSchedulingIgnoredDuringExecution_inner_podAffinityTerm_labelSelector(), 
+                                            storage_class_name = '', 
+                                            volume_attributes_class_name = '', 
+                                            volume_mode = '', 
+                                            volume_name = '', ), ), ), 
+                                fc = arl_client.models.warm_pool_spec_template_spec_volumes_inner_fc.WarmPoolSpec_template_spec_volumes_inner_fc(
+                                    fs_type = '', 
+                                    lun = 56, 
+                                    read_only = True, 
+                                    target_wwns = [
+                                        ''
+                                        ], 
+                                    wwids = [
+                                        ''
+                                        ], ), 
+                                flex_volume = arl_client.models.warm_pool_spec_template_spec_volumes_inner_flex_volume.WarmPoolSpec_template_spec_volumes_inner_flexVolume(
+                                    driver = '', 
+                                    fs_type = '', 
+                                    read_only = True, ), 
+                                flocker = arl_client.models.warm_pool_spec_template_spec_volumes_inner_flocker.WarmPoolSpec_template_spec_volumes_inner_flocker(
+                                    dataset_name = '', 
+                                    dataset_uuid = '', ), 
+                                gce_persistent_disk = arl_client.models.warm_pool_spec_template_spec_volumes_inner_gce_persistent_disk.WarmPoolSpec_template_spec_volumes_inner_gcePersistentDisk(
+                                    fs_type = '', 
+                                    partition = 56, 
+                                    pd_name = '', 
+                                    read_only = True, ), 
+                                git_repo = arl_client.models.warm_pool_spec_template_spec_volumes_inner_git_repo.WarmPoolSpec_template_spec_volumes_inner_gitRepo(
+                                    directory = '', 
+                                    repository = '', 
+                                    revision = '', ), 
+                                glusterfs = arl_client.models.warm_pool_spec_template_spec_volumes_inner_glusterfs.WarmPoolSpec_template_spec_volumes_inner_glusterfs(
+                                    endpoints = '', 
+                                    path = '', 
+                                    read_only = True, ), 
+                                host_path = arl_client.models.warm_pool_spec_template_spec_volumes_inner_host_path.WarmPoolSpec_template_spec_volumes_inner_hostPath(
+                                    path = '', 
+                                    type = '', ), 
+                                image = arl_client.models.warm_pool_spec_template_spec_volumes_inner_image.WarmPoolSpec_template_spec_volumes_inner_image(
+                                    pull_policy = '', 
+                                    reference = '', ), 
+                                iscsi = arl_client.models.warm_pool_spec_template_spec_volumes_inner_iscsi.WarmPoolSpec_template_spec_volumes_inner_iscsi(
+                                    chap_auth_discovery = True, 
+                                    chap_auth_session = True, 
+                                    fs_type = '', 
+                                    initiator_name = '', 
+                                    iqn = '', 
+                                    iscsi_interface = 'default', 
+                                    lun = 56, 
+                                    portals = [
+                                        ''
+                                        ], 
+                                    read_only = True, 
+                                    target_portal = '', ), 
+                                name = '', 
+                                nfs = arl_client.models.warm_pool_spec_template_spec_volumes_inner_nfs.WarmPoolSpec_template_spec_volumes_inner_nfs(
+                                    path = '', 
+                                    read_only = True, 
+                                    server = '', ), 
+                                persistent_volume_claim = arl_client.models.warm_pool_spec_template_spec_volumes_inner_persistent_volume_claim.WarmPoolSpec_template_spec_volumes_inner_persistentVolumeClaim(
+                                    claim_name = '', 
+                                    read_only = True, ), 
+                                photon_persistent_disk = arl_client.models.warm_pool_spec_template_spec_volumes_inner_photon_persistent_disk.WarmPoolSpec_template_spec_volumes_inner_photonPersistentDisk(
+                                    fs_type = '', 
+                                    pd_id = '', ), 
+                                portworx_volume = arl_client.models.warm_pool_spec_template_spec_volumes_inner_portworx_volume.WarmPoolSpec_template_spec_volumes_inner_portworxVolume(
+                                    fs_type = '', 
+                                    read_only = True, 
+                                    volume_id = '', ), 
+                                projected = arl_client.models.warm_pool_spec_template_spec_volumes_inner_projected.WarmPoolSpec_template_spec_volumes_inner_projected(
+                                    default_mode = 56, 
+                                    sources = [
+                                        arl_client.models.warm_pool_spec_template_spec_volumes_inner_projected_sources_inner.WarmPoolSpec_template_spec_volumes_inner_projected_sources_inner(
+                                            cluster_trust_bundle = arl_client.models.warm_pool_spec_template_spec_volumes_inner_projected_sources_inner_cluster_trust_bundle.WarmPoolSpec_template_spec_volumes_inner_projected_sources_inner_clusterTrustBundle(
+                                                name = '', 
+                                                optional = True, 
+                                                path = '', 
+                                                signer_name = '', ), 
+                                            pod_certificate = arl_client.models.warm_pool_spec_template_spec_volumes_inner_projected_sources_inner_pod_certificate.WarmPoolSpec_template_spec_volumes_inner_projected_sources_inner_podCertificate(
+                                                certificate_chain_path = '', 
+                                                credential_bundle_path = '', 
+                                                key_path = '', 
+                                                key_type = '', 
+                                                max_expiration_seconds = 56, 
+                                                signer_name = '', 
+                                                user_annotations = {
+                                                    'key' : ''
+                                                    }, ), 
+                                            secret = arl_client.models.warm_pool_spec_template_spec_volumes_inner_projected_sources_inner_config_map.WarmPoolSpec_template_spec_volumes_inner_projected_sources_inner_configMap(
+                                                name = '', 
+                                                optional = True, ), 
+                                            service_account_token = arl_client.models.warm_pool_spec_template_spec_volumes_inner_projected_sources_inner_service_account_token.WarmPoolSpec_template_spec_volumes_inner_projected_sources_inner_serviceAccountToken(
+                                                audience = '', 
+                                                expiration_seconds = 56, 
+                                                path = '', ), )
+                                        ], ), 
+                                quobyte = arl_client.models.warm_pool_spec_template_spec_volumes_inner_quobyte.WarmPoolSpec_template_spec_volumes_inner_quobyte(
+                                    group = '', 
+                                    read_only = True, 
+                                    registry = '', 
+                                    tenant = '', 
+                                    user = '', 
+                                    volume = '', ), 
+                                rbd = arl_client.models.warm_pool_spec_template_spec_volumes_inner_rbd.WarmPoolSpec_template_spec_volumes_inner_rbd(
+                                    fs_type = '', 
+                                    image = '', 
+                                    keyring = '/etc/ceph/keyring', 
+                                    monitors = [
+                                        ''
+                                        ], 
+                                    pool = 'rbd', 
+                                    read_only = True, 
+                                    user = 'admin', ), 
+                                scale_io = arl_client.models.warm_pool_spec_template_spec_volumes_inner_scale_io.WarmPoolSpec_template_spec_volumes_inner_scaleIO(
+                                    fs_type = 'xfs', 
+                                    gateway = '', 
+                                    protection_domain = '', 
+                                    read_only = True, 
+                                    secret_ref = , 
+                                    ssl_enabled = True, 
+                                    storage_mode = 'ThinProvisioned', 
+                                    storage_pool = '', 
+                                    system = '', 
+                                    volume_name = '', ), 
+                                secret = arl_client.models.warm_pool_spec_template_spec_volumes_inner_secret.WarmPoolSpec_template_spec_volumes_inner_secret(
+                                    default_mode = 56, 
+                                    optional = True, 
+                                    secret_name = '', ), 
+                                storageos = arl_client.models.warm_pool_spec_template_spec_volumes_inner_storageos.WarmPoolSpec_template_spec_volumes_inner_storageos(
+                                    fs_type = '', 
+                                    read_only = True, 
+                                    volume_name = '', 
+                                    volume_namespace = '', ), 
+                                vsphere_volume = arl_client.models.warm_pool_spec_template_spec_volumes_inner_vsphere_volume.WarmPoolSpec_template_spec_volumes_inner_vsphereVolume(
+                                    fs_type = '', 
+                                    storage_policy_id = '', 
+                                    storage_policy_name = '', 
+                                    volume_path = '', ), )
+                            ], 
+                        workload_ref = arl_client.models.warm_pool_spec_template_spec_workload_ref.WarmPoolSpec_template_spec_workloadRef(
+                            name = '', 
+                            pod_group = '', 
+                            pod_group_replica_key = '', ), ), ),
         )
         """
 

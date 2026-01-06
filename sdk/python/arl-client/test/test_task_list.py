@@ -42,8 +42,8 @@ class TestTaskList(unittest.TestCase):
                     continue = '', ),
                 items = [
                     arl_client.models.task.Task(
-                        api_version = 'arl.infra.io/v1alpha1', 
-                        kind = 'Task', 
+                        api_version = '', 
+                        kind = '', 
                         metadata = arl_client.models.object_meta.ObjectMeta(
                             name = '', 
                             namespace = '', 
@@ -54,39 +54,37 @@ class TestTaskList(unittest.TestCase):
                                 'key' : ''
                                 }, ), 
                         spec = arl_client.models.task_spec.TaskSpec(
+                            retries = 0, 
                             sandbox_ref = '', 
-                            timeout = '', 
                             steps = [
                                 arl_client.models.task_step.TaskStep(
-                                    name = '', 
-                                    type = 'FilePatch', 
-                                    content = '', 
-                                    path = '', 
-                                    command = [
-                                        ''
-                                        ], 
-                                    work_dir = '', 
-                                    env = {
-                                        'key' : ''
-                                        }, )
+                                    command = ["python","script.py","--verbose"], 
+                                    content = 'print('Hello, World!')', 
+                                    env = {"DEBUG":"1","API_KEY":"secret"}, 
+                                    name = 'step1_write_file', 
+                                    path = '/workspace/script.py', 
+                                    type = 'Command', 
+                                    work_dir = '/workspace', )
                                 ], 
-                            retries = 0, 
+                            timeout = '', 
                             ttl_seconds_after_finished = 0, ), 
                         status = arl_client.models.task_status.TaskStatus(
-                            state = 'Pending', 
-                            exit_code = 56, 
-                            stdout = '', 
-                            stderr = '', 
-                            duration = '', 
-                            start_time = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
                             completion_time = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
                             conditions = [
                                 arl_client.models.condition.Condition(
-                                    type = '', 
                                     last_transition_time = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
-                                    reason = '', 
-                                    message = '', )
-                                ], ), )
+                                    message = '', 
+                                    observed_generation = 0, 
+                                    reason = 'AbUUGjjNSwg1_bs:ZayIMrKdgNvb7gvxmPb:GcsM72ate2RA9:q4w2l5eH5XxEz06awo0', 
+                                    status = 'True', 
+                                    type = '8.z.c.e.0.3zmetozkhdomha1bae37b8ocvx8o53ow2eg7p6qw9qklp6l4y010fog5ugcajvnh6nzn2yp6d7tmo7zxedi-pkbmh3.o.34ncp9spy.k.hf9r1ly-n2jyba-zuswj171d3kx6.vyykb66fgvcwlpe6fjm6div96l1hmssf5by0949ps5we28.kiw57.m.n50o3hq25-ctix-xt8fyuzw85-6ymflfzgfzdm4gro1y8vcn4nxdzyo.t2bsdqi-90qr77qnqf26kpzuf5a652r9yc8wgfitooko8u.wj5.b6ca0gq8ejs584qp107f5qv9ze3gk7q64-5mecujmelufynb1wtb8v2n1x9-y9o36-1meqixpaj.x.zay1yebs1kiembt-ho5.8.864bew-vpjuuty7-xv4qjygg3hwqd-5gynywalvhvvesyveyxp35spjahpsiagrj0jehh3a3x8z9axqtswj383252z.d6d4ifob3rgi7j1fao-vb9l55lz.bsk1mqype9zx3n6q-u55t879v1lf.1.k.isf-swgdlh.0.m4u5aoqakjc4xlcmbpoy4ndizk4s3cdhxttexawd8mnl6e4uzxalowdqy9rokd32ct-w5p-yt-emwrzfi.lulqkw0osnqktff9fp6xbt97440w4wt3xjayovyb7flljlnosgtrofp.o.j.p5-2p577rg1fwny6cq1e2d3p5aa62rscqk6cxzeqcrvjnbqd52lumjr3qda19c-7skjef4ovphp57sme4j.v/uvfKd3LB7Nke4pyLFXi20uV', )
+                                ], 
+                            duration = '', 
+                            exit_code = 56, 
+                            start_time = datetime.datetime.strptime('2013-10-20 19:20:30.00', '%Y-%m-%d %H:%M:%S.%f'), 
+                            state = '', 
+                            stderr = '', 
+                            stdout = '', ), )
                     ]
             )
         else:

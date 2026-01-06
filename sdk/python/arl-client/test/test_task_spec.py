@@ -35,23 +35,19 @@ class TestTaskSpec(unittest.TestCase):
         model = TaskSpec()
         if include_optional:
             return TaskSpec(
+                retries = 0,
                 sandbox_ref = '',
-                timeout = '',
                 steps = [
                     arl_client.models.task_step.TaskStep(
-                        name = '', 
-                        type = 'FilePatch', 
-                        content = '', 
-                        path = '', 
-                        command = [
-                            ''
-                            ], 
-                        work_dir = '', 
-                        env = {
-                            'key' : ''
-                            }, )
+                        command = ["python","script.py","--verbose"], 
+                        content = 'print('Hello, World!')', 
+                        env = {"DEBUG":"1","API_KEY":"secret"}, 
+                        name = 'step1_write_file', 
+                        path = '/workspace/script.py', 
+                        type = 'Command', 
+                        work_dir = '/workspace', )
                     ],
-                retries = 0,
+                timeout = '',
                 ttl_seconds_after_finished = 0
             )
         else:
@@ -59,17 +55,13 @@ class TestTaskSpec(unittest.TestCase):
                 sandbox_ref = '',
                 steps = [
                     arl_client.models.task_step.TaskStep(
-                        name = '', 
-                        type = 'FilePatch', 
-                        content = '', 
-                        path = '', 
-                        command = [
-                            ''
-                            ], 
-                        work_dir = '', 
-                        env = {
-                            'key' : ''
-                            }, )
+                        command = ["python","script.py","--verbose"], 
+                        content = 'print('Hello, World!')', 
+                        env = {"DEBUG":"1","API_KEY":"secret"}, 
+                        name = 'step1_write_file', 
+                        path = '/workspace/script.py', 
+                        type = 'Command', 
+                        work_dir = '/workspace', )
                     ],
         )
         """

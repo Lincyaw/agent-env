@@ -6,18 +6,17 @@ Demonstrates:
 - Working with relative paths
 """
 
-from arl_client.session import SandboxSession
+from arl import SandboxSession, TaskStep
 
 
-def main():
+def main() -> None:
     """Execute commands with custom working directory."""
     print("=" * 60)
     print("Example: Working Directory")
     print("=" * 60)
 
     with SandboxSession(pool_ref="python-39-std", namespace="default") as session:
-        result = session.execute(
-            [
+        steps: list[TaskStep] = [
                 # Create subdirectory structure
                 {
                     "name": "create_structure",
@@ -46,9 +45,10 @@ def main():
                     "workDir": "/workspace/project",
                 },
             ]
-        )
 
-        status = result.get("status", {})
+        result = session.execute(steps)
+
+        status = result.get("status", {}) if result else {}
         print(f"\n✓ Task State: {status.get('state')}")
         print(f"✓ Output:\n{status.get('stdout')}")
 

@@ -7,10 +7,10 @@ Demonstrates:
 - Progress output
 """
 
-from arl_client.session import SandboxSession
+from arl import SandboxSession
 
 
-def main():
+def main() -> None:
     """Execute a long-running task."""
     print("=" * 60)
     print("Example: Long-Running Task")

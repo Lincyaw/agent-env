@@ -6,7 +6,6 @@ Automatically formats code and fixes common linting issues.
 
 import subprocess
 import sys
-from pathlib import Path
 
 
 def run_command(cmd: list[str], description: str) -> bool:
@@ -19,7 +18,7 @@ def run_command(cmd: list[str], description: str) -> bool:
             text=True,
             check=False,
         )
-        
+
         if result.returncode == 0:
             print(f"   ✅ {description} completed")
             if result.stdout.strip():
@@ -38,27 +37,27 @@ def run_command(cmd: list[str], description: str) -> bool:
 def main():
     """Run auto-fix tools."""
     target = sys.argv[1] if len(sys.argv) > 1 else "."
-    
+
     print(f"🚀 Auto-fixing Python code quality issues in: {target}\n")
-    
+
     # Run Ruff auto-fixes
     run_command(
         ["uv", "run", "ruff", "check", "--fix", target],
         "Ruff auto-fix linting issues",
     )
-    
+
     # Run Ruff formatting
     run_command(
         ["uv", "run", "ruff", "format", target],
         "Ruff format code",
     )
-    
+
     # Sort imports (Ruff handles this too, but being explicit)
     run_command(
         ["uv", "run", "ruff", "check", "--select", "I", "--fix", target],
         "Sort imports",
     )
-    
+
     print("\n✅ Auto-fix completed!")
     print("💡 Run 'uv run python scripts/check_quality.py' to verify all fixes")
 

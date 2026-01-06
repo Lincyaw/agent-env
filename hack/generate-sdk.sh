@@ -47,6 +47,7 @@ mkdir -p "${SDK_DIR}"
 echo "Generating Python client..."
 
 docker run --rm \
+    --user "$(id -u):$(id -g)" \
     -v "${OPENAPI_DIR}:/openapi" \
     -v "${SDK_DIR}:/output" \
     openapitools/openapi-generator-cli:v7.12.0 generate \
@@ -56,5 +57,13 @@ docker run --rm \
     --package-name "arl_client" \
     --additional-properties=packageVersion=0.1.0,projectName=arl-client,library=urllib3
 
+echo "==> Post-processing generated files"
+
+# Fix pyproject.toml to use modern [project] table format (for uv compatibility)
+python3 "${SCRIPT_DIR}/fix-arl-client-pyproject.py" "${SDK_DIR}/pyproject.toml"
+
 echo "==> Python SDK generation complete"
 echo "    Output: ${SDK_DIR}"
+echo ""
+echo "Note: Custom wrapper code is in sdk/python/arl-wrapper/"
+echo "      Auto-generated client code is in sdk/python/arl-client/"

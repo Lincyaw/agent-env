@@ -7,10 +7,10 @@ Demonstrates:
 - Manual sandbox lifecycle management
 """
 
-from arl_client.session import SandboxSession
+from arl import SandboxSession
 
 
-def main():
+def main() -> None:
     """Reuse sandbox across multiple tasks."""
     print("=" * 60)
     print("Example: Sandbox Reuse (Host-like)")

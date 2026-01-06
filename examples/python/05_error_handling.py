@@ -7,10 +7,10 @@ Demonstrates:
 - Retry logic
 """
 
-from arl_client.session import SandboxSession
+from arl import SandboxSession
 
 
-def example_task_failure():
+def example_task_failure() -> None:
     """Handle task execution failure."""
     print("\n" + "=" * 60)
     print("Example 1: Task Failure")
@@ -37,7 +37,7 @@ def example_task_failure():
             print("✓ Task failed as expected")
 
 
-def example_invalid_command():
+def example_invalid_command() -> None:
     """Handle invalid command."""
     print("\n" + "=" * 60)
     print("Example 2: Invalid Command")
@@ -61,7 +61,7 @@ def example_invalid_command():
             print(f"✓ Error: {status.get('stderr')[:200]}")
 
 
-def example_retry_logic():
+def example_retry_logic() -> None:
     """Demonstrate retry logic for failed tasks."""
     print("\n" + "=" * 60)
     print("Example 3: Retry Logic")
@@ -98,7 +98,7 @@ def example_retry_logic():
                     print("✗ Max retries reached")
 
 
-def main():
+def main() -> None:
     """Run all error handling examples."""
     print("=" * 60)
     print("Error Handling Examples")

@@ -7,10 +7,10 @@ Demonstrates:
 - Verifying output
 """
 
-from arl_client.session import SandboxSession
+from arl import SandboxSession, TaskStep
 
 
-def main():
+def main() -> None:
     """Run a multi-step data processing pipeline."""
     print("=" * 60)
     print("Example: Multi-Step Pipeline")
@@ -18,8 +18,7 @@ def main():
 
     with SandboxSession(pool_ref="python-39-std", namespace="default") as session:
         # Create and execute a data processing pipeline
-        result = session.execute(
-            [
+        steps: list[TaskStep] = [
                 # Step 1: Create input data
                 {
                     "name": "create_data",
@@ -60,9 +59,10 @@ print("Processing completed!")
                     "command": ["cat", "/workspace/output.txt"],
                 },
             ]
-        )
 
-        status = result.get("status", {})
+        result = session.execute(steps)
+
+        status = result.get("status", {}) if result else {}
         print(f"\n✓ Task State: {status.get('state')}")
         print(f"✓ Output:\n{status.get('stdout')}")
 

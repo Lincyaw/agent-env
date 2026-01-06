@@ -65,7 +65,7 @@ def check_pytest(target: str = "tests") -> CheckResult:
     """Run pytest tests."""
     if not Path(target).exists():
         return CheckResult("Pytest", True, "⚠️  No tests directory found")
-    
+
     return run_command(
         ["uv", "run", "pytest", target, "-v"],
         "Pytest",
@@ -88,9 +88,9 @@ def print_separator():
 def main():
     """Run all quality checks."""
     target = sys.argv[1] if len(sys.argv) > 1 else "."
-    
+
     print(f"🔍 Running Python code quality checks on: {target}\n")
-    
+
     checks = [
         check_ruff_lint(target),
         check_ruff_format(target),
@@ -98,22 +98,22 @@ def main():
         check_pytest("tests"),
         check_bandit(target),
     ]
-    
+
     all_passed = True
-    
+
     for result in checks:
         print_separator()
         status = "✅ PASSED" if result.passed else "❌ FAILED"
         print(f"{result.name}: {status}")
         print_separator()
-        
+
         if result.output.strip():
             print(result.output)
             print()
-        
+
         if not result.passed:
             all_passed = False
-    
+
     print_separator()
     if all_passed:
         print("✅ All quality checks passed!")
