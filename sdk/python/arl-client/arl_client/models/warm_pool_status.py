@@ -27,10 +27,10 @@ class WarmPoolStatus(BaseModel):
     """
     WarmPoolStatus
     """ # noqa: E501
-    ready_replicas: Optional[StrictInt] = Field(default=None, alias="readyReplicas")
-    allocated_replicas: Optional[StrictInt] = Field(default=None, alias="allocatedReplicas")
+    allocated_replicas: StrictInt = Field(alias="allocatedReplicas")
     conditions: Optional[List[Condition]] = None
-    __properties: ClassVar[List[str]] = ["readyReplicas", "allocatedReplicas", "conditions"]
+    ready_replicas: StrictInt = Field(alias="readyReplicas")
+    __properties: ClassVar[List[str]] = ["allocatedReplicas", "conditions", "readyReplicas"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -90,9 +90,9 @@ class WarmPoolStatus(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
-            "readyReplicas": obj.get("readyReplicas"),
             "allocatedReplicas": obj.get("allocatedReplicas"),
-            "conditions": [Condition.from_dict(_item) for _item in obj["conditions"]] if obj.get("conditions") is not None else None
+            "conditions": [Condition.from_dict(_item) for _item in obj["conditions"]] if obj.get("conditions") is not None else None,
+            "readyReplicas": obj.get("readyReplicas")
         })
         return _obj
 

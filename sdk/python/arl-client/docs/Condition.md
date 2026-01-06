@@ -5,11 +5,12 @@
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**type** | **str** |  | [optional] 
-**status** | **str** |  | [optional] 
-**last_transition_time** | **datetime** |  | [optional] 
-**reason** | **str** |  | [optional] 
-**message** | **str** |  | [optional] 
+**last_transition_time** | **datetime** |  | 
+**message** | **str** |  | 
+**observed_generation** | **int** |  | [optional] 
+**reason** | **str** |  | 
+**status** | **str** |  | 
+**type** | **str** |  | 
 
 ## Example
 

@@ -5,9 +5,9 @@
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**ready_replicas** | **int** |  | [optional] 
-**allocated_replicas** | **int** |  | [optional] 
+**allocated_replicas** | **int** |  | 
 **conditions** | [**List[Condition]**](Condition.md) |  | [optional] 
+**ready_replicas** | **int** |  | 
 
 ## Example
 

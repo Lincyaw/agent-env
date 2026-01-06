@@ -69,8 +69,8 @@ properties:
               type: string
             status:
               enum:
-                - "True"
-                - "False"
+                - 'True'
+                - 'False'
                 - Unknown
               type: string
             type:

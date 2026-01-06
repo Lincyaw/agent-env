@@ -18,8 +18,9 @@ import re  # noqa: F401
 import json
 
 from datetime import datetime
-from pydantic import BaseModel, ConfigDict, Field, StrictStr
+from pydantic import BaseModel, ConfigDict, Field, StrictStr, field_validator
 from typing import Any, ClassVar, Dict, List, Optional
+from typing_extensions import Annotated
 from typing import Optional, Set
 from typing_extensions import Self
 
@@ -27,12 +28,34 @@ class Condition(BaseModel):
     """
     Condition
     """ # noqa: E501
-    type: Optional[StrictStr] = None
-    status: Optional[StrictStr] = None
-    last_transition_time: Optional[datetime] = Field(default=None, alias="lastTransitionTime")
-    reason: Optional[StrictStr] = None
-    message: Optional[StrictStr] = None
-    __properties: ClassVar[List[str]] = ["type", "status", "lastTransitionTime", "reason", "message"]
+    last_transition_time: datetime = Field(alias="lastTransitionTime")
+    message: Annotated[str, Field(strict=True, max_length=32768)]
+    observed_generation: Optional[Annotated[int, Field(strict=True, ge=0)]] = Field(default=None, alias="observedGeneration")
+    reason: Annotated[str, Field(min_length=1, strict=True, max_length=1024)]
+    status: StrictStr
+    type: Annotated[str, Field(strict=True, max_length=316)]
+    __properties: ClassVar[List[str]] = ["lastTransitionTime", "message", "observedGeneration", "reason", "status", "type"]
+
+    @field_validator('reason')
+    def reason_validate_regular_expression(cls, value):
+        """Validates the regular expression"""
+        if not re.match(r"^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$", value):
+            raise ValueError(r"must validate the regular expression /^[A-Za-z]([A-Za-z0-9_,:]*[A-Za-z0-9_])?$/")
+        return value
+
+    @field_validator('status')
+    def status_validate_enum(cls, value):
+        """Validates the enum"""
+        if value not in set(['True', 'False', 'Unknown']):
+            raise ValueError("must be one of enum values ('True', 'False', 'Unknown')")
+        return value
+
+    @field_validator('type')
+    def type_validate_regular_expression(cls, value):
+        """Validates the regular expression"""
+        if not re.match(r"^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*\/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$", value):
+            raise ValueError(r"must validate the regular expression /^([a-z0-9]([-a-z0-9]*[a-z0-9])?(\.[a-z0-9]([-a-z0-9]*[a-z0-9])?)*\/)?(([A-Za-z0-9][-A-Za-z0-9_.]*)?[A-Za-z0-9])$/")
+        return value
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -85,11 +108,12 @@ class Condition(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
-            "type": obj.get("type"),
-            "status": obj.get("status"),
             "lastTransitionTime": obj.get("lastTransitionTime"),
+            "message": obj.get("message"),
+            "observedGeneration": obj.get("observedGeneration"),
             "reason": obj.get("reason"),
-            "message": obj.get("message")
+            "status": obj.get("status"),
+            "type": obj.get("type")
         })
         return _obj
 

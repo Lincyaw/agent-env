@@ -1,0 +1,30 @@
+# WarmPoolSpecTemplateSpecDnsConfigOptionsInner
+
+
+## Properties
+
+Name | Type | Description | Notes
+------------ | ------------- | ------------- | -------------
+**name** | **str** |  | [optional] 
+**value** | **str** |  | [optional] 
+
+## Example
+
+```python
+from arl_client.models.warm_pool_spec_template_spec_dns_config_options_inner import WarmPoolSpecTemplateSpecDnsConfigOptionsInner
+
+# TODO update the JSON string below
+json = "{}"
+# create an instance of WarmPoolSpecTemplateSpecDnsConfigOptionsInner from a JSON string
+warm_pool_spec_template_spec_dns_config_options_inner_instance = WarmPoolSpecTemplateSpecDnsConfigOptionsInner.from_json(json)
+# print the JSON string representation of the object
+print(WarmPoolSpecTemplateSpecDnsConfigOptionsInner.to_json())
+
+# convert the object into a dict
+warm_pool_spec_template_spec_dns_config_options_inner_dict = warm_pool_spec_template_spec_dns_config_options_inner_instance.to_dict()
+# create an instance of WarmPoolSpecTemplateSpecDnsConfigOptionsInner from a dict
+warm_pool_spec_template_spec_dns_config_options_inner_from_dict = WarmPoolSpecTemplateSpecDnsConfigOptionsInner.from_dict(warm_pool_spec_template_spec_dns_config_options_inner_dict)
+```
+[[Back to Model list]](../README.md#documentation-for-models) [[Back to API list]](../README.md#documentation-for-api-endpoints) [[Back to README]](../README.md)
+
+

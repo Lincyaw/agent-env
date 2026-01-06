@@ -5,8 +5,8 @@
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**replicas** | **int** | Number of idle pods to maintain | 
-**template** | [**PodTemplateSpec**](PodTemplateSpec.md) |  | 
+**replicas** | **int** |  | 
+**template** | [**WarmPoolSpecTemplate**](WarmPoolSpecTemplate.md) |  | 
 
 ## Example
 

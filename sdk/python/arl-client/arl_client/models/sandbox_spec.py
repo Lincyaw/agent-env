@@ -19,7 +19,7 @@ import json
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
-from arl_client.models.resource_requirements import ResourceRequirements
+from arl_client.models.sandbox_spec_resources import SandboxSpecResources
 from typing import Optional, Set
 from typing_extensions import Self
 
@@ -27,10 +27,10 @@ class SandboxSpec(BaseModel):
     """
     SandboxSpec
     """ # noqa: E501
-    pool_ref: StrictStr = Field(description="Name of the WarmPool to allocate from", alias="poolRef")
-    keep_alive: Optional[StrictBool] = Field(default=None, description="Keep pod alive after task completion", alias="keepAlive")
-    resources: Optional[ResourceRequirements] = None
-    __properties: ClassVar[List[str]] = ["poolRef", "keepAlive", "resources"]
+    keep_alive: Optional[StrictBool] = Field(default=None, alias="keepAlive")
+    pool_ref: StrictStr = Field(alias="poolRef")
+    resources: Optional[SandboxSpecResources] = None
+    __properties: ClassVar[List[str]] = ["keepAlive", "poolRef", "resources"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -86,9 +86,9 @@ class SandboxSpec(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
-            "poolRef": obj.get("poolRef"),
             "keepAlive": obj.get("keepAlive"),
-            "resources": ResourceRequirements.from_dict(obj["resources"]) if obj.get("resources") is not None else None
+            "poolRef": obj.get("poolRef"),
+            "resources": SandboxSpecResources.from_dict(obj["resources"]) if obj.get("resources") is not None else None
         })
         return _obj
 

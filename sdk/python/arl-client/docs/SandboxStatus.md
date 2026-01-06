@@ -5,11 +5,11 @@
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**phase** | **str** |  | [optional] 
-**pod_name** | **str** |  | [optional] 
-**pod_ip** | **str** |  | [optional] 
-**work_dir** | **str** |  | [optional] 
 **conditions** | [**List[Condition]**](Condition.md) |  | [optional] 
+**phase** | **str** |  | [optional] 
+**pod_ip** | **str** |  | [optional] 
+**pod_name** | **str** |  | [optional] 
+**work_dir** | **str** |  | [optional] 
 
 ## Example
 

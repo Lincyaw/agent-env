@@ -5,10 +5,10 @@
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**sandbox_ref** | **str** | Name of the Sandbox to execute in | 
-**timeout** | **str** | Maximum execution time (e.g., \&quot;30s\&quot;, \&quot;5m\&quot;) | [optional] 
-**steps** | [**List[TaskStep]**](TaskStep.md) |  | 
 **retries** | **int** |  | [optional] 
+**sandbox_ref** | **str** |  | 
+**steps** | [**List[TaskStep]**](TaskStep.md) |  | 
+**timeout** | **str** |  | [optional] 
 **ttl_seconds_after_finished** | **int** |  | [optional] 
 
 ## Example

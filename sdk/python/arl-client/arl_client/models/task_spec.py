@@ -28,12 +28,12 @@ class TaskSpec(BaseModel):
     """
     TaskSpec
     """ # noqa: E501
-    sandbox_ref: StrictStr = Field(description="Name of the Sandbox to execute in", alias="sandboxRef")
-    timeout: Optional[StrictStr] = Field(default=None, description="Maximum execution time (e.g., \"30s\", \"5m\")")
-    steps: List[TaskStep]
     retries: Optional[Annotated[int, Field(le=10, strict=True, ge=0)]] = None
+    sandbox_ref: StrictStr = Field(alias="sandboxRef")
+    steps: List[TaskStep]
+    timeout: Optional[StrictStr] = None
     ttl_seconds_after_finished: Optional[Annotated[int, Field(strict=True, ge=0)]] = Field(default=None, alias="ttlSecondsAfterFinished")
-    __properties: ClassVar[List[str]] = ["sandboxRef", "timeout", "steps", "retries", "ttlSecondsAfterFinished"]
+    __properties: ClassVar[List[str]] = ["retries", "sandboxRef", "steps", "timeout", "ttlSecondsAfterFinished"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -93,10 +93,10 @@ class TaskSpec(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
-            "sandboxRef": obj.get("sandboxRef"),
-            "timeout": obj.get("timeout"),
-            "steps": [TaskStep.from_dict(_item) for _item in obj["steps"]] if obj.get("steps") is not None else None,
             "retries": obj.get("retries"),
+            "sandboxRef": obj.get("sandboxRef"),
+            "steps": [TaskStep.from_dict(_item) for _item in obj["steps"]] if obj.get("steps") is not None else None,
+            "timeout": obj.get("timeout"),
             "ttlSecondsAfterFinished": obj.get("ttlSecondsAfterFinished")
         })
         return _obj

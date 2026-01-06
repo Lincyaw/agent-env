@@ -17,7 +17,7 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict, Field, StrictStr, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
 from typing import Optional, Set
 from typing_extensions import Self
@@ -26,21 +26,14 @@ class TaskStep(BaseModel):
     """
     TaskStep
     """ # noqa: E501
-    name: StrictStr
-    type: StrictStr
-    content: Optional[StrictStr] = Field(default=None, description="Patch content for FilePatch type")
-    path: Optional[StrictStr] = Field(default=None, description="File path for FilePatch operations")
-    command: Optional[List[StrictStr]] = Field(default=None, description="Command to execute for Command type")
-    work_dir: Optional[StrictStr] = Field(default=None, alias="workDir")
+    command: Optional[List[StrictStr]] = None
+    content: Optional[StrictStr] = None
     env: Optional[Dict[str, StrictStr]] = None
-    __properties: ClassVar[List[str]] = ["name", "type", "content", "path", "command", "workDir", "env"]
-
-    @field_validator('type')
-    def type_validate_enum(cls, value):
-        """Validates the enum"""
-        if value not in set(['FilePatch', 'Command']):
-            raise ValueError("must be one of enum values ('FilePatch', 'Command')")
-        return value
+    name: StrictStr
+    path: Optional[StrictStr] = None
+    type: StrictStr
+    work_dir: Optional[StrictStr] = Field(default=None, alias="workDir")
+    __properties: ClassVar[List[str]] = ["command", "content", "env", "name", "path", "type", "workDir"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -93,13 +86,13 @@ class TaskStep(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
-            "name": obj.get("name"),
-            "type": obj.get("type"),
-            "content": obj.get("content"),
-            "path": obj.get("path"),
             "command": obj.get("command"),
-            "workDir": obj.get("workDir"),
-            "env": obj.get("env")
+            "content": obj.get("content"),
+            "env": obj.get("env"),
+            "name": obj.get("name"),
+            "path": obj.get("path"),
+            "type": obj.get("type"),
+            "workDir": obj.get("workDir")
         })
         return _obj
 

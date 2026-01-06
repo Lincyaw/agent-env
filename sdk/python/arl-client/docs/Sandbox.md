@@ -5,8 +5,8 @@
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**api_version** | **str** |  | [optional] 
-**kind** | **str** |  | [optional] 
+**api_version** | **str** | APIVersion defines the versioned schema of this representation | [optional] 
+**kind** | **str** | Kind is a string value representing the REST resource | [optional] 
 **metadata** | [**ObjectMeta**](ObjectMeta.md) |  | [optional] 
 **spec** | [**SandboxSpec**](SandboxSpec.md) |  | [optional] 
 **status** | [**SandboxStatus**](SandboxStatus.md) |  | [optional] 

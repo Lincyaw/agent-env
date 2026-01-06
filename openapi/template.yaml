@@ -1,0 +1,220 @@
+openapi: 3.0.0
+info:
+  title: ARL Infrastructure API
+  version: v1alpha1
+  description: |
+    OpenAPI specification for ARL (Agentic RL) Infrastructure custom resources.
+    This SDK provides models for WarmPool, Sandbox, and Task Kubernetes custom resources.
+  contact:
+    name: ARL Infrastructure
+    url: https://github.com/Lincyaw/agent-env
+
+servers: []
+
+paths:
+  /api/v1alpha1/namespaces/{namespace}/sandboxes:
+    get:
+      summary: List Sandboxes
+      operationId: listSandboxes
+      parameters:
+        - name: namespace
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List of sandboxes
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SandboxList'
+    post:
+      summary: Create Sandbox
+      operationId: createSandbox
+      parameters:
+        - name: namespace
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Sandbox'
+      responses:
+        '201':
+          description: Sandbox created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Sandbox'
+
+  /api/v1alpha1/namespaces/{namespace}/tasks:
+    get:
+      summary: List Tasks
+      operationId: listTasks
+      parameters:
+        - name: namespace
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List of tasks
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/TaskList'
+    post:
+      summary: Create Task
+      operationId: createTask
+      parameters:
+        - name: namespace
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Task'
+      responses:
+        '201':
+          description: Task created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Task'
+
+  /api/v1alpha1/namespaces/{namespace}/warmpools:
+    get:
+      summary: List WarmPools
+      operationId: listWarmPools
+      parameters:
+        - name: namespace
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          description: List of warmpools
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WarmPoolList'
+    post:
+      summary: Create WarmPool
+      operationId: createWarmPool
+      parameters:
+        - name: namespace
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WarmPool'
+      responses:
+        '201':
+          description: WarmPool created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/WarmPool'
+
+components:
+  schemas:
+    # Basic Kubernetes types
+    ObjectMeta:
+      type: object
+      properties:
+        name:
+          type: string
+        namespace:
+          type: string
+        labels:
+          type: object
+          additionalProperties:
+            type: string
+        annotations:
+          type: object
+          additionalProperties:
+            type: string
+    
+    ListMeta:
+      type: object
+      properties:
+        resourceVersion:
+          type: string
+        continue:
+          type: string
+    
+    Condition:
+      type: object
+      properties:
+        type:
+          type: string
+        status:
+          type: string
+        lastTransitionTime:
+          type: string
+          format: date-time
+        reason:
+          type: string
+        message:
+          type: string
+    
+    # List schemas - structure is predictable
+    SandboxList:
+      type: object
+      properties:
+        apiVersion:
+          type: string
+        kind:
+          type: string
+        metadata:
+          $ref: '#/components/schemas/ListMeta'
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Sandbox'
+    
+    TaskList:
+      type: object
+      properties:
+        apiVersion:
+          type: string
+        kind:
+          type: string
+        metadata:
+          $ref: '#/components/schemas/ListMeta'
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/Task'
+    
+    WarmPoolList:
+      type: object
+      properties:
+        apiVersion:
+          type: string
+        kind:
+          type: string
+        metadata:
+          $ref: '#/components/schemas/ListMeta'
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/WarmPool'
+    
+    # Resource, Spec, Status schemas will be auto-generated from CRDs

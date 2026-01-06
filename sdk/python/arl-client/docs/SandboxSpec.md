@@ -5,9 +5,9 @@
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**pool_ref** | **str** | Name of the WarmPool to allocate from | 
-**keep_alive** | **bool** | Keep pod alive after task completion | [optional] 
-**resources** | [**ResourceRequirements**](ResourceRequirements.md) |  | [optional] 
+**keep_alive** | **bool** |  | [optional] 
+**pool_ref** | **str** |  | 
+**resources** | [**SandboxSpecResources**](SandboxSpecResources.md) |  | [optional] 
 
 ## Example
 

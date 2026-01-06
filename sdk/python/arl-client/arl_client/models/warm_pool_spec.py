@@ -17,9 +17,9 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict, Field, StrictInt
+from pydantic import BaseModel, ConfigDict, StrictInt
 from typing import Any, ClassVar, Dict, List
-from arl_client.models.pod_template_spec import PodTemplateSpec
+from arl_client.models.warm_pool_spec_template import WarmPoolSpecTemplate
 from typing import Optional, Set
 from typing_extensions import Self
 
@@ -27,8 +27,8 @@ class WarmPoolSpec(BaseModel):
     """
     WarmPoolSpec
     """ # noqa: E501
-    replicas: StrictInt = Field(description="Number of idle pods to maintain")
-    template: PodTemplateSpec
+    replicas: StrictInt
+    template: WarmPoolSpecTemplate
     __properties: ClassVar[List[str]] = ["replicas", "template"]
 
     model_config = ConfigDict(
@@ -86,7 +86,7 @@ class WarmPoolSpec(BaseModel):
 
         _obj = cls.model_validate({
             "replicas": obj.get("replicas"),
-            "template": PodTemplateSpec.from_dict(obj["template"]) if obj.get("template") is not None else None
+            "template": WarmPoolSpecTemplate.from_dict(obj["template"]) if obj.get("template") is not None else None
         })
         return _obj
 

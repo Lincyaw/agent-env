@@ -481,7 +481,7 @@ properties:
                                   key:
                                     type: string
                                   name:
-                                    default: ""
+                                    default: ''
                                     type: string
                                   optional:
                                     type: boolean
@@ -537,7 +537,7 @@ properties:
                                   key:
                                     type: string
                                   name:
-                                    default: ""
+                                    default: ''
                                     type: string
                                   optional:
                                     type: boolean
@@ -559,7 +559,7 @@ properties:
                           configMapRef:
                             properties:
                               name:
-                                default: ""
+                                default: ''
                                 type: string
                               optional:
                                 type: boolean
@@ -570,7 +570,7 @@ properties:
                           secretRef:
                             properties:
                               name:
-                                default: ""
+                                default: ''
                                 type: string
                               optional:
                                 type: boolean
@@ -727,7 +727,7 @@ properties:
                               format: int32
                               type: integer
                             service:
-                              default: ""
+                              default: ''
                               type: string
                           required:
                             - port
@@ -834,7 +834,7 @@ properties:
                               format: int32
                               type: integer
                             service:
-                              default: ""
+                              default: ''
                               type: string
                           required:
                             - port
@@ -1058,7 +1058,7 @@ properties:
                               format: int32
                               type: integer
                             service:
-                              default: ""
+                              default: ''
                               type: string
                           required:
                             - port
@@ -1233,7 +1233,7 @@ properties:
                                   key:
                                     type: string
                                   name:
-                                    default: ""
+                                    default: ''
                                     type: string
                                   optional:
                                     type: boolean
@@ -1289,7 +1289,7 @@ properties:
                                   key:
                                     type: string
                                   name:
-                                    default: ""
+                                    default: ''
                                     type: string
                                   optional:
                                     type: boolean
@@ -1311,7 +1311,7 @@ properties:
                           configMapRef:
                             properties:
                               name:
-                                default: ""
+                                default: ''
                                 type: string
                               optional:
                                 type: boolean
@@ -1322,7 +1322,7 @@ properties:
                           secretRef:
                             properties:
                               name:
-                                default: ""
+                                default: ''
                                 type: string
                               optional:
                                 type: boolean
@@ -1479,7 +1479,7 @@ properties:
                               format: int32
                               type: integer
                             service:
-                              default: ""
+                              default: ''
                               type: string
                           required:
                             - port
@@ -1586,7 +1586,7 @@ properties:
                               format: int32
                               type: integer
                             service:
-                              default: ""
+                              default: ''
                               type: string
                           required:
                             - port
@@ -1810,7 +1810,7 @@ properties:
                               format: int32
                               type: integer
                             service:
-                              default: ""
+                              default: ''
                               type: string
                           required:
                             - port
@@ -1966,7 +1966,7 @@ properties:
                 items:
                   properties:
                     name:
-                      default: ""
+                      default: ''
                       type: string
                   type: object
                   x-kubernetes-map-type: atomic
@@ -2001,7 +2001,7 @@ properties:
                                   key:
                                     type: string
                                   name:
-                                    default: ""
+                                    default: ''
                                     type: string
                                   optional:
                                     type: boolean
@@ -2057,7 +2057,7 @@ properties:
                                   key:
                                     type: string
                                   name:
-                                    default: ""
+                                    default: ''
                                     type: string
                                   optional:
                                     type: boolean
@@ -2079,7 +2079,7 @@ properties:
                           configMapRef:
                             properties:
                               name:
-                                default: ""
+                                default: ''
                                 type: string
                               optional:
                                 type: boolean
@@ -2090,7 +2090,7 @@ properties:
                           secretRef:
                             properties:
                               name:
-                                default: ""
+                                default: ''
                                 type: string
                               optional:
                                 type: boolean
@@ -2247,7 +2247,7 @@ properties:
                               format: int32
                               type: integer
                             service:
-                              default: ""
+                              default: ''
                               type: string
                           required:
                             - port
@@ -2354,7 +2354,7 @@ properties:
                               format: int32
                               type: integer
                             service:
-                              default: ""
+                              default: ''
                               type: string
                           required:
                             - port
@@ -2578,7 +2578,7 @@ properties:
                               format: int32
                               type: integer
                             service:
-                              default: ""
+                              default: ''
                               type: string
                           required:
                             - port
@@ -3037,7 +3037,7 @@ properties:
                         secretRef:
                           properties:
                             name:
-                              default: ""
+                              default: ''
                               type: string
                           type: object
                           x-kubernetes-map-type: atomic
@@ -3055,7 +3055,7 @@ properties:
                         secretRef:
                           properties:
                             name:
-                              default: ""
+                              default: ''
                               type: string
                           type: object
                           x-kubernetes-map-type: atomic
@@ -3086,7 +3086,7 @@ properties:
                           type: array
                           x-kubernetes-list-type: atomic
                         name:
-                          default: ""
+                          default: ''
                           type: string
                         optional:
                           type: boolean
@@ -3101,7 +3101,7 @@ properties:
                         nodePublishSecretRef:
                           properties:
                             name:
-                              default: ""
+                              default: ''
                               type: string
                           type: object
                           x-kubernetes-map-type: atomic
@@ -3303,7 +3303,7 @@ properties:
                         secretRef:
                           properties:
                             name:
-                              default: ""
+                              default: ''
                               type: string
                           type: object
                           x-kubernetes-map-type: atomic
@@ -3398,7 +3398,7 @@ properties:
                         secretRef:
                           properties:
                             name:
-                              default: ""
+                              default: ''
                               type: string
                           type: object
                           x-kubernetes-map-type: atomic
@@ -3518,7 +3518,7 @@ properties:
                                     type: array
                                     x-kubernetes-list-type: atomic
                                   name:
-                                    default: ""
+                                    default: ''
                                     type: string
                                   optional:
                                     type: boolean
@@ -3608,7 +3608,7 @@ properties:
                                     type: array
                                     x-kubernetes-list-type: atomic
                                   name:
-                                    default: ""
+                                    default: ''
                                     type: string
                                   optional:
                                     type: boolean
@@ -3670,7 +3670,7 @@ properties:
                         secretRef:
                           properties:
                             name:
-                              default: ""
+                              default: ''
                               type: string
                           type: object
                           x-kubernetes-map-type: atomic
@@ -3695,7 +3695,7 @@ properties:
                         secretRef:
                           properties:
                             name:
-                              default: ""
+                              default: ''
                               type: string
                           type: object
                           x-kubernetes-map-type: atomic
@@ -3750,7 +3750,7 @@ properties:
                         secretRef:
                           properties:
                             name:
-                              default: ""
+                              default: ''
                               type: string
                           type: object
                           x-kubernetes-map-type: atomic
@@ -3824,8 +3824,8 @@ properties:
               type: string
             status:
               enum:
-                - "True"
-                - "False"
+                - 'True'
+                - 'False'
                 - Unknown
               type: string
             type:
@@ -3849,5 +3849,6 @@ properties:
     type: object
 type: object
 x-kubernetes-validations:
-  - message: WarmPool name must be a valid DNS label (lowercase alphanumeric and hyphens only, no dots)
+  - message: WarmPool name must be a valid DNS label (lowercase alphanumeric and hyphens
+      only, no dots)
     rule: self.metadata.name.matches('^[a-z0-9]([-a-z0-9]*[a-z0-9])?$')

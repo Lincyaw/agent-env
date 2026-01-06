@@ -64,15 +64,3 @@ target/
 
 #Ipython Notebook
 .ipynb_checkpoints
-
-# OpenAPI Generator metadata
-.openapi-generator/
-.openapi-generator-ignore
-
-# CI files from generator
-.travis.yml
-.gitlab-ci.yml
-.github/
-
-# Generated scripts
-git_push.sh

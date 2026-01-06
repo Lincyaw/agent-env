@@ -5,13 +5,13 @@
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**name** | **str** |  | 
-**type** | **str** |  | 
-**content** | **str** | Patch content for FilePatch type | [optional] 
-**path** | **str** | File path for FilePatch operations | [optional] 
-**command** | **List[str]** | Command to execute for Command type | [optional] 
-**work_dir** | **str** |  | [optional] 
+**command** | **List[str]** |  | [optional] 
+**content** | **str** |  | [optional] 
 **env** | **Dict[str, str]** |  | [optional] 
+**name** | **str** |  | 
+**path** | **str** |  | [optional] 
+**type** | **str** |  | 
+**work_dir** | **str** |  | [optional] 
 
 ## Example
 

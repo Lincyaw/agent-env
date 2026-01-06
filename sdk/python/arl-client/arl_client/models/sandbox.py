@@ -29,8 +29,8 @@ class Sandbox(BaseModel):
     """
     Sandbox
     """ # noqa: E501
-    api_version: Optional[StrictStr] = Field(default=None, alias="apiVersion")
-    kind: Optional[StrictStr] = None
+    api_version: Optional[StrictStr] = Field(default=None, description="APIVersion defines the versioned schema of this representation", alias="apiVersion")
+    kind: Optional[StrictStr] = Field(default=None, description="Kind is a string value representing the REST resource")
     metadata: Optional[ObjectMeta] = None
     spec: Optional[SandboxSpec] = None
     status: Optional[SandboxStatus] = None

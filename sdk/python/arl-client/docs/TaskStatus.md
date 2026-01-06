@@ -5,14 +5,14 @@
 
 Name | Type | Description | Notes
 ------------ | ------------- | ------------- | -------------
-**state** | **str** |  | [optional] 
-**exit_code** | **int** |  | [optional] 
-**stdout** | **str** |  | [optional] 
-**stderr** | **str** |  | [optional] 
-**duration** | **str** |  | [optional] 
-**start_time** | **datetime** |  | [optional] 
 **completion_time** | **datetime** |  | [optional] 
 **conditions** | [**List[Condition]**](Condition.md) |  | [optional] 
+**duration** | **str** |  | [optional] 
+**exit_code** | **int** |  | [optional] 
+**start_time** | **datetime** |  | [optional] 
+**state** | **str** |  | [optional] 
+**stderr** | **str** |  | [optional] 
+**stdout** | **str** |  | [optional] 
 
 ## Example
 

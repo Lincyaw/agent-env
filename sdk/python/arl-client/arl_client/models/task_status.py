@@ -18,7 +18,7 @@ import re  # noqa: F401
 import json
 
 from datetime import datetime
-from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictInt, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
 from arl_client.models.condition import Condition
 from typing import Optional, Set
@@ -28,25 +28,15 @@ class TaskStatus(BaseModel):
     """
     TaskStatus
     """ # noqa: E501
-    state: Optional[StrictStr] = None
-    exit_code: Optional[StrictInt] = Field(default=None, alias="exitCode")
-    stdout: Optional[StrictStr] = None
-    stderr: Optional[StrictStr] = None
-    duration: Optional[StrictStr] = None
-    start_time: Optional[datetime] = Field(default=None, alias="startTime")
     completion_time: Optional[datetime] = Field(default=None, alias="completionTime")
     conditions: Optional[List[Condition]] = None
-    __properties: ClassVar[List[str]] = ["state", "exitCode", "stdout", "stderr", "duration", "startTime", "completionTime", "conditions"]
-
-    @field_validator('state')
-    def state_validate_enum(cls, value):
-        """Validates the enum"""
-        if value is None:
-            return value
-
-        if value not in set(['Pending', 'Running', 'Succeeded', 'Failed']):
-            raise ValueError("must be one of enum values ('Pending', 'Running', 'Succeeded', 'Failed')")
-        return value
+    duration: Optional[StrictStr] = None
+    exit_code: Optional[StrictInt] = Field(default=None, alias="exitCode")
+    start_time: Optional[datetime] = Field(default=None, alias="startTime")
+    state: Optional[StrictStr] = None
+    stderr: Optional[StrictStr] = None
+    stdout: Optional[StrictStr] = None
+    __properties: ClassVar[List[str]] = ["completionTime", "conditions", "duration", "exitCode", "startTime", "state", "stderr", "stdout"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -106,14 +96,14 @@ class TaskStatus(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
-            "state": obj.get("state"),
-            "exitCode": obj.get("exitCode"),
-            "stdout": obj.get("stdout"),
-            "stderr": obj.get("stderr"),
-            "duration": obj.get("duration"),
-            "startTime": obj.get("startTime"),
             "completionTime": obj.get("completionTime"),
-            "conditions": [Condition.from_dict(_item) for _item in obj["conditions"]] if obj.get("conditions") is not None else None
+            "conditions": [Condition.from_dict(_item) for _item in obj["conditions"]] if obj.get("conditions") is not None else None,
+            "duration": obj.get("duration"),
+            "exitCode": obj.get("exitCode"),
+            "startTime": obj.get("startTime"),
+            "state": obj.get("state"),
+            "stderr": obj.get("stderr"),
+            "stdout": obj.get("stdout")
         })
         return _obj
 

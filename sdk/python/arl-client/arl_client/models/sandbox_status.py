@@ -17,7 +17,7 @@ import pprint
 import re  # noqa: F401
 import json
 
-from pydantic import BaseModel, ConfigDict, Field, StrictStr, field_validator
+from pydantic import BaseModel, ConfigDict, Field, StrictStr
 from typing import Any, ClassVar, Dict, List, Optional
 from arl_client.models.condition import Condition
 from typing import Optional, Set
@@ -27,22 +27,12 @@ class SandboxStatus(BaseModel):
     """
     SandboxStatus
     """ # noqa: E501
-    phase: Optional[StrictStr] = None
-    pod_name: Optional[StrictStr] = Field(default=None, alias="podName")
-    pod_ip: Optional[StrictStr] = Field(default=None, alias="podIP")
-    work_dir: Optional[StrictStr] = Field(default=None, alias="workDir")
     conditions: Optional[List[Condition]] = None
-    __properties: ClassVar[List[str]] = ["phase", "podName", "podIP", "workDir", "conditions"]
-
-    @field_validator('phase')
-    def phase_validate_enum(cls, value):
-        """Validates the enum"""
-        if value is None:
-            return value
-
-        if value not in set(['Pending', 'Bound', 'Ready', 'Failed']):
-            raise ValueError("must be one of enum values ('Pending', 'Bound', 'Ready', 'Failed')")
-        return value
+    phase: Optional[StrictStr] = None
+    pod_ip: Optional[StrictStr] = Field(default=None, alias="podIP")
+    pod_name: Optional[StrictStr] = Field(default=None, alias="podName")
+    work_dir: Optional[StrictStr] = Field(default=None, alias="workDir")
+    __properties: ClassVar[List[str]] = ["conditions", "phase", "podIP", "podName", "workDir"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -102,11 +92,11 @@ class SandboxStatus(BaseModel):
             return cls.model_validate(obj)
 
         _obj = cls.model_validate({
+            "conditions": [Condition.from_dict(_item) for _item in obj["conditions"]] if obj.get("conditions") is not None else None,
             "phase": obj.get("phase"),
-            "podName": obj.get("podName"),
             "podIP": obj.get("podIP"),
-            "workDir": obj.get("workDir"),
-            "conditions": [Condition.from_dict(_item) for _item in obj["conditions"]] if obj.get("conditions") is not None else None
+            "podName": obj.get("podName"),
+            "workDir": obj.get("workDir")
         })
         return _obj
 
