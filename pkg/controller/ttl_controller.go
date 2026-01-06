@@ -16,6 +16,11 @@ import (
 	"github.com/Lincyaw/agent-env/pkg/middleware"
 )
 
+const (
+	// auditTimeFormat is the standard time format used for audit records
+	auditTimeFormat = time.RFC3339
+)
+
 // TTLReconciler reconciles completed Tasks for TTL-based cleanup
 type TTLReconciler struct {
 	client.Client
@@ -97,10 +102,10 @@ func (r *TTLReconciler) reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 			StepCount:  len(task.Spec.Steps),
 		}
 		if task.Status.StartTime != nil {
-			record.StartTime = task.Status.StartTime.Format(time.RFC3339)
+			record.StartTime = task.Status.StartTime.Format(auditTimeFormat)
 		}
 		if task.Status.CompletionTime != nil {
-			record.CompletionTime = task.Status.CompletionTime.Format(time.RFC3339)
+			record.CompletionTime = task.Status.CompletionTime.Format(auditTimeFormat)
 		}
 		if err := r.AuditWriter.WriteTaskCompletion(ctx, record); err != nil {
 			logger.Error(err, "Failed to write task audit record")

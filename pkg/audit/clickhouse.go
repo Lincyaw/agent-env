@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"net/url"
 	"sync"
 	"time"
 
@@ -35,9 +36,13 @@ type ClickHouseConfig struct {
 }
 
 // NewClickHouseWriter creates a new ClickHouse audit writer
+// Note: Requires the ClickHouse driver to be imported in the main package:
+// import _ "github.com/ClickHouse/clickhouse-go/v2"
 func NewClickHouseWriter(cfg ClickHouseConfig) (*ClickHouseWriter, error) {
+	// URL-encode password to handle special characters safely
+	encodedPassword := url.QueryEscape(cfg.Password)
 	dsn := fmt.Sprintf("clickhouse://%s:%s@%s/%s",
-		cfg.Username, cfg.Password, cfg.Addr, cfg.Database)
+		cfg.Username, encodedPassword, cfg.Addr, cfg.Database)
 
 	db, err := sql.Open("clickhouse", dsn)
 	if err != nil {

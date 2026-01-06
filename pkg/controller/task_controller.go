@@ -257,10 +257,10 @@ func (r *TaskReconciler) reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 			StepCount:  len(task.Spec.Steps),
 		}
 		if task.Status.StartTime != nil {
-			record.StartTime = task.Status.StartTime.Format("2006-01-02T15:04:05Z07:00")
+			record.StartTime = task.Status.StartTime.Format(auditTimeFormat)
 		}
 		if task.Status.CompletionTime != nil {
-			record.CompletionTime = task.Status.CompletionTime.Format("2006-01-02T15:04:05Z07:00")
+			record.CompletionTime = task.Status.CompletionTime.Format(auditTimeFormat)
 		}
 		if err := r.AuditWriter.WriteTaskCompletion(ctx, record); err != nil {
 			logger.Error(err, "Failed to write task audit record")
