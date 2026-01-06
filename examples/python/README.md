@@ -2,52 +2,113 @@
 
 This directory contains examples demonstrating various features of the ARL Python SDK.
 
+# ARL Python SDK Examples
+
+This directory contains examples demonstrating various features of the ARL Python SDK.
+
 ## Prerequisites
 
-1. Install the ARL Python SDK:
+1. **Install dependencies using uv:**
    ```bash
-   cd sdk/python/arl-client
-   pip install -e .
+   cd examples/python
+   uv sync
    ```
 
 2. Ensure you have access to a Kubernetes cluster with ARL infrastructure deployed
 3. Configure kubectl to access your cluster
+4. Create a WarmPool named `python-39-std`
 
-## Examples
+## Running Examples
 
-### Basic Usage (`basic_usage.py`)
+### Individual Examples
+
+Each example demonstrates a specific feature and can be run independently:
+
+```bash
+cd examples/python
+
+# Basic serial execution
+uv run python 01_basic_execution.py
+
+# Multi-step data pipeline
+uv run python 02_multi_step_pipeline.py
+
+# Environment variables
+uv run python 03_environment_variables.py
+
+# Working directory
+uv run python 04_working_directory.py
+
+# Error handling
+uv run python 05_error_handling.py
+
+# Long-running tasks
+uv run python 06_long_running_task.py
+
+# Sandbox reuse (host-like behavior)
+uv run python 07_sandbox_reuse.py
+```
+
+### Run All Examples
+
+Run all examples as tests:
+
+```bash
+cd examples/python
+uv run python run_all_examples.py
+```
+
+## Examples Overview
+
+### 01. Basic Execution (`01_basic_execution.py`)
 
 Simple example showing how to:
 - Create a sandbox using a context manager
-- Execute a task with file and command steps
+- Execute serial steps
 - Read task output
 
-```bash
-python basic_usage.py
-```
+### 02. Multi-Step Pipeline (`02_multi_step_pipeline.py`)
 
-### Batch Tasks (`batch_tasks.py`)
+Demonstrates data processing pipeline:
+- Create data files
+- Process data with Python scripts
+- Pass data between steps
+- Verify output
 
-Demonstrates parallel task execution:
-- Run multiple tasks concurrently
-- Use ThreadPoolExecutor for parallelism
-- Collect and display results
+### 03. Environment Variables (`03_environment_variables.py`)
 
-```bash
-python batch_tasks.py
-```
+Shows environment variable usage:
+- Set custom environment variables
+- Access variables in commands
+- Combine system and custom variables
 
-### Error Handling (`error_handling.py`)
+### 04. Working Directory (`04_working_directory.py`)
 
-Shows how to handle various error scenarios:
+Working directory management:
+- Set custom working directory
+- Create subdirectories
+- Work with relative paths
+
+### 05. Error Handling (`05_error_handling.py`)
+
+Error handling scenarios:
 - Task execution failures
-- Timeouts
-- Invalid pool references
+- Invalid commands
 - Retry logic
 
-```bash
-python error_handling.py
-```
+### 06. Long-Running Task (`06_long_running_task.py`)
+
+Long-running task execution:
+- Tasks with longer execution time
+- Setting timeouts
+- Tracking duration
+
+### 07. Sandbox Reuse (`07_sandbox_reuse.py`)
+
+Host-like behavior with sandbox reuse:
+- Keep sandbox alive between tasks
+- Serial task execution in same environment
+- State persistence across tasks
 
 ## Common Patterns
 

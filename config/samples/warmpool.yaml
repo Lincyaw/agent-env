@@ -2,13 +2,10 @@
 apiVersion: arl.infra.io/v1alpha1
 kind: WarmPool
 metadata:
-  name: python-3.9-std
+  name: python-39-std
 spec:
   replicas: 2
   template:
-    metadata:
-      labels:
-        app: arl-sandbox
     spec:
       containers:
         - name: executor
@@ -18,7 +15,7 @@ spec:
             - name: workspace
               mountPath: /workspace
         - name: sidecar
-          image: arl-sidecar:latest
+          image: 10.10.10.240/library/arl-sidecar:latest
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8080

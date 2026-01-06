@@ -177,15 +177,37 @@ ARL Infrastructure provides a Python SDK for programmatic access to ARL resource
 
 ### Installation
 
+**Using uv (Recommended):**
+
 ```bash
 cd sdk/python/arl-client
-pip install -e .
+uv sync
+```
+
+**Using pip:**
+
+```bash
+pip install -e sdk/python/arl-client
 ```
 
 Or install directly from the repository:
 
 ```bash
 pip install git+https://github.com/Lincyaw/agent-env.git#subdirectory=sdk/python/arl-client
+```
+
+### Development Setup
+
+```bash
+# Install with development dependencies
+cd sdk/python/arl-client
+uv sync --all-groups
+
+# Run quality checks
+make python-quality
+
+# Auto-fix code issues
+make python-fix
 ```
 
 ### Quick Start
@@ -294,6 +316,20 @@ The Python SDK is auto-generated from CRD OpenAPI schemas using:
 1. `controller-gen` - Generates CRD manifests with OpenAPI schemas
 2. Custom script - Creates unified OpenAPI specification
 3. `openapi-generator` - Generates Python client code
+
+### Python Code Quality
+
+```bash
+# Run all quality checks (Ruff, MyPy, Pytest, Bandit)
+make python-quality
+
+# Auto-fix formatting and linting issues
+make python-fix
+
+# Install Python dependencies
+make python-install-sdk
+make python-install-examples
+```
 
 ### Run Locally
 
