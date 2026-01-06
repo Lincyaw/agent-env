@@ -117,6 +117,35 @@ func (r *WarmPoolReconciler) reconcile(ctx context.Context, req ctrl.Request) (c
 			}
 			logger.Info("Created pod", "pod", pod.Name)
 		}
+	} else if needed < 0 {
+		// Delete excess pods (scale down)
+		toDelete := -needed
+		logger.Info("Scaling down pool", "toDelete", toDelete)
+
+		// Get idle pods to delete
+		var idlePods corev1.PodList
+		if err := r.List(ctx, &idlePods, client.InNamespace(pool.Namespace),
+			client.MatchingLabels{
+				PoolLabelKey:   pool.Name,
+				StatusLabelKey: StatusIdle,
+			}); err != nil {
+			logger.Error(err, "Failed to list idle pods for deletion")
+		} else {
+			// Delete the excess idle pods
+			deleted := int32(0)
+			for i := range idlePods.Items {
+				if deleted >= toDelete {
+					break
+				}
+				pod := &idlePods.Items[i]
+				if err := r.Delete(ctx, pod); err != nil {
+					logger.Error(err, "Failed to delete pod", "pod", pod.Name)
+					continue
+				}
+				logger.Info("Deleted excess pod", "pod", pod.Name)
+				deleted++
+			}
+		}
 	}
 
 	// Update status

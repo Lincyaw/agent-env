@@ -20,28 +20,18 @@ if ! minikube status >/dev/null 2>&1; then
     exit 1
 fi
 
-echo -e "${YELLOW}Step 1: Deploying CRDs...${NC}"
-minikube kubectl -- apply -f "$PROJECT_ROOT/config/crd/"
-echo -e "${GREEN}✓ CRDs deployed${NC}"
+echo -e "${YELLOW}Step 1: Deploying ARL Operator with Helm...${NC}"
+helm upgrade --install arl-operator "$PROJECT_ROOT/charts/arl-operator" \
+  --namespace arl-system --create-namespace \
+  --set crds.install=true \
+  --wait --timeout=2m
+echo -e "${GREEN}✓ Operator deployed via Helm${NC}"
 
-echo -e "\n${YELLOW}Step 2: Deploying ARL Operator...${NC}"
-minikube kubectl -- apply -f "$PROJECT_ROOT/config/operator/deployment.yaml"
-echo -e "${GREEN}✓ Operator deployment created${NC}"
-
-echo -e "\n${YELLOW}Step 3: Waiting for operator to be ready...${NC}"
-echo "This may take a minute..."
-if minikube kubectl -- wait --for=condition=ready pod -l app=arl-operator -n arl-system --timeout=120s 2>/dev/null; then
-    echo -e "${GREEN}✓ Operator is ready${NC}"
-else
-    echo -e "${YELLOW}Warning: Operator pod not ready yet, continuing anyway...${NC}"
-    echo "You can check status with: minikube kubectl -- get pods -n arl-system"
-fi
-
-echo -e "\n${YELLOW}Step 4: Deploying WarmPool...${NC}"
+echo -e "\n${YELLOW}Step 2: Deploying WarmPool...${NC}"
 minikube kubectl -- apply -f "$SCRIPT_DIR/manifests/warmpool.yaml"
 echo -e "${GREEN}✓ WarmPool created${NC}"
 
-echo -e "\n${YELLOW}Step 5: Waiting for warm pool pods to be ready...${NC}"
+echo -e "\n${YELLOW}Step 3: Waiting for warm pool pods to be ready...${NC}"
 echo "This may take a minute..."
 sleep 5  # Give operator time to react
 

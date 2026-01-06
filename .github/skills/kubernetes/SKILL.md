@@ -20,11 +20,18 @@ This skill provides comprehensive Kubernetes operations and testing capabilities
 ### Deploy and Verify Operator
 
 ```bash
-# Minikube: Build and deploy operator with CRDs
-make docker-build && make deploy
+# Minikube: Build and deploy operator with CRDs using Helm
+make docker-build && helm upgrade --install arl-operator charts/arl-operator \
+  --namespace arl-system --create-namespace --set crds.install=true --wait
 
 # Standard K8s: Build, push and deploy
-REGISTRY=your-registry.com make k8s-build-push && make k8s-deploy
+REGISTRY=your-registry.com make k8s-build-push && \
+  helm upgrade --install arl-operator charts/arl-operator \
+  --namespace arl-system --create-namespace \
+  --set crds.install=true \
+  --set image.repository=your-registry.com/arl-operator \
+  --set sidecar.image.repository=your-registry.com/arl-sidecar \
+  --wait
 
 # Verify operator is running
 kubectl get pods -n arl-system
@@ -94,10 +101,13 @@ uv add <package-name>
 #### CRD Operations
 
 ```bash
-# Install CRDs
-make install-crds
-# Or manually:
-kubectl apply -f config/crd/
+# Install CRDs via Helm
+helm upgrade --install arl-operator charts/arl-operator \
+  --namespace arl-system --create-namespace \
+  --set crds.install=true --wait
+
+# Or manually apply CRDs only
+kubectl apply -f charts/arl-operator/crds/
 
 # List installed CRDs
 kubectl get crds | grep arl.infra.io
@@ -105,8 +115,8 @@ kubectl get crds | grep arl.infra.io
 # View CRD definition
 kubectl get crd warmpools.arl.infra.io -o yaml
 
-# Uninstall CRDs
-make uninstall-crds
+# Uninstall operator and CRDs
+helm uninstall arl-operator -n arl-system --wait
 ```
 
 #### Working with Custom Resources
@@ -319,11 +329,12 @@ make k8s-undeploy
 
 ```bash
 # 1. Validate CRD YAML before applying
-kubectl apply --dry-run=client -f config/crd/warmpool.yaml
-kubectl apply --dry-run=server -f config/crd/warmpool.yaml
+kubectl apply --dry-run=client -f charts/arl-operator/crds/arl.infra.io_warmpools.yaml
+kubectl apply --dry-run=server -f charts/arl-operator/crds/arl.infra.io_warmpools.yaml
 
-# 2. Install CRDs
-make install-crds
+# 2. Install operator with CRDs via Helm
+helm upgrade --install arl-operator charts/arl-operator \
+  --namespace arl-system --create-namespace --set crds.install=true --wait
 
 # 3. Verify CRD registration
 kubectl get crds | grep arl.infra.io
@@ -862,15 +873,14 @@ kubectl logs -n arl-system -l app=arl-operator > operator.log
 - `make minikube-delete` - Delete minikube cluster
 
 **Deployment (Minikube):**
-- `make deploy` - Deploy operator and CRDs
-- `make deploy-samples` - Deploy sample resources
-- `make undeploy` - Remove all resources
-- `make install-crds` - Install CRDs only
-- `make uninstall-crds` - Remove CRDs only
+- `helm upgrade --install arl-operator charts/arl-operator --namespace arl-system --create-namespace --set crds.install=true --wait` - Deploy operator with CRDs
+- `kubectl apply -f config/samples/` - Deploy sample resources
+- `helm uninstall arl-operator -n arl-system --wait` - Remove operator and CRDs
+- `kubectl apply -f charts/arl-operator/crds/` - Install CRDs only
 
 **Deployment (Standard K8s):**
-- `make k8s-deploy` - Deploy to K8s cluster
-- `make k8s-undeploy` - Remove from K8s cluster
+- `helm upgrade --install arl-operator charts/arl-operator --namespace arl-system --create-namespace --set crds.install=true --set image.repository=<registry>/arl-operator --set sidecar.image.repository=<registry>/arl-sidecar --wait` - Deploy to K8s cluster
+- `helm uninstall arl-operator -n arl-system --wait` - Remove from K8s cluster
 
 **Testing:**
 - `make test-integration` - Run integration tests

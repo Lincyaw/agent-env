@@ -15,11 +15,16 @@ build:
   tagPolicy:
     gitCommit: {}
 
-# Default manifests
+# Default manifests - using Helm chart
 manifests:
-  rawYaml:
-  - config/crd/*.yaml
-  - config/operator/deployment.yaml
+  helm:
+    releases:
+    - name: arl-operator
+      chartPath: charts/arl-operator
+      namespace: arl-system
+      createNamespace: true
+      setValues:
+        crds.install: true
 
 # Default deploy configuration (for minikube)
 deploy:
@@ -44,9 +49,16 @@ profiles:
     tagPolicy:
       sha256: {}
   manifests:
-    rawYaml:
-    - config/crd/*.yaml
-    - config/operator/deployment-k8s.yaml
+    helm:
+      releases:
+      - name: arl-operator
+        chartPath: charts/arl-operator
+        namespace: arl-system
+        createNamespace: true
+        setValues:
+          crds.install: true
+          image.repository: 10.10.10.240/library/arl-operator
+          sidecar.image.repository: 10.10.10.240/library/arl-sidecar
   deploy:
     kubectl:
       flags:
@@ -79,9 +91,14 @@ profiles:
         - src: 'pkg/sidecar/**/*.go'
           dest: /app
   manifests:
-    rawYaml:
-    - config/crd/*.yaml
-    - config/operator/deployment.yaml
+    helm:
+      releases:
+      - name: arl-operator
+        chartPath: charts/arl-operator
+        namespace: arl-system
+        createNamespace: true
+        setValues:
+          crds.install: true
   deploy:
     kubectl:
       flags:
@@ -92,9 +109,15 @@ profiles:
 # Profile for deploying samples
 - name: with-samples
   manifests:
+    helm:
+      releases:
+      - name: arl-operator
+        chartPath: charts/arl-operator
+        namespace: arl-system
+        createNamespace: true
+        setValues:
+          crds.install: true
     rawYaml:
-    - config/crd/*.yaml
-    - config/operator/deployment.yaml
     - config/samples/*.yaml
   deploy:
     kubectl:
@@ -116,9 +139,17 @@ profiles:
     tagPolicy:
       sha256: {}
   manifests:
+    helm:
+      releases:
+      - name: arl-operator
+        chartPath: charts/arl-operator
+        namespace: arl-system
+        createNamespace: true
+        setValues:
+          crds.install: true
+          image.repository: 10.10.10.240/library/arl-operator
+          sidecar.image.repository: 10.10.10.240/library/arl-sidecar
     rawYaml:
-    - config/crd/*.yaml
-    - config/operator/deployment-k8s.yaml
     - config/samples/*.yaml
   deploy:
     kubectl:

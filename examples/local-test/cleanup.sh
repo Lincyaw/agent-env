@@ -46,13 +46,9 @@ sleep 3
 minikube kubectl -- wait --for=delete pod -l arl.infra.io/pool=python-39-std --timeout=60s 2>/dev/null || echo "Pods already gone or timeout"
 echo -e "${GREEN}✓ Warm pool pods terminated${NC}"
 
-echo -e "\n${YELLOW}Step 5: Deleting Operator...${NC}"
-minikube kubectl -- delete -f "$PROJECT_ROOT/config/operator/deployment.yaml" --timeout=30s || echo "Operator already deleted or timeout"
-echo -e "${GREEN}✓ Operator deleted${NC}"
-
-echo -e "\n${YELLOW}Step 6: Deleting CRDs...${NC}"
-minikube kubectl -- delete -f "$PROJECT_ROOT/config/crd/" --timeout=30s || echo "CRDs already deleted or timeout"
-echo -e "${GREEN}✓ CRDs deleted${NC}"
+echo -e "\n${YELLOW}Step 5: Uninstalling Helm release...${NC}"
+helm uninstall arl-operator -n arl-system --wait --timeout=60s || echo "Helm release already deleted or timeout"
+echo -e "${GREEN}✓ Helm release uninstalled${NC}"
 
 echo -e "\n${GREEN}=== Cleanup Complete ===${NC}"
 echo -e "\nRemaining resources:"

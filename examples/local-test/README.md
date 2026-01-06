@@ -64,14 +64,11 @@ docker images | grep arl
 ### 3. Deploy ARL Infrastructure
 
 ```bash
-# Apply CRDs
-minikube kubectl -- apply -f ../../config/crd/
-
-# Deploy operator
-minikube kubectl -- apply -f ../../config/operator/deployment.yaml
-
-# Wait for operator to be ready
-minikube kubectl -- wait --for=condition=ready pod -l app=arl-operator -n arl-system --timeout=120s
+# Install ARL operator using Helm
+helm upgrade --install arl-operator ../../charts/arl-operator \
+  --namespace arl-system --create-namespace \
+  --set crds.install=true \
+  --wait --timeout=2m
 
 # Deploy WarmPool
 minikube kubectl -- apply -f manifests/warmpool.yaml
@@ -196,11 +193,8 @@ minikube kubectl -- delete tasks --all
 minikube kubectl -- delete sandboxes --all
 minikube kubectl -- delete warmpools --all
 
-# Delete operator
-minikube kubectl -- delete -f ../../config/operator/deployment.yaml
-
-# Delete CRDs
-minikube kubectl -- delete -f ../../config/crd/
+# Uninstall Helm release
+helm uninstall arl-operator -n arl-system --wait
 
 # Stop minikube (optional)
 minikube stop
