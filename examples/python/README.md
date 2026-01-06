@@ -26,12 +26,17 @@ uv run python 04_working_directory.py
 uv run python 05_error_handling.py
 uv run python 06_long_running_task.py
 uv run python 07_sandbox_reuse.py
+uv run python 08_streaming_execution.py
+uv run python 09_interactive_shell.py
+uv run python 10_direct_sidecar_client.py  # Demo only - needs real pod IP
 
 # Run all examples
 uv run python run_all_examples.py
 ```
 
 ## Examples
+
+### Basic Examples (Task CRD)
 
 - **01_basic_execution.py**: Create sandbox, execute steps, read output
 - **02_multi_step_pipeline.py**: Data processing pipeline with multiple steps
@@ -40,6 +45,12 @@ uv run python run_all_examples.py
 - **05_error_handling.py**: Error handling and retries
 - **06_long_running_task.py**: Long-running tasks with timeouts
 - **07_sandbox_reuse.py**: Sandbox reuse for serial tasks
+
+### gRPC Streaming Examples (New!)
+
+- **08_streaming_execution.py**: Real-time output streaming via gRPC
+- **09_interactive_shell.py**: Bidirectional interactive shell sessions
+- **10_direct_sidecar_client.py**: Low-level SidecarClient API demonstration
 
 ## Common Patterns
 
