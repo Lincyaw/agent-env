@@ -1,0 +1,27 @@
+---
+apiVersion: arl.infra.io/v1alpha1
+kind: WarmPool
+metadata:
+  name: python-39-std
+spec:
+  replicas: 2
+  template:
+    spec:
+      containers:
+        - name: executor
+          image: python:3.9-slim
+          command: ["/bin/sh", "-c", "sleep infinity"]
+          volumeMounts:
+            - name: workspace
+              mountPath: /workspace
+        - name: sidecar
+          image: arl-sidecar:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8080
+          volumeMounts:
+            - name: workspace
+              mountPath: /workspace
+      volumes:
+        - name: workspace
+          emptyDir: {}
