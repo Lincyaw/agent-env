@@ -388,102 +388,47 @@ Task executed successfully
 
 ---
 
-### 方式一：通过 Sidecar HTTP API（推荐）
+### 方式一：通过 Sidecar gRPC API（推荐）
 
-这是最灵活的方式，适合需要精确控制进程生命周期的场景。
+这是最灵活的方式，适合需要精确控制进程生命周期的场景。Sidecar 现在使用 gRPC 协议（默认在 Pod 的 50051 端口）。
 
-#### 1. 启动后台进程
+#### gRPC 服务定义
 
-直接调用 Sidecar 的 HTTP API（Sidecar 默认在 Pod 的 8080 端口）：
+Sidecar 提供了 `AgentService`，包含以下主要方法：
 
-```bash
-# 获取 Pod IP
-POD_IP=$(kubectl get sandbox my-workspace -o jsonpath='{.status.podIP}')
+- **Execute**: 执行命令（支持后台模式）
+- **SignalProcess**: 发送信号到进程
+- **UpdateFiles**: 创建或更新文件
+- **Reset**: 清理工作空间
+- **InteractiveShell**: 交互式 Shell 会话（双向流）
 
-# 启动 Python Web 服务器（后台模式）
-curl -X POST http://${POD_IP}:8080/execute \
-  -H "Content-Type: application/json" \
-  -d '{
-    "command": ["python", "-m", "http.server", "8000"],
-    "working_dir": "/workspace",
-    "background": true,
-    "env": {
-      "PYTHONUNBUFFERED": "1"
-    }
-  }'
+详细的 gRPC 服务定义请参考：`proto/agent.proto`
+
+#### Python 示例
+
+推荐使用 Python SDK 来与 Sidecar 交互。完整示例请查看 `examples/python/` 目录：
+
+```python
+from arl import SandboxSession
+
+# 使用上下文管理器自动管理资源
+with SandboxSession("python-pool", namespace="default") as session:
+    # 执行命令示例
+    result = session.execute([
+        {
+            "name": "start-server",
+            "type": "Command",
+            "command": ["python", "-m", "http.server", "8000"],
+        }
+    ])
 ```
 
-**响应示例：**
-```json
-{
-  "stdout": "",
-  "stderr": "",
-  "exit_code": 0,
-  "done": false
-}
-```
-
-进程将在后台持续运行，Sidecar 会记录其 PID。
-
-#### 2. 与后台进程交互
-
-后台进程运行后，可以通过新的命令与之交互：
-
-```bash
-# 测试 Web 服务器是否正在运行
-curl -X POST http://${POD_IP}:8080/execute \
-  -H "Content-Type: application/json" \
-  -d '{
-    "command": ["curl", "http://localhost:8000"],
-    "timeout_seconds": 5
-  }'
-```
-
-#### 3. 查看进程状态
-
-```bash
-# 列出所有运行的进程
-curl -X POST http://${POD_IP}:8080/execute \
-  -H "Content-Type: application/json" \
-  -d '{
-    "command": ["ps", "aux"]
-  }'
-```
-
-#### 4. 停止后台进程
-
-使用 Signal API 发送信号：
-
-```bash
-# 先找到进程 PID
-PROCESS_PID=$(curl -X POST http://${POD_IP}:8080/execute \
-  -H "Content-Type: application/json" \
-  -d '{"command": ["pgrep", "-f", "http.server"]}' | jq -r '.stdout' | tr -d '\n')
-
-# 发送 SIGTERM 优雅停止
-curl -X POST http://${POD_IP}:8080/signal \
-  -H "Content-Type: application/json" \
-  -d "{
-    \"pid\": ${PROCESS_PID},
-    \"signal\": \"SIGTERM\"
-  }"
-
-# 或发送 SIGKILL 强制终止
-curl -X POST http://${POD_IP}:8080/signal \
-  -H "Content-Type: application/json" \
-  -d "{
-    \"pid\": ${PROCESS_PID},
-    \"signal\": \"SIGKILL\"
-  }"
-```
-
-**响应示例：**
-```json
-{
-  "success": true,
-  "message": "signal SIGTERM sent to process 1234"
-}
-```
+**更多示例：**
+- 基本执行: `examples/python/01_basic_execution.py`
+- 多步骤流水线: `examples/python/02_multi_step_pipeline.py`
+- 环境变量: `examples/python/03_environment_variables.py`
+- 长期运行任务: `examples/python/06_long_running_task.py`
+- 沙箱复用: `examples/python/07_sandbox_reuse.py`
 
 ---
 
@@ -803,53 +748,61 @@ EOF
 
 ### Host 模式 API 参考
 
-#### Sidecar HTTP API 端点
+#### Sidecar gRPC 服务
 
-| 端点 | 方法 | 描述 |
-|------|------|------|
-| `/execute` | POST | 执行命令（支持 `background: true`） |
-| `/signal` | POST | 发送信号到进程 |
-| `/reset` | POST | 清理所有后台进程和工作空间 |
-| `/health` | GET | 健康检查 |
+Sidecar 现在使用 gRPC 协议（默认端口：50051）。主要的 RPC 方法：
 
-#### Execute API 请求格式
+| RPC 方法 | 描述 | 请求类型 | 响应类型 |
+|---------|------|---------|---------|
+| `Execute` | 执行命令（支持后台模式） | `ExecRequest` | `stream ExecLog` |
+| `SignalProcess` | 发送信号到进程 | `SignalRequest` | `SignalResponse` |
+| `UpdateFiles` | 创建或更新文件 | `FileRequest` | `FileResponse` |
+| `Reset` | 清理工作空间 | `ResetRequest` | `ResetResponse` |
+| `InteractiveShell` | 交互式 Shell | `stream ShellInput` | `stream ShellOutput` |
 
-```json
-{
-  "command": ["python", "server.py"],
-  "working_dir": "/workspace",
-  "env": {
-    "DEBUG": "true"
-  },
-  "background": true,
-  "timeout_seconds": 0
+#### gRPC 消息格式示例
+
+**ExecRequest**（执行命令）:
+```protobuf
+message ExecRequest {
+  repeated string command = 1;           // ["python", "server.py"]
+  map<string, string> env = 2;          // {"DEBUG": "true"}
+  string working_dir = 3;               // "/workspace"
+  bool background = 4;                  // true 后台运行
+  int32 timeout_seconds = 5;            // 超时时间
 }
 ```
 
-#### Signal API 请求格式
-
-```json
-{
-  "pid": 1234,
-  "signal": "SIGTERM"
+**SignalRequest**（发送信号）:
+```protobuf
+message SignalRequest {
+  int32 pid = 1;      // 进程 PID
+  string signal = 2;  // "SIGTERM", "SIGINT", "SIGKILL"
 }
 ```
 
-**支持的信号：**
-- `SIGTERM`（优雅停止，15）
-- `SIGINT`（中断，2）
-- `SIGKILL`（强制终止，9）
-
-#### Reset API 请求格式
-
-```json
-{
-  "preserve_files": true
+**ResetRequest**（重置工作空间）:
+```protobuf
+message ResetRequest {
+  bool preserve_files = 1;  // true: 保留文件，仅终止进程
 }
 ```
 
-- `preserve_files: false`：删除所有文件并终止所有进程
-- `preserve_files: true`：仅终止进程，保留文件
+#### Python 使用示例
+
+推荐使用 Python SDK，它封装了与 Sidecar 的 gRPC 通信：
+
+```python
+from arl import SandboxSession
+
+with SandboxSession("python-pool", namespace="default") as session:
+    result = session.execute([
+        {"name": "task", "type": "Command", "command": ["echo", "hello"]}
+    ])
+```
+
+完整的 gRPC 服务定义请参考：`proto/agent.proto`
+更多 Python 示例请查看：`examples/python/`
 
 ---
 
