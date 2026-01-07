@@ -85,6 +85,9 @@ clickhouse:
   password: ""
   batchSize: 100
   flushInterval: "10s"
+  # Storage configuration
+  storageClassName: "juicefs-sc"
+  storageSize: "10Gi"
 
 # CRD installation
 crds:

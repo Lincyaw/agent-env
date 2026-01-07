@@ -45,7 +45,8 @@ spec:
         spec:
           accessModes:
             - ReadWriteOnce
+          storageClassName: {{ .Values.clickhouse.storageClassName | quote }}
           resources:
             requests:
-              storage: 10Gi
+              storage: {{ .Values.clickhouse.storageSize | default "10Gi" | quote }}
 {{- end }}

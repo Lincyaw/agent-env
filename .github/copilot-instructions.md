@@ -9,6 +9,30 @@
 - **Go version**: Using Go 1.25.0 - follow latest best practices
 - **DO NOT write** documentation unless specifically asked
 
+## Architecture Change Management
+
+**CRITICAL**: After any code change, ALWAYS perform impact analysis using architecture files:
+
+1. **Query Impact Range**: Check `architecture/propagation-rules.yaml` to identify:
+   - Which components are affected by your changes
+   - What actions are required (automated commands or manual reviews)
+   - Which files need updates due to dependencies in `architecture/dependencies.yaml`
+
+2. **Execute Required Actions**: Run all commands specified in matching propagation rules:
+   - Automated: Run `make` commands (e.g., `make manifests`, `make proto-go`, `make sdk-python`)
+   - Manual reviews: Check and update files listed in the rule's `manual` actions
+
+3. **Maintain Architecture Files**: When making significant changes, update architecture documentation:
+   - **Add new components**: Update `architecture/components.yaml` with component details
+   - **Change dependencies**: Update `architecture/dependencies.yaml` with new/modified relationships
+   - **New propagation patterns**: Update `architecture/propagation-rules.yaml` with impact rules
+   - **Validate changes**: Run `make arch-check` to verify architecture files are consistent
+
+4. **Scope of "Significant Changes"**:
+   - Adding/removing components (controllers, CRDs, webhooks, services)
+   - Changing component interfaces (API fields, proto methods, gRPC endpoints)
+   - Adding/removing dependencies between components
+   - Modifying responsibility boundaries
 
 ## Python
 
