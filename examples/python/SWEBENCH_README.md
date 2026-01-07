@@ -25,7 +25,7 @@ This is a SWE-bench instance for the [emotion](https://github.com/emotion-js/emo
 1. **Kubernetes cluster** with ARL operator deployed
 2. **WarmPool created** with the SWE-bench image:
    ```bash
-   kubectl apply -f /home/runner/work/agent-env/agent-env/config/samples/warmpool-swebench.yaml
+   kubectl apply -f config/samples/warmpool-swebench.yaml
    ```
 3. **Verify WarmPool is ready**:
    ```bash
