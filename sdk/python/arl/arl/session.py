@@ -2,14 +2,14 @@
 
 import time
 from collections.abc import Callable
-from typing import Any, cast
+from typing import cast
 
 from kubernetes import client, config
 
-from arl.types import TaskStep
+from arl.types import SandboxResource, TaskResource, TaskStep
 
 # Type alias for callback functions
-TaskCallback = Callable[[dict[str, Any]], None]
+TaskCallback = Callable[[TaskResource], None]
 
 
 class SandboxSession:
@@ -108,7 +108,7 @@ class SandboxSession:
         else:
             self._callbacks[event] = [cb for cb in self._callbacks[event] if cb != callback]
 
-    def _trigger_callbacks(self, event: str, result: dict[str, Any]) -> None:
+    def _trigger_callbacks(self, event: str, result: TaskResource) -> None:
         """Trigger all callbacks registered for an event.
 
         Args:
@@ -128,7 +128,7 @@ class SandboxSession:
         steps: list[TaskStep],
         callback_script: str | None = None,
         trace_id: str | None = None,
-    ) -> dict[str, Any]:
+    ) -> TaskResource:
         """Execute task steps and optionally run a callback script afterward.
 
         This is useful for SWE-bench scenarios where you want to run a test
@@ -178,7 +178,7 @@ class SandboxSession:
             self._custom_api = client.CustomObjectsApi()
         return self._custom_api
 
-    def create_sandbox(self) -> dict[str, Any]:
+    def create_sandbox(self) -> SandboxResource:
         """Create a new sandbox from the warm pool.
 
         Returns:
@@ -216,7 +216,7 @@ class SandboxSession:
         # Wait for sandbox to be ready
         self._wait_for_sandbox_ready()
 
-        return cast(dict[str, Any], sandbox)
+        return cast(SandboxResource, sandbox)
 
     def _wait_for_sandbox_ready(self, poll_interval: float = 1.0) -> None:
         """Wait for sandbox to reach Ready state.
@@ -245,13 +245,14 @@ class SandboxSession:
                 if not isinstance(sandbox_obj, dict):
                     continue
 
-                status: dict[str, Any] = cast(dict[str, Any], sandbox_obj.get("status", {}))
-                phase: str | None = status.get("phase")
+                sandbox_resource = cast(SandboxResource, sandbox_obj)
+                status = sandbox_resource.get("status", {})
+                phase = status.get("phase")
 
                 if phase == "Ready":
                     return
                 elif phase == "Failed":
-                    conditions: list[dict[str, Any]] = status.get("conditions", [])
+                    conditions = status.get("conditions", [])
                     msg: str = (
                         conditions[0].get("message", "Unknown error")
                         if conditions
@@ -267,7 +268,7 @@ class SandboxSession:
 
         raise RuntimeError(f"Sandbox '{self.sandbox_name}' not ready after {self.timeout}s")
 
-    def execute(self, steps: list[TaskStep], trace_id: str | None = None) -> dict[str, Any]:
+    def execute(self, steps: list[TaskStep], trace_id: str | None = None) -> TaskResource:
         """Execute task steps in the sandbox.
 
         Triggers registered callbacks after task completion:
@@ -290,7 +291,7 @@ class SandboxSession:
 
         task_name = f"{self.sandbox_name}-task-{int(time.time() * 1000)}"
 
-        task_body: dict[str, Any] = {
+        task_body = {
             "apiVersion": "arl.infra.io/v1alpha1",
             "kind": "Task",
             "metadata": {
@@ -332,7 +333,7 @@ class SandboxSession:
 
     def _wait_for_task_completion(
         self, task_name: str, poll_interval: float = 0.5
-    ) -> dict[str, Any]:
+    ) -> TaskResource:
         """Wait for task to complete.
 
         Args:
@@ -360,11 +361,12 @@ class SandboxSession:
                 if not isinstance(task_obj, dict):
                     continue
 
-                status: dict[str, Any] = cast(dict[str, Any], task_obj.get("status", {}))
-                state: str | None = status.get("state")
+                task_resource = cast(TaskResource, task_obj)
+                status = task_resource.get("status", {})
+                state = status.get("state")
 
                 if state in ("Succeeded", "Failed"):
-                    return task_obj
+                    return task_resource
 
             except client.ApiException as e:
                 if e.status != 404:
