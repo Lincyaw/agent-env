@@ -71,7 +71,37 @@ profiles:
         apply:
         - --server-side=true
         - --force-conflicts=true
-
+- name: prod
+  build:
+    artifacts:
+    - image: pair-diag-cn-guangzhou.cr.volces.com/pair/arl-operator
+      docker:
+        dockerfile: Dockerfile.operator
+    - image: pair-diag-cn-guangzhou.cr.volces.com/pair/arl-sidecar
+      docker:
+        dockerfile: Dockerfile.sidecar
+    tagPolicy:
+      sha256: {}
+  manifests:
+    helm:
+      releases:
+      - name: arl-operator
+        chartPath: charts/arl-operator
+        namespace: arl-system
+        createNamespace: true
+        setValues:
+          crds.install: true
+          image.repository: pair-diag-cn-guangzhou.cr.volces.com/pair/arl-operator
+          sidecar.image.repository: pair-diag-cn-guangzhou.cr.volces.com/pair/arl-sidecar
+        setValueTemplates:
+          image.tag: "{{.IMAGE_TAG}}"
+          sidecar.image.tag: "{{.IMAGE_TAG2}}"
+  deploy:
+    kubectl:
+      flags:
+        apply:
+        - --server-side=true
+        - --force-conflicts=true
 # Profile for development with auto-sync and rebuild
 - name: dev
   activation:

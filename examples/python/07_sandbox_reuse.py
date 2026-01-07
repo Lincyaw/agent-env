@@ -11,7 +11,6 @@ from arl import SandboxSession
 
 
 def main() -> None:
-    """Reuse sandbox across multiple tasks."""
     print("=" * 60)
     print("Example: Sandbox Reuse (Host-like)")
     print("=" * 60)

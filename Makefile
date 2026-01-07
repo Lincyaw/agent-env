@@ -41,21 +41,22 @@ install-python-tools: ## Install Python development tools
 
 ##@ Deployment (Skaffold)
 
-.PHONY: dev
-dev: ## Start development mode with auto-rebuild (minikube)
-	skaffold dev --profile=dev
+.PHONY: k8s-setup
+k8s-setup: ## Setup prerequisites for new K8s cluster (ClickHouse operator, Helm dependencies, CRDs)
+	@echo "Setting up K8s cluster prerequisites..."
+	@echo "1. Installing ClickHouse operator..."
+	helm repo add clickhouse-operator https://helm.altinity.com || true
+	helm repo update
+	helm upgrade --install clickhouse-operator clickhouse-operator/altinity-clickhouse-operator \
+		--namespace kube-system \
+		--create-namespace \
+		--wait
+	@echo "2. Updating Helm dependencies..."
+	cd charts/arl-operator && helm dependency update
+	@echo "3. Installing CRDs..."
+	kubectl apply -f config/crd/ --server-side=true
+	@echo "✅ Setup complete. Now run 'make k8s-run' to deploy."
 
-.PHONY: run
-run: ## Build and deploy once (minikube)
-	skaffold run --profile=with-samples
-
-.PHONY: k8s-run
-k8s-run: ## Build, push and deploy to standard K8s with samples
-	skaffold run --profile=k8s-with-samples
-
-.PHONY: delete
-delete: ## Delete deployed resources
-	skaffold delete || true
 
 ##@ Development
 
