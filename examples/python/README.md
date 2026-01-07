@@ -12,6 +12,7 @@ Examples demonstrating ARL Python SDK features.
 
 2. Access to Kubernetes cluster with ARL infrastructure
 3. Create a WarmPool named `python-39-std`
+4. (Optional) For SWE-bench example: Create `swebench-emotion` WarmPool using `config/samples/warmpool-swebench.yaml`
 
 ## Running Examples
 
