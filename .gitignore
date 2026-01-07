@@ -66,4 +66,5 @@ uv.lock
 
 # helm chart
 *.tgz
-Chart.lock
+Chart.lockoperator
+sidecar

@@ -3,6 +3,9 @@ package controller
 import (
 	"context"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -53,7 +56,23 @@ func (r *WarmPoolReconciler) Reconcile(ctx context.Context, req ctrl.Request) (c
 }
 
 func (r *WarmPoolReconciler) reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	// Create tracing span
+	tracer := otel.Tracer("warmpool-controller")
+	ctx, span := tracer.Start(ctx, "WarmPoolReconcile",
+		trace.WithAttributes(
+			attribute.String("pool.namespace", req.Namespace),
+			attribute.String("pool.name", req.Name),
+		),
+	)
+	defer span.End()
+
 	logger := log.FromContext(ctx)
+
+	// Add span trace ID to logger for correlation
+	spanContext := span.SpanContext()
+	if spanContext.HasTraceID() {
+		logger = logger.WithValues("otel.trace_id", spanContext.TraceID().String())
+	}
 
 	// Fetch the WarmPool instance
 	pool := &arlv1alpha1.WarmPool{}
@@ -63,6 +82,10 @@ func (r *WarmPoolReconciler) reconcile(ctx context.Context, req ctrl.Request) (c
 		}
 		return ctrl.Result{}, err
 	}
+
+	span.SetAttributes(
+		attribute.Int("pool.replicas.desired", int(pool.Spec.Replicas)),
+	)
 
 	// List all pods belonging to this pool
 	podList := &corev1.PodList{}

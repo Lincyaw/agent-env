@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"time"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -22,6 +25,9 @@ import (
 
 const (
 	sandboxFinalizer = "arl.infra.io/sandbox-finalizer"
+
+	// Requeue delays for various scenarios
+	DefaultPodWaitRequeueDelay = 5 * time.Second // Wait time when no idle pods available
 )
 
 // SandboxReconciler reconciles a Sandbox object
@@ -52,7 +58,23 @@ func (r *SandboxReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 }
 
 func (r *SandboxReconciler) reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	// Create tracing span
+	tracer := otel.Tracer("sandbox-controller")
+	ctx, span := tracer.Start(ctx, "SandboxReconcile",
+		trace.WithAttributes(
+			attribute.String("sandbox.namespace", req.Namespace),
+			attribute.String("sandbox.name", req.Name),
+		),
+	)
+	defer span.End()
+
 	logger := log.FromContext(ctx)
+
+	// Add span trace ID to logger for correlation
+	spanContext := span.SpanContext()
+	if spanContext.HasTraceID() {
+		logger = logger.WithValues("otel.trace_id", spanContext.TraceID().String())
+	}
 
 	// Fetch the Sandbox instance
 	sandbox := &arlv1alpha1.Sandbox{}
@@ -62,8 +84,13 @@ func (r *SandboxReconciler) reconcile(ctx context.Context, req ctrl.Request) (ct
 			return ctrl.Result{}, nil
 		}
 		// Error reading the object - requeue the request
-		return ctrl.Result{}, fmt.Errorf("failed to get Sandbox: %w", err)
+		return ctrl.Result{}, fmt.Errorf("failed to get Sandbox %s/%s: %w", req.Namespace, req.Name, err)
 	}
+
+	span.SetAttributes(
+		attribute.String("sandbox.pool_ref", sandbox.Spec.PoolRef),
+		attribute.String("sandbox.phase", string(sandbox.Status.Phase)),
+	)
 
 	// Handle deletion with finalizer
 	if !sandbox.DeletionTimestamp.IsZero() {
@@ -74,7 +101,7 @@ func (r *SandboxReconciler) reconcile(ctx context.Context, req ctrl.Request) (ct
 	if !controllerutil.ContainsFinalizer(sandbox, sandboxFinalizer) {
 		controllerutil.AddFinalizer(sandbox, sandboxFinalizer)
 		if err := r.Update(ctx, sandbox); err != nil {
-			return ctrl.Result{}, fmt.Errorf("failed to add finalizer: %w", err)
+			return ctrl.Result{}, fmt.Errorf("failed to add finalizer to Sandbox %s/%s: %w", sandbox.Namespace, sandbox.Name, err)
 		}
 		return ctrl.Result{Requeue: true}, nil
 	}
@@ -94,7 +121,8 @@ func (r *SandboxReconciler) reconcile(ctx context.Context, req ctrl.Request) (ct
 				PoolLabelKey:   sandbox.Spec.PoolRef,
 				StatusLabelKey: StatusIdle,
 			}); err != nil {
-			return ctrl.Result{}, err
+			return ctrl.Result{}, fmt.Errorf("failed to list idle pods from pool %s for Sandbox %s/%s: %w",
+				sandbox.Spec.PoolRef, sandbox.Namespace, sandbox.Name, err)
 		}
 
 		// Find a running pod
@@ -108,12 +136,13 @@ func (r *SandboxReconciler) reconcile(ctx context.Context, req ctrl.Request) (ct
 		}
 
 		if selectedPod == nil {
-			logger.Info("No idle pods available", "pool", sandbox.Spec.PoolRef)
-			sandbox.Status.Phase = arlv1alpha1.SandboxPhasePending
-			if err := r.Status().Update(ctx, sandbox); err != nil {
-				return ctrl.Result{}, err
+			logger.Info("No idle pods available", "pool", sandbox.Spec.PoolRef, "sandbox", sandbox.Name)
+			newPhase := arlv1alpha1.SandboxPhasePending
+			if err := r.updateSandboxPhase(ctx, sandbox, newPhase); err != nil {
+				return ctrl.Result{}, fmt.Errorf("failed to update Sandbox %s/%s phase to Pending: %w",
+					sandbox.Namespace, sandbox.Name, err)
 			}
-			return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+			return ctrl.Result{RequeueAfter: DefaultPodWaitRequeueDelay}, nil
 		}
 
 		// Mark pod as allocated
@@ -124,17 +153,24 @@ func (r *SandboxReconciler) reconcile(ctx context.Context, req ctrl.Request) (ct
 		selectedPod.Labels[SandboxLabelKey] = sandbox.Name
 
 		if err := r.Update(ctx, selectedPod); err != nil {
-			return ctrl.Result{}, err
+			return ctrl.Result{}, fmt.Errorf("failed to update pod %s/%s labels for Sandbox %s: %w",
+				selectedPod.Namespace, selectedPod.Name, sandbox.Name, err)
 		}
 
-		// Update sandbox status
-		sandbox.Status.Phase = arlv1alpha1.SandboxPhaseBound
+		// Update sandbox status with validation
+		newPhase := arlv1alpha1.SandboxPhaseBound
+		if err := r.updateSandboxPhase(ctx, sandbox, newPhase); err != nil {
+			return ctrl.Result{}, fmt.Errorf("failed to update Sandbox %s/%s phase to Bound: %w",
+				sandbox.Namespace, sandbox.Name, err)
+		}
+
 		sandbox.Status.PodName = selectedPod.Name
 		sandbox.Status.PodIP = selectedPod.Status.PodIP
 		sandbox.Status.WorkDir = r.Config.WorkspaceDir
 
 		if err := r.Status().Update(ctx, sandbox); err != nil {
-			return ctrl.Result{}, err
+			return ctrl.Result{}, fmt.Errorf("failed to update Sandbox %s/%s status: %w",
+				sandbox.Namespace, sandbox.Name, err)
 		}
 
 		// Record metrics
@@ -363,4 +399,26 @@ func setCondition(conditions *[]metav1.Condition, condType string, status metav1
 		cond.Reason = reason
 		cond.Message = message
 	}
+}
+
+// updateSandboxPhase updates the sandbox phase with validation
+func (r *SandboxReconciler) updateSandboxPhase(ctx context.Context, sandbox *arlv1alpha1.Sandbox, newPhase arlv1alpha1.SandboxPhase) error {
+	logger := log.FromContext(ctx)
+
+	// Validate phase transition
+	if err := sandbox.ValidatePhaseTransition(newPhase); err != nil {
+		logger.Error(err, "Invalid phase transition attempt",
+			"sandbox", sandbox.Name,
+			"currentPhase", sandbox.Status.Phase,
+			"newPhase", newPhase)
+
+		// Record event for visibility
+		setCondition(&sandbox.Status.Conditions, "PhaseTransition", metav1.ConditionFalse,
+			"InvalidTransition", fmt.Sprintf("Invalid phase transition from %s to %s: %v", sandbox.Status.Phase, newPhase, err))
+
+		return err
+	}
+
+	sandbox.Status.Phase = newPhase
+	return nil
 }
