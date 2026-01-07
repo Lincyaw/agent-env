@@ -3,6 +3,7 @@ package controller
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"strings"
 	"time"
 
@@ -57,7 +58,7 @@ func (r *TaskReconciler) reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		if errors.IsNotFound(err) {
 			return ctrl.Result{}, nil
 		}
-		return ctrl.Result{}, err
+		return ctrl.Result{}, fmt.Errorf("failed to get Task %s/%s: %w", req.Namespace, req.Name, err)
 	}
 
 	// If already completed, nothing to do
@@ -72,21 +73,23 @@ func (r *TaskReconciler) reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		Namespace: req.Namespace,
 		Name:      task.Spec.SandboxRef,
 	}, sandbox); err != nil {
-		logger.Error(err, "Failed to get sandbox", "sandbox", task.Spec.SandboxRef)
+		logger.Error(err, "Failed to get sandbox", "sandbox", task.Spec.SandboxRef, "task", task.Name)
 		task.Status.State = arlv1alpha1.TaskStateFailed
-		task.Status.Stderr = "sandbox not found"
+		task.Status.Stderr = fmt.Sprintf("sandbox %s not found: %v", task.Spec.SandboxRef, err)
 		if err := r.Status().Update(ctx, task); err != nil {
-			return ctrl.Result{}, err
+			return ctrl.Result{}, fmt.Errorf("failed to update Task %s/%s status after sandbox lookup failure: %w",
+				task.Namespace, task.Name, err)
 		}
 		return ctrl.Result{}, nil
 	}
 
 	// Check if sandbox is ready
 	if sandbox.Status.Phase != arlv1alpha1.SandboxPhaseReady {
-		logger.Info("Sandbox not ready", "sandbox", sandbox.Name, "phase", sandbox.Status.Phase)
+		logger.Info("Sandbox not ready", "sandbox", sandbox.Name, "phase", sandbox.Status.Phase, "task", task.Name)
 		task.Status.State = arlv1alpha1.TaskStatePending
 		if err := r.Status().Update(ctx, task); err != nil {
-			return ctrl.Result{}, err
+			return ctrl.Result{}, fmt.Errorf("failed to update Task %s/%s state to Pending: %w",
+				task.Namespace, task.Name, err)
 		}
 		return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
 	}
@@ -97,7 +100,8 @@ func (r *TaskReconciler) reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		task.Status.State = arlv1alpha1.TaskStateRunning
 		task.Status.StartTime = &now
 		if err := r.Status().Update(ctx, task); err != nil {
-			return ctrl.Result{}, err
+			return ctrl.Result{}, fmt.Errorf("failed to update Task %s/%s state to Running: %w",
+				task.Namespace, task.Name, err)
 		}
 
 		// Record state change

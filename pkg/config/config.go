@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"strconv"
 	"time"
@@ -200,6 +201,64 @@ func LoadFromEnv() *Config {
 
 // Validate validates the configuration
 func (c *Config) Validate() error {
-	// Add validation logic here if needed
+	// Validate port ranges
+	if c.SidecarHTTPPort < 1 || c.SidecarHTTPPort > 65535 {
+		return fmt.Errorf("invalid sidecar HTTP port: %d (must be 1-65535)", c.SidecarHTTPPort)
+	}
+
+	if c.SidecarGRPCPort < 1 || c.SidecarGRPCPort > 65535 {
+		return fmt.Errorf("invalid sidecar gRPC port: %d (must be 1-65535)", c.SidecarGRPCPort)
+	}
+
+	// Validate replica count
+	if c.DefaultPoolReplicas < 0 {
+		return fmt.Errorf("default pool replicas cannot be negative: %d", c.DefaultPoolReplicas)
+	}
+
+	// Validate timeouts
+	if c.HTTPClientTimeout <= 0 {
+		return fmt.Errorf("HTTP client timeout must be positive: %v", c.HTTPClientTimeout)
+	}
+
+	if c.DefaultRequeueDelay <= 0 {
+		return fmt.Errorf("default requeue delay must be positive: %v", c.DefaultRequeueDelay)
+	}
+
+	if c.SandboxCheckInterval <= 0 {
+		return fmt.Errorf("sandbox check interval must be positive: %v", c.SandboxCheckInterval)
+	}
+
+	// Validate ClickHouse configuration if enabled
+	if c.ClickHouseEnabled {
+		if c.ClickHouseAddr == "" {
+			return fmt.Errorf("ClickHouse address is required when ClickHouse is enabled")
+		}
+
+		if c.ClickHouseDatabase == "" {
+			return fmt.Errorf("ClickHouse database name is required when ClickHouse is enabled")
+		}
+
+		if c.ClickHouseBatchSize < 1 {
+			return fmt.Errorf("ClickHouse batch size must be positive: %d", c.ClickHouseBatchSize)
+		}
+
+		if c.ClickHouseFlushInterval <= 0 {
+			return fmt.Errorf("ClickHouse flush interval must be positive: %v", c.ClickHouseFlushInterval)
+		}
+	}
+
+	// Validate cleanup configuration
+	if c.TaskRetentionDays < 0 {
+		return fmt.Errorf("task retention days cannot be negative: %d", c.TaskRetentionDays)
+	}
+
+	if c.SandboxIdleTimeoutSeconds < 0 {
+		return fmt.Errorf("sandbox idle timeout cannot be negative: %d", c.SandboxIdleTimeoutSeconds)
+	}
+
+	if c.EnableAutoCleanup && c.TTLCheckInterval <= 0 {
+		return fmt.Errorf("TTL check interval must be positive when auto cleanup is enabled: %v", c.TTLCheckInterval)
+	}
+
 	return nil
 }

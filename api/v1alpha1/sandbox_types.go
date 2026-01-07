@@ -1,6 +1,8 @@
 package v1alpha1
 
 import (
+	"fmt"
+
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
@@ -76,4 +78,41 @@ type SandboxList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
 	Items           []Sandbox `json:"items"`
+}
+
+// ValidatePhaseTransition validates if a phase transition is allowed
+func (s *Sandbox) ValidatePhaseTransition(newPhase SandboxPhase) error {
+	// Define valid state transitions
+	validTransitions := map[SandboxPhase][]SandboxPhase{
+		"":                  {SandboxPhasePending},                   // Initial state
+		SandboxPhasePending: {SandboxPhaseBound, SandboxPhaseFailed}, // Can bind or fail
+		SandboxPhaseBound:   {SandboxPhaseReady, SandboxPhaseFailed}, // Can become ready or fail
+		SandboxPhaseReady:   {SandboxPhaseFailed},                    // Can only fail once ready
+		SandboxPhaseFailed:  {},                                      // Terminal state
+	}
+
+	currentPhase := s.Status.Phase
+	if currentPhase == "" {
+		currentPhase = ""
+	}
+
+	// Check if transition is valid
+	allowedPhases, exists := validTransitions[currentPhase]
+	if !exists {
+		return fmt.Errorf("unknown current phase: %s", currentPhase)
+	}
+
+	// Allow staying in the same phase (idempotent updates)
+	if currentPhase == newPhase {
+		return nil
+	}
+
+	// Check if new phase is in allowed list
+	for _, allowed := range allowedPhases {
+		if allowed == newPhase {
+			return nil
+		}
+	}
+
+	return fmt.Errorf("invalid phase transition from %s to %s", currentPhase, newPhase)
 }
