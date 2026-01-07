@@ -1,0 +1,262 @@
+# ARL-Infra Change Propagation Rules
+# This file defines what actions are required when specific components change
+
+# Rule Structure:
+#   trigger: Pattern or component that triggers this rule
+#   impacts: List of affected components/files
+#   actions: Required steps when this change occurs
+#   validation: Commands to verify changes are correct
+
+rules:
+  # ============================================================================
+  # CRD Changes
+  # ============================================================================
+  - name: warmpool-crd-change
+    trigger:
+      component: warmpool-crd
+      patterns:
+        - api/v1alpha1/warmpool_types.go
+    impacts:
+      - config/crd/arl.infra.io_warmpools.yaml
+      - api/v1alpha1/zz_generated.deepcopy.go
+      - sdk/python/arl/arl/arl_client/
+    actions:
+      - description: Regenerate deepcopy methods
+        command: make deepcopy
+      - description: Regenerate CRD manifests
+        command: make manifests
+      - description: Regenerate Python SDK
+        command: make sdk-python
+      - description: Update Helm chart if schema changed significantly
+        manual: true
+        files:
+          - charts/arl-operator/templates/
+    validation:
+      - make vet
+      - make check
+      - kubectl apply --dry-run=server -f config/crd/
+
+  - name: sandbox-crd-change
+    trigger:
+      component: sandbox-crd
+      patterns:
+        - api/v1alpha1/sandbox_types.go
+    impacts:
+      - config/crd/arl.infra.io_sandboxes.yaml
+      - api/v1alpha1/zz_generated.deepcopy.go
+      - sdk/python/arl/arl/arl_client/
+      - pkg/controller/sandbox_controller.go
+      - pkg/webhook/sandbox_validator.go
+    actions:
+      - description: Regenerate deepcopy methods
+        command: make deepcopy
+      - description: Regenerate CRD manifests
+        command: make manifests
+      - description: Regenerate Python SDK
+        command: make sdk-python
+      - description: Review controller for new field handling
+        manual: true
+        files:
+          - pkg/controller/sandbox_controller.go
+      - description: Review webhook for new validation rules
+        manual: true
+        files:
+          - pkg/webhook/sandbox_validator.go
+    validation:
+      - make vet
+      - make check
+      - kubectl apply --dry-run=server -f config/crd/
+
+  - name: task-crd-change
+    trigger:
+      component: task-crd
+      patterns:
+        - api/v1alpha1/task_types.go
+    impacts:
+      - config/crd/arl.infra.io_tasks.yaml
+      - api/v1alpha1/zz_generated.deepcopy.go
+      - sdk/python/arl/arl/arl_client/
+      - pkg/controller/task_controller.go
+      - pkg/webhook/task_validator.go
+    actions:
+      - description: Regenerate deepcopy methods
+        command: make deepcopy
+      - description: Regenerate CRD manifests
+        command: make manifests
+      - description: Regenerate Python SDK
+        command: make sdk-python
+      - description: Review controller for new step types
+        manual: true
+        files:
+          - pkg/controller/task_controller.go
+      - description: Review webhook for new validation rules
+        manual: true
+        files:
+          - pkg/webhook/task_validator.go
+    validation:
+      - make vet
+      - make check
+      - kubectl apply --dry-run=server -f config/crd/
+
+  # ============================================================================
+  # Proto Changes
+  # ============================================================================
+  - name: proto-change
+    trigger:
+      component: agent-proto
+      patterns:
+        - proto/agent.proto
+    impacts:
+      - pkg/pb/agent.pb.go
+      - pkg/pb/agent_grpc.pb.go
+      - sdk/python/arl/arl/pb/proto/agent_pb2.py
+      - sdk/python/arl/arl/pb/proto/agent_pb2_grpc.py
+      - pkg/sidecar/service.go
+      - pkg/controller/task_controller.go
+    actions:
+      - description: Regenerate Go protobuf code
+        command: make proto-go
+      - description: Regenerate Python protobuf code
+        command: make proto-python
+      - description: Update sidecar service implementation
+        manual: true
+        files:
+          - pkg/sidecar/service.go
+      - description: Update task controller gRPC client usage
+        manual: true
+        files:
+          - pkg/controller/task_controller.go
+    validation:
+      - make vet
+      - make check
+      - go build ./cmd/sidecar/
+      - go build ./cmd/operator/
+
+  # ============================================================================
+  # Controller Changes
+  # ============================================================================
+  - name: controller-change
+    trigger:
+      patterns:
+        - pkg/controller/*.go
+    impacts:
+      - cmd/operator/main.go
+    actions:
+      - description: Ensure controller is registered in operator
+        manual: true
+        files:
+          - cmd/operator/main.go
+      - description: Update RBAC if new resources are accessed
+        manual: true
+        files:
+          - charts/arl-operator/templates/rbac.yaml
+    validation:
+      - make vet
+      - go build ./cmd/operator/
+
+  # ============================================================================
+  # Webhook Changes
+  # ============================================================================
+  - name: webhook-change
+    trigger:
+      patterns:
+        - pkg/webhook/*.go
+    impacts:
+      - cmd/operator/main.go
+      - charts/arl-operator/templates/webhook.yaml
+    actions:
+      - description: Ensure webhook is registered in operator
+        manual: true
+        files:
+          - cmd/operator/main.go
+      - description: Update webhook configuration in Helm chart
+        manual: true
+        files:
+          - charts/arl-operator/templates/webhook.yaml
+    validation:
+      - make vet
+      - go build ./cmd/operator/
+
+  # ============================================================================
+  # Sidecar Changes
+  # ============================================================================
+  - name: sidecar-change
+    trigger:
+      patterns:
+        - pkg/sidecar/*.go
+        - cmd/sidecar/*.go
+    impacts:
+      - Dockerfile.sidecar
+    actions:
+      - description: Rebuild sidecar image
+        command: docker build -f Dockerfile.sidecar -t arl-sidecar:dev .
+    validation:
+      - make vet
+      - go build ./cmd/sidecar/
+
+  # ============================================================================
+  # SDK Changes
+  # ============================================================================
+  - name: sdk-python-change
+    trigger:
+      patterns:
+        - sdk/python/arl/**/*.py
+    impacts:
+      - examples/python/
+    actions:
+      - description: Run Python quality checks
+        command: make check
+      - description: Update examples if API changed
+        manual: true
+        files:
+          - examples/python/
+    validation:
+      - uv run ruff check sdk/python/
+      - uv run mypy sdk/python/arl/arl/
+
+  # ============================================================================
+  # Helm Chart Changes
+  # ============================================================================
+  - name: helm-chart-change
+    trigger:
+      patterns:
+        - charts/arl-operator/**
+    actions:
+      - description: Validate Helm chart
+        command: helm lint charts/arl-operator
+      - description: Test Helm template rendering
+        command: helm template arl charts/arl-operator
+    validation:
+      - helm lint charts/arl-operator
+
+  # ============================================================================
+  # Go Module Changes
+  # ============================================================================
+  - name: go-mod-change
+    trigger:
+      patterns:
+        - go.mod
+        - go.sum
+    actions:
+      - description: Tidy dependencies
+        command: make tidy
+      - description: Verify builds still work
+        command: go build ./...
+    validation:
+      - go mod verify
+      - make vet
+
+  # ============================================================================
+  # Python Dependencies Changes
+  # ============================================================================
+  - name: python-deps-change
+    trigger:
+      patterns:
+        - pyproject.toml
+        - uv.lock
+        - sdk/python/arl/pyproject.toml
+    actions:
+      - description: Sync Python dependencies
+        command: uv sync --all-groups
+    validation:
+      - uv run ruff check .

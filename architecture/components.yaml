@@ -1,0 +1,291 @@
+# ARL-Infra Component Catalog
+# This file documents all components in the system with their responsibilities and interfaces
+
+components:
+  # ============================================================================
+  # Custom Resource Definitions (CRDs)
+  # ============================================================================
+  - name: warmpool-crd
+    type: crd
+    paths:
+      - api/v1alpha1/warmpool_types.go
+      - config/crd/arl.infra.io_warmpools.yaml
+    responsibilities:
+      - Define WarmPool resource schema
+      - Specify validation rules for warm pool configuration
+      - Maintain pool of ready-to-use pods
+    interfaces:
+      inputs:
+        - Replicas count
+        - Pod template specification
+      outputs:
+        - ReadyReplicas count
+        - AllocatedReplicas count
+        - Conditions
+
+  - name: sandbox-crd
+    type: crd
+    paths:
+      - api/v1alpha1/sandbox_types.go
+      - config/crd/arl.infra.io_sandboxes.yaml
+    responsibilities:
+      - Define Sandbox resource schema
+      - Agent isolated workspace bound to a pod
+      - Track pod allocation and lifecycle
+    interfaces:
+      inputs:
+        - PoolRef (reference to WarmPool)
+        - KeepAlive flag
+        - Resource requirements
+        - IdleTimeoutSeconds
+      outputs:
+        - Phase (Pending/Bound/Ready/Failed)
+        - PodName
+        - PodIP
+        - WorkDir
+        - LastTaskTime
+        - Conditions
+
+  - name: task-crd
+    type: crd
+    paths:
+      - api/v1alpha1/task_types.go
+      - config/crd/arl.infra.io_tasks.yaml
+    responsibilities:
+      - Define Task resource schema
+      - Execution unit with file operations and commands
+      - Track execution state and results
+    interfaces:
+      inputs:
+        - SandboxRef (reference to Sandbox)
+        - Timeout
+        - Steps (FilePatch or Command)
+        - Retries
+        - TTLSecondsAfterFinished
+        - TraceID
+      outputs:
+        - State (Pending/Running/Succeeded/Failed)
+        - ExitCode
+        - Stdout/Stderr
+        - Duration
+        - StartTime/CompletionTime
+        - Conditions
+
+  # ============================================================================
+  # Controllers
+  # ============================================================================
+  - name: warmpool-controller
+    type: controller
+    paths:
+      - pkg/controller/warmpool_controller.go
+    responsibilities:
+      - Reconcile WarmPool resources
+      - Maintain desired number of warm pods
+      - Track pod readiness and allocation
+    interfaces:
+      watches:
+        - WarmPool
+        - Pod
+      manages:
+        - Pod
+
+  - name: sandbox-controller
+    type: controller
+    paths:
+      - pkg/controller/sandbox_controller.go
+    responsibilities:
+      - Reconcile Sandbox resources
+      - Allocate pods from warm pool
+      - Track sandbox lifecycle phases
+    interfaces:
+      watches:
+        - Sandbox
+        - WarmPool
+        - Pod
+      manages:
+        - Sandbox status
+
+  - name: task-controller
+    type: controller
+    paths:
+      - pkg/controller/task_controller.go
+    responsibilities:
+      - Reconcile Task resources
+      - Execute task steps via sidecar gRPC
+      - Track execution state and results
+    interfaces:
+      watches:
+        - Task
+        - Sandbox
+      manages:
+        - Task status
+      calls:
+        - Sidecar gRPC (AgentService)
+
+  - name: ttl-controller
+    type: controller
+    paths:
+      - pkg/controller/ttl_controller.go
+    responsibilities:
+      - Clean up completed tasks after TTL expires
+      - Clean up idle sandboxes after timeout
+
+  # ============================================================================
+  # Webhooks
+  # ============================================================================
+  - name: sandbox-webhook
+    type: webhook
+    paths:
+      - pkg/webhook/sandbox_validator.go
+    responsibilities:
+      - Validate Sandbox resources on create/update
+      - Ensure PoolRef exists
+
+  - name: task-webhook
+    type: webhook
+    paths:
+      - pkg/webhook/task_validator.go
+    responsibilities:
+      - Validate Task resources on create/update
+      - Ensure SandboxRef exists
+      - Validate step configuration
+
+  - name: warmpool-webhook
+    type: webhook
+    paths:
+      - pkg/webhook/warmpool_validator.go
+    responsibilities:
+      - Validate WarmPool resources on create/update
+      - Ensure name is valid DNS label
+
+  # ============================================================================
+  # Operator
+  # ============================================================================
+  - name: operator
+    type: operator
+    paths:
+      - cmd/operator/main.go
+    responsibilities:
+      - Bootstrap Kubernetes controller manager
+      - Register all controllers
+      - Register all webhooks
+      - Serve health and metrics endpoints
+    config:
+      default_namespace: arl-system
+      health_probe_port: 8081
+      metrics_port: 8080
+
+  # ============================================================================
+  # Sidecar
+  # ============================================================================
+  - name: sidecar
+    type: sidecar
+    paths:
+      - cmd/sidecar/main.go
+      - pkg/sidecar/server.go
+      - pkg/sidecar/service.go
+      - pkg/sidecar/grpc_server.go
+    responsibilities:
+      - Run as sidecar in warm pool pods
+      - Provide gRPC API for file operations
+      - Execute commands in container
+      - Manage interactive shell sessions
+    interfaces:
+      exposes:
+        - gRPC AgentService
+      grpc_methods:
+        - UpdateFiles
+        - Execute
+        - SignalProcess
+        - Reset
+        - InteractiveShell
+    config:
+      default_port: 50051
+      workspace_dir: /workspace
+
+  # ============================================================================
+  # Protocol Buffers
+  # ============================================================================
+  - name: agent-proto
+    type: proto
+    paths:
+      - proto/agent.proto
+    responsibilities:
+      - Define gRPC service interface for sidecar
+      - Define message types for file/process operations
+    interfaces:
+      defines:
+        - AgentService
+        - FileRequest/FileResponse
+        - ExecRequest/ExecLog
+        - SignalRequest/SignalResponse
+        - ResetRequest/ResetResponse
+        - ShellInput/ShellOutput
+
+  - name: proto-go-generated
+    type: generated
+    paths:
+      - pkg/pb/agent.pb.go
+      - pkg/pb/agent_grpc.pb.go
+    responsibilities:
+      - Go implementation of protobuf messages
+      - Go gRPC client and server stubs
+
+  - name: proto-python-generated
+    type: generated
+    paths:
+      - sdk/python/arl/arl/pb/proto/agent_pb2.py
+      - sdk/python/arl/arl/pb/proto/agent_pb2_grpc.py
+    responsibilities:
+      - Python implementation of protobuf messages
+      - Python gRPC client stubs
+
+  # ============================================================================
+  # Python SDK
+  # ============================================================================
+  - name: python-sdk
+    type: sdk
+    paths:
+      - sdk/python/arl/
+    responsibilities:
+      - Provide Python client for ARL resources
+      - Auto-generated models from CRD OpenAPI schemas
+      - High-level API for sandbox and task management
+    interfaces:
+      depends_on:
+        - Kubernetes Python client
+        - Generated protobuf code
+      provides:
+        - ARL Python client
+        - CRD model classes
+
+  # ============================================================================
+  # Helm Charts
+  # ============================================================================
+  - name: helm-chart
+    type: config
+    paths:
+      - charts/arl-operator/
+    responsibilities:
+      - Kubernetes deployment configuration
+      - Service accounts and RBAC
+      - CRD installation
+
+  # ============================================================================
+  # Configuration
+  # ============================================================================
+  - name: crd-manifests
+    type: config
+    paths:
+      - config/crd/
+    responsibilities:
+      - Generated CRD YAML manifests
+      - OpenAPI validation schemas
+
+  - name: sample-resources
+    type: config
+    paths:
+      - config/samples/
+    responsibilities:
+      - Example resource configurations
+      - Quick start templates
