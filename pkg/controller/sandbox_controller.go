@@ -5,6 +5,9 @@ import (
 	"fmt"
 	"time"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/trace"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -22,6 +25,9 @@ import (
 
 const (
 	sandboxFinalizer = "arl.infra.io/sandbox-finalizer"
+
+	// Requeue delays for various scenarios
+	DefaultPodWaitRequeueDelay = 5 * time.Second // Wait time when no idle pods available
 )
 
 // SandboxReconciler reconciles a Sandbox object
@@ -52,7 +58,23 @@ func (r *SandboxReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ct
 }
 
 func (r *SandboxReconciler) reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	// Create tracing span
+	tracer := otel.Tracer("sandbox-controller")
+	ctx, span := tracer.Start(ctx, "SandboxReconcile",
+		trace.WithAttributes(
+			attribute.String("sandbox.namespace", req.Namespace),
+			attribute.String("sandbox.name", req.Name),
+		),
+	)
+	defer span.End()
+
 	logger := log.FromContext(ctx)
+
+	// Add span trace ID to logger for correlation
+	spanContext := span.SpanContext()
+	if spanContext.HasTraceID() {
+		logger = logger.WithValues("otel.trace_id", spanContext.TraceID().String())
+	}
 
 	// Fetch the Sandbox instance
 	sandbox := &arlv1alpha1.Sandbox{}
@@ -64,6 +86,11 @@ func (r *SandboxReconciler) reconcile(ctx context.Context, req ctrl.Request) (ct
 		// Error reading the object - requeue the request
 		return ctrl.Result{}, fmt.Errorf("failed to get Sandbox %s/%s: %w", req.Namespace, req.Name, err)
 	}
+
+	span.SetAttributes(
+		attribute.String("sandbox.pool_ref", sandbox.Spec.PoolRef),
+		attribute.String("sandbox.phase", string(sandbox.Status.Phase)),
+	)
 
 	// Handle deletion with finalizer
 	if !sandbox.DeletionTimestamp.IsZero() {
@@ -115,7 +142,7 @@ func (r *SandboxReconciler) reconcile(ctx context.Context, req ctrl.Request) (ct
 				return ctrl.Result{}, fmt.Errorf("failed to update Sandbox %s/%s phase to Pending: %w",
 					sandbox.Namespace, sandbox.Name, err)
 			}
-			return ctrl.Result{RequeueAfter: 5 * time.Second}, nil
+			return ctrl.Result{RequeueAfter: DefaultPodWaitRequeueDelay}, nil
 		}
 
 		// Mark pod as allocated

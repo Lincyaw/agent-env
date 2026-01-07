@@ -102,7 +102,7 @@ func TestSandbox_ValidatePhaseTransition(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			sandbox := &Sandbox{}
 			sandbox.Status.Phase = tt.currentPhase
-			
+
 			err := sandbox.ValidatePhaseTransition(tt.newPhase)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ValidatePhaseTransition() error = %v, wantErr %v", err, tt.wantErr)

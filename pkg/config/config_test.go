@@ -19,10 +19,10 @@ func TestConfig_Validate(t *testing.T) {
 		{
 			name: "invalid sidecar HTTP port - too low",
 			config: &Config{
-				SidecarHTTPPort:   0,
-				SidecarGRPCPort:   9090,
-				HTTPClientTimeout: 30 * time.Second,
-				DefaultRequeueDelay: 10 * time.Second,
+				SidecarHTTPPort:      0,
+				SidecarGRPCPort:      9090,
+				HTTPClientTimeout:    30 * time.Second,
+				DefaultRequeueDelay:  10 * time.Second,
 				SandboxCheckInterval: 2 * time.Second,
 			},
 			wantErr: true,
@@ -30,10 +30,10 @@ func TestConfig_Validate(t *testing.T) {
 		{
 			name: "invalid sidecar HTTP port - too high",
 			config: &Config{
-				SidecarHTTPPort:   65536,
-				SidecarGRPCPort:   9090,
-				HTTPClientTimeout: 30 * time.Second,
-				DefaultRequeueDelay: 10 * time.Second,
+				SidecarHTTPPort:      65536,
+				SidecarGRPCPort:      9090,
+				HTTPClientTimeout:    30 * time.Second,
+				DefaultRequeueDelay:  10 * time.Second,
 				SandboxCheckInterval: 2 * time.Second,
 			},
 			wantErr: true,
@@ -41,10 +41,10 @@ func TestConfig_Validate(t *testing.T) {
 		{
 			name: "invalid sidecar gRPC port",
 			config: &Config{
-				SidecarHTTPPort:   8080,
-				SidecarGRPCPort:   -1,
-				HTTPClientTimeout: 30 * time.Second,
-				DefaultRequeueDelay: 10 * time.Second,
+				SidecarHTTPPort:      8080,
+				SidecarGRPCPort:      -1,
+				HTTPClientTimeout:    30 * time.Second,
+				DefaultRequeueDelay:  10 * time.Second,
 				SandboxCheckInterval: 2 * time.Second,
 			},
 			wantErr: true,
@@ -52,11 +52,11 @@ func TestConfig_Validate(t *testing.T) {
 		{
 			name: "negative default pool replicas",
 			config: &Config{
-				SidecarHTTPPort:     8080,
-				SidecarGRPCPort:     9090,
-				DefaultPoolReplicas: -1,
-				HTTPClientTimeout:   30 * time.Second,
-				DefaultRequeueDelay: 10 * time.Second,
+				SidecarHTTPPort:      8080,
+				SidecarGRPCPort:      9090,
+				DefaultPoolReplicas:  -1,
+				HTTPClientTimeout:    30 * time.Second,
+				DefaultRequeueDelay:  10 * time.Second,
 				SandboxCheckInterval: 2 * time.Second,
 			},
 			wantErr: true,
@@ -64,10 +64,10 @@ func TestConfig_Validate(t *testing.T) {
 		{
 			name: "invalid HTTP client timeout",
 			config: &Config{
-				SidecarHTTPPort:   8080,
-				SidecarGRPCPort:   9090,
-				HTTPClientTimeout: 0,
-				DefaultRequeueDelay: 10 * time.Second,
+				SidecarHTTPPort:      8080,
+				SidecarGRPCPort:      9090,
+				HTTPClientTimeout:    0,
+				DefaultRequeueDelay:  10 * time.Second,
 				SandboxCheckInterval: 2 * time.Second,
 			},
 			wantErr: true,
@@ -169,25 +169,25 @@ func TestConfig_Validate(t *testing.T) {
 
 func TestDefaultConfig(t *testing.T) {
 	cfg := DefaultConfig()
-	
+
 	// Verify default config is valid
 	if err := cfg.Validate(); err != nil {
 		t.Errorf("DefaultConfig() should be valid, got error: %v", err)
 	}
-	
+
 	// Verify some key defaults
 	if cfg.SidecarHTTPPort != 8080 {
 		t.Errorf("Expected SidecarHTTPPort = 8080, got %d", cfg.SidecarHTTPPort)
 	}
-	
+
 	if cfg.SidecarGRPCPort != 9090 {
 		t.Errorf("Expected SidecarGRPCPort = 9090, got %d", cfg.SidecarGRPCPort)
 	}
-	
+
 	if cfg.DefaultPoolReplicas != 3 {
 		t.Errorf("Expected DefaultPoolReplicas = 3, got %d", cfg.DefaultPoolReplicas)
 	}
-	
+
 	if cfg.EnableMetrics != true {
 		t.Error("Expected EnableMetrics = true")
 	}

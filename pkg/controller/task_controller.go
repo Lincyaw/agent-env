@@ -7,6 +7,10 @@ import (
 	"strings"
 	"time"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -19,6 +23,11 @@ import (
 	"github.com/Lincyaw/agent-env/pkg/interfaces"
 	"github.com/Lincyaw/agent-env/pkg/middleware"
 	"github.com/Lincyaw/agent-env/pkg/sidecar"
+)
+
+const (
+	// Requeue delays for various scenarios
+	DefaultSandboxReadyCheckDelay = 2 * time.Second // Wait time when sandbox not ready
 )
 
 // TaskReconciler reconciles a Task object
@@ -50,20 +59,47 @@ func (r *TaskReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 }
 
 func (r *TaskReconciler) reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+	// Create tracing span
+	tracer := otel.Tracer("task-controller")
+	ctx, span := tracer.Start(ctx, "TaskReconcile",
+		trace.WithAttributes(
+			attribute.String("task.namespace", req.Namespace),
+			attribute.String("task.name", req.Name),
+		),
+	)
+	defer span.End()
+
 	logger := log.FromContext(ctx)
 
 	// Fetch the Task instance
 	task := &arlv1alpha1.Task{}
 	if err := r.Get(ctx, req.NamespacedName, task); err != nil {
 		if errors.IsNotFound(err) {
+			span.SetStatus(codes.Ok, "Task not found")
 			return ctrl.Result{}, nil
 		}
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "Failed to get Task")
 		return ctrl.Result{}, fmt.Errorf("failed to get Task %s/%s: %w", req.Namespace, req.Name, err)
+	}
+
+	// Add TraceID from task spec if provided
+	if task.Spec.TraceID != "" {
+		span.SetAttributes(attribute.String("task.trace_id", task.Spec.TraceID))
+		logger = logger.WithValues("traceID", task.Spec.TraceID)
+	}
+
+	// Add span trace ID to logger for correlation
+	spanContext := span.SpanContext()
+	if spanContext.HasTraceID() {
+		logger = logger.WithValues("otel.trace_id", spanContext.TraceID().String())
 	}
 
 	// If already completed, nothing to do
 	if task.Status.State == arlv1alpha1.TaskStateSucceeded ||
 		task.Status.State == arlv1alpha1.TaskStateFailed {
+		span.SetAttributes(attribute.String("task.state", string(task.Status.State)))
+		span.SetStatus(codes.Ok, "Task already completed")
 		return ctrl.Result{}, nil
 	}
 
@@ -73,6 +109,9 @@ func (r *TaskReconciler) reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		Namespace: req.Namespace,
 		Name:      task.Spec.SandboxRef,
 	}, sandbox); err != nil {
+		span.RecordError(err)
+		span.SetStatus(codes.Error, "Failed to get sandbox")
+		span.SetAttributes(attribute.String("sandbox.name", task.Spec.SandboxRef))
 		logger.Error(err, "Failed to get sandbox", "sandbox", task.Spec.SandboxRef, "task", task.Name)
 		task.Status.State = arlv1alpha1.TaskStateFailed
 		task.Status.Stderr = fmt.Sprintf("sandbox %s not found: %v", task.Spec.SandboxRef, err)
@@ -83,19 +122,26 @@ func (r *TaskReconciler) reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 		return ctrl.Result{}, nil
 	}
 
+	span.SetAttributes(
+		attribute.String("sandbox.name", sandbox.Name),
+		attribute.String("sandbox.phase", string(sandbox.Status.Phase)),
+	)
+
 	// Check if sandbox is ready
 	if sandbox.Status.Phase != arlv1alpha1.SandboxPhaseReady {
+		span.SetStatus(codes.Ok, "Sandbox not ready, requeuing")
 		logger.Info("Sandbox not ready", "sandbox", sandbox.Name, "phase", sandbox.Status.Phase, "task", task.Name)
 		task.Status.State = arlv1alpha1.TaskStatePending
 		if err := r.Status().Update(ctx, task); err != nil {
 			return ctrl.Result{}, fmt.Errorf("failed to update Task %s/%s state to Pending: %w",
 				task.Namespace, task.Name, err)
 		}
-		return ctrl.Result{RequeueAfter: 2 * time.Second}, nil
+		return ctrl.Result{RequeueAfter: DefaultSandboxReadyCheckDelay}, nil
 	}
 
 	// Mark task as running
 	if task.Status.State == "" || task.Status.State == arlv1alpha1.TaskStatePending {
+		span.AddEvent("Task state transition to Running")
 		now := metav1.Now()
 		task.Status.State = arlv1alpha1.TaskStateRunning
 		task.Status.StartTime = &now
