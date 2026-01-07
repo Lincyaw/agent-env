@@ -43,6 +43,7 @@ def main():
         ("05_error_handling", "05. Error Handling"),
         ("06_long_running_task", "06. Long-Running Task"),
         ("07_sandbox_reuse", "07. Sandbox Reuse"),
+        ("08_callback_hooks", "08. Callback Hooks"),
     ]
 
     results = []
