@@ -10,6 +10,7 @@ Demonstrates:
 from pathlib import Path
 
 from arl import SandboxSession, TaskStep, WarmPoolManager
+from arl.types import TaskResource
 from kubernetes import client
 from mock_agent import create_mock_agent
 
@@ -24,7 +25,7 @@ def create_test_callback(test_script_path: str):
         Callback function that runs tests
     """
 
-    def run_tests_callback(result: dict) -> None:
+    def run_tests_callback(result: TaskResource) -> None:
         """Callback to run tests after successful task completion."""
         status = result.get("status", {})
         state = status.get("state")
@@ -40,7 +41,7 @@ def create_test_callback(test_script_path: str):
     return run_tests_callback
 
 
-def log_callback(result: dict) -> None:
+def log_callback(result: TaskResource) -> None:
     """Simple logging callback."""
     status = result.get("status", {})
     state = status.get("state")
@@ -50,7 +51,7 @@ def log_callback(result: dict) -> None:
     print(f"[Log Callback] State: {state}, Exit Code: {exit_code}")
 
 
-def success_callback(result: dict) -> None:
+def success_callback(result: TaskResource) -> None:
     """Callback triggered only on success."""
     print("\n[Success Callback] 🎉 Task completed successfully!")
     status = result.get("status", {})
@@ -59,7 +60,7 @@ def success_callback(result: dict) -> None:
         print(f"[Success Callback] Output preview: {stdout[:100]}...")
 
 
-def failure_callback(result: dict) -> None:
+def failure_callback(result: TaskResource) -> None:
     """Callback triggered only on failure."""
     print("\n[Failure Callback] ❌ Task failed!")
     status = result.get("status", {})
@@ -115,9 +116,7 @@ def main() -> None:
     session.register_callback("on_task_complete", log_callback)
     session.register_callback("on_task_success", success_callback)
     session.register_callback("on_task_failure", failure_callback)
-    session.register_callback(
-        "on_task_complete", create_test_callback("/testbed/run_tests.sh")
-    )
+    session.register_callback("on_task_complete", create_test_callback("/testbed/run_tests.sh"))
     print("✓ Registered 4 callbacks")
     print("  - Log callback (on_task_complete)")
     print("  - Success callback (on_task_success)")

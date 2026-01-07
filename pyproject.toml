@@ -36,6 +36,11 @@ dev = [
 [tool.ruff]
 line-length = 100
 target-version = "py310"
+extend-exclude = [
+    "sdk/python/arl/arl/arl_client/**",
+    ".github/skills/**",
+    "hack/**",
+]
 
 [tool.ruff.lint]
 select = [
@@ -60,6 +65,11 @@ warn_return_any = true
 warn_unused_configs = true
 check_untyped_defs = true
 plugins = ["pydantic.mypy"]
+exclude = [
+    "sdk/python/arl/arl/arl_client/",
+    ".github/skills/",
+    "hack/",
+]
 
 [[tool.mypy.overrides]]
 module = ["kubernetes.*"]

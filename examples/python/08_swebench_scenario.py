@@ -188,8 +188,9 @@ def main() -> None:
         result_patch = session.execute(steps_patch)
         status_patch = result_patch.get("status", {})
         print(f"Patch application: {status_patch.get('state')}")
-        if status_patch.get("stdout"):
-            print(f"Output:\n{status_patch.get('stdout')[:500]}...")
+        stdout_patch = status_patch.get("stdout")
+        if stdout_patch:
+            print(f"Output:\n{stdout_patch[:500]}...")
 
         # Step 3: Run test scripts to verify the fix
         print("\n[Step 3] Running test scripts to verify fix...")

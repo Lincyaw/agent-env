@@ -73,13 +73,15 @@ tidy: ## Run go mod tidy
 
 .PHONY: check
 check: fmt vet tidy ## Run all code quality checks
-	uv run ruff format .
-	uv run ruff check --fix . --unsafe-fixes
+	uv run ruff check --fix sdk/python/arl/arl/*.py examples/python/*.py --unsafe-fixes
+	uv run ruff format sdk/python/arl/arl/*.py examples/python/*.py
+	uv run mypy sdk/python/arl/arl examples/python
+
 
 ##@ Code Generation
 
 .PHONY: generate
-generate: proto-go proto-python manifests deepcopy sdk-python ## Generate all code (proto, CRDs, deepcopy, Python SDK)
+generate: proto-go manifests deepcopy sdk-python ## Generate all code (proto, CRDs, deepcopy, Python SDK)
 
 .PHONY: proto-go
 proto-go: ## Generate Go gRPC code from proto files
@@ -89,17 +91,7 @@ proto-go: ## Generate Go gRPC code from proto files
 		proto/agent.proto
 	@mv proto/*.pb.go pkg/pb/ 2>/dev/null || true
 
-.PHONY: proto-python
-proto-python: ## Generate Python gRPC code from proto files
-	@mkdir -p sdk/python/arl/arl/pb
-	python -m grpc_tools.protoc -I. \
-		--python_out=sdk/python/arl/arl/pb \
-		--pyi_out=sdk/python/arl/arl/pb \
-		--grpc_python_out=sdk/python/arl/arl/pb \
-		proto/agent.proto
-	@touch sdk/python/arl/arl/pb/__init__.py
-	@# Fix imports in generated files
-	@sed -i 's/from proto import agent_pb2/from arl.pb.proto import agent_pb2/g' sdk/python/arl/arl/pb/proto/agent_pb2_grpc.py 2>/dev/null || true
+
 
 .PHONY: manifests
 manifests: ## Generate CRD manifests

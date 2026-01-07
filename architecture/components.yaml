@@ -231,15 +231,6 @@ components:
       - Go implementation of protobuf messages
       - Go gRPC client and server stubs
 
-  - name: proto-python-generated
-    type: generated
-    paths:
-      - sdk/python/arl/arl/pb/proto/agent_pb2.py
-      - sdk/python/arl/arl/pb/proto/agent_pb2_grpc.py
-    responsibilities:
-      - Python implementation of protobuf messages
-      - Python gRPC client stubs
-
   # ============================================================================
   # Python SDK
   # ============================================================================

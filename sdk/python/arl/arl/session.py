@@ -306,7 +306,9 @@ class SandboxSession:
 
         # Add trace ID if provided
         if trace_id is not None:
-            task_body["spec"]["traceID"] = trace_id
+            spec = task_body["spec"]
+            if isinstance(spec, dict):
+                spec["traceID"] = trace_id
 
         # Create task resource
         self.custom_api.create_namespaced_custom_object(
@@ -331,9 +333,7 @@ class SandboxSession:
 
         return result
 
-    def _wait_for_task_completion(
-        self, task_name: str, poll_interval: float = 0.5
-    ) -> TaskResource:
+    def _wait_for_task_completion(self, task_name: str, poll_interval: float = 0.5) -> TaskResource:
         """Wait for task to complete.
 
         Args:

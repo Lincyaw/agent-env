@@ -103,9 +103,7 @@ class MockAgent:
         """
         return self.read_fixture(test_file)
 
-    def generate_report(
-        self, report_template: str = "fix_report_template.md"
-    ) -> str:
+    def generate_report(self, report_template: str = "fix_report_template.md") -> str:
         """Generate a fix report.
 
         In a real agent, this would involve:

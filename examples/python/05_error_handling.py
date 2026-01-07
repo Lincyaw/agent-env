@@ -57,8 +57,9 @@ def example_invalid_command() -> None:
         status = result.get("status", {})
         print(f"\n✓ Task State: {status.get('state')}")
         print(f"✓ Exit Code: {status.get('exitCode')}")
-        if status.get("stderr"):
-            print(f"✓ Error: {status.get('stderr')[:200]}")
+        stderr = status.get("stderr")
+        if stderr:
+            print(f"✓ Error: {stderr[:200]}")
 
 
 def example_retry_logic() -> None:

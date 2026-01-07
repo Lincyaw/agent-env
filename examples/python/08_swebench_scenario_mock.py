@@ -169,8 +169,9 @@ def main() -> None:
         result_patch = session.execute(steps_patch)
         status_patch = result_patch.get("status", {})
         print(f"Patch application: {status_patch.get('state')}")
-        if status_patch.get("stdout"):
-            print(f"Output:\n{status_patch.get('stdout')[:500]}...")
+        stdout_patch = status_patch.get("stdout")
+        if stdout_patch:
+            print(f"Output:\n{stdout_patch[:500]}...")
 
         # Agent Step 3: Generate test script
         print("\n[Agent Step 3] Generating test script...")

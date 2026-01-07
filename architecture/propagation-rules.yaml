@@ -109,15 +109,11 @@ rules:
     impacts:
       - pkg/pb/agent.pb.go
       - pkg/pb/agent_grpc.pb.go
-      - sdk/python/arl/arl/pb/proto/agent_pb2.py
-      - sdk/python/arl/arl/pb/proto/agent_pb2_grpc.py
       - pkg/sidecar/service.go
       - pkg/controller/task_controller.go
     actions:
       - description: Regenerate Go protobuf code
         command: make proto-go
-      - description: Regenerate Python protobuf code
-        command: make proto-python
       - description: Update sidecar service implementation
         manual: true
         files:

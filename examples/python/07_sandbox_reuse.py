@@ -78,7 +78,10 @@ def main() -> None:
                     "command": [
                         "sh",
                         "-c",
-                        "echo 'State:' && cat /workspace/state.txt && echo 'Counter:' && cat /workspace/counter.txt",
+                        (
+                            "echo 'State:' && cat /workspace/state.txt && "
+                            "echo 'Counter:' && cat /workspace/counter.txt"
+                        ),
                     ],
                 }
             ]

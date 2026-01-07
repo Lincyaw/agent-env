@@ -189,11 +189,6 @@ dependencies:
     type: generates
     description: Generated from proto/agent.proto via protoc
 
-  - from: proto-python-generated
-    to: agent-proto
-    type: generates
-    description: Generated from proto/agent.proto via grpc_tools.protoc
-
   - from: crd-manifests
     to: warmpool-crd
     type: generates
@@ -216,11 +211,6 @@ dependencies:
     to: crd-manifests
     type: generates
     description: SDK models generated from CRD OpenAPI schemas
-
-  - from: python-sdk
-    to: proto-python-generated
-    type: import
-    description: Uses Python gRPC stubs for sidecar communication
 
   # ============================================================================
   # Deployment Dependencies
