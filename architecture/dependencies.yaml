@@ -1,0 +1,233 @@
+# ARL-Infra Dependency Graph
+# This file documents technical and logical dependencies between components
+
+# Dependency Types:
+#   - import: Go package import
+#   - watch: Kubernetes watch on resource type
+#   - grpc: gRPC client-server communication
+#   - references: Logical reference (e.g., field referencing another CRD)
+#   - generates: Code generation output
+
+dependencies:
+  # ============================================================================
+  # CRD Dependencies
+  # ============================================================================
+  - from: sandbox-crd
+    to: warmpool-crd
+    type: references
+    description: SandboxSpec.PoolRef references WarmPool by name
+
+  - from: task-crd
+    to: sandbox-crd
+    type: references
+    description: TaskSpec.SandboxRef references Sandbox by name
+
+  # ============================================================================
+  # Controller Dependencies
+  # ============================================================================
+  # WarmPool Controller
+  - from: warmpool-controller
+    to: warmpool-crd
+    type: import
+    description: Uses WarmPool types for reconciliation
+
+  - from: warmpool-controller
+    to: warmpool-crd
+    type: watch
+    description: Watches WarmPool resources for changes
+
+  # Sandbox Controller
+  - from: sandbox-controller
+    to: sandbox-crd
+    type: import
+    description: Uses Sandbox types for reconciliation
+
+  - from: sandbox-controller
+    to: sandbox-crd
+    type: watch
+    description: Watches Sandbox resources for changes
+
+  - from: sandbox-controller
+    to: warmpool-crd
+    type: import
+    description: Reads WarmPool to allocate pods
+
+  - from: sandbox-controller
+    to: warmpool-crd
+    type: watch
+    description: Watches WarmPool for available pods
+
+  # Task Controller
+  - from: task-controller
+    to: task-crd
+    type: import
+    description: Uses Task types for reconciliation
+
+  - from: task-controller
+    to: task-crd
+    type: watch
+    description: Watches Task resources for changes
+
+  - from: task-controller
+    to: sandbox-crd
+    type: import
+    description: Reads Sandbox to get pod information
+
+  - from: task-controller
+    to: sandbox-crd
+    type: watch
+    description: Watches Sandbox for ready state
+
+  - from: task-controller
+    to: proto-go-generated
+    type: import
+    description: Uses generated gRPC client stubs
+
+  - from: task-controller
+    to: sidecar
+    type: grpc
+    description: Calls sidecar AgentService to execute tasks
+
+  # TTL Controller
+  - from: ttl-controller
+    to: task-crd
+    type: watch
+    description: Watches completed Tasks for TTL cleanup
+
+  - from: ttl-controller
+    to: sandbox-crd
+    type: watch
+    description: Watches idle Sandboxes for timeout cleanup
+
+  # ============================================================================
+  # Webhook Dependencies
+  # ============================================================================
+  - from: sandbox-webhook
+    to: sandbox-crd
+    type: import
+    description: Validates Sandbox resources
+
+  - from: sandbox-webhook
+    to: warmpool-crd
+    type: import
+    description: Validates PoolRef exists
+
+  - from: task-webhook
+    to: task-crd
+    type: import
+    description: Validates Task resources
+
+  - from: task-webhook
+    to: sandbox-crd
+    type: import
+    description: Validates SandboxRef exists
+
+  - from: warmpool-webhook
+    to: warmpool-crd
+    type: import
+    description: Validates WarmPool resources
+
+  # ============================================================================
+  # Operator Dependencies
+  # ============================================================================
+  - from: operator
+    to: warmpool-controller
+    type: import
+    description: Registers WarmPool controller
+
+  - from: operator
+    to: sandbox-controller
+    type: import
+    description: Registers Sandbox controller
+
+  - from: operator
+    to: task-controller
+    type: import
+    description: Registers Task controller
+
+  - from: operator
+    to: ttl-controller
+    type: import
+    description: Registers TTL controller
+
+  - from: operator
+    to: sandbox-webhook
+    type: import
+    description: Registers Sandbox webhook
+
+  - from: operator
+    to: task-webhook
+    type: import
+    description: Registers Task webhook
+
+  - from: operator
+    to: warmpool-webhook
+    type: import
+    description: Registers WarmPool webhook
+
+  # ============================================================================
+  # Sidecar Dependencies
+  # ============================================================================
+  - from: sidecar
+    to: proto-go-generated
+    type: import
+    description: Implements AgentService gRPC server
+
+  - from: sidecar
+    to: agent-proto
+    type: implements
+    description: Implements AgentService interface
+
+  # ============================================================================
+  # Code Generation Dependencies
+  # ============================================================================
+  - from: proto-go-generated
+    to: agent-proto
+    type: generates
+    description: Generated from proto/agent.proto via protoc
+
+  - from: proto-python-generated
+    to: agent-proto
+    type: generates
+    description: Generated from proto/agent.proto via grpc_tools.protoc
+
+  - from: crd-manifests
+    to: warmpool-crd
+    type: generates
+    description: Generated from Go types via controller-gen
+
+  - from: crd-manifests
+    to: sandbox-crd
+    type: generates
+    description: Generated from Go types via controller-gen
+
+  - from: crd-manifests
+    to: task-crd
+    type: generates
+    description: Generated from Go types via controller-gen
+
+  # ============================================================================
+  # SDK Dependencies
+  # ============================================================================
+  - from: python-sdk
+    to: crd-manifests
+    type: generates
+    description: SDK models generated from CRD OpenAPI schemas
+
+  - from: python-sdk
+    to: proto-python-generated
+    type: import
+    description: Uses Python gRPC stubs for sidecar communication
+
+  # ============================================================================
+  # Deployment Dependencies
+  # ============================================================================
+  - from: helm-chart
+    to: crd-manifests
+    type: includes
+    description: Helm chart installs CRD manifests
+
+  - from: helm-chart
+    to: operator
+    type: deploys
+    description: Helm chart deploys operator

@@ -134,6 +134,12 @@ clean-sdk: ## Clean Python SDK build artifacts
 	rm -rf sdk/python/arl/dist sdk/python/arl/build sdk/python/arl/*.egg-info
 	rm -rf sdk/python/arl/arl/arl_client
 
+##@ Architecture
+
+.PHONY: arch-check
+arch-check: ## Validate architecture documentation
+	uv run python hack/arch-lint.py validate
+
 ##@ Utilities
 
 .PHONY: logs
