@@ -1,0 +1,39 @@
+---
+apiVersion: arl.infra.io/v1alpha1
+kind: WarmPool
+metadata:
+  name: swebench-emotion
+spec:
+  replicas: 2
+  template:
+    spec:
+      containers:
+        - name: executor
+          # SWE-bench image for js-emotion bug fixing scenario
+          image: swebench/swesmith.x86_64.emotion_1776_js-emotion.b882bcba
+          command: ["/bin/sh", "-c", "sleep infinity"]
+          volumeMounts:
+            - name: workspace
+              mountPath: /workspace
+            - name: testbed
+              mountPath: /testbed
+        - name: sidecar
+          image: 10.10.10.240/library/arl-sidecar:latest
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+            - name: grpc
+              containerPort: 9090
+              protocol: TCP
+          volumeMounts:
+            - name: workspace
+              mountPath: /workspace
+            - name: testbed
+              mountPath: /testbed
+      volumes:
+        - name: workspace
+          emptyDir: {}
+        - name: testbed
+          emptyDir: {}
