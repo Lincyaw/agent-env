@@ -1,12 +1,10 @@
 """Sandbox session management for ARL."""
 
 import time
-from collections.abc import Iterator
 from typing import Any, cast
 
 from kubernetes import client, config
 
-from arl.sidecar_client import SidecarClient
 from arl.types import TaskStep
 
 
@@ -33,15 +31,7 @@ class SandboxSession:
         ...     result2 = session.execute([...])  # Reuses same sandbox
         ... finally:
         ...     session.delete_sandbox()
-
-        Streaming execution (direct gRPC):
-
-        >>> with SandboxSession(pool_ref="python-39") as session:
-        ...     for log in session.execute_stream(["python", "-c", "print('hello')"]):
-        ...         print(log.stdout, end="")
     """
-
-    DEFAULT_GRPC_PORT = 9090
 
     def __init__(
         self,
@@ -49,7 +39,6 @@ class SandboxSession:
         namespace: str = "default",
         keep_alive: bool = False,
         timeout: int = 300,
-        grpc_port: int = DEFAULT_GRPC_PORT,
     ) -> None:
         """Initialize sandbox session.
 
@@ -58,19 +47,14 @@ class SandboxSession:
             namespace: Kubernetes namespace (default: "default")
             keep_alive: If True, sandbox persists after context exit
             timeout: Maximum seconds to wait for operations (default: 300)
-            grpc_port: gRPC port for sidecar communication (default: 9090)
         """
         self.pool_ref = pool_ref
         self.namespace = namespace
         self.keep_alive = keep_alive
         self.timeout = timeout
-        self.grpc_port = grpc_port
 
         self.sandbox_name: str | None = None
-        self._pod_ip: str | None = None
         self._custom_api: client.CustomObjectsApi | None = None
-        self._sidecar_client: SidecarClient | None = None
-        self._entered = False
 
     @property
     def custom_api(self) -> client.CustomObjectsApi:
@@ -82,27 +66,6 @@ class SandboxSession:
                 config.load_kube_config()
             self._custom_api = client.CustomObjectsApi()
         return self._custom_api
-
-    @property
-    def pod_ip(self) -> str | None:
-        """Get the pod IP of the sandbox (available after sandbox is ready)."""
-        return self._pod_ip
-
-    @property
-    def sidecar_client(self) -> SidecarClient:
-        """Get gRPC client for direct sidecar communication.
-
-        Raises:
-            RuntimeError: If sandbox is not ready or pod IP is not available
-        """
-        if self._pod_ip is None:
-            raise RuntimeError("Sandbox not ready - pod IP not available")
-        if self._sidecar_client is None:
-            self._sidecar_client = SidecarClient(
-                f"{self._pod_ip}:{self.grpc_port}",
-                timeout=float(self.timeout),
-            )
-        return self._sidecar_client
 
     def create_sandbox(self) -> dict[str, Any]:
         """Create a new sandbox from the warm pool.
@@ -175,8 +138,6 @@ class SandboxSession:
                 phase: str | None = status.get("phase")
 
                 if phase == "Ready":
-                    # Capture pod IP for direct gRPC communication
-                    self._pod_ip = status.get("podIP")
                     return
                 elif phase == "Failed":
                     conditions: list[dict[str, Any]] = status.get("conditions", [])
@@ -291,11 +252,6 @@ class SandboxSession:
 
         This method is idempotent and safe to call multiple times.
         """
-        # Close sidecar client if open
-        if self._sidecar_client is not None:
-            self._sidecar_client.close()
-            self._sidecar_client = None
-
         if self.sandbox_name is None:
             return
 
@@ -312,89 +268,9 @@ class SandboxSession:
                 raise
 
         self.sandbox_name = None
-        self._pod_ip = None
-
-    def execute_stream(
-        self,
-        command: list[str],
-        env: dict[str, str] | None = None,
-        working_dir: str = "",
-        timeout_seconds: int = 0,
-    ) -> Iterator[Any]:
-        """Execute a command with streaming output via gRPC.
-
-        This method bypasses the Task CRD and communicates directly with
-        the sidecar for real-time output streaming.
-
-        Args:
-            command: Command and arguments to execute
-            env: Environment variables
-            working_dir: Working directory for the command
-            timeout_seconds: Command timeout (0 = no timeout)
-
-        Yields:
-            ExecLog messages with stdout/stderr as they are received
-
-        Raises:
-            RuntimeError: If sandbox is not ready
-        """
-        yield from self.sidecar_client.execute_stream(
-            command=command,
-            env=env,
-            working_dir=working_dir,
-            timeout_seconds=timeout_seconds,
-        )
-
-    def execute_direct(
-        self,
-        command: list[str],
-        env: dict[str, str] | None = None,
-        working_dir: str = "",
-        timeout_seconds: int = 0,
-    ) -> Any:
-        """Execute a command directly via gRPC (non-streaming).
-
-        This method bypasses the Task CRD and communicates directly with
-        the sidecar. Use execute_stream() for real-time output.
-
-        Args:
-            command: Command and arguments to execute
-            env: Environment variables
-            working_dir: Working directory for the command
-            timeout_seconds: Command timeout (0 = no timeout)
-
-        Returns:
-            ExecLog with aggregated stdout, stderr, and exit code
-
-        Raises:
-            RuntimeError: If sandbox is not ready
-        """
-        return self.sidecar_client.execute(
-            command=command,
-            env=env,
-            working_dir=working_dir,
-            timeout_seconds=timeout_seconds,
-        )
-
-    def interactive_shell(self) -> Any:
-        """Start an interactive shell session via gRPC.
-
-        Returns:
-            ShellSession for bidirectional communication
-
-        Raises:
-            RuntimeError: If sandbox is not ready
-
-        Examples:
-            >>> with session.interactive_shell() as shell:
-            ...     for output in shell.run("ls -la"):
-            ...         print(output.data, end="")
-        """
-        return self.sidecar_client.interactive_shell()
 
     def __enter__(self) -> "SandboxSession":
         """Enter context manager - create sandbox."""
-        self._entered = True
         self.create_sandbox()
         return self
 

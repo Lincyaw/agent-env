@@ -69,15 +69,17 @@ cleanup:
   sandboxIdleTimeoutSeconds: 3600
   ttlCheckInterval: "30s"
 
+# Altinity ClickHouse Operator (installed as dependency)
+clickhouse-operator:
+  enabled: true
+
 # ClickHouse configuration (for audit logging)
 clickhouse:
-  # Enable the ClickHouse subchart dependency
-  enabled: false
-  # External ClickHouse configuration (used when subchart is disabled)
-  external:
-    host: ""
-    port: 9000
+  # Enable audit logging to ClickHouse
+  enabled: true
   # ClickHouse connection settings
+  host: "clickhouse-arl"
+  port: 9000
   database: "arl"
   username: "default"
   password: ""

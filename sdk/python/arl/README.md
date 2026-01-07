@@ -7,8 +7,6 @@ High-level Python wrapper for the ARL (Agent Runtime Layer) client providing sim
 - **Context Manager Support**: Automatic sandbox lifecycle management
 - **Type-Safe API**: Full type hints with Pydantic models
 - **Kubernetes Integration**: Direct CRD interaction
-- **gRPC Streaming**: Real-time command output streaming
-- **Interactive Shell**: Bidirectional shell sessions via gRPC
 - **Error Handling**: Comprehensive error reporting and retry logic
 
 ## Installation
@@ -31,60 +29,13 @@ with SandboxSession(pool_ref="python-39-std", namespace="default") as session:
             "command": ["echo", "Hello, World!"],
         }
     ])
-    print(result["status"]["stdout"])
-```
-
-## Streaming Execution (gRPC)
-
-For real-time output streaming, use direct gRPC communication:
-
-```python
-from arl import SandboxSession
-
-with SandboxSession(pool_ref="python-39-std") as session:
-    # Stream command output in real-time
-    for log in session.execute_stream(["python", "-c", "print('hello')"]):
-        print(log.stdout, end="")
-        if log.done:
-            print(f"Exit code: {log.exit_code}")
-```
-
-## Interactive Shell
-
-Start an interactive shell session:
-
-```python
-from arl import SandboxSession
-
-with SandboxSession(pool_ref="python-39-std") as session:
-    with session.interactive_shell() as shell:
-        shell.send_data("echo hello\n")
-        for output in shell.read_output():
-            print(output.data, end="")
-            if output.closed:
-                break
-        
-        # Send Ctrl+C if needed
-        shell.send_signal("SIGINT")
-```
-
-## Direct Sidecar Client
-
-For low-level gRPC access to the sidecar:
-
-```python
-from arl import SidecarClient
-
-with SidecarClient("10.0.0.1:9090") as client:
-    # Update files
-    client.update_files("/workspace", {"script.py": "print('hello')"})
     
-    # Execute with streaming
-    for log in client.execute_stream(["python", "script.py"]):
-        print(log.stdout, end="")
-    
-    # Reset workspace
-    client.reset()
+    # Access results
+    status = result["status"]
+    for step in status.get("steps", []):
+        print(f"Step: {step['name']}")
+        print(f"Exit Code: {step['exitCode']}")
+        print(f"Stdout: {step['stdout']}")
 ```
 
 ## Manual Lifecycle Management
@@ -135,19 +86,13 @@ finally:
 ## Architecture
 
 - **SandboxSession**: High-level API using Kubernetes CRDs for task execution
-- **SidecarClient**: Low-level gRPC client for direct sidecar communication
-- **ShellSession**: Bidirectional streaming shell sessions
+- **Task CRD**: Operator watches and executes tasks via sidecar
+- **Auto-generated client**: `arl-client` package (CRD models)
 
-The SDK supports two execution modes:
-1. **CRD-based** (`execute()`): Creates Task CRD, operator handles execution
-2. **Direct gRPC** (`execute_stream()`, `execute_direct()`): Communicates directly with sidecar
+Task execution flow:
+1. Client creates Task CRD via Kubernetes API
+2. Operator watches for new tasks
+3. Operator communicates with sidecar to execute steps
+4. Client polls Task status for results
 
-## Development
-
-This package provides a clean separation between auto-generated API client code and custom business logic.
-
-- Auto-generated client: `arl-client` package (CRD models)
-- Auto-generated gRPC: `arl.pb` package (protobuf stubs)
-- Custom wrapper: `arl` package (this package)
-
-This architecture ensures custom code is never overwritten during API regeneration.
+This architecture ensures tasks can be executed from anywhere with cluster access.

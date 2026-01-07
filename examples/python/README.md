@@ -26,9 +26,6 @@ uv run python 04_working_directory.py
 uv run python 05_error_handling.py
 uv run python 06_long_running_task.py
 uv run python 07_sandbox_reuse.py
-uv run python 08_streaming_execution.py
-uv run python 09_interactive_shell.py
-uv run python 10_direct_sidecar_client.py  # Demo only - needs real pod IP
 
 # Run all examples
 uv run python run_all_examples.py
@@ -36,7 +33,9 @@ uv run python run_all_examples.py
 
 ## Examples
 
-### Basic Examples (Task CRD)
+### Task CRD-Based Execution
+
+All examples use the Kubernetes Task CRD for execution, which works from anywhere with cluster access:
 
 - **01_basic_execution.py**: Create sandbox, execute steps, read output
 - **02_multi_step_pipeline.py**: Data processing pipeline with multiple steps
@@ -45,12 +44,6 @@ uv run python run_all_examples.py
 - **05_error_handling.py**: Error handling and retries
 - **06_long_running_task.py**: Long-running tasks with timeouts
 - **07_sandbox_reuse.py**: Sandbox reuse for serial tasks
-
-### gRPC Streaming Examples (New!)
-
-- **08_streaming_execution.py**: Real-time output streaming via gRPC
-- **09_interactive_shell.py**: Bidirectional interactive shell sessions
-- **10_direct_sidecar_client.py**: Low-level SidecarClient API demonstration
 
 ## Common Patterns
 
@@ -63,7 +56,7 @@ with SandboxSession("python-3.9-std", namespace="default") as session:
     result = session.execute([...])
 ```
 
-### Task Steps (via Kubernetes CRD)
+### Task Steps
 
 ```python
 # FilePatch: Create/modify files
@@ -84,57 +77,20 @@ with SandboxSession("python-3.9-std", namespace="default") as session:
 }
 ```
 
-### Streaming Execution (Direct gRPC)
-
-For real-time output streaming, use the direct gRPC methods:
+### Result Handling
 
 ```python
-from arl import SandboxSession
+# Execute returns the completed task object
+task = session.execute([...])
 
-with SandboxSession("python-3.9-std") as session:
-    # Stream execution output in real-time
-    for log in session.execute_stream(["python", "-c", "print('hello')"]):
-        print(log.stdout, end="")
-        if log.done:
-            print(f"Exit code: {log.exit_code}")
-```
+# Check execution status
+status = task["status"]
+state = status["state"]  # "Succeeded" or "Failed"
 
-### Interactive Shell
-
-For interactive shell sessions:
-
-```python
-from arl import SandboxSession
-
-with SandboxSession("python-3.9-std") as session:
-    with session.interactive_shell() as shell:
-        # Run commands interactively
-        shell.send_data("echo hello\n")
-        for output in shell.read_output():
-            print(output.data, end="")
-            if output.closed:
-                break
-        
-        # Send Ctrl+C
-        shell.send_signal("SIGINT")
-```
-
-### Direct Sidecar Client
-
-For low-level sidecar access:
-
-```python
-from arl import SidecarClient
-
-# Connect directly to sidecar (requires pod IP)
-with SidecarClient("10.0.0.1:9090") as client:
-    # Update files
-    client.update_files("/workspace", {"test.py": "print('hello')"})
-    
-    # Execute with streaming
-    for log in client.execute_stream(["python", "test.py"]):
-        print(log.stdout, end="")
-    
-    # Reset workspace
-    client.reset()
+# Access step results
+for step_result in status.get("steps", []):
+    print(f"Step: {step_result['name']}")
+    print(f"Exit Code: {step_result['exitCode']}")
+    print(f"Stdout: {step_result['stdout']}")
+    print(f"Stderr: {step_result['stderr']}")
 ```

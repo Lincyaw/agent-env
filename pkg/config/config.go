@@ -9,6 +9,7 @@ import (
 // Config holds the operator configuration
 type Config struct {
 	// Sidecar configuration
+	SidecarImage      string
 	SidecarHTTPPort   int
 	SidecarGRPCPort   int
 	WorkspaceDir      string
@@ -49,6 +50,7 @@ type Config struct {
 // DefaultConfig returns the default configuration
 func DefaultConfig() *Config {
 	return &Config{
+		SidecarImage:              "arl-sidecar:latest",
 		SidecarHTTPPort:           8080,
 		SidecarGRPCPort:           9090,
 		WorkspaceDir:              "/workspace",
@@ -80,6 +82,10 @@ func DefaultConfig() *Config {
 // LoadFromEnv loads configuration from environment variables
 func LoadFromEnv() *Config {
 	cfg := DefaultConfig()
+
+	if image := os.Getenv("SIDECAR_IMAGE"); image != "" {
+		cfg.SidecarImage = image
+	}
 
 	if port := os.Getenv("SIDECAR_HTTP_PORT"); port != "" {
 		if p, err := strconv.Atoi(port); err == nil {

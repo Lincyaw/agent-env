@@ -43,9 +43,6 @@ def main():
         ("05_error_handling", "05. Error Handling"),
         ("06_long_running_task", "06. Long-Running Task"),
         ("07_sandbox_reuse", "07. Sandbox Reuse"),
-        ("08_streaming_execution", "08. Streaming Execution (gRPC)"),
-        ("09_interactive_shell", "09. Interactive Shell (gRPC)"),
-        # Note: 10_direct_sidecar_client is demonstration only, requires manual pod IP
     ]
 
     results = []

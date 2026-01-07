@@ -4,9 +4,9 @@ go 1.25.0
 
 require (
 	github.com/prometheus/client_golang v1.23.2
-	google.golang.org/grpc v1.78.0
+	google.golang.org/grpc v1.72.2
 	google.golang.org/grpc/cmd/protoc-gen-go-grpc v1.6.0
-	google.golang.org/protobuf v1.36.11
+	google.golang.org/protobuf v1.36.10
 	k8s.io/api v0.35.0
 	k8s.io/apimachinery v0.35.0
 	k8s.io/client-go v0.35.0

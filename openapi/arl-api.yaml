@@ -243,6 +243,10 @@ components:
           $ref: '#/components/schemas/SandboxStatus'
     SandboxSpec:
       properties:
+        idleTimeoutSeconds:
+          format: int32
+          minimum: 0
+          type: integer
         keepAlive:
           type: boolean
         poolRef:
@@ -284,6 +288,9 @@ components:
           items:
             $ref: '#/components/schemas/Condition'
           type: array
+        lastTaskTime:
+          format: date-time
+          type: string
         phase:
           type: string
         podIP:
@@ -322,6 +329,8 @@ components:
             $ref: '#/components/schemas/TaskStep'
           type: array
         timeout:
+          type: string
+        traceID:
           type: string
         ttlSecondsAfterFinished:
           format: int32

@@ -16,9 +16,14 @@ spec:
               mountPath: /workspace
         - name: sidecar
           image: 10.10.10.240/library/arl-sidecar:latest
-          imagePullPolicy: IfNotPresent
+          imagePullPolicy: Always
           ports:
-            - containerPort: 8080
+            - name: http
+              containerPort: 8080
+              protocol: TCP
+            - name: grpc
+              containerPort: 9090
+              protocol: TCP
           volumeMounts:
             - name: workspace
               mountPath: /workspace

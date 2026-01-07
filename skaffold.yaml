@@ -25,6 +25,9 @@ manifests:
       createNamespace: true
       setValues:
         crds.install: true
+      setValueTemplates:
+        image.tag: "{{.IMAGE_TAG}}"
+        sidecar.image.tag: "{{.IMAGE_TAG2}}"
 
 # Default deploy configuration (for minikube)
 deploy:
@@ -59,6 +62,9 @@ profiles:
           crds.install: true
           image.repository: 10.10.10.240/library/arl-operator
           sidecar.image.repository: 10.10.10.240/library/arl-sidecar
+        setValueTemplates:
+          image.tag: "{{.IMAGE_TAG}}"
+          sidecar.image.tag: "{{.IMAGE_TAG2}}"
   deploy:
     kubectl:
       flags:
@@ -99,6 +105,9 @@ profiles:
         createNamespace: true
         setValues:
           crds.install: true
+        setValueTemplates:
+          image.tag: "{{.IMAGE_TAG}}"
+          sidecar.image.tag: "{{.IMAGE_TAG2}}"
   deploy:
     kubectl:
       flags:
@@ -117,6 +126,9 @@ profiles:
         createNamespace: true
         setValues:
           crds.install: true
+        setValueTemplates:
+          image.tag: "{{.IMAGE_TAG}}"
+          sidecar.image.tag: "{{.IMAGE_TAG2}}"
     rawYaml:
     - config/samples/*.yaml
   deploy:
@@ -149,6 +161,9 @@ profiles:
           crds.install: true
           image.repository: 10.10.10.240/library/arl-operator
           sidecar.image.repository: 10.10.10.240/library/arl-sidecar
+        setValueTemplates:
+          image.tag: "{{.IMAGE_TAG}}"
+          sidecar.image.tag: "{{.IMAGE_TAG2}}"
     rawYaml:
     - config/samples/*.yaml
   deploy:

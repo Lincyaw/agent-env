@@ -24,9 +24,6 @@ dependencies = [
     "python-dateutil>=2.8.2",
     "pydantic>=2",
     "typing-extensions>=4.7.1",
-    "grpcio>=1.60.0",
-    "grpcio-tools>=1.60.0",
-    "protobuf>=4.25.0",
 ]
 
 [project.urls]
