@@ -1,0 +1,6 @@
+dependencies:
+- name: altinity-clickhouse-operator
+  repository: https://helm.altinity.com
+  version: 0.24.0
+digest: sha256:baf01a45475f21539658a02f653bf080ae4ba51b70b2340de4b7a2eddb4015e8
+generated: "2026-01-07T09:44:10.657247986+08:00"
