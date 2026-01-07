@@ -187,11 +187,17 @@ func (r *WarmPoolReconciler) constructPod(pool *arlv1alpha1.WarmPool) *corev1.Po
 		// Add default sidecar container
 		sidecarContainer := corev1.Container{
 			Name:            "sidecar",
-			Image:           "arl-sidecar:latest",
+			Image:           r.Config.SidecarImage,
 			ImagePullPolicy: corev1.PullIfNotPresent,
 			Ports: []corev1.ContainerPort{
 				{
-					ContainerPort: int32(r.Config.SidecarPort),
+					Name:          "http",
+					ContainerPort: int32(r.Config.SidecarHTTPPort),
+					Protocol:      corev1.ProtocolTCP,
+				},
+				{
+					Name:          "grpc",
+					ContainerPort: int32(r.Config.SidecarGRPCPort),
 					Protocol:      corev1.ProtocolTCP,
 				},
 			},

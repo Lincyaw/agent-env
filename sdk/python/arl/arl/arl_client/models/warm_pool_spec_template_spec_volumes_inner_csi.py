@@ -1,3 +1,4 @@
+
 """
 ARL Infrastructure API
 
@@ -35,7 +36,9 @@ class WarmPoolSpecTemplateSpecVolumesInnerCsi(BaseModel):
         default=None, alias="nodePublishSecretRef"
     )
     read_only: StrictBool | None = Field(default=None, alias="readOnly")
-    volume_attributes: dict[str, StrictStr] | None = Field(default=None, alias="volumeAttributes")
+    volume_attributes: dict[str, StrictStr] | None = Field(
+        default=None, alias="volumeAttributes"
+    )
     __properties: ClassVar[list[str]] = [
         "driver",
         "fsType",

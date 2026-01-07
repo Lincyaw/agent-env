@@ -1,3 +1,4 @@
+
 """
 ARL Infrastructure API
 
@@ -49,8 +50,8 @@ class WarmPoolSpecTemplateSpecContainersInnerLivenessProbe(BaseModel):
     initial_delay_seconds: StrictInt | None = Field(default=None, alias="initialDelaySeconds")
     period_seconds: StrictInt | None = Field(default=None, alias="periodSeconds")
     success_threshold: StrictInt | None = Field(default=None, alias="successThreshold")
-    tcp_socket: WarmPoolSpecTemplateSpecContainersInnerLifecyclePostStartTcpSocket | None = Field(
-        default=None, alias="tcpSocket"
+    tcp_socket: WarmPoolSpecTemplateSpecContainersInnerLifecyclePostStartTcpSocket | None = (
+        Field(default=None, alias="tcpSocket")
     )
     termination_grace_period_seconds: StrictInt | None = Field(
         default=None, alias="terminationGracePeriodSeconds"

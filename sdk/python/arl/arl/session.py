@@ -55,7 +55,6 @@ class SandboxSession:
 
         self.sandbox_name: str | None = None
         self._custom_api: client.CustomObjectsApi | None = None
-        self._entered = False
 
     @property
     def custom_api(self) -> client.CustomObjectsApi:
@@ -272,7 +271,6 @@ class SandboxSession:
 
     def __enter__(self) -> "SandboxSession":
         """Enter context manager - create sandbox."""
-        self._entered = True
         self.create_sandbox()
         return self
 

@@ -63,20 +63,12 @@ Create the name of the service account to use
 ClickHouse host
 */}}
 {{- define "arl-operator.clickhouseHost" -}}
-{{- if .Values.clickhouse.enabled }}
-{{- printf "%s-clickhouse" .Release.Name }}
-{{- else }}
-{{- .Values.clickhouse.external.host }}
-{{- end }}
+{{- .Values.clickhouse.host | default "clickhouse-arl" }}
 {{- end }}
 
 {{/*
 ClickHouse address
 */}}
 {{- define "arl-operator.clickhouseAddr" -}}
-{{- if .Values.clickhouse.enabled }}
-{{- printf "%s-clickhouse:%d" .Release.Name (int .Values.clickhouse.external.port | default 9000) }}
-{{- else }}
-{{- printf "%s:%d" .Values.clickhouse.external.host (int .Values.clickhouse.external.port | default 9000) }}
-{{- end }}
+{{- printf "%s:%d" (.Values.clickhouse.host | default "clickhouse-arl") (int .Values.clickhouse.port | default 9000) }}
 {{- end }}

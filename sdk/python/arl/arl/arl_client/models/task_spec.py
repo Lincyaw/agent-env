@@ -1,3 +1,4 @@
+
 """
 ARL Infrastructure API
 
@@ -31,6 +32,7 @@ class TaskSpec(BaseModel):
     sandbox_ref: StrictStr = Field(alias="sandboxRef")
     steps: list[TaskStep]
     timeout: StrictStr | None = None
+    trace_id: StrictStr | None = Field(default=None, alias="traceID")
     ttl_seconds_after_finished: Annotated[int, Field(strict=True, ge=0)] | None = Field(
         default=None, alias="ttlSecondsAfterFinished"
     )
@@ -39,6 +41,7 @@ class TaskSpec(BaseModel):
         "sandboxRef",
         "steps",
         "timeout",
+        "traceID",
         "ttlSecondsAfterFinished",
     ]
 
@@ -105,6 +108,7 @@ class TaskSpec(BaseModel):
                 if obj.get("steps") is not None
                 else None,
                 "timeout": obj.get("timeout"),
+                "traceID": obj.get("traceID"),
                 "ttlSecondsAfterFinished": obj.get("ttlSecondsAfterFinished"),
             }
         )

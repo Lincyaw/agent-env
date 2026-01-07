@@ -1,3 +1,4 @@
+
 """
 ARL Infrastructure API
 
@@ -160,8 +161,8 @@ class WarmPoolSpecTemplateSpecVolumesInner(BaseModel):
     persistent_volume_claim: WarmPoolSpecTemplateSpecVolumesInnerPersistentVolumeClaim | None = (
         Field(default=None, alias="persistentVolumeClaim")
     )
-    photon_persistent_disk: WarmPoolSpecTemplateSpecVolumesInnerPhotonPersistentDisk | None = Field(
-        default=None, alias="photonPersistentDisk"
+    photon_persistent_disk: WarmPoolSpecTemplateSpecVolumesInnerPhotonPersistentDisk | None = (
+        Field(default=None, alias="photonPersistentDisk")
     )
     portworx_volume: WarmPoolSpecTemplateSpecVolumesInnerPortworxVolume | None = Field(
         default=None, alias="portworxVolume"

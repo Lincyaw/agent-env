@@ -1,3 +1,4 @@
+
 """
 ARL Infrastructure API
 
@@ -32,18 +33,8 @@ class WarmPoolSpecTemplateSpecAffinityPodAffinity(BaseModel):
     WarmPoolSpecTemplateSpecAffinityPodAffinity
     """
 
-    preferred_during_scheduling_ignored_during_execution: (
-        list[
-            WarmPoolSpecTemplateSpecAffinityPodAffinityPreferredDuringSchedulingIgnoredDuringExecutionInner
-        ]
-        | None
-    ) = Field(default=None, alias="preferredDuringSchedulingIgnoredDuringExecution")
-    required_during_scheduling_ignored_during_execution: (
-        list[
-            WarmPoolSpecTemplateSpecAffinityPodAffinityPreferredDuringSchedulingIgnoredDuringExecutionInnerPodAffinityTerm
-        ]
-        | None
-    ) = Field(default=None, alias="requiredDuringSchedulingIgnoredDuringExecution")
+    preferred_during_scheduling_ignored_during_execution: list[WarmPoolSpecTemplateSpecAffinityPodAffinityPreferredDuringSchedulingIgnoredDuringExecutionInner] | None = Field(default=None, alias="preferredDuringSchedulingIgnoredDuringExecution")
+    required_during_scheduling_ignored_during_execution: list[WarmPoolSpecTemplateSpecAffinityPodAffinityPreferredDuringSchedulingIgnoredDuringExecutionInnerPodAffinityTerm] | None = Field(default=None, alias="requiredDuringSchedulingIgnoredDuringExecution")
     __properties: ClassVar[list[str]] = [
         "preferredDuringSchedulingIgnoredDuringExecution",
         "requiredDuringSchedulingIgnoredDuringExecution",

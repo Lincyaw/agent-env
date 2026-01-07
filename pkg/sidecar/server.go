@@ -9,28 +9,22 @@ import (
 	"time"
 )
 
-// Server provides HTTP API for the sidecar
+// Server provides HTTP API for health checks only
 type Server struct {
-	service    *AgentService
 	port       int
 	httpServer *http.Server
 }
 
-// NewServer creates a new HTTP server
-func NewServer(workspaceDir string, port int) *Server {
+// NewServer creates a new HTTP server for health checks
+func NewServer(port int) *Server {
 	mux := http.NewServeMux()
 	srv := &Server{
-		service: NewAgentService(workspaceDir),
-		port:    port,
+		port: port,
 	}
 
 	mux.HandleFunc("/health", srv.handleHealth)
 	mux.HandleFunc("/healthz", srv.handleHealthz)
 	mux.HandleFunc("/readyz", srv.handleReadyz)
-	mux.HandleFunc("/files", srv.handleFiles)
-	mux.HandleFunc("/execute", srv.handleExecute)
-	mux.HandleFunc("/signal", srv.handleSignal)
-	mux.HandleFunc("/reset", srv.handleReset)
 
 	srv.httpServer = &http.Server{
 		Addr:              fmt.Sprintf(":%d", port),
@@ -46,7 +40,7 @@ func NewServer(workspaceDir string, port int) *Server {
 
 // Start starts the HTTP server
 func (s *Server) Start() error {
-	log.Printf("Sidecar server starting on %s", s.httpServer.Addr)
+	log.Printf("HTTP server starting on %s", s.httpServer.Addr)
 	return s.httpServer.ListenAndServe()
 }
 
@@ -61,107 +55,11 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
-	// Kubernetes health check endpoint
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("ok"))
 }
 
 func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
-	// Kubernetes readiness check endpoint
-	// Check if service is ready to handle requests
-	if s.service == nil {
-		w.WriteHeader(http.StatusServiceUnavailable)
-		w.Write([]byte("service not ready"))
-		return
-	}
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("ok"))
-}
-
-func (s *Server) handleFiles(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	var req FileRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	resp, err := s.service.UpdateFiles(r.Context(), &req)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
-}
-
-func (s *Server) handleExecute(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	var req ExecRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	resp, err := s.service.ExecuteSync(r.Context(), &req)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
-}
-
-func (s *Server) handleSignal(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	var req SignalRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	resp, err := s.service.SignalProcess(r.Context(), &req)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
-}
-
-func (s *Server) handleReset(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	var req ResetRequest
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	resp, err := s.service.Reset(r.Context(), &req)
-	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp)
 }

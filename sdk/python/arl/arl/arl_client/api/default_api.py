@@ -1,3 +1,4 @@
+
 """
 ARL Infrastructure API
 
@@ -41,9 +42,7 @@ class DefaultApi:
         self,
         namespace: StrictStr,
         sandbox: Sandbox,
-        _request_timeout: None
-        | Annotated[StrictFloat, Field(gt=0)]
-        | tuple[Annotated[StrictFloat, Field(gt=0)], Annotated[StrictFloat, Field(gt=0)]] = None,
+        _request_timeout: None | Annotated[StrictFloat, Field(gt=0)] | tuple[Annotated[StrictFloat, Field(gt=0)], Annotated[StrictFloat, Field(gt=0)]] = None,
         _request_auth: dict[StrictStr, Any] | None = None,
         _content_type: StrictStr | None = None,
         _headers: dict[StrictStr, Any] | None = None,
@@ -102,9 +101,7 @@ class DefaultApi:
         self,
         namespace: StrictStr,
         sandbox: Sandbox,
-        _request_timeout: None
-        | Annotated[StrictFloat, Field(gt=0)]
-        | tuple[Annotated[StrictFloat, Field(gt=0)], Annotated[StrictFloat, Field(gt=0)]] = None,
+        _request_timeout: None | Annotated[StrictFloat, Field(gt=0)] | tuple[Annotated[StrictFloat, Field(gt=0)], Annotated[StrictFloat, Field(gt=0)]] = None,
         _request_auth: dict[StrictStr, Any] | None = None,
         _content_type: StrictStr | None = None,
         _headers: dict[StrictStr, Any] | None = None,
@@ -163,9 +160,7 @@ class DefaultApi:
         self,
         namespace: StrictStr,
         sandbox: Sandbox,
-        _request_timeout: None
-        | Annotated[StrictFloat, Field(gt=0)]
-        | tuple[Annotated[StrictFloat, Field(gt=0)], Annotated[StrictFloat, Field(gt=0)]] = None,
+        _request_timeout: None | Annotated[StrictFloat, Field(gt=0)] | tuple[Annotated[StrictFloat, Field(gt=0)], Annotated[StrictFloat, Field(gt=0)]] = None,
         _request_auth: dict[StrictStr, Any] | None = None,
         _content_type: StrictStr | None = None,
         _headers: dict[StrictStr, Any] | None = None,
@@ -280,9 +275,7 @@ class DefaultApi:
         self,
         namespace: StrictStr,
         task: Task,
-        _request_timeout: None
-        | Annotated[StrictFloat, Field(gt=0)]
-        | tuple[Annotated[StrictFloat, Field(gt=0)], Annotated[StrictFloat, Field(gt=0)]] = None,
+        _request_timeout: None | Annotated[StrictFloat, Field(gt=0)] | tuple[Annotated[StrictFloat, Field(gt=0)], Annotated[StrictFloat, Field(gt=0)]] = None,
         _request_auth: dict[StrictStr, Any] | None = None,
         _content_type: StrictStr | None = None,
         _headers: dict[StrictStr, Any] | None = None,
@@ -341,9 +334,7 @@ class DefaultApi:
         self,
         namespace: StrictStr,
         task: Task,
-        _request_timeout: None
-        | Annotated[StrictFloat, Field(gt=0)]
-        | tuple[Annotated[StrictFloat, Field(gt=0)], Annotated[StrictFloat, Field(gt=0)]] = None,
+        _request_timeout: None | Annotated[StrictFloat, Field(gt=0)] | tuple[Annotated[StrictFloat, Field(gt=0)], Annotated[StrictFloat, Field(gt=0)]] = None,
         _request_auth: dict[StrictStr, Any] | None = None,
         _content_type: StrictStr | None = None,
         _headers: dict[StrictStr, Any] | None = None,
@@ -402,9 +393,7 @@ class DefaultApi:
         self,
         namespace: StrictStr,
         task: Task,
-        _request_timeout: None
-        | Annotated[StrictFloat, Field(gt=0)]
-        | tuple[Annotated[StrictFloat, Field(gt=0)], Annotated[StrictFloat, Field(gt=0)]] = None,
+        _request_timeout: None | Annotated[StrictFloat, Field(gt=0)] | tuple[Annotated[StrictFloat, Field(gt=0)], Annotated[StrictFloat, Field(gt=0)]] = None,
         _request_auth: dict[StrictStr, Any] | None = None,
         _content_type: StrictStr | None = None,
         _headers: dict[StrictStr, Any] | None = None,
@@ -519,9 +508,7 @@ class DefaultApi:
         self,
         namespace: StrictStr,
         warm_pool: WarmPool,
-        _request_timeout: None
-        | Annotated[StrictFloat, Field(gt=0)]
-        | tuple[Annotated[StrictFloat, Field(gt=0)], Annotated[StrictFloat, Field(gt=0)]] = None,
+        _request_timeout: None | Annotated[StrictFloat, Field(gt=0)] | tuple[Annotated[StrictFloat, Field(gt=0)], Annotated[StrictFloat, Field(gt=0)]] = None,
         _request_auth: dict[StrictStr, Any] | None = None,
         _content_type: StrictStr | None = None,
         _headers: dict[StrictStr, Any] | None = None,
@@ -580,9 +567,7 @@ class DefaultApi:
         self,
         namespace: StrictStr,
         warm_pool: WarmPool,
-        _request_timeout: None
-        | Annotated[StrictFloat, Field(gt=0)]
-        | tuple[Annotated[StrictFloat, Field(gt=0)], Annotated[StrictFloat, Field(gt=0)]] = None,
+        _request_timeout: None | Annotated[StrictFloat, Field(gt=0)] | tuple[Annotated[StrictFloat, Field(gt=0)], Annotated[StrictFloat, Field(gt=0)]] = None,
         _request_auth: dict[StrictStr, Any] | None = None,
         _content_type: StrictStr | None = None,
         _headers: dict[StrictStr, Any] | None = None,
@@ -641,9 +626,7 @@ class DefaultApi:
         self,
         namespace: StrictStr,
         warm_pool: WarmPool,
-        _request_timeout: None
-        | Annotated[StrictFloat, Field(gt=0)]
-        | tuple[Annotated[StrictFloat, Field(gt=0)], Annotated[StrictFloat, Field(gt=0)]] = None,
+        _request_timeout: None | Annotated[StrictFloat, Field(gt=0)] | tuple[Annotated[StrictFloat, Field(gt=0)], Annotated[StrictFloat, Field(gt=0)]] = None,
         _request_auth: dict[StrictStr, Any] | None = None,
         _content_type: StrictStr | None = None,
         _headers: dict[StrictStr, Any] | None = None,
@@ -757,9 +740,7 @@ class DefaultApi:
     def list_sandboxes(
         self,
         namespace: StrictStr,
-        _request_timeout: None
-        | Annotated[StrictFloat, Field(gt=0)]
-        | tuple[Annotated[StrictFloat, Field(gt=0)], Annotated[StrictFloat, Field(gt=0)]] = None,
+        _request_timeout: None | Annotated[StrictFloat, Field(gt=0)] | tuple[Annotated[StrictFloat, Field(gt=0)], Annotated[StrictFloat, Field(gt=0)]] = None,
         _request_auth: dict[StrictStr, Any] | None = None,
         _content_type: StrictStr | None = None,
         _headers: dict[StrictStr, Any] | None = None,
@@ -814,9 +795,7 @@ class DefaultApi:
     def list_sandboxes_with_http_info(
         self,
         namespace: StrictStr,
-        _request_timeout: None
-        | Annotated[StrictFloat, Field(gt=0)]
-        | tuple[Annotated[StrictFloat, Field(gt=0)], Annotated[StrictFloat, Field(gt=0)]] = None,
+        _request_timeout: None | Annotated[StrictFloat, Field(gt=0)] | tuple[Annotated[StrictFloat, Field(gt=0)], Annotated[StrictFloat, Field(gt=0)]] = None,
         _request_auth: dict[StrictStr, Any] | None = None,
         _content_type: StrictStr | None = None,
         _headers: dict[StrictStr, Any] | None = None,
@@ -871,9 +850,7 @@ class DefaultApi:
     def list_sandboxes_without_preload_content(
         self,
         namespace: StrictStr,
-        _request_timeout: None
-        | Annotated[StrictFloat, Field(gt=0)]
-        | tuple[Annotated[StrictFloat, Field(gt=0)], Annotated[StrictFloat, Field(gt=0)]] = None,
+        _request_timeout: None | Annotated[StrictFloat, Field(gt=0)] | tuple[Annotated[StrictFloat, Field(gt=0)], Annotated[StrictFloat, Field(gt=0)]] = None,
         _request_auth: dict[StrictStr, Any] | None = None,
         _content_type: StrictStr | None = None,
         _headers: dict[StrictStr, Any] | None = None,
@@ -973,9 +950,7 @@ class DefaultApi:
     def list_tasks(
         self,
         namespace: StrictStr,
-        _request_timeout: None
-        | Annotated[StrictFloat, Field(gt=0)]
-        | tuple[Annotated[StrictFloat, Field(gt=0)], Annotated[StrictFloat, Field(gt=0)]] = None,
+        _request_timeout: None | Annotated[StrictFloat, Field(gt=0)] | tuple[Annotated[StrictFloat, Field(gt=0)], Annotated[StrictFloat, Field(gt=0)]] = None,
         _request_auth: dict[StrictStr, Any] | None = None,
         _content_type: StrictStr | None = None,
         _headers: dict[StrictStr, Any] | None = None,
@@ -1030,9 +1005,7 @@ class DefaultApi:
     def list_tasks_with_http_info(
         self,
         namespace: StrictStr,
-        _request_timeout: None
-        | Annotated[StrictFloat, Field(gt=0)]
-        | tuple[Annotated[StrictFloat, Field(gt=0)], Annotated[StrictFloat, Field(gt=0)]] = None,
+        _request_timeout: None | Annotated[StrictFloat, Field(gt=0)] | tuple[Annotated[StrictFloat, Field(gt=0)], Annotated[StrictFloat, Field(gt=0)]] = None,
         _request_auth: dict[StrictStr, Any] | None = None,
         _content_type: StrictStr | None = None,
         _headers: dict[StrictStr, Any] | None = None,
@@ -1087,9 +1060,7 @@ class DefaultApi:
     def list_tasks_without_preload_content(
         self,
         namespace: StrictStr,
-        _request_timeout: None
-        | Annotated[StrictFloat, Field(gt=0)]
-        | tuple[Annotated[StrictFloat, Field(gt=0)], Annotated[StrictFloat, Field(gt=0)]] = None,
+        _request_timeout: None | Annotated[StrictFloat, Field(gt=0)] | tuple[Annotated[StrictFloat, Field(gt=0)], Annotated[StrictFloat, Field(gt=0)]] = None,
         _request_auth: dict[StrictStr, Any] | None = None,
         _content_type: StrictStr | None = None,
         _headers: dict[StrictStr, Any] | None = None,
@@ -1189,9 +1160,7 @@ class DefaultApi:
     def list_warm_pools(
         self,
         namespace: StrictStr,
-        _request_timeout: None
-        | Annotated[StrictFloat, Field(gt=0)]
-        | tuple[Annotated[StrictFloat, Field(gt=0)], Annotated[StrictFloat, Field(gt=0)]] = None,
+        _request_timeout: None | Annotated[StrictFloat, Field(gt=0)] | tuple[Annotated[StrictFloat, Field(gt=0)], Annotated[StrictFloat, Field(gt=0)]] = None,
         _request_auth: dict[StrictStr, Any] | None = None,
         _content_type: StrictStr | None = None,
         _headers: dict[StrictStr, Any] | None = None,
@@ -1246,9 +1215,7 @@ class DefaultApi:
     def list_warm_pools_with_http_info(
         self,
         namespace: StrictStr,
-        _request_timeout: None
-        | Annotated[StrictFloat, Field(gt=0)]
-        | tuple[Annotated[StrictFloat, Field(gt=0)], Annotated[StrictFloat, Field(gt=0)]] = None,
+        _request_timeout: None | Annotated[StrictFloat, Field(gt=0)] | tuple[Annotated[StrictFloat, Field(gt=0)], Annotated[StrictFloat, Field(gt=0)]] = None,
         _request_auth: dict[StrictStr, Any] | None = None,
         _content_type: StrictStr | None = None,
         _headers: dict[StrictStr, Any] | None = None,
@@ -1303,9 +1270,7 @@ class DefaultApi:
     def list_warm_pools_without_preload_content(
         self,
         namespace: StrictStr,
-        _request_timeout: None
-        | Annotated[StrictFloat, Field(gt=0)]
-        | tuple[Annotated[StrictFloat, Field(gt=0)], Annotated[StrictFloat, Field(gt=0)]] = None,
+        _request_timeout: None | Annotated[StrictFloat, Field(gt=0)] | tuple[Annotated[StrictFloat, Field(gt=0)], Annotated[StrictFloat, Field(gt=0)]] = None,
         _request_auth: dict[StrictStr, Any] | None = None,
         _content_type: StrictStr | None = None,
         _headers: dict[StrictStr, Any] | None = None,

@@ -1,3 +1,4 @@
+
 """
 ARL Infrastructure API
 
@@ -45,8 +46,8 @@ class WarmPoolSpecTemplateSpecContainersInnerLifecyclePostStart(BaseModel):
         default=None, alias="httpGet"
     )
     sleep: WarmPoolSpecTemplateSpecContainersInnerLifecyclePostStartSleep | None = None
-    tcp_socket: WarmPoolSpecTemplateSpecContainersInnerLifecyclePostStartTcpSocket | None = Field(
-        default=None, alias="tcpSocket"
+    tcp_socket: WarmPoolSpecTemplateSpecContainersInnerLifecyclePostStartTcpSocket | None = (
+        Field(default=None, alias="tcpSocket")
     )
     __properties: ClassVar[list[str]] = ["exec", "httpGet", "sleep", "tcpSocket"]
 

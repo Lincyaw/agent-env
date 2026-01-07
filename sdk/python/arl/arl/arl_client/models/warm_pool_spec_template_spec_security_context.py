@@ -1,3 +1,4 @@
+
 """
 ARL Infrastructure API
 
@@ -38,32 +39,21 @@ class WarmPoolSpecTemplateSpecSecurityContext(BaseModel):
     WarmPoolSpecTemplateSpecSecurityContext
     """
 
-    app_armor_profile: (
-        WarmPoolSpecTemplateSpecContainersInnerSecurityContextAppArmorProfile | None
-    ) = Field(default=None, alias="appArmorProfile")
+    app_armor_profile: WarmPoolSpecTemplateSpecContainersInnerSecurityContextAppArmorProfile | None = Field(default=None, alias="appArmorProfile")
     fs_group: StrictInt | None = Field(default=None, alias="fsGroup")
     fs_group_change_policy: StrictStr | None = Field(default=None, alias="fsGroupChangePolicy")
     run_as_group: StrictInt | None = Field(default=None, alias="runAsGroup")
     run_as_non_root: StrictBool | None = Field(default=None, alias="runAsNonRoot")
     run_as_user: StrictInt | None = Field(default=None, alias="runAsUser")
     se_linux_change_policy: StrictStr | None = Field(default=None, alias="seLinuxChangePolicy")
-    se_linux_options: (
-        WarmPoolSpecTemplateSpecContainersInnerSecurityContextSeLinuxOptions | None
-    ) = Field(default=None, alias="seLinuxOptions")
-    seccomp_profile: (
-        WarmPoolSpecTemplateSpecContainersInnerSecurityContextAppArmorProfile | None
-    ) = Field(default=None, alias="seccompProfile")
+    se_linux_options: WarmPoolSpecTemplateSpecContainersInnerSecurityContextSeLinuxOptions | None = Field(default=None, alias="seLinuxOptions")
+    seccomp_profile: WarmPoolSpecTemplateSpecContainersInnerSecurityContextAppArmorProfile | None = Field(default=None, alias="seccompProfile")
     supplemental_groups: list[StrictInt] | None = Field(default=None, alias="supplementalGroups")
     supplemental_groups_policy: StrictStr | None = Field(
         default=None, alias="supplementalGroupsPolicy"
     )
-    sysctls: (
-        list[WarmPoolSpecTemplateSpecContainersInnerLifecyclePostStartHttpGetHttpHeadersInner]
-        | None
-    ) = None
-    windows_options: WarmPoolSpecTemplateSpecContainersInnerSecurityContextWindowsOptions | None = (
-        Field(default=None, alias="windowsOptions")
-    )
+    sysctls: list[WarmPoolSpecTemplateSpecContainersInnerLifecyclePostStartHttpGetHttpHeadersInner] | None = None
+    windows_options: WarmPoolSpecTemplateSpecContainersInnerSecurityContextWindowsOptions | None = Field(default=None, alias="windowsOptions")
     __properties: ClassVar[list[str]] = [
         "appArmorProfile",
         "fsGroup",

@@ -1,3 +1,4 @@
+
 """
 ARL Infrastructure API
 
@@ -39,19 +40,10 @@ class WarmPoolSpecTemplateSpecVolumesInnerEphemeralVolumeClaimTemplateSpec(BaseM
     """
 
     access_modes: list[StrictStr] | None = Field(default=None, alias="accessModes")
-    data_source: (
-        WarmPoolSpecTemplateSpecVolumesInnerEphemeralVolumeClaimTemplateSpecDataSource | None
-    ) = Field(default=None, alias="dataSource")
-    data_source_ref: (
-        WarmPoolSpecTemplateSpecVolumesInnerEphemeralVolumeClaimTemplateSpecDataSourceRef | None
-    ) = Field(default=None, alias="dataSourceRef")
-    resources: (
-        WarmPoolSpecTemplateSpecVolumesInnerEphemeralVolumeClaimTemplateSpecResources | None
-    ) = None
-    selector: (
-        WarmPoolSpecTemplateSpecAffinityPodAffinityPreferredDuringSchedulingIgnoredDuringExecutionInnerPodAffinityTermLabelSelector
-        | None
-    ) = None
+    data_source: WarmPoolSpecTemplateSpecVolumesInnerEphemeralVolumeClaimTemplateSpecDataSource | None = Field(default=None, alias="dataSource")
+    data_source_ref: WarmPoolSpecTemplateSpecVolumesInnerEphemeralVolumeClaimTemplateSpecDataSourceRef | None = Field(default=None, alias="dataSourceRef")
+    resources: WarmPoolSpecTemplateSpecVolumesInnerEphemeralVolumeClaimTemplateSpecResources | None = None
+    selector: WarmPoolSpecTemplateSpecAffinityPodAffinityPreferredDuringSchedulingIgnoredDuringExecutionInnerPodAffinityTermLabelSelector | None = None
     storage_class_name: StrictStr | None = Field(default=None, alias="storageClassName")
     volume_attributes_class_name: StrictStr | None = Field(
         default=None, alias="volumeAttributesClassName"

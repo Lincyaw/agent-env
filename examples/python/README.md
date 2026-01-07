@@ -33,6 +33,10 @@ uv run python run_all_examples.py
 
 ## Examples
 
+### Task CRD-Based Execution
+
+All examples use the Kubernetes Task CRD for execution, which works from anywhere with cluster access:
+
 - **01_basic_execution.py**: Create sandbox, execute steps, read output
 - **02_multi_step_pipeline.py**: Data processing pipeline with multiple steps
 - **03_environment_variables.py**: Custom environment variables
@@ -46,7 +50,7 @@ uv run python run_all_examples.py
 ### Context Manager (Recommended)
 
 ```python
-from arl.session import SandboxSession
+from arl import SandboxSession
 
 with SandboxSession("python-3.9-std", namespace="default") as session:
     result = session.execute([...])
@@ -71,4 +75,22 @@ with SandboxSession("python-3.9-std", namespace="default") as session:
     "workDir": "/workspace",
     "env": {"DEBUG": "true"}
 }
+```
+
+### Result Handling
+
+```python
+# Execute returns the completed task object
+task = session.execute([...])
+
+# Check execution status
+status = task["status"]
+state = status["state"]  # "Succeeded" or "Failed"
+
+# Access step results
+for step_result in status.get("steps", []):
+    print(f"Step: {step_result['name']}")
+    print(f"Exit Code: {step_result['exitCode']}")
+    print(f"Stdout: {step_result['stdout']}")
+    print(f"Stderr: {step_result['stderr']}")
 ```

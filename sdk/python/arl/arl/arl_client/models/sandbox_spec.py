@@ -1,3 +1,4 @@
+
 """
 ARL Infrastructure API
 
@@ -14,7 +15,7 @@ from __future__ import annotations
 import json
 import pprint
 import re  # noqa: F401
-from typing import Any, ClassVar
+from typing import Annotated, Any, ClassVar
 
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictStr
 from typing_extensions import Self
@@ -27,10 +28,13 @@ class SandboxSpec(BaseModel):
     SandboxSpec
     """
 
+    idle_timeout_seconds: Annotated[int, Field(strict=True, ge=0)] | None = Field(
+        default=None, alias="idleTimeoutSeconds"
+    )
     keep_alive: StrictBool | None = Field(default=None, alias="keepAlive")
     pool_ref: StrictStr = Field(alias="poolRef")
     resources: SandboxSpecResources | None = None
-    __properties: ClassVar[list[str]] = ["keepAlive", "poolRef", "resources"]
+    __properties: ClassVar[list[str]] = ["idleTimeoutSeconds", "keepAlive", "poolRef", "resources"]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -85,6 +89,7 @@ class SandboxSpec(BaseModel):
 
         _obj = cls.model_validate(
             {
+                "idleTimeoutSeconds": obj.get("idleTimeoutSeconds"),
                 "keepAlive": obj.get("keepAlive"),
                 "poolRef": obj.get("poolRef"),
                 "resources": SandboxSpecResources.from_dict(obj["resources"])

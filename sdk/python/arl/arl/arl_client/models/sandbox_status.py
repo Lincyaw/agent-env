@@ -1,3 +1,4 @@
+
 """
 ARL Infrastructure API
 
@@ -14,6 +15,7 @@ from __future__ import annotations
 import json
 import pprint
 import re  # noqa: F401
+from datetime import datetime
 from typing import Any, ClassVar
 
 from pydantic import BaseModel, ConfigDict, Field, StrictStr
@@ -28,11 +30,19 @@ class SandboxStatus(BaseModel):
     """
 
     conditions: list[Condition] | None = None
+    last_task_time: datetime | None = Field(default=None, alias="lastTaskTime")
     phase: StrictStr | None = None
     pod_ip: StrictStr | None = Field(default=None, alias="podIP")
     pod_name: StrictStr | None = Field(default=None, alias="podName")
     work_dir: StrictStr | None = Field(default=None, alias="workDir")
-    __properties: ClassVar[list[str]] = ["conditions", "phase", "podIP", "podName", "workDir"]
+    __properties: ClassVar[list[str]] = [
+        "conditions",
+        "lastTaskTime",
+        "phase",
+        "podIP",
+        "podName",
+        "workDir",
+    ]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -94,6 +104,7 @@ class SandboxStatus(BaseModel):
                 "conditions": [Condition.from_dict(_item) for _item in obj["conditions"]]
                 if obj.get("conditions") is not None
                 else None,
+                "lastTaskTime": obj.get("lastTaskTime"),
                 "phase": obj.get("phase"),
                 "podIP": obj.get("podIP"),
                 "podName": obj.get("podName"),

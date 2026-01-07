@@ -1,3 +1,4 @@
+
 """
 ARL Infrastructure API
 
@@ -29,10 +30,7 @@ class WarmPoolSpecTemplateSpecTopologySpreadConstraintsInner(BaseModel):
     WarmPoolSpecTemplateSpecTopologySpreadConstraintsInner
     """
 
-    label_selector: (
-        WarmPoolSpecTemplateSpecAffinityPodAffinityPreferredDuringSchedulingIgnoredDuringExecutionInnerPodAffinityTermLabelSelector
-        | None
-    ) = Field(default=None, alias="labelSelector")
+    label_selector: WarmPoolSpecTemplateSpecAffinityPodAffinityPreferredDuringSchedulingIgnoredDuringExecutionInnerPodAffinityTermLabelSelector | None = Field(default=None, alias="labelSelector")
     match_label_keys: list[StrictStr] | None = Field(default=None, alias="matchLabelKeys")
     max_skew: StrictInt = Field(alias="maxSkew")
     min_domains: StrictInt | None = Field(default=None, alias="minDomains")

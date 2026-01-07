@@ -14,12 +14,14 @@ import (
 )
 
 // HTTPSidecarClient is an HTTP-based implementation of SidecarClient
+// Deprecated: Use GRPCSidecarClient for streaming support
 type HTTPSidecarClient struct {
 	httpClient *http.Client
 	port       int
 }
 
 // NewHTTPSidecarClient creates a new HTTP sidecar client
+// Deprecated: Use NewGRPCSidecarClient for streaming support
 func NewHTTPSidecarClient(port int, timeout time.Duration) interfaces.SidecarClient {
 	return &HTTPSidecarClient{
 		httpClient: &http.Client{
@@ -68,6 +70,20 @@ func (c *HTTPSidecarClient) Execute(ctx context.Context, podIP string, req inter
 	return &resp, nil
 }
 
+// ExecuteStream returns a channel but only sends a single aggregated response
+// This is for interface compatibility; for true streaming, use GRPCSidecarClient
+func (c *HTTPSidecarClient) ExecuteStream(ctx context.Context, podIP string, req interfaces.ExecRequest) (<-chan interfaces.ExecResponse, error) {
+	resp, err := c.Execute(ctx, podIP, req)
+	if err != nil {
+		return nil, err
+	}
+
+	ch := make(chan interfaces.ExecResponse, 1)
+	ch <- resp
+	close(ch)
+	return ch, nil
+}
+
 // Reset sends reset request to sidecar
 func (c *HTTPSidecarClient) Reset(ctx context.Context, podIP string, req interfaces.ResetRequest) (interfaces.ResetResponse, error) {
 	url := fmt.Sprintf("http://%s:%d/reset", podIP, c.port)
@@ -108,6 +124,11 @@ func (c *HTTPSidecarClient) HealthCheck(ctx context.Context, podIP string) error
 		return fmt.Errorf("health check returned status %d", resp.StatusCode)
 	}
 
+	return nil
+}
+
+// Close is a no-op for HTTP client
+func (c *HTTPSidecarClient) Close() error {
 	return nil
 }
 

@@ -1,0 +1,51 @@
+{{- if .Values.clickhouse.enabled }}
+# This requires Altinity ClickHouse operator to be installed first:
+# helm repo add clickhouse-operator https://helm.altinity.com
+# helm install clickhouse-operator clickhouse-operator/altinity-clickhouse-operator
+apiVersion: clickhouse.altinity.com/v1
+kind: ClickHouseInstallation
+metadata:
+  name: clickhouse-arl
+  namespace: {{ .Release.Namespace }}
+spec:
+  configuration:
+    users:
+      {{ .Values.clickhouse.username }}/password: {{ .Values.clickhouse.password | default "" | quote }}
+      {{ .Values.clickhouse.username }}/networks/ip:
+        - "::/0"
+    clusters:
+      - name: arl-cluster
+        layout:
+          shardsCount: 1
+          replicasCount: 1
+    zookeeper:
+      nodes:
+        - host: zookeeper
+          port: 2181
+  defaults:
+    templates:
+      podTemplate: pod-template
+      dataVolumeClaimTemplate: data-volume-template
+  templates:
+    podTemplates:
+      - name: pod-template
+        spec:
+          containers:
+            - name: clickhouse
+              image: clickhouse/clickhouse-server:latest
+              resources:
+                requests:
+                  memory: "512Mi"
+                  cpu: "500m"
+                limits:
+                  memory: "1Gi"
+                  cpu: "1000m"
+    volumeClaimTemplates:
+      - name: data-volume-template
+        spec:
+          accessModes:
+            - ReadWriteOnce
+          resources:
+            requests:
+              storage: 10Gi
+{{- end }}

@@ -1,3 +1,4 @@
+
 """
 ARL Infrastructure API
 
@@ -31,12 +32,7 @@ class WarmPoolSpecTemplateSpecAffinityPodAffinityPreferredDuringSchedulingIgnore
     WarmPoolSpecTemplateSpecAffinityPodAffinityPreferredDuringSchedulingIgnoredDuringExecutionInnerPodAffinityTermLabelSelector
     """
 
-    match_expressions: (
-        list[
-            WarmPoolSpecTemplateSpecAffinityNodeAffinityPreferredDuringSchedulingIgnoredDuringExecutionInnerPreferenceMatchExpressionsInner
-        ]
-        | None
-    ) = Field(default=None, alias="matchExpressions")
+    match_expressions: list[WarmPoolSpecTemplateSpecAffinityNodeAffinityPreferredDuringSchedulingIgnoredDuringExecutionInnerPreferenceMatchExpressionsInner] | None = Field(default=None, alias="matchExpressions")
     match_labels: dict[str, StrictStr] | None = Field(default=None, alias="matchLabels")
     __properties: ClassVar[list[str]] = ["matchExpressions", "matchLabels"]
 

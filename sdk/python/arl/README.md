@@ -29,7 +29,13 @@ with SandboxSession(pool_ref="python-39-std", namespace="default") as session:
             "command": ["echo", "Hello, World!"],
         }
     ])
-    print(result["status"]["stdout"])
+    
+    # Access results
+    status = result["status"]
+    for step in status.get("steps", []):
+        print(f"Step: {step['name']}")
+        print(f"Exit Code: {step['exitCode']}")
+        print(f"Stdout: {step['stdout']}")
 ```
 
 ## Manual Lifecycle Management
@@ -77,11 +83,16 @@ finally:
 }
 ```
 
-## Development
+## Architecture
 
-This package provides a clean separation between auto-generated API client code and custom business logic.
+- **SandboxSession**: High-level API using Kubernetes CRDs for task execution
+- **Task CRD**: Operator watches and executes tasks via sidecar
+- **Auto-generated client**: `arl-client` package (CRD models)
 
-- Auto-generated client: `arl-client` package
-- Custom wrapper: `arl-wrapper` package (this package)
+Task execution flow:
+1. Client creates Task CRD via Kubernetes API
+2. Operator watches for new tasks
+3. Operator communicates with sidecar to execute steps
+4. Client polls Task status for results
 
-This architecture ensures custom code is never overwritten during API regeneration.
+This architecture ensures tasks can be executed from anywhere with cluster access.

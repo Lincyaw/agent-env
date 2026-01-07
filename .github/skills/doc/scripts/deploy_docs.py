@@ -7,9 +7,7 @@ import sys
 from pathlib import Path
 
 
-def deploy_docs(
-    project_dir: Path, message: str | None = None, force: bool = False
-) -> int:
+def deploy_docs(project_dir: Path, message: str | None = None, force: bool = False) -> int:
     """Deploy documentation to GitHub Pages."""
     mkdocs_yml = project_dir / "mkdocs.yml"
     if not mkdocs_yml.exists():
@@ -38,9 +36,7 @@ def deploy_docs(
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(
-        description="Deploy MkDocs documentation to GitHub Pages"
-    )
+    parser = argparse.ArgumentParser(description="Deploy MkDocs documentation to GitHub Pages")
     parser.add_argument(
         "project_dir",
         type=Path,

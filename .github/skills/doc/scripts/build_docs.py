@@ -21,7 +21,7 @@ def build_docs(project_dir: Path, strict: bool = False, clean: bool = True) -> i
     if clean:
         cmd.append("--clean")
 
-    print(f"Building documentation...")
+    print("Building documentation...")
     result = subprocess.run(cmd, cwd=project_dir)
 
     if result.returncode == 0:

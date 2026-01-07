@@ -1,3 +1,4 @@
+
 """
 ARL Infrastructure API
 
@@ -381,7 +382,9 @@ class ApiClient:
         elif re.match(r"^text\/[a-z.+-]+\s*(;|$)", content_type, re.IGNORECASE):
             data = response_text
         else:
-            raise ApiException(status=0, reason=f"Unsupported content type: {content_type}")
+            raise ApiException(
+                status=0, reason=f"Unsupported content type: {content_type}"
+            )
 
         return self.__deserialize(data, response_type)
 
@@ -668,7 +671,9 @@ class ApiClient:
         except ImportError:
             return string
         except ValueError:
-            raise rest.ApiException(status=0, reason=f"Failed to parse `{string}` as date object")
+            raise rest.ApiException(
+                status=0, reason=f"Failed to parse `{string}` as date object"
+            )
 
     def __deserialize_datetime(self, string):
         """Deserializes string to datetime.
@@ -697,7 +702,9 @@ class ApiClient:
         try:
             return klass(data)
         except ValueError:
-            raise rest.ApiException(status=0, reason=(f"Failed to parse `{data}` as `{klass}`"))
+            raise rest.ApiException(
+                status=0, reason=(f"Failed to parse `{data}` as `{klass}`")
+            )
 
     def __deserialize_model(self, data, klass):
         """Deserializes list or dict to model.

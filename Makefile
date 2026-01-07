@@ -4,6 +4,41 @@
 help: ## Display this help
 	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_-]+:.*?##/ { printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
 
+##@ Setup
+
+.PHONY: install-tools
+install-tools: install-protoc install-go-tools install-python-tools ## Install all development tools
+
+.PHONY: install-protoc
+install-protoc: ## Install Protocol Buffers compiler
+	@echo "Installing protoc..."
+	@if command -v protoc >/dev/null 2>&1; then \
+		echo "protoc already installed: $$(protoc --version)"; \
+	else \
+		PROTOC_VERSION=28.3; \
+		PROTOC_ZIP=protoc-$${PROTOC_VERSION}-linux-x86_64.zip; \
+		curl -LO https://github.com/protocolbuffers/protobuf/releases/download/v$${PROTOC_VERSION}/$${PROTOC_ZIP}; \
+		sudo unzip -o $${PROTOC_ZIP} -d /usr/local bin/protoc; \
+		sudo unzip -o $${PROTOC_ZIP} -d /usr/local 'include/*'; \
+		rm -f $${PROTOC_ZIP}; \
+		echo "protoc installed: $$(protoc --version)"; \
+	fi
+
+.PHONY: install-go-tools
+install-go-tools: ## Install Go development tools
+	@echo "Installing Go tools..."
+	go install google.golang.org/protobuf/cmd/protoc-gen-go@latest
+	go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+	go install sigs.k8s.io/controller-tools/cmd/controller-gen@latest
+	@echo "Go tools installed successfully"
+
+.PHONY: install-python-tools
+install-python-tools: ## Install Python development tools
+	@echo "Installing Python tools..."
+	uv sync --all-groups
+	uv pip install grpcio-tools
+	@echo "Python tools installed successfully"
+
 ##@ Deployment (Skaffold)
 
 .PHONY: dev
@@ -41,17 +76,43 @@ check: fmt vet tidy ## Run all code quality checks
 	uv run ruff format .
 	uv run ruff check --fix . --unsafe-fixes
 
+##@ Code Generation
+
 .PHONY: generate
-generate: ## Generate deepcopy code
-	go run sigs.k8s.io/controller-tools/cmd/controller-gen object:headerFile="hack/boilerplate.go.txt" paths="./api/..."
+generate: proto-go proto-python manifests deepcopy sdk-python ## Generate all code (proto, CRDs, deepcopy, Python SDK)
+
+.PHONY: proto-go
+proto-go: ## Generate Go gRPC code from proto files
+	@mkdir -p pkg/pb
+	protoc --go_out=. --go_opt=paths=source_relative \
+		--go-grpc_out=. --go-grpc_opt=paths=source_relative \
+		proto/agent.proto
+	@mv proto/*.pb.go pkg/pb/ 2>/dev/null || true
+
+.PHONY: proto-python
+proto-python: ## Generate Python gRPC code from proto files
+	@mkdir -p sdk/python/arl/arl/pb
+	python -m grpc_tools.protoc -I. \
+		--python_out=sdk/python/arl/arl/pb \
+		--pyi_out=sdk/python/arl/arl/pb \
+		--grpc_python_out=sdk/python/arl/arl/pb \
+		proto/agent.proto
+	@touch sdk/python/arl/arl/pb/__init__.py
+	@# Fix imports in generated files
+	@sed -i 's/from proto import agent_pb2/from arl.pb.proto import agent_pb2/g' sdk/python/arl/arl/pb/proto/agent_pb2_grpc.py 2>/dev/null || true
 
 .PHONY: manifests
 manifests: ## Generate CRD manifests
 	go run sigs.k8s.io/controller-tools/cmd/controller-gen crd:maxDescLen=0 paths="./api/..." output:crd:artifacts:config=config/crd
 
+.PHONY: deepcopy
+deepcopy: ## Generate deepcopy code
+	go run sigs.k8s.io/controller-tools/cmd/controller-gen object:headerFile="hack/boilerplate.go.txt" paths="./api/..."
+
 .PHONY: sdk-python
-sdk-python: manifests ## Generate Python SDK from CRDs
+sdk-python: ## Generate Python SDK from CRDs
 	./hack/generate-sdk.sh
+	uv run ruff format .
 	uv run ruff check --fix . --unsafe-fixes
 
 ##@ Python SDK
