@@ -26,6 +26,7 @@ uv run python 04_working_directory.py
 uv run python 05_error_handling.py
 uv run python 06_long_running_task.py
 uv run python 07_sandbox_reuse.py
+uv run python 08_swebench_scenario.py  # Requires swebench-emotion WarmPool
 
 # Run all examples
 uv run python run_all_examples.py
@@ -44,6 +45,7 @@ All examples use the Kubernetes Task CRD for execution, which works from anywher
 - **05_error_handling.py**: Error handling and retries
 - **06_long_running_task.py**: Long-running tasks with timeouts
 - **07_sandbox_reuse.py**: Sandbox reuse for serial tasks
+- **08_swebench_scenario.py**: SWE-bench automated bug fixing workflow (see [SWEBENCH_README.md](SWEBENCH_README.md))
 
 ## Common Patterns
 
