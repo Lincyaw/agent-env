@@ -112,10 +112,10 @@ func (r *TTLReconciler) reconcile(ctx context.Context, req ctrl.Request) (ctrl.R
 			Stderr:     task.Status.Stderr,
 		}
 		if task.Status.StartTime != nil {
-			record.StartTime = task.Status.StartTime.Format(auditTimeFormat)
+			record.StartTime = task.Status.StartTime.Time
 		}
 		if task.Status.CompletionTime != nil {
-			record.CompletionTime = task.Status.CompletionTime.Format(auditTimeFormat)
+			record.CompletionTime = task.Status.CompletionTime.Time
 		}
 		if err := r.AuditWriter.WriteTaskCompletion(ctx, record); err != nil {
 			logger.Error(err, "Failed to write task audit record")

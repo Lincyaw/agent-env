@@ -2,6 +2,7 @@ package interfaces
 
 import (
 	"context"
+	"time"
 )
 
 // AuditWriter defines the interface for writing audit logs
@@ -28,8 +29,8 @@ type TaskAuditRecord struct {
 	State          string
 	ExitCode       int32
 	Duration       string
-	StartTime      string
-	CompletionTime string
+	StartTime      time.Time
+	CompletionTime time.Time
 	StepCount      int
 	// Input is the JSON-serialized task steps (input commands/content)
 	Input string

@@ -8,6 +8,7 @@
 - **Format before commit**: Run `make fmt`, `make vet`, `make tidy`
 - **Go version**: Using Go 1.25.0 - follow latest best practices
 - **DO NOT write** documentation unless specifically asked
+- use `skaffold run --profile=k8s` to deploy to k8s cluster
 
 ## Architecture Change Management
 

@@ -26,7 +26,25 @@ spec:
     templates:
       podTemplate: pod-template
       dataVolumeClaimTemplate: data-volume-template
+      {{- if .Values.clickhouse.serviceType }}
+      serviceTemplate: service-template
+      {{- end }}
   templates:
+    {{- if .Values.clickhouse.serviceType }}
+    serviceTemplates:
+      - name: service-template
+        spec:
+          type: {{ .Values.clickhouse.serviceType }}
+          {{- if eq .Values.clickhouse.serviceType "NodePort" }}
+          ports:
+            - name: http
+              port: 8123
+              nodePort: {{ .Values.clickhouse.httpNodePort | default 30123 }}
+            - name: native
+              port: 9000
+              nodePort: {{ .Values.clickhouse.nativeNodePort | default 30000 }}
+          {{- end }}
+    {{- end }}
     podTemplates:
       - name: pod-template
         spec:
@@ -35,10 +53,10 @@ spec:
               image: clickhouse/clickhouse-server:latest
               resources:
                 requests:
-                  memory: "512Mi"
+                  memory: "2Gi"
                   cpu: "500m"
                 limits:
-                  memory: "1Gi"
+                  memory: "4Gi"
                   cpu: "1000m"
     volumeClaimTemplates:
       - name: data-volume-template

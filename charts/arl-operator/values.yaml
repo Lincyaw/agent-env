@@ -78,16 +78,20 @@ clickhouse:
   # Enable audit logging to ClickHouse
   enabled: true
   # ClickHouse connection settings
-  host: "clickhouse-arl"
+  host: "clickhouse-clickhouse-arl"
   port: 9000
   database: "arl"
   username: "default"
-  password: ""
+  password: "clickhouse123"
   batchSize: 100
   flushInterval: "10s"
   # Storage configuration
   storageClassName: "juicefs-sc"
   storageSize: "10Gi"
+  # Service configuration
+  serviceType: "NodePort"
+  httpNodePort: 30123  # Port for HTTP interface (8123)
+  nativeNodePort: 30000  # Port for native protocol (9000)
 
 # CRD installation
 crds:

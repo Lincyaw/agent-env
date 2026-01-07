@@ -70,5 +70,5 @@ ClickHouse host
 ClickHouse address
 */}}
 {{- define "arl-operator.clickhouseAddr" -}}
-{{- printf "%s:%d" (.Values.clickhouse.host | default "clickhouse-arl") (int .Values.clickhouse.port | default 9000) }}
+{{- printf "%s:%d" (.Values.clickhouse.host | default "clickhouse-clickhouse-arl") (int .Values.clickhouse.port | default 9000) }}
 {{- end }}

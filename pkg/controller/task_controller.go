@@ -247,6 +247,7 @@ func (r *TaskReconciler) reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 
 	// Write audit log if no TTL is set (TTL controller handles audit for TTL tasks)
 	if r.AuditWriter != nil && task.Spec.TTLSecondsAfterFinished == nil {
+		logger.Info("Writing task audit record", "task", task.Name, "state", task.Status.State)
 		// Serialize steps (input) to JSON
 		inputJSON, err := json.Marshal(task.Spec.Steps)
 		if err != nil {
@@ -267,17 +268,21 @@ func (r *TaskReconciler) reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 			Stderr:     task.Status.Stderr,
 		}
 		if task.Status.StartTime != nil {
-			record.StartTime = task.Status.StartTime.Format(auditTimeFormat)
+			record.StartTime = task.Status.StartTime.Time
 		}
 		if task.Status.CompletionTime != nil {
-			record.CompletionTime = task.Status.CompletionTime.Format(auditTimeFormat)
+			record.CompletionTime = task.Status.CompletionTime.Time
 		}
 		if err := r.AuditWriter.WriteTaskCompletion(ctx, record); err != nil {
 			logger.Error(err, "Failed to write task audit record")
 			if r.Metrics != nil {
 				r.Metrics.RecordAuditWriteError("task")
 			}
+		} else {
+			logger.Info("Task audit record written successfully", "task", task.Name)
 		}
+	} else {
+		logger.Info("Skipping task audit", "task", task.Name, "hasAuditWriter", r.AuditWriter != nil, "hasTTL", task.Spec.TTLSecondsAfterFinished != nil)
 	}
 
 	// Record metrics

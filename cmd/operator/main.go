@@ -4,6 +4,7 @@ import (
 	"flag"
 	"os"
 
+	_ "github.com/ClickHouse/clickhouse-go/v2"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"

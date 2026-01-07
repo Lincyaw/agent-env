@@ -79,7 +79,7 @@ spec:
                 secretKeyRef:
                   name: {{ include "arl-operator.fullname" . }}-clickhouse
                   key: password
-                  optional: true
+                  optional: false
             - name: CLICKHOUSE_BATCH_SIZE
               value: "{{ .Values.clickhouse.batchSize }}"
             - name: CLICKHOUSE_FLUSH_INTERVAL
