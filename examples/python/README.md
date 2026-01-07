@@ -29,6 +29,7 @@ uv run python 06_long_running_task.py
 uv run python 07_sandbox_reuse.py
 uv run python 08_swebench_scenario.py  # Creates WarmPool automatically!
 uv run python 08_swebench_scenario_mock.py  # With mock agent
+uv run python 09_swebench_callbacks.py  # With callback hooks
 
 # Run all examples
 uv run python run_all_examples.py
@@ -49,6 +50,7 @@ All examples use the Kubernetes Task CRD for execution, which works from anywher
 - **07_sandbox_reuse.py**: Sandbox reuse for serial tasks
 - **08_swebench_scenario.py**: SWE-bench automated bug fixing workflow with WarmPool created via Python SDK (see [SWEBENCH_README.md](SWEBENCH_README.md))
 - **08_swebench_scenario_mock.py**: SWE-bench with mock agent and separated fixture files
+- **09_swebench_callbacks.py**: SWE-bench with callback hooks for automatic test execution
 
 ### Mock Agent
 
@@ -68,6 +70,33 @@ report = agent.generate_report()
 ```
 
 Agent inputs/outputs are stored in `swebench_fixtures/` directory for easy modification and testing.
+
+### Callback System
+
+The SDK supports callbacks for running scripts or functions after task completion:
+
+```python
+from arl import SandboxSession
+
+session = SandboxSession(pool_ref="my-pool")
+
+# Register callbacks for different events
+def on_success(result):
+    print(f"Task succeeded: {result['status']['state']}")
+
+session.register_callback("on_task_success", on_success)
+
+# Execute with automatic callback script execution
+result = session.execute_with_callback(
+    steps=[...],
+    callback_script="/testbed/run_tests.sh"
+)
+```
+
+**Supported callback events:**
+- `on_task_complete` - Triggered after any task completes
+- `on_task_success` - Triggered only when task succeeds
+- `on_task_failure` - Triggered only when task fails
 
 ## Common Patterns
 

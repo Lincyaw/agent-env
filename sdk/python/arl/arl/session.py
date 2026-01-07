@@ -1,18 +1,23 @@
 """Sandbox session management for ARL."""
 
 import time
+from collections.abc import Callable
 from typing import Any, cast
 
 from kubernetes import client, config
 
 from arl.types import TaskStep
 
+# Type alias for callback functions
+TaskCallback = Callable[[dict[str, Any]], None]
+
 
 class SandboxSession:
     """High-level sandbox session manager with automatic lifecycle management.
 
     Provides context manager support for automatic resource cleanup and
-    simplified task execution against sandboxes.
+    simplified task execution against sandboxes. Supports callback functions
+    that can be triggered after task completion.
 
     Examples:
         Using context manager (automatic cleanup):
@@ -31,6 +36,16 @@ class SandboxSession:
         ...     result2 = session.execute([...])  # Reuses same sandbox
         ... finally:
         ...     session.delete_sandbox()
+
+        Using callbacks:
+
+        >>> def on_task_complete(result):
+        ...     print(f"Task completed: {result['status']['state']}")
+        >>>
+        >>> session = SandboxSession(pool_ref="python-39", namespace="default")
+        >>> session.register_callback("on_complete", on_task_complete)
+        >>> with session:
+        ...     result = session.execute([...])  # Callback triggered after completion
     """
 
     def __init__(
@@ -55,6 +70,102 @@ class SandboxSession:
 
         self.sandbox_name: str | None = None
         self._custom_api: client.CustomObjectsApi | None = None
+        self._callbacks: dict[str, list[TaskCallback]] = {}
+
+    def register_callback(self, event: str, callback: TaskCallback) -> None:
+        """Register a callback function for a specific event.
+
+        Supported events:
+        - "on_task_complete": Triggered after task execution completes
+        - "on_task_success": Triggered when task succeeds
+        - "on_task_failure": Triggered when task fails
+
+        Args:
+            event: Event name to trigger callback on
+            callback: Callback function that accepts task result dict
+
+        Example:
+            >>> def log_result(result):
+            ...     print(f"Task state: {result['status']['state']}")
+            >>> session.register_callback("on_task_complete", log_result)
+        """
+        if event not in self._callbacks:
+            self._callbacks[event] = []
+        self._callbacks[event].append(callback)
+
+    def unregister_callback(self, event: str, callback: TaskCallback | None = None) -> None:
+        """Unregister callback(s) for a specific event.
+
+        Args:
+            event: Event name to unregister callbacks from
+            callback: Specific callback to remove. If None, removes all callbacks for event.
+        """
+        if event not in self._callbacks:
+            return
+
+        if callback is None:
+            self._callbacks[event] = []
+        else:
+            self._callbacks[event] = [cb for cb in self._callbacks[event] if cb != callback]
+
+    def _trigger_callbacks(self, event: str, result: dict[str, Any]) -> None:
+        """Trigger all callbacks registered for an event.
+
+        Args:
+            event: Event name
+            result: Task result to pass to callbacks
+        """
+        if event in self._callbacks:
+            for callback in self._callbacks[event]:
+                try:
+                    callback(result)
+                except Exception as e:
+                    # Log but don't fail on callback errors
+                    print(f"Warning: Callback error for {event}: {e}")
+
+    def execute_with_callback(
+        self,
+        steps: list[TaskStep],
+        callback_script: str | None = None,
+        trace_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Execute task steps and optionally run a callback script afterward.
+
+        This is useful for SWE-bench scenarios where you want to run a test
+        script after applying patches.
+
+        Args:
+            steps: List of task steps to execute
+            callback_script: Optional shell script to run after task completes
+            trace_id: Optional trace ID for distributed tracing
+
+        Returns:
+            Task result including callback execution results if provided
+
+        Example:
+            >>> result = session.execute_with_callback(
+            ...     steps=[{"name": "apply_patch", "type": "FilePatch", ...}],
+            ...     callback_script="/testbed/run_tests.sh"
+            ... )
+        """
+        # Execute main task
+        result = self.execute(steps, trace_id)
+
+        # If callback script provided, execute it as a follow-up task
+        if callback_script and result.get("status", {}).get("state") == "Succeeded":
+            callback_steps: list[TaskStep] = [
+                {
+                    "name": "callback_script",
+                    "type": "Command",
+                    "command": ["/bin/bash", callback_script],
+                }
+            ]
+            callback_result = self.execute(callback_steps, trace_id)
+
+            # Merge callback results into main result
+            result["callback_result"] = callback_result
+
+        return result
 
     @property
     def custom_api(self) -> client.CustomObjectsApi:
@@ -159,6 +270,11 @@ class SandboxSession:
     def execute(self, steps: list[TaskStep], trace_id: str | None = None) -> dict[str, Any]:
         """Execute task steps in the sandbox.
 
+        Triggers registered callbacks after task completion:
+        - "on_task_complete": Always triggered after task finishes
+        - "on_task_success": Triggered only if task succeeds
+        - "on_task_failure": Triggered only if task fails
+
         Args:
             steps: List of task steps to execute
             trace_id: Optional trace ID for distributed tracing (e.g., uuid.uuid4())
@@ -201,7 +317,18 @@ class SandboxSession:
         )
 
         # Wait for task completion
-        return self._wait_for_task_completion(task_name)
+        result = self._wait_for_task_completion(task_name)
+
+        # Trigger callbacks based on task state
+        self._trigger_callbacks("on_task_complete", result)
+
+        task_state = result.get("status", {}).get("state")
+        if task_state == "Succeeded":
+            self._trigger_callbacks("on_task_success", result)
+        elif task_state == "Failed":
+            self._trigger_callbacks("on_task_failure", result)
+
+        return result
 
     def _wait_for_task_completion(
         self, task_name: str, poll_interval: float = 0.5
