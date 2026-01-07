@@ -12,7 +12,7 @@ Examples demonstrating ARL Python SDK features.
 
 2. Access to Kubernetes cluster with ARL infrastructure
 3. Create a WarmPool named `python-39-std`
-4. (Optional) For SWE-bench example: Create `swebench-emotion` WarmPool using `config/samples/warmpool-swebench.yaml`
+4. (Optional) For SWE-bench example: WarmPool is created automatically via Python SDK!
 
 ## Running Examples
 
@@ -27,7 +27,7 @@ uv run python 04_working_directory.py
 uv run python 05_error_handling.py
 uv run python 06_long_running_task.py
 uv run python 07_sandbox_reuse.py
-uv run python 08_swebench_scenario.py  # Requires swebench-emotion WarmPool
+uv run python 08_swebench_scenario.py  # Creates WarmPool automatically!
 
 # Run all examples
 uv run python run_all_examples.py
@@ -46,7 +46,7 @@ All examples use the Kubernetes Task CRD for execution, which works from anywher
 - **05_error_handling.py**: Error handling and retries
 - **06_long_running_task.py**: Long-running tasks with timeouts
 - **07_sandbox_reuse.py**: Sandbox reuse for serial tasks
-- **08_swebench_scenario.py**: SWE-bench automated bug fixing workflow (see [SWEBENCH_README.md](SWEBENCH_README.md))
+- **08_swebench_scenario.py**: SWE-bench automated bug fixing workflow with WarmPool created via Python SDK (see [SWEBENCH_README.md](SWEBENCH_README.md))
 
 ## Common Patterns
 
@@ -57,6 +57,30 @@ from arl import SandboxSession
 
 with SandboxSession("python-3.9-std", namespace="default") as session:
     result = session.execute([...])
+```
+
+### WarmPool Management (Python SDK)
+
+```python
+from arl import WarmPoolManager
+
+# Create a WarmPool
+manager = WarmPoolManager(namespace="default")
+manager.create_warmpool(
+    name="my-pool",
+    image="python:3.9-slim",
+    replicas=2
+)
+
+# Wait for it to be ready
+manager.wait_for_warmpool_ready("my-pool")
+
+# Check status
+warmpool = manager.get_warmpool("my-pool")
+print(warmpool["status"])
+
+# Delete when done
+manager.delete_warmpool("my-pool")
 ```
 
 ### Task Steps

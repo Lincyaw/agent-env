@@ -2,13 +2,13 @@
 
 Demonstrates:
 - Using SWE-bench Docker images for code repair tasks
-- Creating WarmPool with pre-configured SWE-bench environment
+- Creating WarmPool programmatically via Python SDK
 - Applying code patches (simulating LLM agent behavior)
 - Running test scripts to verify fixes
 - Complete workflow for automated bug fixing scenarios
 """
 
-from arl import SandboxSession, TaskStep
+from arl import SandboxSession, TaskStep, WarmPoolManager
 
 
 def main() -> None:
@@ -17,11 +17,37 @@ def main() -> None:
     print("Example: SWE-bench Scenario - Code Repair and Testing")
     print("=" * 60)
 
-    # Use SWE-bench warm pool (must be created first)
-    # Image: swebench/swesmith.x86_64.emotion_1776_js-emotion.b882bcba
+    # Configuration
     pool_name = "swebench-emotion"
+    namespace = "default"
+    swebench_image = "swebench/swesmith.x86_64.emotion_1776_js-emotion.b882bcba"
 
-    with SandboxSession(pool_ref=pool_name, namespace="default", keep_alive=True) as session:
+    # Step 0: Create WarmPool using Python SDK (no YAML required!)
+    print("\n[Step 0] Setting up WarmPool with Python SDK...")
+    print(f"Creating WarmPool '{pool_name}' with SWE-bench image...")
+
+    warmpool_manager = WarmPoolManager(namespace=namespace)
+
+    try:
+        # Try to get existing warmpool
+        warmpool_manager.get_warmpool(pool_name)
+        print(f"✓ WarmPool '{pool_name}' already exists")
+    except Exception:
+        # Create new warmpool if it doesn't exist
+        warmpool_manager.create_warmpool(
+            name=pool_name,
+            image=swebench_image,
+            replicas=2,
+            testbed_path="/testbed",  # SWE-bench uses /testbed directory
+        )
+        print(f"✓ WarmPool '{pool_name}' created")
+
+        # Wait for warmpool to be ready
+        print("Waiting for warm pods to be ready...")
+        warmpool_manager.wait_for_warmpool_ready(pool_name)
+        print("✓ WarmPool is ready with warm pods")
+
+    with SandboxSession(pool_ref=pool_name, namespace=namespace, keep_alive=True) as session:
         print(f"\n✓ Sandbox allocated from pool '{pool_name}'")
 
         # Step 1: Inspect the environment
@@ -236,13 +262,15 @@ The fix has been verified in the SWE-bench environment and all tests pass.
         print("\n" + "=" * 60)
         print("SWE-bench Scenario Completed Successfully!")
         print("=" * 60)
-        print("\n✓ Environment inspected")
+        print("\n✓ WarmPool created via Python SDK (no YAML required)")
+        print("✓ Environment inspected")
         print("✓ Code patch applied (simulating LLM agent)")
         print("✓ Tests executed and passed")
         print("✓ Fix report generated")
         print("\nThis demonstrates the complete workflow for:")
         print("- Automated bug fixing with LLM agents")
         print("- Code repair in SWE-bench environments")
+        print("- WarmPool management without Kubernetes knowledge")
         print("- Patch application and verification")
         print("- Test execution and validation")
 
