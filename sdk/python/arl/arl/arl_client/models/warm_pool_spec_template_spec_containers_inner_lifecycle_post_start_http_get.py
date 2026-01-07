@@ -1,3 +1,4 @@
+
 """
 ARL Infrastructure API
 
@@ -33,10 +34,7 @@ class WarmPoolSpecTemplateSpecContainersInnerLifecyclePostStartHttpGet(BaseModel
     """
 
     host: StrictStr | None = None
-    http_headers: (
-        list[WarmPoolSpecTemplateSpecContainersInnerLifecyclePostStartHttpGetHttpHeadersInner]
-        | None
-    ) = Field(default=None, alias="httpHeaders")
+    http_headers: list[WarmPoolSpecTemplateSpecContainersInnerLifecyclePostStartHttpGetHttpHeadersInner] | None = Field(default=None, alias="httpHeaders")
     path: StrictStr | None = None
     port: WarmPoolSpecTemplateSpecContainersInnerLifecyclePostStartHttpGetPort
     scheme: StrictStr | None = None

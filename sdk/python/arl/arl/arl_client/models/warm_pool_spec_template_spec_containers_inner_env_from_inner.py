@@ -1,3 +1,4 @@
+
 """
 ARL Infrastructure API
 
@@ -29,8 +30,8 @@ class WarmPoolSpecTemplateSpecContainersInnerEnvFromInner(BaseModel):
     WarmPoolSpecTemplateSpecContainersInnerEnvFromInner
     """
 
-    config_map_ref: WarmPoolSpecTemplateSpecContainersInnerEnvFromInnerConfigMapRef | None = Field(
-        default=None, alias="configMapRef"
+    config_map_ref: WarmPoolSpecTemplateSpecContainersInnerEnvFromInnerConfigMapRef | None = (
+        Field(default=None, alias="configMapRef")
     )
     prefix: StrictStr | None = None
     secret_ref: WarmPoolSpecTemplateSpecContainersInnerEnvFromInnerConfigMapRef | None = Field(

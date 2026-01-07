@@ -1,3 +1,4 @@
+
 """
 ARL Infrastructure API
 
@@ -41,22 +42,16 @@ class WarmPoolSpecTemplateSpecVolumesInnerProjectedSourcesInner(BaseModel):
     WarmPoolSpecTemplateSpecVolumesInnerProjectedSourcesInner
     """
 
-    cluster_trust_bundle: (
-        WarmPoolSpecTemplateSpecVolumesInnerProjectedSourcesInnerClusterTrustBundle | None
-    ) = Field(default=None, alias="clusterTrustBundle")
-    config_map: WarmPoolSpecTemplateSpecVolumesInnerProjectedSourcesInnerConfigMap | None = Field(
-        default=None, alias="configMap"
+    cluster_trust_bundle: WarmPoolSpecTemplateSpecVolumesInnerProjectedSourcesInnerClusterTrustBundle | None = Field(default=None, alias="clusterTrustBundle")
+    config_map: WarmPoolSpecTemplateSpecVolumesInnerProjectedSourcesInnerConfigMap | None = (
+        Field(default=None, alias="configMap")
     )
     downward_api: WarmPoolSpecTemplateSpecVolumesInnerProjectedSourcesInnerDownwardAPI | None = (
         Field(default=None, alias="downwardAPI")
     )
-    pod_certificate: (
-        WarmPoolSpecTemplateSpecVolumesInnerProjectedSourcesInnerPodCertificate | None
-    ) = Field(default=None, alias="podCertificate")
+    pod_certificate: WarmPoolSpecTemplateSpecVolumesInnerProjectedSourcesInnerPodCertificate | None = Field(default=None, alias="podCertificate")
     secret: WarmPoolSpecTemplateSpecVolumesInnerProjectedSourcesInnerConfigMap | None = None
-    service_account_token: (
-        WarmPoolSpecTemplateSpecVolumesInnerProjectedSourcesInnerServiceAccountToken | None
-    ) = Field(default=None, alias="serviceAccountToken")
+    service_account_token: WarmPoolSpecTemplateSpecVolumesInnerProjectedSourcesInnerServiceAccountToken | None = Field(default=None, alias="serviceAccountToken")
     __properties: ClassVar[list[str]] = [
         "clusterTrustBundle",
         "configMap",

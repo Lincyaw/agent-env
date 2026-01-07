@@ -1,3 +1,4 @@
+
 """
 ARL Infrastructure API
 
@@ -37,9 +38,7 @@ class WarmPoolSpecTemplateSpecVolumesInnerDownwardAPIItemsInner(BaseModel):
     )
     mode: StrictInt | None = None
     path: StrictStr
-    resource_field_ref: (
-        WarmPoolSpecTemplateSpecContainersInnerEnvInnerValueFromResourceFieldRef | None
-    ) = Field(default=None, alias="resourceFieldRef")
+    resource_field_ref: WarmPoolSpecTemplateSpecContainersInnerEnvInnerValueFromResourceFieldRef | None = Field(default=None, alias="resourceFieldRef")
     __properties: ClassVar[list[str]] = ["fieldRef", "mode", "path", "resourceFieldRef"]
 
     model_config = ConfigDict(

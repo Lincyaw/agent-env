@@ -1,3 +1,4 @@
+
 """
 ARL Infrastructure API
 
@@ -448,7 +449,9 @@ class Configuration:
         self.__logger_format = value
         self.logger_formatter = logging.Formatter(self.__logger_format)
 
-    def get_api_key_with_prefix(self, identifier: str, alias: str | None = None) -> str | None:
+    def get_api_key_with_prefix(
+        self, identifier: str, alias: str | None = None
+    ) -> str | None:
         """Gets API key (with prefix if set).
 
         :param identifier: The identifier of apiKey.
@@ -535,8 +538,7 @@ class Configuration:
             server = servers[index]
         except IndexError:
             raise ValueError(
-                f"Invalid index {index} when selecting the host settings. "
-                f"Must be less than {len(servers)}"
+                f"Invalid index {index} when selecting the host settings. Must be less than {len(servers)}"
             )
 
         url = server["url"]

@@ -1,3 +1,4 @@
+
 """
 ARL Infrastructure API
 
@@ -41,10 +42,10 @@ class WarmPoolSpecTemplateSpecContainersInnerSecurityContext(BaseModel):
     allow_privilege_escalation: StrictBool | None = Field(
         default=None, alias="allowPrivilegeEscalation"
     )
-    app_armor_profile: (
-        WarmPoolSpecTemplateSpecContainersInnerSecurityContextAppArmorProfile | None
-    ) = Field(default=None, alias="appArmorProfile")
-    capabilities: WarmPoolSpecTemplateSpecContainersInnerSecurityContextCapabilities | None = None
+    app_armor_profile: WarmPoolSpecTemplateSpecContainersInnerSecurityContextAppArmorProfile | None = Field(default=None, alias="appArmorProfile")
+    capabilities: WarmPoolSpecTemplateSpecContainersInnerSecurityContextCapabilities | None = (
+        None
+    )
     privileged: StrictBool | None = None
     proc_mount: StrictStr | None = Field(default=None, alias="procMount")
     read_only_root_filesystem: StrictBool | None = Field(
@@ -53,15 +54,9 @@ class WarmPoolSpecTemplateSpecContainersInnerSecurityContext(BaseModel):
     run_as_group: StrictInt | None = Field(default=None, alias="runAsGroup")
     run_as_non_root: StrictBool | None = Field(default=None, alias="runAsNonRoot")
     run_as_user: StrictInt | None = Field(default=None, alias="runAsUser")
-    se_linux_options: (
-        WarmPoolSpecTemplateSpecContainersInnerSecurityContextSeLinuxOptions | None
-    ) = Field(default=None, alias="seLinuxOptions")
-    seccomp_profile: (
-        WarmPoolSpecTemplateSpecContainersInnerSecurityContextAppArmorProfile | None
-    ) = Field(default=None, alias="seccompProfile")
-    windows_options: WarmPoolSpecTemplateSpecContainersInnerSecurityContextWindowsOptions | None = (
-        Field(default=None, alias="windowsOptions")
-    )
+    se_linux_options: WarmPoolSpecTemplateSpecContainersInnerSecurityContextSeLinuxOptions | None = Field(default=None, alias="seLinuxOptions")
+    seccomp_profile: WarmPoolSpecTemplateSpecContainersInnerSecurityContextAppArmorProfile | None = Field(default=None, alias="seccompProfile")
+    windows_options: WarmPoolSpecTemplateSpecContainersInnerSecurityContextWindowsOptions | None = Field(default=None, alias="windowsOptions")
     __properties: ClassVar[list[str]] = [
         "allowPrivilegeEscalation",
         "appArmorProfile",

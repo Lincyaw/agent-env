@@ -1,3 +1,4 @@
+
 """
 ARL Infrastructure API
 
@@ -60,7 +61,9 @@ class WarmPoolSpecTemplateSpec(BaseModel):
     WarmPoolSpecTemplateSpec
     """
 
-    active_deadline_seconds: StrictInt | None = Field(default=None, alias="activeDeadlineSeconds")
+    active_deadline_seconds: StrictInt | None = Field(
+        default=None, alias="activeDeadlineSeconds"
+    )
     affinity: WarmPoolSpecTemplateSpecAffinity | None = None
     automount_service_account_token: StrictBool | None = Field(
         default=None, alias="automountServiceAccountToken"
@@ -113,15 +116,15 @@ class WarmPoolSpecTemplateSpec(BaseModel):
     service_account: StrictStr | None = Field(default=None, alias="serviceAccount")
     service_account_name: StrictStr | None = Field(default=None, alias="serviceAccountName")
     set_hostname_as_fqdn: StrictBool | None = Field(default=None, alias="setHostnameAsFQDN")
-    share_process_namespace: StrictBool | None = Field(default=None, alias="shareProcessNamespace")
+    share_process_namespace: StrictBool | None = Field(
+        default=None, alias="shareProcessNamespace"
+    )
     subdomain: StrictStr | None = None
     termination_grace_period_seconds: StrictInt | None = Field(
         default=None, alias="terminationGracePeriodSeconds"
     )
     tolerations: list[WarmPoolSpecTemplateSpecTolerationsInner] | None = None
-    topology_spread_constraints: (
-        list[WarmPoolSpecTemplateSpecTopologySpreadConstraintsInner] | None
-    ) = Field(default=None, alias="topologySpreadConstraints")
+    topology_spread_constraints: list[WarmPoolSpecTemplateSpecTopologySpreadConstraintsInner] | None = Field(default=None, alias="topologySpreadConstraints")
     volumes: list[WarmPoolSpecTemplateSpecVolumesInner] | None = None
     workload_ref: WarmPoolSpecTemplateSpecWorkloadRef | None = Field(
         default=None, alias="workloadRef"

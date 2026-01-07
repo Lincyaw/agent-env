@@ -1,3 +1,4 @@
+
 """
 ARL Infrastructure API
 
@@ -79,9 +80,7 @@ class WarmPoolSpecTemplateSpecContainersInner(BaseModel):
     )
     resources: SandboxSpecResources | None = None
     restart_policy: StrictStr | None = Field(default=None, alias="restartPolicy")
-    restart_policy_rules: (
-        list[WarmPoolSpecTemplateSpecContainersInnerRestartPolicyRulesInner] | None
-    ) = Field(default=None, alias="restartPolicyRules")
+    restart_policy_rules: list[WarmPoolSpecTemplateSpecContainersInnerRestartPolicyRulesInner] | None = Field(default=None, alias="restartPolicyRules")
     security_context: WarmPoolSpecTemplateSpecContainersInnerSecurityContext | None = Field(
         default=None, alias="securityContext"
     )
@@ -90,13 +89,15 @@ class WarmPoolSpecTemplateSpecContainersInner(BaseModel):
     )
     stdin: StrictBool | None = None
     stdin_once: StrictBool | None = Field(default=None, alias="stdinOnce")
-    termination_message_path: StrictStr | None = Field(default=None, alias="terminationMessagePath")
+    termination_message_path: StrictStr | None = Field(
+        default=None, alias="terminationMessagePath"
+    )
     termination_message_policy: StrictStr | None = Field(
         default=None, alias="terminationMessagePolicy"
     )
     tty: StrictBool | None = None
-    volume_devices: list[WarmPoolSpecTemplateSpecContainersInnerVolumeDevicesInner] | None = Field(
-        default=None, alias="volumeDevices"
+    volume_devices: list[WarmPoolSpecTemplateSpecContainersInnerVolumeDevicesInner] | None = (
+        Field(default=None, alias="volumeDevices")
     )
     volume_mounts: list[WarmPoolSpecTemplateSpecContainersInnerVolumeMountsInner] | None = Field(
         default=None, alias="volumeMounts"

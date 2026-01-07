@@ -1,3 +1,4 @@
+
 """
 ARL Infrastructure API
 
@@ -31,16 +32,10 @@ class WarmPoolSpecTemplateSpecAffinityPodAffinityPreferredDuringSchedulingIgnore
     WarmPoolSpecTemplateSpecAffinityPodAffinityPreferredDuringSchedulingIgnoredDuringExecutionInnerPodAffinityTerm
     """
 
-    label_selector: (
-        WarmPoolSpecTemplateSpecAffinityPodAffinityPreferredDuringSchedulingIgnoredDuringExecutionInnerPodAffinityTermLabelSelector
-        | None
-    ) = Field(default=None, alias="labelSelector")
+    label_selector: WarmPoolSpecTemplateSpecAffinityPodAffinityPreferredDuringSchedulingIgnoredDuringExecutionInnerPodAffinityTermLabelSelector | None = Field(default=None, alias="labelSelector")
     match_label_keys: list[StrictStr] | None = Field(default=None, alias="matchLabelKeys")
     mismatch_label_keys: list[StrictStr] | None = Field(default=None, alias="mismatchLabelKeys")
-    namespace_selector: (
-        WarmPoolSpecTemplateSpecAffinityPodAffinityPreferredDuringSchedulingIgnoredDuringExecutionInnerPodAffinityTermLabelSelector
-        | None
-    ) = Field(default=None, alias="namespaceSelector")
+    namespace_selector: WarmPoolSpecTemplateSpecAffinityPodAffinityPreferredDuringSchedulingIgnoredDuringExecutionInnerPodAffinityTermLabelSelector | None = Field(default=None, alias="namespaceSelector")
     namespaces: list[StrictStr] | None = None
     topology_key: StrictStr = Field(alias="topologyKey")
     __properties: ClassVar[list[str]] = [

@@ -1,3 +1,4 @@
+
 """
 ARL Infrastructure API
 
@@ -29,9 +30,7 @@ class WarmPoolSpecTemplateSpecVolumesInnerEphemeral(BaseModel):
     WarmPoolSpecTemplateSpecVolumesInnerEphemeral
     """
 
-    volume_claim_template: (
-        WarmPoolSpecTemplateSpecVolumesInnerEphemeralVolumeClaimTemplate | None
-    ) = Field(default=None, alias="volumeClaimTemplate")
+    volume_claim_template: WarmPoolSpecTemplateSpecVolumesInnerEphemeralVolumeClaimTemplate | None = Field(default=None, alias="volumeClaimTemplate")
     __properties: ClassVar[list[str]] = ["volumeClaimTemplate"]
 
     model_config = ConfigDict(

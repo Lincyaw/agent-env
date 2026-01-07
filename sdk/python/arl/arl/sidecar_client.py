@@ -1,7 +1,6 @@
 """gRPC client for direct sidecar communication."""
 
 import queue
-import threading
 from collections.abc import Iterator
 from typing import Any
 
@@ -131,9 +130,7 @@ class SidecarClient:
         stderr_parts: list[str] = []
         exit_code = 0
 
-        for log in self.execute_stream(
-            command, env, working_dir, background, timeout_seconds
-        ):
+        for log in self.execute_stream(command, env, working_dir, background, timeout_seconds):
             if log.stdout:
                 stdout_parts.append(log.stdout)
             if log.stderr:
@@ -241,9 +238,7 @@ class ShellSession:
     def __enter__(self) -> "ShellSession":
         """Enter context manager - start the shell."""
         self._request_iterator = _ShellInputIterator()
-        self._response_iterator = self._stub.InteractiveShell(
-            iter(self._request_iterator)
-        )
+        self._response_iterator = self._stub.InteractiveShell(iter(self._request_iterator))
         return self
 
     def __exit__(

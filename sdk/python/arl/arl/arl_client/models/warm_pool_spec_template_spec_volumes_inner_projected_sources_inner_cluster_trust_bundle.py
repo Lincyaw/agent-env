@@ -1,3 +1,4 @@
+
 """
 ARL Infrastructure API
 
@@ -29,10 +30,7 @@ class WarmPoolSpecTemplateSpecVolumesInnerProjectedSourcesInnerClusterTrustBundl
     WarmPoolSpecTemplateSpecVolumesInnerProjectedSourcesInnerClusterTrustBundle
     """
 
-    label_selector: (
-        WarmPoolSpecTemplateSpecAffinityPodAffinityPreferredDuringSchedulingIgnoredDuringExecutionInnerPodAffinityTermLabelSelector
-        | None
-    ) = Field(default=None, alias="labelSelector")
+    label_selector: WarmPoolSpecTemplateSpecAffinityPodAffinityPreferredDuringSchedulingIgnoredDuringExecutionInnerPodAffinityTermLabelSelector | None = Field(default=None, alias="labelSelector")
     name: StrictStr | None = None
     optional: StrictBool | None = None
     path: StrictStr

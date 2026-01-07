@@ -1,3 +1,4 @@
+
 """
 ARL Infrastructure API
 
@@ -31,18 +32,8 @@ class WarmPoolSpecTemplateSpecAffinityNodeAffinityPreferredDuringSchedulingIgnor
     WarmPoolSpecTemplateSpecAffinityNodeAffinityPreferredDuringSchedulingIgnoredDuringExecutionInnerPreference
     """
 
-    match_expressions: (
-        list[
-            WarmPoolSpecTemplateSpecAffinityNodeAffinityPreferredDuringSchedulingIgnoredDuringExecutionInnerPreferenceMatchExpressionsInner
-        ]
-        | None
-    ) = Field(default=None, alias="matchExpressions")
-    match_fields: (
-        list[
-            WarmPoolSpecTemplateSpecAffinityNodeAffinityPreferredDuringSchedulingIgnoredDuringExecutionInnerPreferenceMatchExpressionsInner
-        ]
-        | None
-    ) = Field(default=None, alias="matchFields")
+    match_expressions: list[WarmPoolSpecTemplateSpecAffinityNodeAffinityPreferredDuringSchedulingIgnoredDuringExecutionInnerPreferenceMatchExpressionsInner] | None = Field(default=None, alias="matchExpressions")
+    match_fields: list[WarmPoolSpecTemplateSpecAffinityNodeAffinityPreferredDuringSchedulingIgnoredDuringExecutionInnerPreferenceMatchExpressionsInner] | None = Field(default=None, alias="matchFields")
     __properties: ClassVar[list[str]] = ["matchExpressions", "matchFields"]
 
     model_config = ConfigDict(

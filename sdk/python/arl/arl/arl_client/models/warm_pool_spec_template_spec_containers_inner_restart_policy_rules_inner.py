@@ -1,3 +1,4 @@
+
 """
 ARL Infrastructure API
 
@@ -30,9 +31,7 @@ class WarmPoolSpecTemplateSpecContainersInnerRestartPolicyRulesInner(BaseModel):
     """
 
     action: StrictStr
-    exit_codes: WarmPoolSpecTemplateSpecContainersInnerRestartPolicyRulesInnerExitCodes | None = (
-        Field(default=None, alias="exitCodes")
-    )
+    exit_codes: WarmPoolSpecTemplateSpecContainersInnerRestartPolicyRulesInnerExitCodes | None = Field(default=None, alias="exitCodes")
     __properties: ClassVar[list[str]] = ["action", "exitCodes"]
 
     model_config = ConfigDict(

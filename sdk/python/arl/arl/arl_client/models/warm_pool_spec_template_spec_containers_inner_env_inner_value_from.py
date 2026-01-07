@@ -1,3 +1,4 @@
+
 """
 ARL Infrastructure API
 
@@ -38,21 +39,15 @@ class WarmPoolSpecTemplateSpecContainersInnerEnvInnerValueFrom(BaseModel):
     WarmPoolSpecTemplateSpecContainersInnerEnvInnerValueFrom
     """
 
-    config_map_key_ref: (
-        WarmPoolSpecTemplateSpecContainersInnerEnvInnerValueFromConfigMapKeyRef | None
-    ) = Field(default=None, alias="configMapKeyRef")
+    config_map_key_ref: WarmPoolSpecTemplateSpecContainersInnerEnvInnerValueFromConfigMapKeyRef | None = Field(default=None, alias="configMapKeyRef")
     field_ref: WarmPoolSpecTemplateSpecContainersInnerEnvInnerValueFromFieldRef | None = Field(
         default=None, alias="fieldRef"
     )
-    file_key_ref: WarmPoolSpecTemplateSpecContainersInnerEnvInnerValueFromFileKeyRef | None = Field(
-        default=None, alias="fileKeyRef"
+    file_key_ref: WarmPoolSpecTemplateSpecContainersInnerEnvInnerValueFromFileKeyRef | None = (
+        Field(default=None, alias="fileKeyRef")
     )
-    resource_field_ref: (
-        WarmPoolSpecTemplateSpecContainersInnerEnvInnerValueFromResourceFieldRef | None
-    ) = Field(default=None, alias="resourceFieldRef")
-    secret_key_ref: (
-        WarmPoolSpecTemplateSpecContainersInnerEnvInnerValueFromConfigMapKeyRef | None
-    ) = Field(default=None, alias="secretKeyRef")
+    resource_field_ref: WarmPoolSpecTemplateSpecContainersInnerEnvInnerValueFromResourceFieldRef | None = Field(default=None, alias="resourceFieldRef")
+    secret_key_ref: WarmPoolSpecTemplateSpecContainersInnerEnvInnerValueFromConfigMapKeyRef | None = Field(default=None, alias="secretKeyRef")
     __properties: ClassVar[list[str]] = [
         "configMapKeyRef",
         "fieldRef",
