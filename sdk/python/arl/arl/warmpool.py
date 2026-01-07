@@ -190,7 +190,7 @@ class WarmPoolManager:
             WarmPool resource dictionary
 
         Raises:
-            kubernetes.client.ApiException: If WarmPool not found
+            client.ApiException: If WarmPool not found
         """
         warmpool_obj: object = self.custom_api.get_namespaced_custom_object(
             group="arl.infra.io",
@@ -208,7 +208,7 @@ class WarmPoolManager:
             name: Name of the WarmPool to delete
 
         Raises:
-            kubernetes.client.ApiException: If deletion fails
+            client.ApiException: If deletion fails
         """
         self.custom_api.delete_namespaced_custom_object(
             group="arl.infra.io",

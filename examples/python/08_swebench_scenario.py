@@ -9,6 +9,7 @@ Demonstrates:
 """
 
 from arl import SandboxSession, TaskStep, WarmPoolManager
+from kubernetes import client
 
 
 def main() -> None:
@@ -32,20 +33,23 @@ def main() -> None:
         # Try to get existing warmpool
         warmpool_manager.get_warmpool(pool_name)
         print(f"✓ WarmPool '{pool_name}' already exists")
-    except Exception:
-        # Create new warmpool if it doesn't exist
-        warmpool_manager.create_warmpool(
-            name=pool_name,
-            image=swebench_image,
-            replicas=2,
-            testbed_path="/testbed",  # SWE-bench uses /testbed directory
-        )
-        print(f"✓ WarmPool '{pool_name}' created")
+    except client.ApiException as e:
+        if e.status == 404:
+            # Create new warmpool if it doesn't exist
+            warmpool_manager.create_warmpool(
+                name=pool_name,
+                image=swebench_image,
+                replicas=2,
+                testbed_path="/testbed",  # SWE-bench uses /testbed directory
+            )
+            print(f"✓ WarmPool '{pool_name}' created")
 
-        # Wait for warmpool to be ready
-        print("Waiting for warm pods to be ready...")
-        warmpool_manager.wait_for_warmpool_ready(pool_name)
-        print("✓ WarmPool is ready with warm pods")
+            # Wait for warmpool to be ready
+            print("Waiting for warm pods to be ready...")
+            warmpool_manager.wait_for_warmpool_ready(pool_name)
+            print("✓ WarmPool is ready with warm pods")
+        else:
+            raise
 
     with SandboxSession(pool_ref=pool_name, namespace=namespace, keep_alive=True) as session:
         print(f"\n✓ Sandbox allocated from pool '{pool_name}'")
