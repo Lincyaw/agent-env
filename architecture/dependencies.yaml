@@ -7,6 +7,9 @@
 #   - grpc: gRPC client-server communication
 #   - references: Logical reference (e.g., field referencing another CRD)
 #   - generates: Code generation output
+#   - implements: Implements an interface definition
+#   - includes: Includes/bundles other resources
+#   - deploys: Deploys/installs a component
 
 dependencies:
   # ============================================================================

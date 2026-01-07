@@ -183,7 +183,7 @@ def run_validate(arch_dir: Path, repo_root: Path) -> int:
 
 def query_dependencies(
     arch_dir: Path, component: str, *, reverse: bool = False
-) -> list[dict[str, str]]:
+) -> list[dict[str, Any]]:
     """Query dependencies for a component.
 
     Args:

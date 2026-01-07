@@ -61,3 +61,6 @@ uv run python hack/arch-lint.py query --component sandbox-crd --reverse
 - `grpc`: gRPC client-server communication
 - `references`: Logical reference (e.g., CRD field to CRD)
 - `generates`: Code generation output
+- `implements`: Implements an interface definition
+- `includes`: Includes/bundles other resources
+- `deploys`: Deploys/installs a component
