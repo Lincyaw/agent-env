@@ -213,13 +213,12 @@ from arl import SandboxSession
 
 # 使用上下文管理器自动管理资源
 with SandboxSession("python-pool", namespace="default") as session:
-    # 执行后台进程
+    # 执行命令示例
     result = session.execute([
         {
             "name": "start-server",
             "type": "Command",
             "command": ["python", "-m", "http.server", "8000"],
-            # 使用 nohup 在后台运行
         }
     ])
 ```
@@ -602,7 +601,7 @@ with SandboxSession("python-pool", namespace="default") as session:
     ])
 ```
 
-完整的 gRPC 服务定义请参考：`proto/agent.proto`  
+完整的 gRPC 服务定义请参考：`proto/agent.proto`
 更多 Python 示例请查看：`examples/python/`
 
 ---
