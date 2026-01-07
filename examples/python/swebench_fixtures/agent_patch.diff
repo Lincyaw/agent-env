@@ -1,0 +1,11 @@
+--- a/packages/emotion/src/index.js
++++ b/packages/emotion/src/index.js
+@@ -10,7 +10,7 @@
+   const styles = createStyles(props)
+ 
+   // Apply styles to element
+-  element.style = styles
++  element.setAttribute('style', styles)
+ 
+   return element
+ }

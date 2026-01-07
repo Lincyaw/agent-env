@@ -28,6 +28,7 @@ uv run python 05_error_handling.py
 uv run python 06_long_running_task.py
 uv run python 07_sandbox_reuse.py
 uv run python 08_swebench_scenario.py  # Creates WarmPool automatically!
+uv run python 08_swebench_scenario_mock.py  # With mock agent
 
 # Run all examples
 uv run python run_all_examples.py
@@ -47,6 +48,26 @@ All examples use the Kubernetes Task CRD for execution, which works from anywher
 - **06_long_running_task.py**: Long-running tasks with timeouts
 - **07_sandbox_reuse.py**: Sandbox reuse for serial tasks
 - **08_swebench_scenario.py**: SWE-bench automated bug fixing workflow with WarmPool created via Python SDK (see [SWEBENCH_README.md](SWEBENCH_README.md))
+- **08_swebench_scenario_mock.py**: SWE-bench with mock agent and separated fixture files
+
+### Mock Agent
+
+The `mock_agent.py` module provides a simple mock agent for simulating LLM behavior:
+
+```python
+from mock_agent import create_mock_agent
+
+# Initialize mock agent
+agent = create_mock_agent("swebench_fixtures")
+
+# Simulate agent workflow
+analysis = agent.analyze_issue()
+patch = agent.generate_patch()
+test_script = agent.generate_test_script()
+report = agent.generate_report()
+```
+
+Agent inputs/outputs are stored in `swebench_fixtures/` directory for easy modification and testing.
 
 ## Common Patterns
 
