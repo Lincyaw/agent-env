@@ -73,15 +73,15 @@ jobs:
 
       - name: Prepare gh-pages content
         run: |
-          # If gh-pages exists, copy existing content
-          if [ -d "gh-pages" ]; then
-            cp -r gh-pages/*.tgz .deploy/ 2>/dev/null || true
-            cp gh-pages/index.yaml .deploy/ 2>/dev/null || true
+          # If gh-pages exists, copy existing content from charts directory
+          if [ -d "gh-pages/charts" ]; then
+            cp -r gh-pages/charts/*.tgz .deploy/ 2>/dev/null || true
+            cp gh-pages/charts/index.yaml .deploy/ 2>/dev/null || true
           fi
 
           # Generate/update index
           cd .deploy
-          helm repo index . --url https://lincyaw.github.io/agent-env
+          helm repo index . --url https://lincyaw.github.io/agent-env/charts
 
           echo "📋 Repository index:"
           cat index.yaml
@@ -92,4 +92,5 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           publish_dir: .deploy
           publish_branch: gh-pages
+          destination_dir: charts
           keep_files: true
