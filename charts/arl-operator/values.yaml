@@ -71,12 +71,12 @@ cleanup:
 
 # Altinity ClickHouse Operator (installed as dependency)
 clickhouse-operator:
-  enabled: true
+  enabled: false
 
 # ClickHouse configuration (for audit logging)
 clickhouse:
   # Enable audit logging to ClickHouse
-  enabled: true
+  enabled: false
   # ClickHouse connection settings
   host: "clickhouse-clickhouse-arl"
   port: 9000

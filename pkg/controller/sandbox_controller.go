@@ -111,8 +111,22 @@ func (r *SandboxReconciler) reconcile(ctx context.Context, req ctrl.Request) (ct
 		return r.handleReadySandbox(ctx, sandbox)
 	}
 
+	// If phase is empty, initialize to Pending first
+	if sandbox.Status.Phase == "" {
+		newPhase := arlv1alpha1.SandboxPhasePending
+		if err := r.updateSandboxPhase(ctx, sandbox, newPhase); err != nil {
+			return ctrl.Result{}, fmt.Errorf("failed to initialize Sandbox %s/%s phase to Pending: %w",
+				sandbox.Namespace, sandbox.Name, err)
+		}
+		if err := r.Status().Update(ctx, sandbox); err != nil {
+			return ctrl.Result{}, fmt.Errorf("failed to update Sandbox %s/%s status: %w",
+				sandbox.Namespace, sandbox.Name, err)
+		}
+		return ctrl.Result{Requeue: true}, nil
+	}
+
 	// If pending, try to bind to a pod
-	if sandbox.Status.Phase == "" || sandbox.Status.Phase == arlv1alpha1.SandboxPhasePending {
+	if sandbox.Status.Phase == arlv1alpha1.SandboxPhasePending {
 		// Find an idle pod from the pool
 		podList := &corev1.PodList{}
 		if err := r.List(ctx, podList,
@@ -137,11 +151,6 @@ func (r *SandboxReconciler) reconcile(ctx context.Context, req ctrl.Request) (ct
 
 		if selectedPod == nil {
 			logger.Info("No idle pods available", "pool", sandbox.Spec.PoolRef, "sandbox", sandbox.Name)
-			newPhase := arlv1alpha1.SandboxPhasePending
-			if err := r.updateSandboxPhase(ctx, sandbox, newPhase); err != nil {
-				return ctrl.Result{}, fmt.Errorf("failed to update Sandbox %s/%s phase to Pending: %w",
-					sandbox.Namespace, sandbox.Name, err)
-			}
 			return ctrl.Result{RequeueAfter: DefaultPodWaitRequeueDelay}, nil
 		}
 
@@ -194,7 +203,11 @@ func (r *SandboxReconciler) reconcile(ctx context.Context, req ctrl.Request) (ct
 			Name:      sandbox.Status.PodName,
 		}, pod); err != nil {
 			if errors.IsNotFound(err) {
-				sandbox.Status.Phase = arlv1alpha1.SandboxPhaseFailed
+				newPhase := arlv1alpha1.SandboxPhaseFailed
+				if err := r.updateSandboxPhase(ctx, sandbox, newPhase); err != nil {
+					return ctrl.Result{}, fmt.Errorf("failed to update Sandbox %s/%s phase to Failed: %w",
+						sandbox.Namespace, sandbox.Name, err)
+				}
 				if err := r.Status().Update(ctx, sandbox); err != nil {
 					return ctrl.Result{}, err
 				}
@@ -213,7 +226,11 @@ func (r *SandboxReconciler) reconcile(ctx context.Context, req ctrl.Request) (ct
 		}
 
 		if allReady {
-			sandbox.Status.Phase = arlv1alpha1.SandboxPhaseReady
+			newPhase := arlv1alpha1.SandboxPhaseReady
+			if err := r.updateSandboxPhase(ctx, sandbox, newPhase); err != nil {
+				return ctrl.Result{}, fmt.Errorf("failed to update Sandbox %s/%s phase to Ready: %w",
+					sandbox.Namespace, sandbox.Name, err)
+			}
 			sandbox.Status.PodIP = pod.Status.PodIP
 
 			if err := r.Status().Update(ctx, sandbox); err != nil {

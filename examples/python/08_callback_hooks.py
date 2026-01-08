@@ -9,7 +9,6 @@ Demonstrates:
 
 import json
 import os
-import time
 
 from arl import SandboxSession
 
@@ -29,7 +28,7 @@ def main() -> None:
         task_name = result.get("metadata", {}).get("name", "unknown")
         state = status.get("state", "unknown")
         print(f"\n[CALLBACK] Task '{task_name}' completed with state: {state}")
-        
+
         if DEBUG:
             print(f"[DEBUG] Full result: {json.dumps(result, indent=2, default=str)}")
 
@@ -50,7 +49,7 @@ def main() -> None:
         exit_code = status.get("exitCode", 0)
         stderr = status.get("stderr", "").strip()
         conditions = status.get("conditions", [])
-        
+
         print(f"  Exit code: {exit_code}")
         if stderr:
             print(f"  Error output: {stderr}")

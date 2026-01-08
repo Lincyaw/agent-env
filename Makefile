@@ -54,8 +54,7 @@ k8s-setup: ## Setup prerequisites for new K8s cluster (ClickHouse operator, Helm
 	@echo "2. Updating Helm dependencies..."
 	cd charts/arl-operator && helm dependency update
 	@echo "3. Installing CRDs..."
-	kubectl apply -f config/crd/ --server-side=true
-	@echo "✅ Setup complete. Now run 'make k8s-run' to deploy."
+	@echo "✅ Setup complete. Now run 'skaffold run --profile=dev' to deploy."
 
 
 ##@ Development
