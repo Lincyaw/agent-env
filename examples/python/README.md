@@ -1,120 +1,188 @@
 # ARL Python SDK Examples
 
-Examples demonstrating ARL Python SDK features.
+Examples demonstrating how to manage Kubernetes sandbox environments and execute tasks using the ARL Python SDK.
 
-## Prerequisites
+## Quick Start
 
-1. Install dependencies:
-   ```bash
-   cd examples/python
-   uv sync
-   ```
+### 1. Install SDK
 
-2. Access to Kubernetes cluster with ARL infrastructure
-3. Create a WarmPool named `python-39-std`
-4. (Optional) For SWE-bench example: WarmPool is created automatically via Python SDK!
+```bash
+pip install arl-env
+```
 
-## Running Examples
+### 2. Configure Kubernetes Access
+
+Ensure you have access to a Kubernetes cluster with a properly configured `kubeconfig`:
+
+```bash
+# Verify cluster access
+kubectl cluster-info
+```
+
+### 3. Run the Comprehensive Example
 
 ```bash
 cd examples/python
-
-# Individual examples
-uv run python 01_basic_execution.py
-uv run python 02_multi_step_pipeline.py
-uv run python 03_environment_variables.py
-uv run python 04_working_directory.py
-uv run python 05_error_handling.py
-uv run python 06_long_running_task.py
-uv run python 07_sandbox_reuse.py
-uv run python 08_callback_hooks.py
-
-# Enable debug mode to see full task results
-DEBUG=true uv run python 08_callback_hooks.py
-
-# Run all examples
-uv run python run_all_examples.py
+uv run python 09_multiple_feature.py
 ```
 
-## Examples
+## Comprehensive Example: 09_multiple_feature.py
 
-### Task CRD-Based Execution
+This is a complete example demonstrating the core features of the SDK:
 
-All examples use the Kubernetes Task CRD for execution, which works from anywhere with cluster access:
+### Feature Overview
 
-- **01_basic_execution.py**: Create sandbox, execute steps, read output
-- **02_multi_step_pipeline.py**: Data processing pipeline with multiple steps
-- **03_environment_variables.py**: Custom environment variables
-- **04_working_directory.py**: Working directory management
-- **05_error_handling.py**: Error handling and retries
-- **06_long_running_task.py**: Long-running tasks with timeouts
-- **07_sandbox_reuse.py**: Sandbox reuse for serial tasks
-- **08_callback_hooks.py**: Callback functions for task events (logging, monitoring, chaining)
+| Feature             | Description                                           |
+| ------------------- | ----------------------------------------------------- |
+| WarmPool Management | Create and manage warm pools via Python SDK           |
+| Sandbox Session     | Allocate sandboxes from warm pool with reuse support  |
+| Task Execution      | Execute commands and file operations                  |
+| State Persistence   | Maintain state across tasks (e.g., counter increment) |
+| Callback Hooks      | Monitor task execution status                         |
 
+### Code Walkthrough
 
-### Callback System
-
-The SDK supports callbacks for running scripts or functions after task completion:
-
-```python
-from arl import SandboxSession
-
-session = SandboxSession(pool_ref="my-pool")
-
-# Register callbacks for different events
-def on_success(result):
-    print(f"Task succeeded: {result['status']['state']}")
-
-session.register_callback("on_task_success", on_success)
-
-# Execute with automatic callback script execution
-result = session.execute_with_callback(
-    steps=[...],
-    callback_script="/testbed/run_tests.sh"
-)
-```
-
-**Supported callback events:**
-- `on_task_complete` - Triggered after any task completes
-- `on_task_success` - Triggered only when task succeeds
-- `on_task_failure` - Triggered only when task fails
-
-## Common Patterns
-
-### Context Manager (Recommended)
-
-```python
-from arl import SandboxSession
-
-with SandboxSession("python-3.9-std", namespace="default") as session:
-    result = session.execute([...])
-```
-
-### WarmPool Management (Python SDK)
+#### Step 1: Create WarmPool
 
 ```python
 from arl import WarmPoolManager
+from kubernetes import client
 
-# Create a WarmPool
-manager = WarmPoolManager(namespace="default")
-manager.create_warmpool(
-    name="my-pool",
-    image="python:3.9-slim",
-    replicas=2
-)
+warmpool_manager = WarmPoolManager(namespace="default")
 
-# Wait for it to be ready
-manager.wait_for_warmpool_ready("my-pool")
-
-# Check status
-warmpool = manager.get_warmpool("my-pool")
-print(warmpool["status"])
-
-# Delete when done
-manager.delete_warmpool("my-pool")
+try:
+    warmpool_manager.get_warmpool(pool_name)
+    print(f"WarmPool '{pool_name}' already exists")
+except client.ApiException as e:
+    if e.status == 404:
+        # Create new WarmPool
+        warmpool_manager.create_warmpool(
+            name=pool_name,
+            sidecar_image=sidecar_image,
+            image=pool_image,
+            replicas=2,
+        )
+        # Wait for WarmPool to be ready
+        warmpool_manager.wait_for_warmpool_ready(pool_name)
 ```
 
-### Task Steps
+#### Step 2: Create Session and Register Callbacks
+
+```python
+from arl import SandboxSession
+
+# Callback functions
+def on_task_complete(result):
+    state = result.get("status", {}).get("state", "unknown")
+    print(f"Task completed with state: {state}")
+
+def on_task_success(result):
+    stdout = result.get("status", {}).get("stdout", "")
+    print(f"Task succeeded! Output: {stdout[:50]}...")
+
+def on_task_failure(result):
+    stderr = result.get("status", {}).get("stderr", "")
+    print(f"Task failed! Error: {stderr}")
+
+# Create session (keep_alive=True enables sandbox reuse)
+session = SandboxSession(pool_ref=pool_name, namespace="default", keep_alive=True)
+
+# Register callbacks
+session.register_callback("on_task_complete", on_task_complete)
+session.register_callback("on_task_success", on_task_success)
+session.register_callback("on_task_failure", on_task_failure)
+```
+
+#### Step 3: Execute Multi-Step Tasks
+
+```python
+# Allocate sandbox from warm pool
+session.create_sandbox()
+
+# Task 1: Initialize environment
+result = session.execute([
+    {
+        "name": "create_workspace",
+        "type": "Command",
+        "command": ["mkdir", "-p", "/workspace"],
+    },
+    {
+        "name": "init_counter",
+        "type": "FilePatch",
+        "path": "/workspace/counter.txt",
+        "content": "0",
+    },
+    {
+        "name": "create_script",
+        "type": "FilePatch",
+        "path": "/workspace/increment.sh",
+        "content": """#!/bin/bash
+COUNTER_FILE="/workspace/counter.txt"
+CURRENT=$(cat $COUNTER_FILE)
+NEW=$((CURRENT + 1))
+echo $NEW > $COUNTER_FILE
+echo "Counter incremented: $CURRENT -> $NEW"
+""",
+    },
+])
+
+# Task 2-3: Execute script multiple times, state persists in sandbox
+result = session.execute([
+    {"name": "run", "type": "Command", "command": ["/workspace/increment.sh"]},
+])
+# Counter increments with each execution: 0 -> 1 -> 2
+```
+
+#### Step 4: Cleanup Resources
+
+```python
+# Delete sandbox
+session.delete_sandbox()
+
+# Optional: Delete WarmPool
+# warmpool_manager.delete_warmpool(pool_name)
+```
+
+### Expected Output
+
+```
+[Step 1] Creating WarmPool with Python SDK...
+✓ WarmPool 'demo-python-pool' created
+✓ WarmPool is ready
+
+[Step 2] Creating sandbox session with callbacks...
+✓ Sandbox allocated from pool 'demo-python-pool'
+
+[Task 1] Initializing environment...
+  State: Succeeded
+
+[Task 2] Running increment script (1st time)...
+  [Callback] Task completed with state: Succeeded
+  [Callback] Task succeeded! Output: Counter incremented: 0 -> 1...
+  Counter value: 1
+
+[Task 3] Running increment script (2nd time)...
+  Counter value: 2
+
+✓ All tasks completed successfully!
+```
+
+## Other Examples
+
+| Example                     | Description                                          |
+| --------------------------- | ---------------------------------------------------- |
+| 01_basic_execution.py       | Basic: Create sandbox, execute commands, read output |
+| 02_multi_step_pipeline.py   | Multi-step data processing pipeline                  |
+| 03_environment_variables.py | Custom environment variables                         |
+| 04_working_directory.py     | Working directory management                         |
+| 05_error_handling.py        | Error handling and retries                           |
+| 06_long_running_task.py     | Long-running tasks with timeouts                     |
+| 07_sandbox_reuse.py         | Sandbox reuse                                        |
+| 08_callback_hooks.py        | Callback hooks                                       |
+
+## API Reference
+
+### Task Step Types
 
 ```python
 # FilePatch: Create/modify files
@@ -138,20 +206,19 @@ manager.delete_warmpool("my-pool")
 ### Result Handling
 
 ```python
-# Execute returns the completed task object
 task = session.execute([...])
 
-# Check execution status
 status = task["status"]
-state = status["state"]  # "Succeeded" or "Failed"
-
-# Access task output
-stdout = status.get("stdout", "")
-stderr = status.get("stderr", "")
+state = status["state"]           # "Succeeded" or "Failed"
+stdout = status.get("stdout", "") # Standard output
+stderr = status.get("stderr", "") # Standard error
 exit_code = status.get("exitCode", 0)
-
-print(f"State: {state}")
-print(f"Output: {stdout}")
-if exit_code != 0:
-    print(f"Error: {stderr}")
 ```
+
+### Callback Events
+
+| Event              | Trigger                                   |
+| ------------------ | ----------------------------------------- |
+| `on_task_complete` | After task completes (success or failure) |
+| `on_task_success`  | Only when task succeeds                   |
+| `on_task_failure`  | Only when task fails                      |
