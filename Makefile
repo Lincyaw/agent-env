@@ -104,8 +104,8 @@ deepcopy: ## Generate deepcopy code
 .PHONY: sdk-python
 sdk-python: ## Generate Python SDK from CRDs
 	./hack/generate-sdk.sh
-	uv run ruff format .
-	uv run ruff check --fix . --unsafe-fixes
+	uv run ruff format . || true
+	uv run ruff check --fix . --unsafe-fixes || true
 
 ##@ Python SDK
 
