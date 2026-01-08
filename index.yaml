@@ -2,8 +2,35 @@ apiVersion: v1
 entries:
   arl-operator:
   - apiVersion: v2
+    appVersion: 0.1.1
+    created: "2026-01-08T11:07:16.387771351Z"
+    dependencies:
+    - condition: clickhouse-operator.enabled
+      name: altinity-clickhouse-operator
+      repository: https://helm.altinity.com
+      version: 0.24.0
+    description: A Helm chart for deploying the ARL (Agent Runtime Layer) Operator
+    digest: c604d989fbe5607a9165cc7caa9ee7f0751e67a76bef457715fa555e8838fd5b
+    home: https://github.com/Lincyaw/agent-env
+    keywords:
+    - kubernetes
+    - operator
+    - sandbox
+    - agent
+    - warmpool
+    maintainers:
+    - name: Lincyaw
+      url: https://github.com/Lincyaw
+    name: arl-operator
+    sources:
+    - https://github.com/Lincyaw/agent-env
+    type: application
+    urls:
+    - https://lincyaw.github.io/agent-env/arl-operator-0.1.1.tgz
+    version: 0.1.1
+  - apiVersion: v2
     appVersion: 0.1.0
-    created: "2026-01-08T10:50:35.022534491Z"
+    created: "2026-01-08T11:07:16.384183875Z"
     dependencies:
     - condition: clickhouse-operator.enabled
       name: altinity-clickhouse-operator
@@ -28,4 +55,4 @@ entries:
     urls:
     - https://lincyaw.github.io/agent-env/arl-operator-0.1.0.tgz
     version: 0.1.0
-generated: "2026-01-08T10:50:35.017730077Z"
+generated: "2026-01-08T11:07:16.379810985Z"
