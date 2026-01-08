@@ -79,9 +79,9 @@ jobs:
         run: |
           cd ${SDK_DIR}
           echo "🔨 Building package..."
-          uv build
+          uv build --out-dir dist
 
           echo "📦 Publishing to PyPI..."
-          uv publish --trusted-publishing always
+          uv publish dist/* --trusted-publishing always
 
           echo "✅ Successfully published arl==${{ steps.version.outputs.version }} to PyPI!"
