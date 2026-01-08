@@ -1,0 +1,95 @@
+name: Publish Helm Chart
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+*"
+    paths:
+      - 'charts/**'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Chart version to publish (e.g., 0.1.0)"
+        required: true
+        default: "0.1.0"
+
+permissions:
+  contents: write
+  pages: write
+
+jobs:
+  publish:
+    name: Publish Helm Chart
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Extract version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            VERSION="${GITHUB_REF_NAME#v}"
+          fi
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "📦 Chart version: ${VERSION}"
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4.3.0
+        with:
+          version: 'v3.16.3'
+
+      - name: Update chart version
+        run: |
+          cd charts/arl-operator
+          sed -i "s/^version:.*/version: ${{ steps.version.outputs.version }}/" Chart.yaml
+          sed -i "s/^appVersion:.*/appVersion: \"${{ steps.version.outputs.version }}\"/" Chart.yaml
+          echo "📝 Updated Chart.yaml:"
+          grep -E "^(version|appVersion):" Chart.yaml
+
+      - name: Update Helm dependencies
+        run: |
+          cd charts/arl-operator
+          helm dependency update
+
+      - name: Package Helm chart
+        run: |
+          mkdir -p .deploy
+          helm package charts/arl-operator -d .deploy
+          echo "📦 Packaged chart:"
+          ls -la .deploy/
+
+      - name: Checkout gh-pages branch
+        uses: actions/checkout@v4
+        with:
+          ref: gh-pages
+          path: gh-pages
+        continue-on-error: true
+
+      - name: Prepare gh-pages content
+        run: |
+          # If gh-pages exists, copy existing content
+          if [ -d "gh-pages" ]; then
+            cp -r gh-pages/*.tgz .deploy/ 2>/dev/null || true
+            cp gh-pages/index.yaml .deploy/ 2>/dev/null || true
+          fi
+
+          # Generate/update index
+          cd .deploy
+          helm repo index . --url https://lincyaw.github.io/agent-env
+
+          echo "📋 Repository index:"
+          cat index.yaml
+
+      - name: Publish to gh-pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: .deploy
+          publish_branch: gh-pages
+          keep_files: true
