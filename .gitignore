@@ -68,3 +68,6 @@ uv.lock
 *.tgz
 Chart.lockoperator
 sidecar
+
+# MkDocs
+site/
