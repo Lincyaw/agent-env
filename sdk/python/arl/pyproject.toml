@@ -1,5 +1,5 @@
 [project]
-name = "arl"
+name = "arl-env"
 version = "0.1.0"
 description = "ARL Infrastructure - Python SDK for Kubernetes-based Agent Runtime Layer"
 readme = "README.md"
