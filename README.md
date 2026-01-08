@@ -1,183 +1,95 @@
-# ARL-Infra: Agentic RL Kubernetes Infrastructure
+# ARL-Infra
 
-A Kubernetes Operator for Agentic Reinforcement Learning environments with warm pool and sidecar injection for ultra-low latency code execution.
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Go Version](https://img.shields.io/badge/go-1.25+-00ADD8.svg)](https://golang.org/)
+[![Python Version](https://img.shields.io/badge/python-3.9+-3776AB.svg)](https://python.org/)
 
-## Architecture
-
-**Control Plane**: ARL Operator manages resource pools and orchestrates task execution  
-**Data Plane**: Warm pool of pre-created pods with sidecar agents for instant code execution
-
-### Core Resources
-
-1. **WarmPool**: Maintains a pool of ready-to-use pods for instant allocation
-2. **Sandbox**: Agent's isolated workspace bound to a pod
-3. **Task**: Execution unit with file operations and commands
-4. **Sidecar**: HTTP agent in each pod for file and process management
+**Kubernetes Operator for Agentic Reinforcement Learning environments with warm pool and sidecar injection for ultra-low latency code execution.**
 
 ## Features
 
-- ✅ **Ultra-low latency**: Bypasses pod startup time using warm pools
-- ✅ **Isolation**: Each sandbox runs in an isolated environment
-- ✅ **Hot code reload**: Update and execute code without pod restarts
-- ✅ **Kubernetes-native**: CRD-based API, standard K8s tooling
+- ⚡ **Ultra-low latency**: Bypasses pod startup time using warm pools
+- 🔒 **Isolation**: Each sandbox runs in an isolated environment
+- 🔄 **Hot code reload**: Update and execute code without pod restarts
+- ☸️ **Kubernetes-native**: CRD-based API, standard K8s tooling
+- 🐍 **Python SDK**: High-level API for seamless integration
 
-## Prerequisites
+## Documentation
 
-- Go 1.25+
-- Docker
-- kubectl
-- minikube (for local) or Kubernetes cluster
+📚 **[Full Documentation](https://lincyaw.github.io/agent-env/)**
+
+| Guide | Description |
+|-------|-------------|
+| [Overview](https://lincyaw.github.io/agent-env/getting-started/overview/) | Introduction to ARL-Infra concepts |
+| [For Developers](https://lincyaw.github.io/agent-env/getting-started/developers/) | Deploy and manage ARL-Infra |
+| [For SDK Users](https://lincyaw.github.io/agent-env/getting-started/sdk-users/) | Use the Python SDK |
+| [Architecture](https://lincyaw.github.io/agent-env/developer-guide/architecture/) | System design and components |
+| [Python SDK](https://lincyaw.github.io/agent-env/user-guide/python-sdk/) | SDK installation and usage |
+| [Examples](https://lincyaw.github.io/agent-env/user-guide/examples/) | Code examples |
 
 ## Quick Start
 
-### Deploy with Skaffold (Recommended)
+### For SDK Users
 
 ```bash
-# Local development with auto-rebuild
-make dev
-
-# Or build and deploy once
-make run
-
-# With samples
-make run-samples
+pip install arl-env
 ```
 
-### Deploy to Kubernetes Cluster
+```python
+from arl import SandboxSession
+
+with SandboxSession(pool_ref="python-pool", namespace="default") as session:
+    result = session.execute([
+        {"name": "hello", "type": "Command", "command": ["echo", "Hello, World!"]}
+    ])
+    print(result["status"]["stdout"])
+```
+
+### For Developers
 
 ```bash
-# Build, push and deploy
-make k8s-run
+# Clone repository
+git clone https://github.com/Lincyaw/agent-env.git
+cd agent-env
 
-# With samples
-make k8s-run-samples
+# Setup and deploy
+make k8s-setup
+skaffold run --profile=k8s
 ```
 
-### Verify Deployment
+## Architecture
+
+```
+┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
+│   Python SDK    │────▶│  Kubernetes API │────▶│   ARL Operator  │
+└─────────────────┘     └─────────────────┘     └─────────────────┘
+                                                        │
+                        ┌───────────────────────────────┴───────────────────────────────┐
+                        ▼                               ▼                               ▼
+                ┌───────────────┐               ┌───────────────┐               ┌───────────────┐
+                │   WarmPool    │               │   Sandbox     │               │     Task      │
+                │  (Pod Pool)   │               │  (Workspace)  │               │  (Execution)  │
+                └───────────────┘               └───────────────┘               └───────────────┘
+```
+
+## Development
 
 ```bash
-kubectl get pods -n arl-system
-kubectl get warmpools,sandboxes,tasks
-```
+# Install tools
+make install-tools
 
-## Usage Examples
-
-### Create a WarmPool
-
-```yaml
-apiVersion: arl.infra.io/v1alpha1
-kind: WarmPool
-metadata:
-  name: python-3.9-std
-spec:
-  replicas: 3  # Maintain 3 idle pods
-  template:
-    spec:
-      containers:
-        - name: executor
-          image: python:3.9-slim
-          command: ["/bin/sh", "-c", "sleep infinity"]
-```
-
-### Create a Sandbox
-
-```yaml
-apiVersion: arl.infra.io/v1alpha1
-kind: Sandbox
-metadata:
-  name: my-agent-workspace
-spec:
-  poolRef: python-3.9-std
-  keepAlive: true
-```
-
-### Execute a Task
-
-```yaml
-apiVersion: arl.infra.io/v1alpha1
-kind: Task
-metadata:
-  name: my-task
-spec:
-  sandboxRef: my-agent-workspace
-  timeout: 30s
-  steps:
-    - name: write_code
-      type: FilePatch
-      content: |
-        print("Hello from ARL!")
-    - name: run_test
-      type: Command
-      command: ["python", "-c", "print('Success!')"]
-```
-
-## Python SDK
-
-Python SDK with auto-generated models and high-level wrappers. See [sdk/python/arl/](sdk/python/arl/) for installation and [examples/python/](examples/python/) for usage
-
-### Build Binaries
-
-```bash
-make build
-```
-
-### Code Generation
-
-Generate CRD manifests and Python SDK:
-
-```bash
-# Generate CRD manifests from Go types
-make manifests
-
-# Generate deepcopy code
+# Generate code
 make generate
 
-# Generate Python SDK from CRDs (requires Docker)
-make sdk-python
+# Run quality checks
+make check
+
+# View operator logs
+make logs
 ```
 
-The Python SDK is auto-generated from CRD OpenAPI schemas using:
-1. `controller-gen` - Generates CRD manifests with OpenAPI schemas
-2. Custom script - Creates unified OpenAPI specification
-3. `openapi-generator` - Generates Python client code
+See [Development Guide](https://lincyaw.github.io/agent-env/developer-guide/development/) for details.
 
-### Python Code Quality
+## License
 
-```bash
-# Run all quality checks (Ruff, MyPy, Pytest, Bandit)
-make python-quality
-
-# Auto-fix formatting and linting issues
-make python-fix
-
-# Install Python dependencies
-make python-install-sdk
-make python-install-examples
-```
-
-### Run Locally
-
-```bash
-# Terminal 1: Run operator
-go run cmd/operator/main.go
-
-# Terminal 2: Run sidecar (for testing)
-go run cmd/sidecar/main.go
-```
-
-### Code Formatting
-
-```bash
-make fmt
-make vet
-make tidy
-```
-
-## Clean Up
-
-```bash
-# Delete all resources
-make delete
-
-# Or for K8s cluster
-make k8s-delete
+This project is open source. See the [LICENSE](LICENSE) file for details
