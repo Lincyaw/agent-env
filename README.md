@@ -1,6 +1,6 @@
 # ARL-Infra
 
-[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Go Version](https://img.shields.io/badge/go-1.25+-00ADD8.svg)](https://golang.org/)
 [![Python Version](https://img.shields.io/badge/python-3.9+-3776AB.svg)](https://python.org/)
 
