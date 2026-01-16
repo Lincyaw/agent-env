@@ -5,7 +5,7 @@ requires-python = ">=3.10"
 [manifest]
 members = [
     "agent-env",
-    "arl",
+    "arl-env",
 ]
 
 [[package]]
@@ -13,7 +13,7 @@ name = "agent-env"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
-    { name = "arl" },
+    { name = "arl-env" },
     { name = "kubernetes" },
     { name = "mkdocs-material" },
     { name = "mkdocs-minify-plugin" },
@@ -35,7 +35,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "arl", editable = "sdk/python/arl" },
+    { name = "arl-env", editable = "sdk/python/arl" },
     { name = "kubernetes", specifier = ">=34.1.0" },
     { name = "mkdocs-material", specifier = ">=9.7.1" },
     { name = "mkdocs-minify-plugin", specifier = ">=0.8.0" },
@@ -65,7 +65,7 @@ wheels = [
 ]
 
 [[package]]
-name = "arl"
+name = "arl-env"
 version = "0.1.0"
 source = { editable = "sdk/python/arl" }
 dependencies = [

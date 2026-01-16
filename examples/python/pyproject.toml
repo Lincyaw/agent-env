@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Examples for ARL Python SDK"
 requires-python = ">=3.10"
 dependencies = [
-    "arl",
+    "arl-env",
 ]
 
 [build-system]
@@ -15,4 +15,4 @@ build-backend = "hatchling.build"
 package = false
 
 [tool.uv.sources]
-arl = { path = "../../sdk/python/arl", editable = true }
+arl-env = { path = "../../sdk/python/arl", editable = true }

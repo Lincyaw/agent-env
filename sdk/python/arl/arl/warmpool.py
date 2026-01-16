@@ -229,6 +229,9 @@ class WarmPoolManager:
             RuntimeError: If WarmPool doesn't become ready within timeout
         """
         start_time: float = time.time()
+        last_ready_count: int = -1
+
+        print(f"⏳ Waiting for WarmPool '{name}' to be ready...")
 
         while time.time() - start_time < self.timeout:
             try:
@@ -237,16 +240,28 @@ class WarmPoolManager:
                 ready_replicas: int = status.get("readyReplicas", 0)
                 desired_replicas: int = warmpool.get("spec", {}).get("replicas", 0)
 
+                # Show progress updates
+                if ready_replicas != last_ready_count:
+                    if ready_replicas > 0 or desired_replicas > 0:
+                        print(f"   {ready_replicas}/{desired_replicas} pods ready")
+                    last_ready_count = ready_replicas
+
                 if ready_replicas >= desired_replicas and desired_replicas > 0:
+                    print(f"✓ WarmPool '{name}' is ready with {ready_replicas} pods")
                     return
 
             except client.ApiException as e:
+                if e.status == 404:
+                    raise RuntimeError(
+                        f"WarmPool '{name}' not found in namespace '{self.namespace}'"
+                    ) from e
                 if e.status != 404:
-                    raise
+                    raise RuntimeError(f"Failed to get WarmPool status: {e.reason}") from e
 
             time.sleep(poll_interval)
 
         raise RuntimeError(
             f"WarmPool '{name}' not ready after {self.timeout}s. "
-            f"Check 'kubectl get warmpool {name} -n {self.namespace}' for status."
+            f"Ready pods: {last_ready_count}. "
+            f"Check 'kubectl describe warmpool {name} -n {self.namespace}' for status."
         )

@@ -186,7 +186,41 @@ class SandboxSession:
 
         Raises:
             RuntimeError: If sandbox creation fails or times out
+            ValueError: If WarmPool does not exist
         """
+        # First check if the WarmPool exists
+        try:
+            self.custom_api.get_namespaced_custom_object(
+                group="arl.infra.io",
+                version="v1alpha1",
+                namespace=self.namespace,
+                plural="warmpools",
+                name=self.pool_ref,
+            )
+        except client.ApiException as e:
+            if e.status == 404:
+                # List available pools to help user
+                try:
+                    pools = self.custom_api.list_namespaced_custom_object(
+                        group="arl.infra.io",
+                        version="v1alpha1",
+                        namespace=self.namespace,
+                        plural="warmpools",
+                    )
+                    available = [p["metadata"]["name"] for p in pools.get("items", [])]
+                    pool_list = ", ".join(available) if available else "(none)"
+                    raise ValueError(
+                        f"WarmPool '{self.pool_ref}' not found in namespace '{self.namespace}'.\n"
+                        f"Available pools: {pool_list}\n"
+                        f"Create a pool first using WarmPoolManager.create_warmpool()"
+                    ) from e
+                except client.ApiException:
+                    raise ValueError(
+                        f"WarmPool '{self.pool_ref}' not found in namespace '{self.namespace}'. "
+                        f"Create it first using WarmPoolManager.create_warmpool()"
+                    ) from e
+            raise RuntimeError(f"Failed to check WarmPool: {e}") from e
+
         sandbox_name = f"session-{int(time.time())}"
 
         sandbox_body = {
@@ -203,13 +237,16 @@ class SandboxSession:
         }
 
         # Create sandbox resource
-        sandbox = self.custom_api.create_namespaced_custom_object(
-            group="arl.infra.io",
-            version="v1alpha1",
-            namespace=self.namespace,
-            plural="sandboxes",
-            body=sandbox_body,
-        )
+        try:
+            sandbox = self.custom_api.create_namespaced_custom_object(
+                group="arl.infra.io",
+                version="v1alpha1",
+                namespace=self.namespace,
+                plural="sandboxes",
+                body=sandbox_body,
+            )
+        except client.ApiException as e:
+            raise RuntimeError(f"Failed to create sandbox: {e.reason}") from e
 
         self.sandbox_name = sandbox_name
 
@@ -231,6 +268,8 @@ class SandboxSession:
             raise RuntimeError("No sandbox created")
 
         start_time: float = time.time()
+        last_phase: str | None = None
+        shown_waiting_msg = False
 
         while time.time() - start_time < self.timeout:
             try:
@@ -249,7 +288,19 @@ class SandboxSession:
                 status = sandbox_resource.get("status", {})
                 phase = status.get("phase")
 
+                # Show progress updates when phase changes
+                if phase != last_phase:
+                    if phase == "Allocating":
+                        print(f"⏳ Allocating sandbox from pool '{self.pool_ref}'...")
+                    elif phase == "Pending":
+                        if not shown_waiting_msg:
+                            print(f"⏳ Waiting for pod from pool '{self.pool_ref}'...")
+                            print(f"   (This may take longer if pool has no available pods)")
+                            shown_waiting_msg = True
+                    last_phase = phase
+
                 if phase == "Ready":
+                    print(f"✓ Sandbox ready: {self.sandbox_name}")
                     return
                 elif phase == "Failed":
                     conditions = status.get("conditions", [])
@@ -258,15 +309,22 @@ class SandboxSession:
                         if conditions
                         else "Unknown error"
                     )
-                    raise RuntimeError(f"Sandbox failed to start: {msg}")
+                    raise RuntimeError(
+                        f"Sandbox failed to start: {msg}\n"
+                        f"Check: kubectl describe sandbox {self.sandbox_name} -n {self.namespace}"
+                    )
 
             except client.ApiException as e:
                 if e.status != 404:
-                    raise
+                    raise RuntimeError(f"Failed to get sandbox status: {e.reason}") from e
 
             time.sleep(poll_interval)
 
-        raise RuntimeError(f"Sandbox '{self.sandbox_name}' not ready after {self.timeout}s")
+        raise RuntimeError(
+            f"Sandbox '{self.sandbox_name}' not ready after {self.timeout}s. "
+            f"Current phase: {last_phase or 'unknown'}. "
+            f"Check: kubectl describe sandbox {self.sandbox_name} -n {self.namespace}"
+        )
 
     def execute(self, steps: list[TaskStep], trace_id: str | None = None) -> TaskResource:
         """Execute task steps in the sandbox.
@@ -347,6 +405,7 @@ class SandboxSession:
             RuntimeError: If task doesn't complete within timeout
         """
         start_time: float = time.time()
+        last_state: str | None = None
 
         while time.time() - start_time < self.timeout:
             try:
@@ -365,16 +424,31 @@ class SandboxSession:
                 status = task_resource.get("status", {})
                 state = status.get("state")
 
+                # Show progress updates when state changes
+                if state != last_state and state:
+                    if state == "Running":
+                        print(f"⚙️  Task executing: {task_name}")
+                    last_state = state
+
                 if state in ("Succeeded", "Failed"):
+                    if state == "Failed":
+                        stderr = status.get("stderr", "")
+                        if stderr:
+                            print(f"❌ Task failed: {task_name}")
+                            print(f"   Error: {stderr[:200]}")
                     return task_resource
 
             except client.ApiException as e:
                 if e.status != 404:
-                    raise
+                    raise RuntimeError(f"Failed to get task status: {e.reason}") from e
 
             time.sleep(poll_interval)
 
-        raise RuntimeError(f"Task '{task_name}' did not complete after {self.timeout}s")
+        raise RuntimeError(
+            f"Task '{task_name}' did not complete after {self.timeout}s. "
+            f"Current state: {last_state or 'unknown'}. "
+            f"Check: kubectl describe task {task_name} -n {self.namespace}"
+        )
 
     def delete_sandbox(self) -> None:
         """Delete the sandbox resource.

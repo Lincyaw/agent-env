@@ -36,9 +36,19 @@ pip install arl-env
 ```
 
 ```python
-from arl import SandboxSession
+from arl import SandboxSession, WarmPoolManager
 
-with SandboxSession(pool_ref="python-pool", namespace="default") as session:
+# Step 1: Create a WarmPool (one-time setup)
+warmpool_mgr = WarmPoolManager(namespace="default")
+warmpool_mgr.create_warmpool(
+    name="my-python-pool",
+    image="python:3.11-slim",
+    replicas=2
+)
+warmpool_mgr.wait_for_warmpool_ready("my-python-pool")
+
+# Step 2: Use the pool to execute tasks
+with SandboxSession(pool_ref="my-python-pool", namespace="default") as session:
     result = session.execute([
         {"name": "hello", "type": "Command", "command": ["echo", "Hello, World!"]}
     ])
