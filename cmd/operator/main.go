@@ -114,6 +114,15 @@ func main() {
 
 	sidecarClient := client.NewGRPCSidecarClient(cfg.SidecarGRPCPort, cfg.HTTPClientTimeout)
 
+	// Initialize PodExecClient for executing commands in executor containers
+	podExecClient, err := client.NewPodExecClient(ctrl.GetConfigOrDie())
+	if err != nil {
+		setupLog.Error(err, "failed to create PodExecClient, executor container execution will be disabled")
+		podExecClient = nil
+	} else {
+		setupLog.Info("PodExecClient initialized for executor container execution")
+	}
+
 	// Setup middleware chains for each controller
 	warmPoolMiddleware := middleware.NewChain()
 	sandboxMiddleware := middleware.NewChain()
@@ -164,6 +173,7 @@ func main() {
 			Scheme:        mgr.GetScheme(),
 			Config:        cfg,
 			SidecarClient: sidecarClient,
+			PodExecClient: podExecClient,
 			Metrics:       metricsCollector,
 			AuditWriter:   auditWriter,
 			Middleware:    taskMiddleware,

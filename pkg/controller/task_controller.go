@@ -36,6 +36,7 @@ type TaskReconciler struct {
 	Scheme        *runtime.Scheme
 	Config        *config.Config
 	SidecarClient interfaces.SidecarClient
+	PodExecClient interfaces.PodExecClient
 	Metrics       interfaces.MetricsCollector
 	AuditWriter   interfaces.AuditWriter
 	Middleware    *middleware.Chain
@@ -248,7 +249,19 @@ func (r *TaskReconciler) reconcile(ctx context.Context, req ctrl.Request) (ctrl.
 				WorkingDir:     workDir,
 				TimeoutSeconds: timeout,
 			}
-			resp, err := r.SidecarClient.Execute(ctx, sandbox.Status.PodIP, execReq)
+
+			var resp interfaces.ExecResponse
+			var err error
+
+			// Check if we should execute in executor container
+			if step.Container == "executor" && r.PodExecClient != nil {
+				// Execute in executor container via kubectl exec
+				resp, err = r.PodExecClient.Execute(ctx, sandbox.Namespace, sandbox.Status.PodName, "executor", execReq)
+			} else {
+				// Execute in sidecar container (default)
+				resp, err = r.SidecarClient.Execute(ctx, sandbox.Status.PodIP, execReq)
+			}
+
 			if err != nil {
 				stderr.WriteString("Failed to execute command: " + err.Error() + "\n")
 				exitCode = 1

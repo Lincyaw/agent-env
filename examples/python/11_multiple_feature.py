@@ -112,7 +112,11 @@ echo "Counter incremented: $CURRENT -> $NEW"
                 {
                     "name": "verify_files",
                     "type": "Command",
-                    "command": ["sh", "-c", "ls -lh /workspace && echo '---' && cat /workspace/counter.txt"],
+                    "command": [
+                        "sh",
+                        "-c",
+                        "ls -lh /workspace && echo '---' && cat /workspace/counter.txt",
+                    ],
                 },
             ]
         )

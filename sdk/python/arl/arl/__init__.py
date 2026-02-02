@@ -1,5 +1,6 @@
 """ARL - High-level API for Agent Runtime Layer."""
 
+from arl.interactive_shell_client import InteractiveShellClient, create_websocket_proxy
 from arl.session import SandboxSession
 from arl.types import (
     SandboxResource,
@@ -12,6 +13,7 @@ from arl.warmpool import WarmPoolManager
 
 __version__ = "0.1.0"
 __all__ = [
+    "InteractiveShellClient",
     "SandboxResource",
     "SandboxSession",
     "TaskResource",
@@ -19,4 +21,5 @@ __all__ = [
     "TaskStep",
     "TaskStepResult",
     "WarmPoolManager",
+    "create_websocket_proxy",
 ]

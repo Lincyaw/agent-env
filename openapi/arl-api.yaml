@@ -352,6 +352,8 @@ components:
           - python
           - script.py
           - --verbose
+        container:
+          type: string
         content:
           type: string
           description: File content to write (required for FilePatch steps, ignored

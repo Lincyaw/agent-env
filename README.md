@@ -11,6 +11,7 @@
 - ⚡ **Ultra-low latency**: Bypasses pod startup time using warm pools
 - 🔒 **Isolation**: Each sandbox runs in an isolated environment
 - 🔄 **Hot code reload**: Update and execute code without pod restarts
+- 🎯 **Flexible execution**: Run commands in sidecar (fast) or executor container (full environment)
 - ☸️ **Kubernetes-native**: CRD-based API, standard K8s tooling
 - 🐍 **Python SDK**: High-level API for seamless integration
 
@@ -50,10 +51,20 @@ warmpool_mgr.wait_for_warmpool_ready("my-python-pool")
 # Step 2: Use the pool to execute tasks
 with SandboxSession(pool_ref="my-python-pool", namespace="default") as session:
     result = session.execute([
-        {"name": "hello", "type": "Command", "command": ["echo", "Hello, World!"]}
+        # Fast execution in sidecar (default)
+        {"name": "hello", "type": "Command", "command": ["echo", "Hello, World!"]},
+
+        # Execute in executor container (has executor tools)
+        {"name": "install", "type": "Command",
+         "command": ["pip", "install", "requests"],
+         "container": "executor"},
     ])
     print(result["status"]["stdout"])
 ```
+
+**Execution Modes:**
+- **Sidecar (default)**: Ultra-fast (1-5ms), for general operations
+- **Executor**: Slower (10-50ms), but has access to executor-specific tools (pip, npm, cargo, etc.)
 
 ### For Developers
 

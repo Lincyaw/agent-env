@@ -45,7 +45,9 @@ def log_callback(result: TaskResource) -> None:
     """Simple logging callback."""
     status = result.get("status", {})
     print(f"\n[Log Callback] Task: {result.get('metadata', {}).get('name')}")
-    print(f"[Log Callback] State: {status.get('state')}, Exit Code: {status.get('exitCode', 'N/A')}")
+    print(
+        f"[Log Callback] State: {status.get('state')}, Exit Code: {status.get('exitCode', 'N/A')}"
+    )
 
 
 def success_callback(result: TaskResource) -> None:

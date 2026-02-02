@@ -2,11 +2,14 @@
 
 import time
 from collections.abc import Callable
-from typing import cast
+from typing import TYPE_CHECKING, cast
 
 from kubernetes import client, config
 
 from arl.types import SandboxResource, TaskResource, TaskStep
+
+if TYPE_CHECKING:
+    from arl.interactive_shell_client import InteractiveShellClient
 
 # Type alias for callback functions
 TaskCallback = Callable[[TaskResource], None]
@@ -178,6 +181,68 @@ class SandboxSession:
             self._custom_api = client.CustomObjectsApi()
         return self._custom_api
 
+    def get_pool_status(self) -> dict[str, int]:
+        """Get the current status of the WarmPool.
+
+        Returns:
+            Dictionary with pool status:
+            - total: Total number of pods in the pool
+            - ready_idle: Number of ready idle pods available for allocation
+            - allocated: Number of pods currently allocated to sandboxes
+            - available: Number of sandboxes that can be created immediately
+
+        Example:
+            >>> session = SandboxSession(pool_ref="my-pool", namespace="default")
+            >>> status = session.get_pool_status()
+            >>> print(f"Available sandboxes: {status['available']}")
+            >>> print(f"Total capacity: {status['total']}")
+        """
+        try:
+            # Get WarmPool resource
+            pool_obj: object = self.custom_api.get_namespaced_custom_object(
+                group="arl.infra.io",
+                version="v1alpha1",
+                namespace=self.namespace,
+                plural="warmpools",
+                name=self.pool_ref,
+            )
+
+            if not isinstance(pool_obj, dict):
+                raise RuntimeError("Invalid pool object returned")
+
+            spec = pool_obj.get("spec", {})
+            status = pool_obj.get("status", {})
+
+            if not isinstance(spec, dict):
+                spec = {}
+            if not isinstance(status, dict):
+                status = {}
+
+            total = spec.get("replicas", 0)
+            ready_idle = status.get("readyReplicas", 0)
+            allocated = status.get("allocatedReplicas", 0)
+
+            if not isinstance(total, int):
+                total = 0
+            if not isinstance(ready_idle, int):
+                ready_idle = 0
+            if not isinstance(allocated, int):
+                allocated = 0
+
+            return {
+                "total": total,
+                "ready_idle": ready_idle,
+                "allocated": allocated,
+                "available": ready_idle,  # Available = ready idle pods
+            }
+
+        except client.ApiException as e:
+            if e.status == 404:
+                raise ValueError(
+                    f"WarmPool '{self.pool_ref}' not found in namespace '{self.namespace}'"
+                ) from e
+            raise RuntimeError(f"Failed to get pool status: {e.reason}") from e
+
     def create_sandbox(self) -> SandboxResource:
         """Create a new sandbox from the warm pool.
 
@@ -295,7 +360,7 @@ class SandboxSession:
                     elif phase == "Pending":
                         if not shown_waiting_msg:
                             print(f"⏳ Waiting for pod from pool '{self.pool_ref}'...")
-                            print(f"   (This may take longer if pool has no available pods)")
+                            print("   (This may take longer if pool has no available pods)")
                             shown_waiting_msg = True
                     last_phase = phase
 
@@ -449,6 +514,58 @@ class SandboxSession:
             f"Current state: {last_state or 'unknown'}. "
             f"Check: kubectl describe task {task_name} -n {self.namespace}"
         )
+
+    def create_interactive_shell(self, container: str = "executor") -> "InteractiveShellClient":
+        """Create an interactive shell client for this sandbox.
+
+        Args:
+            container: Container name (default: "executor")
+
+        Returns:
+            InteractiveShellClient instance ready to use
+
+        Raises:
+            RuntimeError: If no sandbox is created or sandbox not ready
+
+        Example:
+            >>> session.create_sandbox()
+            >>> shell = session.create_interactive_shell()
+            >>> # Use shell for interactive commands
+        """
+        from arl.interactive_shell_client import InteractiveShellClient
+
+        if self.sandbox_name is None:
+            raise RuntimeError("No sandbox created. Call create_sandbox() first.")
+
+        # Get pod info
+        try:
+            sandbox_obj = self.custom_api.get_namespaced_custom_object(
+                group="arl.infra.io",
+                version="v1alpha1",
+                namespace=self.namespace,
+                plural="sandboxes",
+                name=self.sandbox_name,
+            )
+
+            if not isinstance(sandbox_obj, dict):
+                raise RuntimeError("Invalid sandbox object returned")
+
+            sandbox_resource = cast(SandboxResource, sandbox_obj)
+            status = sandbox_resource.get("status", {})
+            pod_name = status.get("podName")
+
+            if not pod_name:
+                raise RuntimeError(
+                    f"Sandbox '{self.sandbox_name}' is not ready yet. Pod has not been allocated."
+                )
+
+            # Create and return shell client
+            shell = InteractiveShellClient()
+            shell.connect_sync(self.namespace, pod_name, container)
+            return shell
+
+        except client.ApiException as e:
+            raise RuntimeError(f"Failed to create interactive shell: {e.reason}") from e
 
     def delete_sandbox(self) -> None:
         """Delete the sandbox resource.

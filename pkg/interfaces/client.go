@@ -2,6 +2,7 @@ package interfaces
 
 import (
 	"context"
+	"io"
 )
 
 // SidecarClient defines the interface for communicating with sidecar containers
@@ -25,6 +26,21 @@ type SidecarClient interface {
 	Close() error
 }
 
+// PodExecClient defines the interface for executing commands in pod containers via kubectl exec
+type PodExecClient interface {
+	// Execute runs a command in the specified container of a pod
+	Execute(ctx context.Context, namespace, podName, container string, req ExecRequest) (ExecResponse, error)
+
+	// InteractiveShell starts an interactive shell session in the specified container
+	// stdin: input stream to send to the shell
+	// stdout: output stream to receive from the shell
+	// stderr: error stream to receive from the shell
+	// resize: optional channel to send terminal size changes
+	InteractiveShell(ctx context.Context, namespace, podName, container string,
+		stdin io.Reader, stdout, stderr io.Writer,
+		resize <-chan TerminalSize) error
+}
+
 // FileUpdateRequest represents a file update request
 type FileUpdateRequest interface {
 	GetBasePath() string
@@ -44,6 +60,12 @@ type ExecRequest interface {
 	GetEnv() map[string]string
 	GetWorkingDir() string
 	GetTimeout() int32
+}
+
+// TerminalSize represents the dimensions of a terminal
+type TerminalSize struct {
+	Width  uint16
+	Height uint16
 }
 
 // ExecResponse represents the response from command execution

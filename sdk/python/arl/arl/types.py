@@ -15,6 +15,7 @@ class TaskStep(TypedDict, total=False):
         path: File path (for FilePatch type)
         content: File content (for FilePatch type)
         traceID: Optional trace ID for distributed tracing
+        container: Container to execute in ("sidecar" or "executor", default: "sidecar")
     """
 
     name: str
@@ -28,6 +29,8 @@ class TaskStep(TypedDict, total=False):
     content: str
     # For distributed tracing
     traceID: str
+    # Container selection
+    container: str  # "sidecar" or "executor"
 
 
 class KubernetesMetadata(TypedDict, total=False):

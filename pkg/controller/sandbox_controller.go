@@ -317,23 +317,20 @@ func (r *SandboxReconciler) handleDeletion(ctx context.Context, sandbox *arlv1al
 
 	logger.Info("Handling sandbox deletion", "sandbox", sandbox.Name)
 
-	// Return pod to WarmPool (mark as idle, remove sandbox label)
+	// Delete the pod to ensure complete cleanup (files, processes, state)
+	// WarmPool controller will automatically create a new pod to maintain pool size
 	if sandbox.Status.PodName != "" {
 		pod := &corev1.Pod{}
 		if err := r.Get(ctx, client.ObjectKey{
 			Namespace: sandbox.Namespace,
 			Name:      sandbox.Status.PodName,
 		}, pod); err == nil {
-			// Update pod labels to return to pool
-			if pod.Labels != nil {
-				pod.Labels[StatusLabelKey] = StatusIdle
-				delete(pod.Labels, SandboxLabelKey)
-				if err := r.Update(ctx, pod); err != nil {
-					logger.Error(err, "Failed to return pod to pool", "pod", pod.Name)
-				} else {
-					logger.Info("Returned pod to pool", "pod", pod.Name)
-				}
+			// Delete the pod - this ensures complete cleanup
+			if err := r.Delete(ctx, pod); err != nil {
+				logger.Error(err, "Failed to delete pod", "pod", pod.Name)
+				return ctrl.Result{}, fmt.Errorf("failed to delete pod: %w", err)
 			}
+			logger.Info("Deleted pod for complete cleanup", "pod", pod.Name)
 		} else if !errors.IsNotFound(err) {
 			return ctrl.Result{}, fmt.Errorf("failed to get pod: %w", err)
 		}

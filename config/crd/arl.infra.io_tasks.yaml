@@ -47,6 +47,8 @@ spec:
                       items:
                         type: string
                       type: array
+                    container:
+                      type: string
                     content:
                       type: string
                     env:

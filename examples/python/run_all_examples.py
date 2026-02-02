@@ -44,6 +44,8 @@ def main():
         ("06_long_running_task", "06. Long-Running Task"),
         ("07_sandbox_reuse", "07. Sandbox Reuse"),
         ("08_callback_hooks", "08. Callback Hooks"),
+        ("09_executor_container", "09. Executor Container Execution"),
+        # Note: 10_interactive_shell requires manual interaction, skip in automated tests
     ]
 
     results = []

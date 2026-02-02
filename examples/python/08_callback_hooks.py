@@ -73,7 +73,7 @@ def main() -> None:
     session = SandboxSession(
         pool_ref="python-39-std",
         namespace="default",
-        keep_alive=True  # Keep sandbox alive for multiple tasks
+        keep_alive=True,  # Keep sandbox alive for multiple tasks
     )
     session.register_callback("on_task_complete", on_complete)
     session.register_callback("on_task_success", on_success)

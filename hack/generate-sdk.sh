@@ -81,6 +81,31 @@ find "${SDK_DIR}" -type f -name "*.py" -exec sed -i \
     -e 's/^import arl_client\.\([^ ]*\)$/from . import \1/g' \
     {} +
 
+# Fix api/__init__.py to use correct relative import
+echo "==> Fixing api/__init__.py imports"
+sed -i 's/from \.api\.default_api import DefaultApi/from .default_api import DefaultApi/g' "${SDK_DIR}/api/__init__.py"
+
+# Fix main __init__.py to import from api subpackage
+echo "==> Fixing main __init__.py imports"
+sed -i 's/from \.default_api import DefaultApi/from .api.default_api import DefaultApi/g' "${SDK_DIR}/__init__.py"
+
+# Fix api/default_api.py to import from parent package
+echo "==> Fixing api/default_api.py imports"
+sed -i \
+    -e 's/^from \.api_client import /from ..api_client import /g' \
+    -e 's/^from \.api_response import /from ..api_response import /g' \
+    -e 's/^from \.models\./from ..models./g' \
+    -e 's/^from \.rest import /from ..rest import /g' \
+    "${SDK_DIR}/api/default_api.py"
+
+# Fix models/__init__.py to remove duplicate .models prefix
+echo "==> Fixing models/__init__.py imports"
+sed -i 's/from \.models\./from ./g' "${SDK_DIR}/models/__init__.py"
+
+# Fix all model files to remove duplicate .models prefix
+echo "==> Fixing all model files imports"
+find "${SDK_DIR}/models" -type f -name "*.py" ! -name "__init__.py" -exec sed -i 's/from \.models\./from ./g' {} +
+
 echo "==> Python SDK generation complete"
 echo "    Output: ${SDK_DIR}"
 echo "    Auto-generated client code integrated into arl package"

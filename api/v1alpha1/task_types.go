@@ -44,6 +44,11 @@ type TaskStep struct {
 
 	// Env is the environment variables for the command
 	Env map[string]string `json:"env,omitempty"`
+
+	// Container specifies which container to execute the command in
+	// If empty, defaults to "sidecar". Use "executor" to run in the executor container.
+	// +optional
+	Container string `json:"container,omitempty"`
 }
 
 // TaskSpec defines the desired state of Task

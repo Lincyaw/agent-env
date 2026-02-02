@@ -113,8 +113,8 @@ func (r *WarmPoolReconciler) reconcile(ctx context.Context, req ctrl.Request) (c
 		}
 	}
 
-	// Calculate how many pods to create - only create if total idle < desired
-	needed := pool.Spec.Replicas - totalIdle
+	// Calculate how many pods to create - only create if total pods < desired
+	needed := pool.Spec.Replicas - totalPods
 
 	logger.Info("Pool status",
 		"pool", pool.Name,
