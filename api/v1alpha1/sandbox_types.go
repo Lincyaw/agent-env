@@ -32,6 +32,11 @@ type SandboxSpec struct {
 	// +kubebuilder:validation:Minimum=0
 	// +optional
 	IdleTimeoutSeconds *int32 `json:"idleTimeoutSeconds,omitempty"`
+
+	// MaxLifetimeSeconds is the maximum time in seconds a sandbox can exist before cleanup
+	// +kubebuilder:validation:Minimum=0
+	// +optional
+	MaxLifetimeSeconds *int32 `json:"maxLifetimeSeconds,omitempty"`
 }
 
 // SandboxStatus defines the observed state of Sandbox

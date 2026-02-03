@@ -44,6 +44,7 @@ type Config struct {
 	// Cleanup configuration
 	TaskRetentionDays         int
 	SandboxIdleTimeoutSeconds int32
+	SandboxMaxLifetimeSeconds int32
 	EnableAutoCleanup         bool
 	TTLCheckInterval          time.Duration
 }
@@ -74,7 +75,8 @@ func DefaultConfig() *Config {
 		ClickHouseBatchSize:       100,
 		ClickHouseFlushInterval:   10 * time.Second,
 		TaskRetentionDays:         30,
-		SandboxIdleTimeoutSeconds: 3600,
+		SandboxIdleTimeoutSeconds: 600,
+		SandboxMaxLifetimeSeconds: 3600,
 		EnableAutoCleanup:         true,
 		TTLCheckInterval:          30 * time.Second,
 	}
@@ -186,6 +188,12 @@ func LoadFromEnv() *Config {
 		}
 	}
 
+	if lifetime := os.Getenv("SANDBOX_MAX_LIFETIME_SECONDS"); lifetime != "" {
+		if l, err := strconv.ParseInt(lifetime, 10, 32); err == nil {
+			cfg.SandboxMaxLifetimeSeconds = int32(l)
+		}
+	}
+
 	if enable := os.Getenv("ENABLE_AUTO_CLEANUP"); enable == "false" {
 		cfg.EnableAutoCleanup = false
 	}
@@ -254,6 +262,10 @@ func (c *Config) Validate() error {
 
 	if c.SandboxIdleTimeoutSeconds < 0 {
 		return fmt.Errorf("sandbox idle timeout cannot be negative: %d", c.SandboxIdleTimeoutSeconds)
+	}
+
+	if c.SandboxMaxLifetimeSeconds < 0 {
+		return fmt.Errorf("sandbox max lifetime cannot be negative: %d", c.SandboxMaxLifetimeSeconds)
 	}
 
 	if c.EnableAutoCleanup && c.TTLCheckInterval <= 0 {

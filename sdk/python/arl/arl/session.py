@@ -57,6 +57,7 @@ class SandboxSession:
         namespace: str = "default",
         keep_alive: bool = False,
         timeout: int = 300,
+        idle_timeout_seconds: int | None = None,
     ) -> None:
         """Initialize sandbox session.
 
@@ -65,11 +66,15 @@ class SandboxSession:
             namespace: Kubernetes namespace (default: "default")
             keep_alive: If True, sandbox persists after context exit
             timeout: Maximum seconds to wait for operations (default: 300)
+            idle_timeout_seconds: Idle timeout in seconds before sandbox is cleaned up.
+                If None and keep_alive=True, defaults to 1800 (30 minutes).
+                If None and keep_alive=False, no idle timeout is set.
         """
         self.pool_ref = pool_ref
         self.namespace = namespace
         self.keep_alive = keep_alive
         self.timeout = timeout
+        self.idle_timeout_seconds = idle_timeout_seconds
 
         self.sandbox_name: str | None = None
         self._custom_api: client.CustomObjectsApi | None = None
@@ -288,6 +293,11 @@ class SandboxSession:
 
         sandbox_name = f"session-{int(time.time())}"
 
+        # Set default idle timeout for keep_alive sandboxes (30 minutes)
+        idle_timeout = self.idle_timeout_seconds
+        if self.keep_alive and idle_timeout is None:
+            idle_timeout = 1800
+
         sandbox_body = {
             "apiVersion": "arl.infra.io/v1alpha1",
             "kind": "Sandbox",
@@ -298,6 +308,7 @@ class SandboxSession:
             "spec": {
                 "poolRef": self.pool_ref,
                 "keepAlive": self.keep_alive,
+                "idleTimeoutSeconds": idle_timeout,
             },
         }
 
@@ -591,6 +602,16 @@ class SandboxSession:
 
     def __enter__(self) -> "SandboxSession":
         """Enter context manager - create sandbox."""
+        if self.keep_alive:
+            import warnings
+
+            warnings.warn(
+                "Using context manager with keep_alive=True. "
+                "Sandbox will NOT be automatically deleted on exit. "
+                "Call delete_sandbox() manually or use keep_alive=False.",
+                UserWarning,
+                stacklevel=2,
+            )
         self.create_sandbox()
         return self
 

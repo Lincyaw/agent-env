@@ -47,9 +47,9 @@ def main():
 
             # Execute a simple task
             print("\n4. Executing task...")
-            result = session.execute([
-                {"name": "hello", "type": "Command", "command": ["echo", "Hello from sandbox!"]}
-            ])
+            result = session.execute(
+                [{"name": "hello", "type": "Command", "command": ["echo", "Hello from sandbox!"]}]
+            )
             print(f"✓ Task completed: {result['status']['state']}")
 
             # Cleanup
@@ -58,9 +58,9 @@ def main():
             print("✓ Sandbox deleted")
 
         else:
-            print(f"\n⚠ No sandboxes available (pool is at full capacity)")
+            print("\n⚠ No sandboxes available (pool is at full capacity)")
             print(f"  All {status['total']} pods are currently allocated")
-            print(f"  Please wait for a sandbox to be released or increase pool size")
+            print("  Please wait for a sandbox to be released or increase pool size")
 
     except ValueError as e:
         print(f"\n❌ Error: {e}")

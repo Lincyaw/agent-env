@@ -233,6 +233,12 @@ func (r *SandboxReconciler) reconcile(ctx context.Context, req ctrl.Request) (ct
 			}
 			sandbox.Status.PodIP = pod.Status.PodIP
 
+			// Initialize LastTaskTime if not set
+			if sandbox.Status.LastTaskTime == nil {
+				now := metav1.Now()
+				sandbox.Status.LastTaskTime = &now
+			}
+
 			if err := r.Status().Update(ctx, sandbox); err != nil {
 				return ctrl.Result{}, err
 			}
@@ -272,6 +278,31 @@ func (r *SandboxReconciler) handleReadySandbox(ctx context.Context, sandbox *arl
 				"sandbox", sandbox.Name)
 			if err := r.Delete(ctx, sandbox); err != nil {
 				return ctrl.Result{}, fmt.Errorf("failed to delete sandbox: %w", err)
+			}
+			return ctrl.Result{}, nil
+		}
+	}
+
+	// Use creation time as fallback if LastTaskTime is not set
+	if sandbox.Status.LastTaskTime == nil {
+		sandbox.Status.LastTaskTime = &sandbox.CreationTimestamp
+		if err := r.Status().Update(ctx, sandbox); err != nil {
+			return ctrl.Result{}, fmt.Errorf("failed to update sandbox LastTaskTime: %w", err)
+		}
+	}
+
+	// Check for max lifetime (checked before idle timeout)
+	maxLifetime := r.getMaxLifetime(sandbox)
+	if maxLifetime > 0 {
+		sandboxAge := time.Since(sandbox.CreationTimestamp.Time)
+		if sandboxAge >= maxLifetime {
+			logger.Info("Sandbox max lifetime exceeded, deleting",
+				"sandbox", sandbox.Name,
+				"age", sandboxAge,
+				"maxLifetime", maxLifetime)
+
+			if err := r.Delete(ctx, sandbox); err != nil {
+				return ctrl.Result{}, fmt.Errorf("failed to delete sandbox after max lifetime: %w", err)
 			}
 			return ctrl.Result{}, nil
 		}
@@ -379,6 +410,19 @@ func (r *SandboxReconciler) getIdleTimeout(sandbox *arlv1alpha1.Sandbox) time.Du
 	// Fall back to config default
 	if r.Config.SandboxIdleTimeoutSeconds > 0 {
 		return time.Duration(r.Config.SandboxIdleTimeoutSeconds) * time.Second
+	}
+	return 0
+}
+
+// getMaxLifetime returns the max lifetime for the sandbox
+func (r *SandboxReconciler) getMaxLifetime(sandbox *arlv1alpha1.Sandbox) time.Duration {
+	// Use sandbox-specific max lifetime if set
+	if sandbox.Spec.MaxLifetimeSeconds != nil {
+		return time.Duration(*sandbox.Spec.MaxLifetimeSeconds) * time.Second
+	}
+	// Fall back to config default
+	if r.Config.SandboxMaxLifetimeSeconds > 0 {
+		return time.Duration(r.Config.SandboxMaxLifetimeSeconds) * time.Second
 	}
 	return 0
 }

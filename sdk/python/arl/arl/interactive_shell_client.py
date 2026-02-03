@@ -33,8 +33,15 @@ class InteractiveShellClient:
         self.namespace = None
         self.pod_name = None
         self.container = None
+        self._read_task: asyncio.Task[None] | None = None
 
-    def connect_sync(self, namespace: str, pod_name: str, container: str = "executor", command: list[str] | None = None) -> None:
+    def connect_sync(
+        self,
+        namespace: str,
+        pod_name: str,
+        container: str = "executor",
+        command: list[str] | None = None,
+    ) -> None:
         """Connect to a pod's interactive shell (synchronous).
 
         Args:
@@ -64,7 +71,13 @@ class InteractiveShellClient:
             _preload_content=False,
         )
 
-    async def connect(self, namespace: str, pod_name: str, container: str = "executor", command: list[str] | None = None) -> None:
+    async def connect(
+        self,
+        namespace: str,
+        pod_name: str,
+        container: str = "executor",
+        command: list[str] | None = None,
+    ) -> None:
         """Connect to a pod's interactive shell (async wrapper).
 
         Args:
@@ -214,7 +227,8 @@ async def create_websocket_proxy(
                 on_close()
 
         # Start the read loop in background
-        asyncio.create_task(read_loop())
+        task = asyncio.create_task(read_loop())
+        client._read_task = task  # Store reference to prevent garbage collection
 
         return client
 

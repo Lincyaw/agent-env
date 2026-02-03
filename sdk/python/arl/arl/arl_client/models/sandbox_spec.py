@@ -32,9 +32,18 @@ class SandboxSpec(BaseModel):
         default=None, alias="idleTimeoutSeconds"
     )
     keep_alive: StrictBool | None = Field(default=None, alias="keepAlive")
+    max_lifetime_seconds: Annotated[int, Field(strict=True, ge=0)] | None = Field(
+        default=None, alias="maxLifetimeSeconds"
+    )
     pool_ref: StrictStr = Field(alias="poolRef")
     resources: SandboxSpecResources | None = None
-    __properties: ClassVar[list[str]] = ["idleTimeoutSeconds", "keepAlive", "poolRef", "resources"]
+    __properties: ClassVar[list[str]] = [
+        "idleTimeoutSeconds",
+        "keepAlive",
+        "maxLifetimeSeconds",
+        "poolRef",
+        "resources",
+    ]
 
     model_config = ConfigDict(
         populate_by_name=True,
@@ -91,6 +100,7 @@ class SandboxSpec(BaseModel):
             {
                 "idleTimeoutSeconds": obj.get("idleTimeoutSeconds"),
                 "keepAlive": obj.get("keepAlive"),
+                "maxLifetimeSeconds": obj.get("maxLifetimeSeconds"),
                 "poolRef": obj.get("poolRef"),
                 "resources": SandboxSpecResources.from_dict(obj["resources"])
                 if obj.get("resources") is not None

@@ -75,10 +75,10 @@ def main() -> None:
         namespace="default",
         keep_alive=True,  # Keep sandbox alive for multiple tasks
     )
-    session.register_callback("on_task_complete", on_complete)
-    session.register_callback("on_task_success", on_success)
-    session.register_callback("on_task_failure", on_failure)
-    session.register_callback("on_task_complete", log_execution_time)
+    session.register_callback("on_task_complete", on_complete)  # type: ignore[arg-type]
+    session.register_callback("on_task_success", on_success)  # type: ignore[arg-type]
+    session.register_callback("on_task_failure", on_failure)  # type: ignore[arg-type]
+    session.register_callback("on_task_complete", log_execution_time)  # type: ignore[arg-type]
     print("   ✓ Registered 4 callbacks")
 
     try:
