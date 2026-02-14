@@ -1207,24 +1207,25 @@
         User --&gt; SDK
     end
 
-    subgraph "Kubernetes Control Plane"
+    subgraph "Control Plane"
+        Gateway[Gateway API]
         API[Kubernetes API]
         Operator[ARL Operator]
-        SDK --&gt; API
+        SDK --&gt; Gateway
+        Gateway --&gt; API
         API --&gt; Operator
     end
 
     subgraph "Data Plane"
         WP[WarmPool]
         SB[Sandbox]
-        Task[Task]
         Pods[Pod Pool]
 
         Operator --&gt; WP
         Operator --&gt; SB
-        Operator --&gt; Task
         WP --&gt; Pods
         SB --&gt; Pods
+        Gateway --&gt; |gRPC| Pods
     end</code></pre>
 <h2 id="getting-started">Getting Started<a class="headerlink" href="#getting-started" title="Permanent link">&para;</a></h2>
 <p>Choose your path:</p>

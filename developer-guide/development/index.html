@@ -910,17 +910,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#proto-grpc" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Proto / gRPC
-      
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -1458,17 +1447,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#proto-grpc" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Proto / gRPC
-      
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -1666,22 +1644,28 @@
 <a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>│   └── v1alpha1/
 <a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>├── cmd/
 <a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>│   ├── operator/          # Operator entrypoint
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>│   └── sidecar/           # Sidecar entrypoint
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>├── config/
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>│   ├── crd/               # Generated CRD manifests
-<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>│   └── samples/           # Sample resources
-<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>├── pkg/
-<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>│   ├── controllers/       # Reconciliation logic
-<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>│   ├── pb/                # Generated protobuf code
-<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>│   └── webhooks/          # Validation webhooks
-<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>├── proto/                 # Protocol buffer definitions
-<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>├── sdk/python/            # Python SDK
-<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>│   └── arl/
-<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a>├── charts/                # Helm charts
-<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a>│   └── arl-operator/
-<a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a>├── examples/              # Example code
-<a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a>│   └── python/
-<a id="__codelineno-0-21" name="__codelineno-0-21" href="#__codelineno-0-21"></a>└── docs/                  # Documentation
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>│   ├── sidecar/           # Sidecar entrypoint
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>│   ├── gateway/           # Gateway entrypoint
+<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>│   └── executor-agent/    # Executor agent entrypoint
+<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>├── config/
+<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>│   ├── crd/               # Generated CRD manifests
+<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>│   └── samples/           # Sample resources
+<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>├── pkg/
+<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>│   ├── controller/        # Reconciliation logic
+<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>│   ├── gateway/           # Gateway REST API
+<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>│   ├── execagent/         # Executor agent logic
+<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>│   ├── scheduler/         # Image-locality pod scheduling
+<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a>│   ├── sidecar/           # Sidecar gRPC server
+<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a>│   ├── pb/                # Generated protobuf code
+<a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a>│   └── webhook/           # Validation webhooks
+<a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a>├── proto/                 # Protocol buffer definitions
+<a id="__codelineno-0-21" name="__codelineno-0-21" href="#__codelineno-0-21"></a>├── sdk/python/            # Python SDK
+<a id="__codelineno-0-22" name="__codelineno-0-22" href="#__codelineno-0-22"></a>│   └── arl/
+<a id="__codelineno-0-23" name="__codelineno-0-23" href="#__codelineno-0-23"></a>├── charts/                # Helm charts
+<a id="__codelineno-0-24" name="__codelineno-0-24" href="#__codelineno-0-24"></a>│   └── arl-operator/
+<a id="__codelineno-0-25" name="__codelineno-0-25" href="#__codelineno-0-25"></a>├── examples/              # Example code
+<a id="__codelineno-0-26" name="__codelineno-0-26" href="#__codelineno-0-26"></a>│   └── python/
+<a id="__codelineno-0-27" name="__codelineno-0-27" href="#__codelineno-0-27"></a>└── docs/                  # Documentation
 </code></pre></div>
 <h2 id="development-workflow">Development Workflow<a class="headerlink" href="#development-workflow" title="Permanent link">&para;</a></h2>
 <h3 id="1-start-development-environment">1. Start Development Environment<a class="headerlink" href="#1-start-development-environment" title="Permanent link">&para;</a></h3>
@@ -1708,11 +1692,19 @@
 </tr>
 <tr>
 <td>Controller logic</td>
-<td><code>pkg/controllers/</code></td>
+<td><code>pkg/controller/</code></td>
+</tr>
+<tr>
+<td>Gateway logic</td>
+<td><code>pkg/gateway/</code></td>
 </tr>
 <tr>
 <td>Sidecar code</td>
 <td><code>cmd/sidecar/</code>, <code>pkg/sidecar/</code></td>
+</tr>
+<tr>
+<td>Executor agent</td>
+<td><code>cmd/executor-agent/</code>, <code>pkg/execagent/</code></td>
 </tr>
 <tr>
 <td>gRPC definitions</td>
@@ -1733,11 +1725,8 @@
 <a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="c1"># After changing proto/*.proto</span>
 <a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>make<span class="w"> </span>proto-go<span class="w">     </span><span class="c1"># Regenerate Go gRPC code</span>
 <a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="c1"># After changing CRDs</span>
-<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>make<span class="w"> </span>sdk-python<span class="w">   </span><span class="c1"># Regenerate Python SDK</span>
-<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>
-<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a><span class="c1"># Or regenerate everything</span>
-<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>make<span class="w"> </span>generate
+<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="c1"># Or regenerate everything</span>
+<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>make<span class="w"> </span>generate
 </code></pre></div>
 <h3 id="4-run-quality-checks">4. Run Quality Checks<a class="headerlink" href="#4-run-quality-checks" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># Run all checks (Go + Python)</span>
@@ -1776,7 +1765,6 @@
 </code></pre></div>
 <p>Input: <code>proto/agent.proto</code>
 Output: <code>pkg/pb/*.pb.go</code></p>
-<h3 id="proto-grpc">Proto / gRPC<a class="headerlink" href="#proto-grpc" title="Permanent link">&para;</a></h3>
 <h2 id="architecture-validation">Architecture Validation<a class="headerlink" href="#architecture-validation" title="Permanent link">&para;</a></h2>
 <p>Validate architecture documentation:</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>make<span class="w"> </span>arch-check
@@ -1803,7 +1791,7 @@ Output: <code>pkg/pb/*.pb.go</code></p>
 </code></pre></div>
 </li>
 <li>
-<p>Update controller logic in <code>pkg/controllers/</code></p>
+<p>Update controller logic in <code>pkg/controller/</code></p>
 </li>
 <li>
 <p>Run checks:</p>
@@ -1813,7 +1801,7 @@ Output: <code>pkg/pb/*.pb.go</code></p>
 </ol>
 <h3 id="adding-a-new-controller">Adding a New Controller<a class="headerlink" href="#adding-a-new-controller" title="Permanent link">&para;</a></h3>
 <ol>
-<li>Create controller file in <code>pkg/controllers/</code></li>
+<li>Create controller file in <code>pkg/controller/</code></li>
 <li>Register in <code>cmd/operator/main.go</code></li>
 <li>Add necessary RBAC markers</li>
 <li>
@@ -1831,7 +1819,7 @@ Output: <code>pkg/pb/*.pb.go</code></p>
 </code></pre></div>
 </li>
 <li>
-<p>Update sidecar implementation in <code>cmd/sidecar/</code></p>
+<p>Update sidecar implementation in <code>pkg/sidecar/</code></p>
 </li>
 </ol>
 <h2 id="debugging">Debugging<a class="headerlink" href="#debugging" title="Permanent link">&para;</a></h2>
