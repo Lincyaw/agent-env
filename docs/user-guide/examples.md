@@ -9,15 +9,15 @@ This page contains practical examples for common use cases with the ARL Python S
 ```python
 from arl import SandboxSession
 
-with SandboxSession(pool_ref="python-pool", namespace="default") as session:
+with SandboxSession(
+    pool_ref="python-pool",
+    namespace="default",
+    gateway_url="http://localhost:8080",
+) as session:
     result = session.execute([
-        {
-            "name": "hello",
-            "type": "Command",
-            "command": ["echo", "Hello, World!"],
-        }
+        {"name": "hello", "command": ["echo", "Hello, World!"]},
     ])
-    print(result["status"]["stdout"])
+    print(result.results[0].output.stdout)
 ```
 
 ### Write and Run a Python Script
@@ -25,26 +25,26 @@ with SandboxSession(pool_ref="python-pool", namespace="default") as session:
 ```python
 from arl import SandboxSession
 
-with SandboxSession(pool_ref="python-pool", namespace="default") as session:
+with SandboxSession(
+    pool_ref="python-pool",
+    namespace="default",
+    gateway_url="http://localhost:8080",
+) as session:
     result = session.execute([
         {
-            "name": "write_script",
-            "type": "FilePatch",
-            "path": "/workspace/script.py",
-            "content": """
+            "name": "write_and_run",
+            "command": ["bash", "-c", """
+cat > /workspace/script.py << 'PYEOF'
 def greet(name):
     return f"Hello, {name}!"
 
 print(greet("ARL"))
-""",
-        },
-        {
-            "name": "run_script",
-            "type": "Command",
-            "command": ["python", "/workspace/script.py"],
+PYEOF
+python /workspace/script.py
+"""],
         },
     ])
-    print(result["status"]["stdout"])  # Hello, ARL!
+    print(result.results[0].output.stdout)  # Hello, ARL!
 ```
 
 ## Data Processing
@@ -54,47 +54,40 @@ print(greet("ARL"))
 ```python
 from arl import SandboxSession
 
-with SandboxSession(pool_ref="python-pool", namespace="default") as session:
+with SandboxSession(
+    pool_ref="python-pool",
+    namespace="default",
+    gateway_url="http://localhost:8080",
+) as session:
     result = session.execute([
         # Install pandas
+        {"name": "install", "command": ["pip", "install", "pandas", "-q"]},
+        # Create data and process it
         {
-            "name": "install",
-            "type": "Command",
-            "command": ["pip", "install", "pandas", "-q"],
-        },
-        # Create sample data
-        {
-            "name": "create_data",
-            "type": "FilePatch",
-            "path": "/workspace/data.csv",
-            "content": """name,age,city
+            "name": "process",
+            "command": ["bash", "-c", """
+cat > /workspace/data.csv << 'EOF'
+name,age,city
 Alice,30,New York
 Bob,25,San Francisco
 Charlie,35,Chicago
 Diana,28,Boston
-""",
-        },
-        # Process data
-        {
-            "name": "process",
-            "type": "FilePatch",
-            "path": "/workspace/process.py",
-            "content": """
+EOF
+
+cat > /workspace/process.py << 'EOF'
 import pandas as pd
 
 df = pd.read_csv('/workspace/data.csv')
 print(f"Total records: {len(df)}")
 print(f"Average age: {df['age'].mean():.1f}")
 print(f"Cities: {', '.join(df['city'].unique())}")
-""",
-        },
-        {
-            "name": "run",
-            "type": "Command",
-            "command": ["python", "/workspace/process.py"],
+EOF
+
+python /workspace/process.py
+"""],
         },
     ])
-    print(result["status"]["stdout"])
+    print(result.results[-1].output.stdout)
 ```
 
 ### JSON Processing
@@ -111,35 +104,34 @@ data = {
     ]
 }
 
-with SandboxSession(pool_ref="python-pool", namespace="default") as session:
+with SandboxSession(
+    pool_ref="python-pool",
+    namespace="default",
+    gateway_url="http://localhost:8080",
+) as session:
     result = session.execute([
         {
-            "name": "write_data",
-            "type": "FilePatch",
-            "path": "/workspace/users.json",
-            "content": json.dumps(data, indent=2),
-        },
-        {
-            "name": "process",
-            "type": "FilePatch",
-            "path": "/workspace/filter.py",
-            "content": """
+            "name": "process_json",
+            "command": ["bash", "-c", f"""
+cat > /workspace/users.json << 'EOF'
+{json.dumps(data, indent=2)}
+EOF
+
+cat > /workspace/filter.py << 'EOF'
 import json
 
 with open('/workspace/users.json') as f:
     data = json.load(f)
 
 active_users = [u for u in data['users'] if u['active']]
-print(f"Active users: {[u['name'] for u in active_users]}")
-""",
-        },
-        {
-            "name": "run",
-            "type": "Command",
-            "command": ["python", "/workspace/filter.py"],
+print(f"Active users: {{[u['name'] for u in active_users]}}")
+EOF
+
+python /workspace/filter.py
+"""],
         },
     ])
-    print(result["status"]["stdout"])  # Active users: ['Alice', 'Charlie']
+    print(result.results[0].output.stdout)  # Active users: ['Alice', 'Charlie']
 ```
 
 ## Machine Learning
@@ -149,20 +141,20 @@ print(f"Active users: {[u['name'] for u in active_users]}")
 ```python
 from arl import SandboxSession
 
-with SandboxSession(pool_ref="python-pool", namespace="default") as session:
+with SandboxSession(
+    pool_ref="python-pool",
+    namespace="default",
+    gateway_url="http://localhost:8080",
+    timeout="120s",
+) as session:
     result = session.execute([
         # Install dependencies
+        {"name": "install", "command": ["pip", "install", "scikit-learn", "numpy", "-q"]},
+        # Create and run training script
         {
-            "name": "install",
-            "type": "Command",
-            "command": ["pip", "install", "scikit-learn", "numpy", "-q"],
-        },
-        # Create training script
-        {
-            "name": "write_script",
-            "type": "FilePatch",
-            "path": "/workspace/train.py",
-            "content": """
+            "name": "train",
+            "command": ["bash", "-c", """
+cat > /workspace/train.py << 'EOF'
 from sklearn.datasets import load_iris
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestClassifier
@@ -182,20 +174,18 @@ model.fit(X_train, y_train)
 predictions = model.predict(X_test)
 accuracy = accuracy_score(y_test, predictions)
 print(f"Model accuracy: {accuracy:.2%}")
-""",
+EOF
+
+python /workspace/train.py
+"""],
         },
-        {
-            "name": "train",
-            "type": "Command",
-            "command": ["python", "/workspace/train.py"],
-        },
-    ], timeout="120s")  # ML tasks may need more time
-    print(result["status"]["stdout"])
+    ])
+    print(result.results[-1].output.stdout)
 ```
 
 ## Stateful Operations
 
-### Maintain State Across Tasks
+### Maintain State Across Executions
 
 ```python
 from arl import SandboxSession
@@ -203,30 +193,27 @@ from arl import SandboxSession
 session = SandboxSession(
     pool_ref="python-pool",
     namespace="default",
-    keep_alive=True  # Important: keep sandbox for state
+    gateway_url="http://localhost:8080",
+    keep_alive=True,  # Important: keep sandbox for state
 )
 
 try:
     session.create_sandbox()
-    
+
     # Initialize state
     session.execute([
         {
             "name": "init",
-            "type": "FilePatch",
-            "path": "/workspace/state.json",
-            "content": '{"counter": 0, "history": []}',
+            "command": ["bash", "-c", """echo '{"counter": 0, "history": []}' > /workspace/state.json"""],
         },
     ])
-    
+
     # Increment counter multiple times
     for i in range(3):
         result = session.execute([
             {
                 "name": "update",
-                "type": "FilePatch",
-                "path": "/workspace/update.py",
-                "content": """
+                "command": ["python", "-c", """
 import json
 
 with open('/workspace/state.json') as f:
@@ -240,18 +227,13 @@ with open('/workspace/state.json', 'w') as f:
 
 print(f"Counter: {state['counter']}")
 print(f"History: {state['history']}")
-""",
-            },
-            {
-                "name": "run",
-                "type": "Command",
-                "command": ["python", "/workspace/update.py"],
+"""],
             },
         ])
         print(f"Iteration {i+1}:")
-        print(result["status"]["stdout"])
+        print(result.results[0].output.stdout)
         print()
-        
+
 finally:
     session.delete_sandbox()
 ```
@@ -262,42 +244,47 @@ finally:
 
 ```python
 from arl import SandboxSession
-from kubernetes import client
 
 def execute_with_retry(session, steps, max_retries=3):
     """Execute steps with retry logic."""
     for attempt in range(max_retries):
         try:
             result = session.execute(steps)
-            if result["status"]["state"] == "Succeeded":
+            if result.results[-1].output.exit_code == 0:
                 return result
             else:
-                print(f"Attempt {attempt + 1} failed: {result['status'].get('stderr', '')}")
-        except client.ApiException as e:
-            print(f"API error on attempt {attempt + 1}: {e.reason}")
+                print(f"Attempt {attempt + 1} failed: {result.results[-1].output.stderr}")
+        except ConnectionError:
+            print(f"Connection error on attempt {attempt + 1}")
         except TimeoutError:
             print(f"Timeout on attempt {attempt + 1}")
-    
+
     raise RuntimeError(f"Failed after {max_retries} attempts")
 
-with SandboxSession(pool_ref="python-pool", namespace="default") as session:
+with SandboxSession(
+    pool_ref="python-pool",
+    namespace="default",
+    gateway_url="http://localhost:8080",
+) as session:
     result = execute_with_retry(session, [
-        {"name": "run", "type": "Command", "command": ["python", "-c", "print('OK')"]}
+        {"name": "run", "command": ["python", "-c", "print('OK')"]},
     ])
-    print(result["status"]["stdout"])
+    print(result.results[0].output.stdout)
 ```
 
 ### Comprehensive Error Handling
 
 ```python
 from arl import SandboxSession
-from kubernetes import client
 
-with SandboxSession(pool_ref="python-pool", namespace="default") as session:
+with SandboxSession(
+    pool_ref="python-pool",
+    namespace="default",
+    gateway_url="http://localhost:8080",
+) as session:
     result = session.execute([
         {
             "name": "risky_operation",
-            "type": "Command",
             "command": ["python", "-c", """
 import sys
 import random
@@ -311,51 +298,14 @@ else:
 """],
         },
     ])
-    
-    status = result["status"]
-    
-    if status["state"] == "Succeeded":
-        print(f"✓ Success: {status['stdout'].strip()}")
+
+    step_result = result.results[0]
+
+    if step_result.output.exit_code == 0:
+        print(f"Success: {step_result.output.stdout.strip()}")
     else:
-        print(f"✗ Failed (exit code: {status.get('exitCode', 'unknown')})")
-        print(f"  Error: {status.get('stderr', 'no error message').strip()}")
-```
-
-## Using Callbacks
-
-### Progress Monitoring
-
-```python
-from arl import SandboxSession
-import datetime
-
-def log_completion(result):
-    timestamp = datetime.datetime.now().strftime("%H:%M:%S")
-    state = result["status"]["state"]
-    print(f"[{timestamp}] Task completed: {state}")
-
-def log_success(result):
-    stdout = result["status"].get("stdout", "").strip()
-    if stdout:
-        print(f"  Output: {stdout[:100]}...")
-
-def log_failure(result):
-    stderr = result["status"].get("stderr", "").strip()
-    exit_code = result["status"].get("exitCode", "?")
-    print(f"  Error (exit {exit_code}): {stderr[:100]}...")
-
-session = SandboxSession(pool_ref="python-pool", namespace="default")
-session.register_callback("on_task_complete", log_completion)
-session.register_callback("on_task_success", log_success)
-session.register_callback("on_task_failure", log_failure)
-
-with session:
-    # Run multiple tasks
-    for i in range(3):
-        print(f"\n--- Task {i+1} ---")
-        session.execute([
-            {"name": f"task_{i}", "type": "Command", "command": ["echo", f"Task {i+1} output"]}
-        ])
+        print(f"Failed (exit code: {step_result.output.exit_code})")
+        print(f"  Error: {step_result.output.stderr.strip()}")
 ```
 
 ## WarmPool Management
@@ -364,7 +314,6 @@ with session:
 
 ```python
 from arl import WarmPoolManager, SandboxSession
-from kubernetes import client
 
 manager = WarmPoolManager(namespace="default")
 
@@ -373,26 +322,27 @@ pool_name = "my-python-pool"
 try:
     manager.get_warmpool(pool_name)
     print(f"WarmPool '{pool_name}' already exists")
-except client.ApiException as e:
-    if e.status == 404:
-        print(f"Creating WarmPool '{pool_name}'...")
-        manager.create_warmpool(
-            name=pool_name,
-            image="python:3.9-slim",
-            sidecar_image="arl-sidecar:latest",
-            replicas=2,
-        )
-        manager.wait_for_warmpool_ready(pool_name, timeout=120)
-        print(f"WarmPool '{pool_name}' is ready")
-    else:
-        raise
+except Exception:
+    print(f"Creating WarmPool '{pool_name}'...")
+    manager.create_warmpool(
+        name=pool_name,
+        image="python:3.9-slim",
+        sidecar_image="arl-sidecar:latest",
+        replicas=2,
+    )
+    manager.wait_for_warmpool_ready(pool_name, timeout=120)
+    print(f"WarmPool '{pool_name}' is ready")
 
 # Use the pool
-with SandboxSession(pool_ref=pool_name, namespace="default") as session:
+with SandboxSession(
+    pool_ref=pool_name,
+    namespace="default",
+    gateway_url="http://localhost:8080",
+) as session:
     result = session.execute([
-        {"name": "test", "type": "Command", "command": ["python", "--version"]}
+        {"name": "test", "command": ["python", "--version"]},
     ])
-    print(f"Python version: {result['status']['stdout'].strip()}")
+    print(f"Python version: {result.results[0].output.stdout.strip()}")
 
 # Optionally delete pool when done
 # manager.delete_warmpool(pool_name)
@@ -408,44 +358,48 @@ from arl import SandboxSession
 def run_pipeline(session, stages):
     """Execute a pipeline of stages, stopping on first failure."""
     results = []
-    
+
     for i, stage in enumerate(stages):
         print(f"Running stage {i+1}: {stage['name']}")
         result = session.execute(stage["steps"])
         results.append(result)
-        
-        if result["status"]["state"] != "Succeeded":
+
+        if result.results[-1].output.exit_code != 0:
             print(f"Pipeline failed at stage {i+1}")
             return results, False
-    
+
     return results, True
 
-with SandboxSession(pool_ref="python-pool", namespace="default") as session:
+with SandboxSession(
+    pool_ref="python-pool",
+    namespace="default",
+    gateway_url="http://localhost:8080",
+) as session:
     pipeline = [
         {
             "name": "Setup",
             "steps": [
-                {"name": "mkdir", "type": "Command", "command": ["mkdir", "-p", "/workspace/output"]},
+                {"name": "mkdir", "command": ["mkdir", "-p", "/workspace/output"]},
             ]
         },
         {
             "name": "Generate",
             "steps": [
-                {"name": "write", "type": "FilePatch", "path": "/workspace/data.txt", "content": "line1\nline2\nline3"},
+                {"name": "write", "command": ["bash", "-c", "echo -e 'line1\nline2\nline3' > /workspace/data.txt"]},
             ]
         },
         {
             "name": "Process",
             "steps": [
-                {"name": "count", "type": "Command", "command": ["wc", "-l", "/workspace/data.txt"]},
+                {"name": "count", "command": ["wc", "-l", "/workspace/data.txt"]},
             ]
         },
     ]
-    
+
     results, success = run_pipeline(session, pipeline)
     print(f"\nPipeline {'succeeded' if success else 'failed'}")
     if success:
-        print(f"Final output: {results[-1]['status']['stdout'].strip()}")
+        print(f"Final output: {results[-1].results[0].output.stdout.strip()}")
 ```
 
 ## More Examples
@@ -454,12 +408,6 @@ For more examples, see the [examples/python](https://github.com/Lincyaw/agent-en
 
 | Example | Description |
 |---------|-------------|
-| `01_basic_execution.py` | Basic command execution |
-| `02_multi_step_pipeline.py` | Multi-step data processing |
-| `03_environment_variables.py` | Using environment variables |
-| `04_working_directory.py` | Working directory management |
-| `05_error_handling.py` | Error handling patterns |
-| `06_long_running_task.py` | Long-running tasks with timeouts |
-| `07_sandbox_reuse.py` | Reusing sandboxes |
-| `08_callback_hooks.py` | Using callback hooks |
-| `09_multiple_feature.py` | Comprehensive feature demo |
+| `test_arl_sdk.py` | Comprehensive SDK test |
+| `bench_gateway.py` | Gateway benchmarking |
+| `test_interactive_shell.py` | Interactive shell test |

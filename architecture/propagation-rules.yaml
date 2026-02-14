@@ -19,14 +19,12 @@ rules:
     impacts:
       - config/crd/arl.infra.io_warmpools.yaml
       - api/v1alpha1/zz_generated.deepcopy.go
-      - sdk/python/arl/arl/arl_client/
+      - pkg/controller/warmpool_controller.go
     actions:
       - description: Regenerate deepcopy methods
         command: make deepcopy
       - description: Regenerate CRD manifests
         command: make manifests
-      - description: Regenerate Python SDK
-        command: make sdk-python
       - description: Update Helm chart if schema changed significantly
         manual: true
         files:
@@ -44,7 +42,6 @@ rules:
     impacts:
       - config/crd/arl.infra.io_sandboxes.yaml
       - api/v1alpha1/zz_generated.deepcopy.go
-      - sdk/python/arl/arl/arl_client/
       - pkg/controller/sandbox_controller.go
       - pkg/webhook/sandbox_validator.go
     actions:
@@ -52,8 +49,6 @@ rules:
         command: make deepcopy
       - description: Regenerate CRD manifests
         command: make manifests
-      - description: Regenerate Python SDK
-        command: make sdk-python
       - description: Review controller for new field handling
         manual: true
         files:
@@ -62,37 +57,6 @@ rules:
         manual: true
         files:
           - pkg/webhook/sandbox_validator.go
-    validation:
-      - make vet
-      - make check
-      - kubectl apply --dry-run=server -f config/crd/
-
-  - name: task-crd-change
-    trigger:
-      component: task-crd
-      patterns:
-        - api/v1alpha1/task_types.go
-    impacts:
-      - config/crd/arl.infra.io_tasks.yaml
-      - api/v1alpha1/zz_generated.deepcopy.go
-      - sdk/python/arl/arl/arl_client/
-      - pkg/controller/task_controller.go
-      - pkg/webhook/task_validator.go
-    actions:
-      - description: Regenerate deepcopy methods
-        command: make deepcopy
-      - description: Regenerate CRD manifests
-        command: make manifests
-      - description: Regenerate Python SDK
-        command: make sdk-python
-      - description: Review controller for new step types
-        manual: true
-        files:
-          - pkg/controller/task_controller.go
-      - description: Review webhook for new validation rules
-        manual: true
-        files:
-          - pkg/webhook/task_validator.go
     validation:
       - make vet
       - make check
@@ -110,7 +74,7 @@ rules:
       - pkg/pb/agent.pb.go
       - pkg/pb/agent_grpc.pb.go
       - pkg/sidecar/service.go
-      - pkg/controller/task_controller.go
+      - pkg/gateway/gateway.go
     actions:
       - description: Regenerate Go protobuf code
         command: make proto-go
@@ -118,15 +82,15 @@ rules:
         manual: true
         files:
           - pkg/sidecar/service.go
-      - description: Update task controller gRPC client usage
+      - description: Update gateway gRPC client usage
         manual: true
         files:
-          - pkg/controller/task_controller.go
+          - pkg/gateway/gateway.go
     validation:
       - make vet
       - make check
       - go build ./cmd/sidecar/
-      - go build ./cmd/operator/
+      - go build ./cmd/gateway/
 
   # ============================================================================
   # Controller Changes
@@ -149,6 +113,28 @@ rules:
     validation:
       - make vet
       - go build ./cmd/operator/
+
+  # ============================================================================
+  # Gateway Changes
+  # ============================================================================
+  - name: gateway-change
+    trigger:
+      patterns:
+        - pkg/gateway/*.go
+        - cmd/gateway/*.go
+    impacts:
+      - sdk/python/arl/arl/gateway_client.py
+      - sdk/python/arl/arl/session.py
+    actions:
+      - description: Update Python SDK gateway client if API changed
+        manual: true
+        files:
+          - sdk/python/arl/arl/gateway_client.py
+      - description: Rebuild gateway image
+        command: docker build -f Dockerfile.gateway -t arl-gateway:dev .
+    validation:
+      - make vet
+      - go build ./cmd/gateway/
 
   # ============================================================================
   # Webhook Changes
@@ -189,6 +175,23 @@ rules:
     validation:
       - make vet
       - go build ./cmd/sidecar/
+
+  # ============================================================================
+  # Executor Agent Changes
+  # ============================================================================
+  - name: executor-agent-change
+    trigger:
+      patterns:
+        - pkg/execagent/*.go
+        - cmd/executor-agent/*.go
+    impacts:
+      - Dockerfile.executor-agent
+    actions:
+      - description: Rebuild executor-agent image
+        command: docker build -f Dockerfile.executor-agent -t arl-executor-agent:dev .
+    validation:
+      - make vet
+      - go build ./cmd/executor-agent/
 
   # ============================================================================
   # SDK Changes

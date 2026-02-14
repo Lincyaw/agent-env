@@ -20,6 +20,7 @@ import (
 	"github.com/Lincyaw/agent-env/pkg/interfaces"
 	"github.com/Lincyaw/agent-env/pkg/metrics"
 	"github.com/Lincyaw/agent-env/pkg/middleware"
+	"github.com/Lincyaw/agent-env/pkg/scheduler"
 )
 
 var (
@@ -127,14 +128,18 @@ func main() {
 			AddAfter(middleware.NewMetricsHook("Sandbox", metricsCollector))
 	}
 
+	// Initialize image-locality scheduler
+	imageScheduler := scheduler.NewImageScheduler(mgr.GetClient())
+
 	// Register controllers (Task and TTL removed — execution via Gateway)
 	controllers := []interfaces.ControllerRegistrar{
 		&controller.WarmPoolReconciler{
-			Client:     mgr.GetClient(),
-			Scheme:     mgr.GetScheme(),
-			Config:     cfg,
-			Metrics:    metricsCollector,
-			Middleware: warmPoolMiddleware,
+			Client:         mgr.GetClient(),
+			Scheme:         mgr.GetScheme(),
+			Config:         cfg,
+			Metrics:        metricsCollector,
+			Middleware:     warmPoolMiddleware,
+			ImageScheduler: imageScheduler,
 		},
 		&controller.SandboxReconciler{
 			Client:      mgr.GetClient(),
@@ -154,6 +159,13 @@ func main() {
 		}
 		setupLog.Info("registered controller", "controller", c.Name())
 	}
+
+	// Setup image-locality scheduler node watcher
+	if err := imageScheduler.SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to setup image scheduler")
+		os.Exit(1)
+	}
+	setupLog.Info("registered image-locality scheduler")
 
 	// Add health checks
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {

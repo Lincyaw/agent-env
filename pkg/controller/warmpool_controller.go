@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"math"
 	"regexp"
 	"strings"
 
@@ -22,6 +23,7 @@ import (
 	"github.com/Lincyaw/agent-env/pkg/config"
 	"github.com/Lincyaw/agent-env/pkg/interfaces"
 	"github.com/Lincyaw/agent-env/pkg/middleware"
+	"github.com/Lincyaw/agent-env/pkg/scheduler"
 )
 
 const (
@@ -35,16 +37,18 @@ const (
 // WarmPoolReconciler reconciles a WarmPool object
 type WarmPoolReconciler struct {
 	client.Client
-	Scheme     *runtime.Scheme
-	Config     *config.Config
-	Metrics    interfaces.MetricsCollector
-	Middleware *middleware.Chain
+	Scheme         *runtime.Scheme
+	Config         *config.Config
+	Metrics        interfaces.MetricsCollector
+	Middleware     *middleware.Chain
+	ImageScheduler *scheduler.ImageScheduler
 }
 
 // +kubebuilder:rbac:groups=arl.infra.io,resources=warmpools,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups=arl.infra.io,resources=warmpools/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=arl.infra.io,resources=warmpools/finalizers,verbs=update
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups="",resources=nodes,verbs=get;list;watch
 
 // Reconcile manages the WarmPool lifecycle
 func (r *WarmPoolReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
@@ -261,6 +265,9 @@ func (r *WarmPoolReconciler) constructPod(pool *arlv1alpha1.WarmPool) *corev1.Po
 	if pool.Spec.Tools != nil {
 		r.injectTools(pod, pool.Spec.Tools)
 	}
+
+	// Inject image-locality-aware node affinity
+	r.injectImageLocality(pod, pool)
 
 	// Ensure sidecar container exists
 	hasSidecar := false
@@ -622,6 +629,78 @@ func joinCmd(parts []string) string {
 		result += p
 	}
 	return result
+}
+
+// injectImageLocality appends a PreferredSchedulingTerm to the pod's affinity
+// so that pods prefer nodes selected by Rendezvous hashing on the primary image.
+func (r *WarmPoolReconciler) injectImageLocality(pod *corev1.Pod, pool *arlv1alpha1.WarmPool) {
+	if r.ImageScheduler == nil {
+		return
+	}
+
+	// Check if explicitly disabled
+	spec := pool.Spec.ImageLocality
+	if spec != nil && spec.Enabled != nil && !*spec.Enabled {
+		return
+	}
+
+	// Extract primary image (first non-sidecar container)
+	var image string
+	for _, c := range pod.Spec.Containers {
+		if c.Name != "sidecar" {
+			image = c.Image
+			break
+		}
+	}
+	if image == "" {
+		return
+	}
+
+	// Compute spread factor and weight with defaults
+	spreadFactor := 1.0
+	weight := int32(80)
+	if spec != nil {
+		if spec.SpreadFactor != nil {
+			spreadFactor = *spec.SpreadFactor
+		}
+		if spec.Weight != nil {
+			weight = *spec.Weight
+		}
+	}
+
+	k := int(math.Ceil(float64(pool.Spec.Replicas) * spreadFactor))
+	if k < 1 {
+		k = 1
+	}
+
+	preferredNodes := r.ImageScheduler.SelectNodes(image, k)
+	if len(preferredNodes) == 0 {
+		return
+	}
+
+	term := corev1.PreferredSchedulingTerm{
+		Weight: weight,
+		Preference: corev1.NodeSelectorTerm{
+			MatchExpressions: []corev1.NodeSelectorRequirement{
+				{
+					Key:      "kubernetes.io/hostname",
+					Operator: corev1.NodeSelectorOpIn,
+					Values:   preferredNodes,
+				},
+			},
+		},
+	}
+
+	if pod.Spec.Affinity == nil {
+		pod.Spec.Affinity = &corev1.Affinity{}
+	}
+	if pod.Spec.Affinity.NodeAffinity == nil {
+		pod.Spec.Affinity.NodeAffinity = &corev1.NodeAffinity{}
+	}
+	pod.Spec.Affinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution = append(
+		pod.Spec.Affinity.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution,
+		term,
+	)
 }
 
 // SetupWithManager sets up the controller with the Manager

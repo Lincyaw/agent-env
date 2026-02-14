@@ -26,6 +26,20 @@ spec:
             type: object
           spec:
             properties:
+              imageLocality:
+                properties:
+                  enabled:
+                    type: boolean
+                  spreadFactor:
+                    maximum: 10
+                    minimum: 0
+                    type: number
+                  weight:
+                    format: int32
+                    maximum: 100
+                    minimum: 1
+                    type: integer
+                type: object
               replicas:
                 format: int32
                 type: integer

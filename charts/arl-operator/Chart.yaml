@@ -2,8 +2,8 @@ apiVersion: v2
 name: arl-operator
 description: A Helm chart for deploying the ARL (Agent Runtime Layer) Operator
 type: application
-version: 0.1.0
-appVersion: "0.1.0"
+version: 0.2.0
+appVersion: "0.2.0"
 keywords:
   - kubernetes
   - operator

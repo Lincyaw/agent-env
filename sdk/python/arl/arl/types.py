@@ -161,3 +161,17 @@ class ToolsSpec(BaseModel):
     inline: list[InlineToolSpec] = []
 
     model_config = {"populate_by_name": True}
+
+
+class ShellMessage(BaseModel):
+    """A message received from the interactive shell WebSocket.
+
+    Message types:
+      - output: shell stdout/stderr data (``data`` field)
+      - exit: shell process exited (``exit_code`` field)
+      - error: server-side error (``data`` field)
+    """
+
+    type: str
+    data: str = ""
+    exit_code: int = 0

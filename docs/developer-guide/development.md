@@ -103,7 +103,7 @@ skaffold run --profile=with-samples
 make logs
 
 # Check resource status
-kubectl get warmpools,sandboxes,tasks
+kubectl get warmpools,sandboxes
 ```
 
 ## Code Generation Details
@@ -139,15 +139,7 @@ make proto-go
 Input: `proto/agent.proto`
 Output: `pkg/pb/*.pb.go`
 
-### Python SDK
-
-Generated from CRD OpenAPI schemas:
-
-```bash
-make sdk-python
-```
-
-Output: `sdk/python/arl/arl/arl_client/`
+### Proto / gRPC
 
 ## Architecture Validation
 
@@ -179,7 +171,7 @@ This checks:
 2. Regenerate code:
 
     ```bash
-    make manifests deepcopy sdk-python
+    make manifests deepcopy
     ```
 
 3. Update controller logic in `pkg/controllers/`

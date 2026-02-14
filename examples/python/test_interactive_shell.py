@@ -1,31 +1,21 @@
-"""Interactive shell terminal for ARL Gateway WebSocket API.
-
-Connects to a sandbox session and provides an interactive shell terminal
-where you can type commands and see output in real-time.
-
-Prerequisites:
-    - ARL operator + gateway deployed to Kubernetes
-    - Gateway port-forwarded to localhost:8080
-    - A WarmPool 'test-pool' with ready pods in namespace 'arl'
-
-Usage:
-    kubectl port-forward -n arl svc/arl-operator-gateway 8080:8080
-    uv run python examples/python/test_interactive_shell.py
-
-    Then type commands interactively. Press Ctrl-C to send SIGINT, Ctrl-D to exit.
-"""
-
 from __future__ import annotations
 
 import json
 import sys
 import threading
 
-from arl import GatewayClient, InteractiveShellClient, SandboxSession
+from arl import (
+    GatewayClient,
+    GatewayError,
+    InteractiveShellClient,
+    SandboxSession,
+    WarmPoolManager,
+)
 
 GATEWAY_URL = "http://14.103.184.145:8080"
 POOL_NAME = "test-pool"
 NAMESPACE = "arl"
+DEFAULT_POOL_IMAGE = "pair-diag-cn-guangzhou.cr.volces.com/pair/ubuntu:22.04"
 
 
 class InteractiveTerminal:
@@ -126,7 +116,11 @@ def main() -> None:
         )
         sys.exit(1)
 
-    # Create session and start interactive shell
+    pool_mgr = WarmPoolManager(namespace=NAMESPACE, gateway_url=GATEWAY_URL)
+    try:
+        pool_mgr.create_warmpool(name=POOL_NAME, image=DEFAULT_POOL_IMAGE, replicas=1)
+    except GatewayError as e:
+        print(e)
     print("Creating sandbox session...")
     with SandboxSession(
         pool_ref=POOL_NAME, namespace=NAMESPACE, gateway_url=GATEWAY_URL

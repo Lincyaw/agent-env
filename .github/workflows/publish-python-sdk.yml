@@ -41,20 +41,10 @@ jobs:
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
           echo "📦 Publishing version: ${VERSION}"
 
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: "1.25"
-
       - name: Install uv
         uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
-
-      - name: Generate Python SDK
-        run: |
-          echo "🔧 Generating Python SDK..."
-          make sdk-python
 
       - name: Update version in pyproject.toml
         run: |

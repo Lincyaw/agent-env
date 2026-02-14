@@ -11,7 +11,7 @@
 - ⚡ **Ultra-low latency**: Bypasses pod startup time using warm pools
 - 🔒 **Isolation**: Each sandbox runs in an isolated environment
 - 🔄 **Hot code reload**: Update and execute code without pod restarts
-- 🎯 **Flexible execution**: Run commands in sidecar (fast) or executor container (full environment)
+- 🌐 **Gateway API**: REST API for session management and execution
 - ☸️ **Kubernetes-native**: CRD-based API, standard K8s tooling
 - 🐍 **Python SDK**: High-level API for seamless integration
 
@@ -37,34 +37,14 @@ pip install arl-env
 ```
 
 ```python
-from arl import SandboxSession, WarmPoolManager
+from arl import SandboxSession
 
-# Step 1: Create a WarmPool (one-time setup)
-warmpool_mgr = WarmPoolManager(namespace="default")
-warmpool_mgr.create_warmpool(
-    name="my-python-pool",
-    image="python:3.11-slim",
-    replicas=2
-)
-warmpool_mgr.wait_for_warmpool_ready("my-python-pool")
-
-# Step 2: Use the pool to execute tasks
-with SandboxSession(pool_ref="my-python-pool", namespace="default") as session:
+with SandboxSession(pool_ref="my-python-pool", gateway_url="http://localhost:8080") as session:
     result = session.execute([
-        # Fast execution in sidecar (default)
-        {"name": "hello", "type": "Command", "command": ["echo", "Hello, World!"]},
-
-        # Execute in executor container (has executor tools)
-        {"name": "install", "type": "Command",
-         "command": ["pip", "install", "requests"],
-         "container": "executor"},
+        {"name": "hello", "command": ["echo", "Hello, World!"]},
     ])
-    print(result["status"]["stdout"])
+    print(result.results[0].output.stdout)
 ```
-
-**Execution Modes:**
-- **Sidecar (default)**: Ultra-fast (1-5ms), for general operations
-- **Executor**: Slower (10-50ms), but has access to executor-specific tools (pip, npm, cargo, etc.)
 
 ### For Developers
 
@@ -82,15 +62,15 @@ skaffold run --profile=k8s
 
 ```
 ┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
-│   Python SDK    │────▶│  Kubernetes API │────▶│   ARL Operator  │
+│   Python SDK    │────▶│    Gateway      │────▶│   ARL Operator  │
 └─────────────────┘     └─────────────────┘     └─────────────────┘
-                                                        │
-                        ┌───────────────────────────────┴───────────────────────────────┐
-                        ▼                               ▼                               ▼
-                ┌───────────────┐               ┌───────────────┐               ┌───────────────┐
-                │   WarmPool    │               │   Sandbox     │               │     Task      │
-                │  (Pod Pool)   │               │  (Workspace)  │               │  (Execution)  │
-                └───────────────┘               └───────────────┘               └───────────────┘
+                               │                        │
+                               │ gRPC          ┌───────┴───────┐
+                               ▼               ▼               ▼
+                        ┌───────────┐   ┌───────────┐   ┌───────────┐
+                        │  Sidecar  │   │ WarmPool  │   │  Sandbox  │
+                        │  (Pod)    │   │ (CRD)     │   │  (CRD)    │
+                        └───────────┘   └───────────┘   └───────────┘
 ```
 
 ## Development

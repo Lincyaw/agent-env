@@ -17,6 +17,34 @@ type WarmPoolSpec struct {
 	// Tools configures pre-provisioned tools available in the executor container
 	// +optional
 	Tools *ToolsSpec `json:"tools,omitempty"`
+
+	// ImageLocality configures image-locality-aware scheduling to minimize
+	// redundant image pulls by preferring nodes that should cache the same image.
+	// +optional
+	ImageLocality *ImageLocalitySpec `json:"imageLocality,omitempty"`
+}
+
+// ImageLocalitySpec configures image-locality-aware scheduling to minimize
+// redundant image pulls by preferring nodes that should cache the same image.
+type ImageLocalitySpec struct {
+	// Enabled activates image-locality scheduling.
+	// Default: true
+	// +optional
+	Enabled *bool `json:"enabled,omitempty"`
+
+	// SpreadFactor controls preferred node count: k = ceil(replicas * spreadFactor).
+	// Default: 1.0
+	// +optional
+	// +kubebuilder:validation:Minimum=0
+	// +kubebuilder:validation:Maximum=10
+	SpreadFactor *float64 `json:"spreadFactor,omitempty"`
+
+	// Weight for preferred NodeAffinity term (1-100).
+	// Default: 80
+	// +optional
+	// +kubebuilder:validation:Minimum=1
+	// +kubebuilder:validation:Maximum=100
+	Weight *int32 `json:"weight,omitempty"`
 }
 
 // ToolsSpec defines the tools to provision in sandbox pods.

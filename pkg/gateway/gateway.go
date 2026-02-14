@@ -229,6 +229,10 @@ func (g *Gateway) ExecuteSteps(ctx context.Context, sessionID string, req Execut
 
 	resp.TotalDurationMs = time.Since(totalStart).Milliseconds()
 
+	// Update Sandbox status.lastTaskTime so the idle-timeout controller
+	// measures idle duration from the last execution, not from creation time.
+	go g.touchSandboxLastTaskTime(s.Info.SandboxName, s.Info.Namespace)
+
 	return resp, nil
 }
 
@@ -496,6 +500,26 @@ func (g *Gateway) diagnosePoolHealth(ctx context.Context, poolRef, namespace str
 	}
 
 	return diag
+}
+
+// touchSandboxLastTaskTime patches the Sandbox status.lastTaskTime to now.
+// Runs asynchronously so it doesn't block the execute response.
+func (g *Gateway) touchSandboxLastTaskTime(sandboxName, namespace string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	sb := &arlv1alpha1.Sandbox{}
+	key := types.NamespacedName{Name: sandboxName, Namespace: namespace}
+	if err := g.k8sClient.Get(ctx, key, sb); err != nil {
+		log.Printf("Warning: failed to get sandbox %s for lastTaskTime update: %v", sandboxName, err)
+		return
+	}
+
+	now := metav1.Now()
+	sb.Status.LastTaskTime = &now
+	if err := g.k8sClient.Status().Update(ctx, sb); err != nil {
+		log.Printf("Warning: failed to update sandbox %s lastTaskTime: %v", sandboxName, err)
+	}
 }
 
 // extractSandboxFailure returns a failure message from sandbox conditions.

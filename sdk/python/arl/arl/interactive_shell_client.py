@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 
+from arl.types import ShellMessage
+
 
 class InteractiveShellClient:
     """Client for interactive shell sessions via the Gateway WebSocket API.
@@ -53,6 +55,56 @@ class InteractiveShellClient:
         msg = json.dumps({"type": "input", "data": data})
         self._ws.send(msg)  # type: ignore[union-attr]
 
+    def send_signal(self, sig: str = "SIGINT") -> None:
+        """Send an out-of-band signal to the remote shell process.
+
+        Args:
+            sig: Signal name (e.g. ``SIGINT``, ``SIGTERM``, ``SIGKILL``).
+        """
+        if self._ws is None:
+            raise RuntimeError("Not connected. Call connect() first.")
+        msg = json.dumps({"type": "signal", "signal": sig})
+        self._ws.send(msg)  # type: ignore[union-attr]
+
+    def send_resize(self, cols: int, rows: int) -> None:
+        """Notify the remote PTY of a terminal size change.
+
+        Args:
+            cols: Number of columns.
+            rows: Number of rows.
+        """
+        if self._ws is None:
+            raise RuntimeError("Not connected. Call connect() first.")
+        msg = json.dumps({"type": "resize", "cols": cols, "rows": rows})
+        self._ws.send(msg)  # type: ignore[union-attr]
+
+    def read_message(self, timeout: float = 1.0) -> ShellMessage | None:
+        """Read the next WebSocket message as a typed :class:`ShellMessage`.
+
+        Unlike :meth:`read_output` this returns the full message including
+        ``exit`` and ``error`` types, giving callers the ability to react to
+        shell termination and errors.
+
+        Args:
+            timeout: Read timeout in seconds.
+
+        Returns:
+            Parsed :class:`ShellMessage`, or ``None`` on timeout / closed.
+        """
+        if self._ws is None:
+            return None
+
+        try:
+            raw = self._ws.recv(timeout=timeout)  # type: ignore[union-attr]
+            if isinstance(raw, bytes):
+                raw = raw.decode()
+            data = json.loads(raw)
+            return ShellMessage(**data)
+        except TimeoutError:
+            return None
+        except Exception:
+            return None
+
     def read_output(self, timeout: float = 1.0) -> str:
         """Read output from the shell.
 
@@ -62,21 +114,10 @@ class InteractiveShellClient:
         Returns:
             Output data.
         """
-        if self._ws is None:
-            return ""
-
-        try:
-            raw = self._ws.recv(timeout=timeout)  # type: ignore[union-attr]
-            if isinstance(raw, bytes):
-                raw = raw.decode()
-            msg = json.loads(raw)
-            if msg.get("type") == "output":
-                return str(msg.get("data", ""))
-            return ""
-        except TimeoutError:
-            return ""
-        except Exception:
-            return ""
+        msg = self.read_message(timeout)
+        if msg is not None and msg.type == "output":
+            return msg.data
+        return ""
 
     def close(self) -> None:
         """Close the shell connection."""

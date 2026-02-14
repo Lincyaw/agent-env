@@ -14,10 +14,12 @@ components:
       - Define WarmPool resource schema
       - Specify validation rules for warm pool configuration
       - Maintain pool of ready-to-use pods
+      - Define ToolsSpec for pre-provisioned tools in executor containers
     interfaces:
       inputs:
         - Replicas count
         - Pod template specification
+        - Tools specification (images, configmaps, inline)
       outputs:
         - ReadyReplicas count
         - AllocatedReplicas count
@@ -38,37 +40,13 @@ components:
         - KeepAlive flag
         - Resource requirements
         - IdleTimeoutSeconds
+        - MaxLifetimeSeconds
       outputs:
         - Phase (Pending/Bound/Ready/Failed)
         - PodName
         - PodIP
         - WorkDir
         - LastTaskTime
-        - Conditions
-
-  - name: task-crd
-    type: crd
-    paths:
-      - api/v1alpha1/task_types.go
-      - config/crd/arl.infra.io_tasks.yaml
-    responsibilities:
-      - Define Task resource schema
-      - Execution unit with file operations and commands
-      - Track execution state and results
-    interfaces:
-      inputs:
-        - SandboxRef (reference to Sandbox)
-        - Timeout
-        - Steps (FilePatch or Command)
-        - Retries
-        - TTLSecondsAfterFinished
-        - TraceID
-      outputs:
-        - State (Pending/Running/Succeeded/Failed)
-        - ExitCode
-        - Stdout/Stderr
-        - Duration
-        - StartTime/CompletionTime
         - Conditions
 
   # ============================================================================
@@ -82,6 +60,8 @@ components:
       - Reconcile WarmPool resources
       - Maintain desired number of warm pods
       - Track pod readiness and allocation
+      - Inject sidecar and executor-agent containers
+      - Provision tools via init containers
     interfaces:
       watches:
         - WarmPool
@@ -105,30 +85,33 @@ components:
       manages:
         - Sandbox status
 
-  - name: task-controller
-    type: controller
+  # ============================================================================
+  # Gateway
+  # ============================================================================
+  - name: gateway
+    type: gateway
     paths:
-      - pkg/controller/task_controller.go
+      - cmd/gateway/main.go
+      - pkg/gateway/gateway.go
+      - pkg/gateway/router.go
+      - pkg/gateway/types.go
+      - pkg/gateway/history.go
+      - pkg/gateway/ws_shell.go
     responsibilities:
-      - Reconcile Task resources
-      - Execute task steps via sidecar gRPC
-      - Track execution state and results
+      - Provide REST API for session and execution management
+      - Create/delete sessions (sandbox lifecycle)
+      - Execute steps via direct gRPC to sidecar
+      - Manage execution history and trajectory export
+      - WebSocket proxy for interactive shell
     interfaces:
-      watches:
-        - Task
-        - Sandbox
-      manages:
-        - Task status
+      exposes:
+        - REST API (POST/GET/DELETE /v1/sessions, /v1/pools)
+        - WebSocket /v1/sessions/{id}/shell
       calls:
+        - Kubernetes API (Sandbox/WarmPool CRDs)
         - Sidecar gRPC (AgentService)
-
-  - name: ttl-controller
-    type: controller
-    paths:
-      - pkg/controller/ttl_controller.go
-    responsibilities:
-      - Clean up completed tasks after TTL expires
-      - Clean up idle sandboxes after timeout
+    config:
+      default_port: 8080
 
   # ============================================================================
   # Webhooks
@@ -140,15 +123,6 @@ components:
     responsibilities:
       - Validate Sandbox resources on create/update
       - Ensure PoolRef exists
-
-  - name: task-webhook
-    type: webhook
-    paths:
-      - pkg/webhook/task_validator.go
-    responsibilities:
-      - Validate Task resources on create/update
-      - Ensure SandboxRef exists
-      - Validate step configuration
 
   - name: warmpool-webhook
     type: webhook
@@ -167,9 +141,10 @@ components:
       - cmd/operator/main.go
     responsibilities:
       - Bootstrap Kubernetes controller manager
-      - Register all controllers
-      - Register all webhooks
+      - Register WarmPool and Sandbox controllers
+      - Register webhooks
       - Serve health and metrics endpoints
+      - Initialize image-locality scheduler
     config:
       default_namespace: arl-system
       health_probe_port: 8081
@@ -182,17 +157,20 @@ components:
     type: sidecar
     paths:
       - cmd/sidecar/main.go
-      - pkg/sidecar/server.go
       - pkg/sidecar/service.go
       - pkg/sidecar/grpc_server.go
+      - pkg/sidecar/executor_client.go
     responsibilities:
       - Run as sidecar in warm pool pods
-      - Provide gRPC API for file operations
-      - Execute commands in container
+      - Provide gRPC API for file operations and command execution
+      - Forward commands to executor-agent via Unix socket
       - Manage interactive shell sessions
+      - Auto-snapshot workspace after each step (git-based)
     interfaces:
       exposes:
         - gRPC AgentService
+      calls:
+        - Executor Agent (Unix socket)
       grpc_methods:
         - UpdateFiles
         - Execute
@@ -202,6 +180,33 @@ components:
     config:
       default_port: 50051
       workspace_dir: /workspace
+
+  # ============================================================================
+  # Executor Agent
+  # ============================================================================
+  - name: executor-agent
+    type: agent
+    paths:
+      - cmd/executor-agent/main.go
+      - pkg/execagent/agent.go
+      - pkg/execagent/protocol.go
+    responsibilities:
+      - Run inside executor container
+      - Execute commands received from sidecar via Unix socket
+      - Provide isolated execution environment with executor-specific tools
+
+  # ============================================================================
+  # Scheduler
+  # ============================================================================
+  - name: image-scheduler
+    type: scheduler
+    paths:
+      - pkg/scheduler/image_scheduler.go
+      - pkg/scheduler/rendezvous.go
+    responsibilities:
+      - Image-locality aware pod scheduling
+      - Use rendezvous hashing for consistent node selection
+      - Prefer nodes that already have required container images
 
   # ============================================================================
   # Protocol Buffers
@@ -239,16 +244,19 @@ components:
     paths:
       - sdk/python/arl/
     responsibilities:
-      - Provide Python client for ARL resources
-      - Auto-generated models from CRD OpenAPI schemas
-      - High-level API for sandbox and task management
+      - Provide Python client for ARL via Gateway API
+      - High-level SandboxSession for session management
+      - GatewayClient for REST API communication
+      - Tool invocation (list_tools, call_tool)
+      - Trajectory export for RL/SFT training
     interfaces:
       depends_on:
-        - Kubernetes Python client
-        - Generated protobuf code
+        - Gateway REST API
       provides:
-        - ARL Python client
-        - CRD model classes
+        - SandboxSession
+        - GatewayClient
+        - WarmPoolManager
+        - InteractiveShellClient
 
   # ============================================================================
   # Helm Charts
@@ -261,6 +269,7 @@ components:
       - Kubernetes deployment configuration
       - Service accounts and RBAC
       - CRD installation
+      - Gateway deployment
 
   # ============================================================================
   # Configuration
