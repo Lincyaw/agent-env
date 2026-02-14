@@ -45,6 +45,8 @@ spec:
               value: "{{ .Values.sidecar.httpPort }}"
             - name: SIDECAR_GRPC_PORT
               value: "{{ .Values.sidecar.grpcPort }}"
+            - name: EXECUTOR_AGENT_IMAGE
+              value: "{{ .Values.executorAgent.image.repository }}:{{ .Values.executorAgent.image.tag }}"
             - name: WORKSPACE_DIR
               value: "{{ .Values.operator.workspaceDir }}"
             - name: HTTP_CLIENT_TIMEOUT
@@ -57,14 +59,12 @@ spec:
               value: "{{ .Values.operator.enableMetrics }}"
             - name: ENABLE_MIDDLEWARE
               value: "{{ .Values.operator.enableMiddleware }}"
-            - name: ENABLE_AUTO_CLEANUP
-              value: "{{ .Values.cleanup.enableAutoCleanup }}"
-            - name: TASK_RETENTION_DAYS
-              value: "{{ .Values.cleanup.taskRetentionDays }}"
             - name: SANDBOX_IDLE_TIMEOUT_SECONDS
-              value: "{{ .Values.cleanup.sandboxIdleTimeoutSeconds }}"
-            - name: TTL_CHECK_INTERVAL
-              value: "{{ .Values.cleanup.ttlCheckInterval }}"
+              value: "{{ .Values.sandbox.idleTimeoutSeconds }}"
+            - name: SANDBOX_MAX_LIFETIME_SECONDS
+              value: "{{ .Values.sandbox.maxLifetimeSeconds }}"
+            - name: GATEWAY_PORT
+              value: "{{ .Values.gateway.port }}"
             {{- if .Values.clickhouse.enabled }}
             - name: CLICKHOUSE_ENABLED
               value: "true"

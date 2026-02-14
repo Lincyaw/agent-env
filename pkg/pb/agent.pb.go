@@ -21,120 +21,6 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-// FileRequest contains file operations to perform
-type FileRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	BasePath      string                 `protobuf:"bytes,1,opt,name=base_path,json=basePath,proto3" json:"base_path,omitempty"`
-	Files         map[string]string      `protobuf:"bytes,2,rep,name=files,proto3" json:"files,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"` // path -> content
-	Patch         string                 `protobuf:"bytes,3,opt,name=patch,proto3" json:"patch,omitempty"`                                                                           // Optional: unified diff format
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *FileRequest) Reset() {
-	*x = FileRequest{}
-	mi := &file_proto_agent_proto_msgTypes[0]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *FileRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*FileRequest) ProtoMessage() {}
-
-func (x *FileRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_agent_proto_msgTypes[0]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use FileRequest.ProtoReflect.Descriptor instead.
-func (*FileRequest) Descriptor() ([]byte, []int) {
-	return file_proto_agent_proto_rawDescGZIP(), []int{0}
-}
-
-func (x *FileRequest) GetBasePath() string {
-	if x != nil {
-		return x.BasePath
-	}
-	return ""
-}
-
-func (x *FileRequest) GetFiles() map[string]string {
-	if x != nil {
-		return x.Files
-	}
-	return nil
-}
-
-func (x *FileRequest) GetPatch() string {
-	if x != nil {
-		return x.Patch
-	}
-	return ""
-}
-
-// FileResponse indicates success or failure of file operations
-type FileResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
-	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *FileResponse) Reset() {
-	*x = FileResponse{}
-	mi := &file_proto_agent_proto_msgTypes[1]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *FileResponse) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*FileResponse) ProtoMessage() {}
-
-func (x *FileResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_agent_proto_msgTypes[1]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use FileResponse.ProtoReflect.Descriptor instead.
-func (*FileResponse) Descriptor() ([]byte, []int) {
-	return file_proto_agent_proto_rawDescGZIP(), []int{1}
-}
-
-func (x *FileResponse) GetSuccess() bool {
-	if x != nil {
-		return x.Success
-	}
-	return false
-}
-
-func (x *FileResponse) GetMessage() string {
-	if x != nil {
-		return x.Message
-	}
-	return ""
-}
-
 // ExecRequest specifies a command to execute
 type ExecRequest struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
@@ -149,7 +35,7 @@ type ExecRequest struct {
 
 func (x *ExecRequest) Reset() {
 	*x = ExecRequest{}
-	mi := &file_proto_agent_proto_msgTypes[2]
+	mi := &file_proto_agent_proto_msgTypes[0]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -161,7 +47,7 @@ func (x *ExecRequest) String() string {
 func (*ExecRequest) ProtoMessage() {}
 
 func (x *ExecRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_agent_proto_msgTypes[2]
+	mi := &file_proto_agent_proto_msgTypes[0]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -174,7 +60,7 @@ func (x *ExecRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExecRequest.ProtoReflect.Descriptor instead.
 func (*ExecRequest) Descriptor() ([]byte, []int) {
-	return file_proto_agent_proto_rawDescGZIP(), []int{2}
+	return file_proto_agent_proto_rawDescGZIP(), []int{0}
 }
 
 func (x *ExecRequest) GetCommand() []string {
@@ -225,7 +111,7 @@ type ExecLog struct {
 
 func (x *ExecLog) Reset() {
 	*x = ExecLog{}
-	mi := &file_proto_agent_proto_msgTypes[3]
+	mi := &file_proto_agent_proto_msgTypes[1]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -237,7 +123,7 @@ func (x *ExecLog) String() string {
 func (*ExecLog) ProtoMessage() {}
 
 func (x *ExecLog) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_agent_proto_msgTypes[3]
+	mi := &file_proto_agent_proto_msgTypes[1]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -250,7 +136,7 @@ func (x *ExecLog) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExecLog.ProtoReflect.Descriptor instead.
 func (*ExecLog) Descriptor() ([]byte, []int) {
-	return file_proto_agent_proto_rawDescGZIP(), []int{3}
+	return file_proto_agent_proto_rawDescGZIP(), []int{1}
 }
 
 func (x *ExecLog) GetStdout() string {
@@ -281,210 +167,6 @@ func (x *ExecLog) GetDone() bool {
 	return false
 }
 
-// SignalRequest specifies a signal to send to a process
-type SignalRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Pid           int32                  `protobuf:"varint,1,opt,name=pid,proto3" json:"pid,omitempty"`
-	Signal        string                 `protobuf:"bytes,2,opt,name=signal,proto3" json:"signal,omitempty"` // e.g., "SIGTERM", "SIGKILL"
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *SignalRequest) Reset() {
-	*x = SignalRequest{}
-	mi := &file_proto_agent_proto_msgTypes[4]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *SignalRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*SignalRequest) ProtoMessage() {}
-
-func (x *SignalRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_agent_proto_msgTypes[4]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use SignalRequest.ProtoReflect.Descriptor instead.
-func (*SignalRequest) Descriptor() ([]byte, []int) {
-	return file_proto_agent_proto_rawDescGZIP(), []int{4}
-}
-
-func (x *SignalRequest) GetPid() int32 {
-	if x != nil {
-		return x.Pid
-	}
-	return 0
-}
-
-func (x *SignalRequest) GetSignal() string {
-	if x != nil {
-		return x.Signal
-	}
-	return ""
-}
-
-// SignalResponse indicates success or failure of signal operation
-type SignalResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
-	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *SignalResponse) Reset() {
-	*x = SignalResponse{}
-	mi := &file_proto_agent_proto_msgTypes[5]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *SignalResponse) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*SignalResponse) ProtoMessage() {}
-
-func (x *SignalResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_agent_proto_msgTypes[5]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use SignalResponse.ProtoReflect.Descriptor instead.
-func (*SignalResponse) Descriptor() ([]byte, []int) {
-	return file_proto_agent_proto_rawDescGZIP(), []int{5}
-}
-
-func (x *SignalResponse) GetSuccess() bool {
-	if x != nil {
-		return x.Success
-	}
-	return false
-}
-
-func (x *SignalResponse) GetMessage() string {
-	if x != nil {
-		return x.Message
-	}
-	return ""
-}
-
-// ResetRequest triggers workspace cleanup
-type ResetRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	PreserveFiles bool                   `protobuf:"varint,1,opt,name=preserve_files,json=preserveFiles,proto3" json:"preserve_files,omitempty"` // Keep files but kill processes
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *ResetRequest) Reset() {
-	*x = ResetRequest{}
-	mi := &file_proto_agent_proto_msgTypes[6]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *ResetRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*ResetRequest) ProtoMessage() {}
-
-func (x *ResetRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_agent_proto_msgTypes[6]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use ResetRequest.ProtoReflect.Descriptor instead.
-func (*ResetRequest) Descriptor() ([]byte, []int) {
-	return file_proto_agent_proto_rawDescGZIP(), []int{6}
-}
-
-func (x *ResetRequest) GetPreserveFiles() bool {
-	if x != nil {
-		return x.PreserveFiles
-	}
-	return false
-}
-
-// ResetResponse indicates success or failure of reset operation
-type ResetResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Success       bool                   `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
-	Message       string                 `protobuf:"bytes,2,opt,name=message,proto3" json:"message,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *ResetResponse) Reset() {
-	*x = ResetResponse{}
-	mi := &file_proto_agent_proto_msgTypes[7]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *ResetResponse) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*ResetResponse) ProtoMessage() {}
-
-func (x *ResetResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_agent_proto_msgTypes[7]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use ResetResponse.ProtoReflect.Descriptor instead.
-func (*ResetResponse) Descriptor() ([]byte, []int) {
-	return file_proto_agent_proto_rawDescGZIP(), []int{7}
-}
-
-func (x *ResetResponse) GetSuccess() bool {
-	if x != nil {
-		return x.Success
-	}
-	return false
-}
-
-func (x *ResetResponse) GetMessage() string {
-	if x != nil {
-		return x.Message
-	}
-	return ""
-}
-
 // ShellInput represents input to an interactive shell session
 type ShellInput struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -502,7 +184,7 @@ type ShellInput struct {
 
 func (x *ShellInput) Reset() {
 	*x = ShellInput{}
-	mi := &file_proto_agent_proto_msgTypes[8]
+	mi := &file_proto_agent_proto_msgTypes[2]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -514,7 +196,7 @@ func (x *ShellInput) String() string {
 func (*ShellInput) ProtoMessage() {}
 
 func (x *ShellInput) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_agent_proto_msgTypes[8]
+	mi := &file_proto_agent_proto_msgTypes[2]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -527,7 +209,7 @@ func (x *ShellInput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ShellInput.ProtoReflect.Descriptor instead.
 func (*ShellInput) Descriptor() ([]byte, []int) {
-	return file_proto_agent_proto_rawDescGZIP(), []int{8}
+	return file_proto_agent_proto_rawDescGZIP(), []int{2}
 }
 
 func (x *ShellInput) GetInput() isShellInput_Input {
@@ -604,7 +286,7 @@ type ShellOutput struct {
 
 func (x *ShellOutput) Reset() {
 	*x = ShellOutput{}
-	mi := &file_proto_agent_proto_msgTypes[9]
+	mi := &file_proto_agent_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -616,7 +298,7 @@ func (x *ShellOutput) String() string {
 func (*ShellOutput) ProtoMessage() {}
 
 func (x *ShellOutput) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_agent_proto_msgTypes[9]
+	mi := &file_proto_agent_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -629,7 +311,7 @@ func (x *ShellOutput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ShellOutput.ProtoReflect.Descriptor instead.
 func (*ShellOutput) Descriptor() ([]byte, []int) {
-	return file_proto_agent_proto_rawDescGZIP(), []int{9}
+	return file_proto_agent_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *ShellOutput) GetData() string {
@@ -657,18 +339,7 @@ var File_proto_agent_proto protoreflect.FileDescriptor
 
 const file_proto_agent_proto_rawDesc = "" +
 	"\n" +
-	"\x11proto/agent.proto\x12\varl.sidecar\"\xb5\x01\n" +
-	"\vFileRequest\x12\x1b\n" +
-	"\tbase_path\x18\x01 \x01(\tR\bbasePath\x129\n" +
-	"\x05files\x18\x02 \x03(\v2#.arl.sidecar.FileRequest.FilesEntryR\x05files\x12\x14\n" +
-	"\x05patch\x18\x03 \x01(\tR\x05patch\x1a8\n" +
-	"\n" +
-	"FilesEntry\x12\x10\n" +
-	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"B\n" +
-	"\fFileResponse\x12\x18\n" +
-	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
-	"\amessage\x18\x02 \x01(\tR\amessage\"\xfe\x01\n" +
+	"\x11proto/agent.proto\x12\varl.sidecar\"\xfe\x01\n" +
 	"\vExecRequest\x12\x18\n" +
 	"\acommand\x18\x01 \x03(\tR\acommand\x123\n" +
 	"\x03env\x18\x02 \x03(\v2!.arl.sidecar.ExecRequest.EnvEntryR\x03env\x12\x1f\n" +
@@ -685,18 +356,7 @@ const file_proto_agent_proto_rawDesc = "" +
 	"\x06stdout\x18\x01 \x01(\tR\x06stdout\x12\x16\n" +
 	"\x06stderr\x18\x02 \x01(\tR\x06stderr\x12\x1b\n" +
 	"\texit_code\x18\x03 \x01(\x05R\bexitCode\x12\x12\n" +
-	"\x04done\x18\x04 \x01(\bR\x04done\"9\n" +
-	"\rSignalRequest\x12\x10\n" +
-	"\x03pid\x18\x01 \x01(\x05R\x03pid\x12\x16\n" +
-	"\x06signal\x18\x02 \x01(\tR\x06signal\"D\n" +
-	"\x0eSignalResponse\x12\x18\n" +
-	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
-	"\amessage\x18\x02 \x01(\tR\amessage\"5\n" +
-	"\fResetRequest\x12%\n" +
-	"\x0epreserve_files\x18\x01 \x01(\bR\rpreserveFiles\"C\n" +
-	"\rResetResponse\x12\x18\n" +
-	"\asuccess\x18\x01 \x01(\bR\asuccess\x12\x18\n" +
-	"\amessage\x18\x02 \x01(\tR\amessage\"\x85\x01\n" +
+	"\x04done\x18\x04 \x01(\bR\x04done\"\x85\x01\n" +
 	"\n" +
 	"ShellInput\x12\x14\n" +
 	"\x04data\x18\x01 \x01(\tH\x00R\x04data\x12\x18\n" +
@@ -708,12 +368,9 @@ const file_proto_agent_proto_rawDesc = "" +
 	"\vShellOutput\x12\x12\n" +
 	"\x04data\x18\x01 \x01(\tR\x04data\x12\x1b\n" +
 	"\texit_code\x18\x02 \x01(\x05R\bexitCode\x12\x16\n" +
-	"\x06closed\x18\x03 \x01(\bR\x06closed2\xe4\x02\n" +
-	"\fAgentService\x12B\n" +
-	"\vUpdateFiles\x12\x18.arl.sidecar.FileRequest\x1a\x19.arl.sidecar.FileResponse\x12;\n" +
-	"\aExecute\x12\x18.arl.sidecar.ExecRequest\x1a\x14.arl.sidecar.ExecLog0\x01\x12H\n" +
-	"\rSignalProcess\x12\x1a.arl.sidecar.SignalRequest\x1a\x1b.arl.sidecar.SignalResponse\x12>\n" +
-	"\x05Reset\x12\x19.arl.sidecar.ResetRequest\x1a\x1a.arl.sidecar.ResetResponse\x12I\n" +
+	"\x06closed\x18\x03 \x01(\bR\x06closed2\x96\x01\n" +
+	"\fAgentService\x12;\n" +
+	"\aExecute\x12\x18.arl.sidecar.ExecRequest\x1a\x14.arl.sidecar.ExecLog0\x01\x12I\n" +
 	"\x10InteractiveShell\x12\x17.arl.sidecar.ShellInput\x1a\x18.arl.sidecar.ShellOutput(\x010\x01B%Z#github.com/Lincyaw/agent-env/pkg/pbb\x06proto3"
 
 var (
@@ -728,39 +385,25 @@ func file_proto_agent_proto_rawDescGZIP() []byte {
 	return file_proto_agent_proto_rawDescData
 }
 
-var file_proto_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
+var file_proto_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
 var file_proto_agent_proto_goTypes = []any{
-	(*FileRequest)(nil),    // 0: arl.sidecar.FileRequest
-	(*FileResponse)(nil),   // 1: arl.sidecar.FileResponse
-	(*ExecRequest)(nil),    // 2: arl.sidecar.ExecRequest
-	(*ExecLog)(nil),        // 3: arl.sidecar.ExecLog
-	(*SignalRequest)(nil),  // 4: arl.sidecar.SignalRequest
-	(*SignalResponse)(nil), // 5: arl.sidecar.SignalResponse
-	(*ResetRequest)(nil),   // 6: arl.sidecar.ResetRequest
-	(*ResetResponse)(nil),  // 7: arl.sidecar.ResetResponse
-	(*ShellInput)(nil),     // 8: arl.sidecar.ShellInput
-	(*ShellOutput)(nil),    // 9: arl.sidecar.ShellOutput
-	nil,                    // 10: arl.sidecar.FileRequest.FilesEntry
-	nil,                    // 11: arl.sidecar.ExecRequest.EnvEntry
+	(*ExecRequest)(nil), // 0: arl.sidecar.ExecRequest
+	(*ExecLog)(nil),     // 1: arl.sidecar.ExecLog
+	(*ShellInput)(nil),  // 2: arl.sidecar.ShellInput
+	(*ShellOutput)(nil), // 3: arl.sidecar.ShellOutput
+	nil,                 // 4: arl.sidecar.ExecRequest.EnvEntry
 }
 var file_proto_agent_proto_depIdxs = []int32{
-	10, // 0: arl.sidecar.FileRequest.files:type_name -> arl.sidecar.FileRequest.FilesEntry
-	11, // 1: arl.sidecar.ExecRequest.env:type_name -> arl.sidecar.ExecRequest.EnvEntry
-	0,  // 2: arl.sidecar.AgentService.UpdateFiles:input_type -> arl.sidecar.FileRequest
-	2,  // 3: arl.sidecar.AgentService.Execute:input_type -> arl.sidecar.ExecRequest
-	4,  // 4: arl.sidecar.AgentService.SignalProcess:input_type -> arl.sidecar.SignalRequest
-	6,  // 5: arl.sidecar.AgentService.Reset:input_type -> arl.sidecar.ResetRequest
-	8,  // 6: arl.sidecar.AgentService.InteractiveShell:input_type -> arl.sidecar.ShellInput
-	1,  // 7: arl.sidecar.AgentService.UpdateFiles:output_type -> arl.sidecar.FileResponse
-	3,  // 8: arl.sidecar.AgentService.Execute:output_type -> arl.sidecar.ExecLog
-	5,  // 9: arl.sidecar.AgentService.SignalProcess:output_type -> arl.sidecar.SignalResponse
-	7,  // 10: arl.sidecar.AgentService.Reset:output_type -> arl.sidecar.ResetResponse
-	9,  // 11: arl.sidecar.AgentService.InteractiveShell:output_type -> arl.sidecar.ShellOutput
-	7,  // [7:12] is the sub-list for method output_type
-	2,  // [2:7] is the sub-list for method input_type
-	2,  // [2:2] is the sub-list for extension type_name
-	2,  // [2:2] is the sub-list for extension extendee
-	0,  // [0:2] is the sub-list for field type_name
+	4, // 0: arl.sidecar.ExecRequest.env:type_name -> arl.sidecar.ExecRequest.EnvEntry
+	0, // 1: arl.sidecar.AgentService.Execute:input_type -> arl.sidecar.ExecRequest
+	2, // 2: arl.sidecar.AgentService.InteractiveShell:input_type -> arl.sidecar.ShellInput
+	1, // 3: arl.sidecar.AgentService.Execute:output_type -> arl.sidecar.ExecLog
+	3, // 4: arl.sidecar.AgentService.InteractiveShell:output_type -> arl.sidecar.ShellOutput
+	3, // [3:5] is the sub-list for method output_type
+	1, // [1:3] is the sub-list for method input_type
+	1, // [1:1] is the sub-list for extension type_name
+	1, // [1:1] is the sub-list for extension extendee
+	0, // [0:1] is the sub-list for field type_name
 }
 
 func init() { file_proto_agent_proto_init() }
@@ -768,7 +411,7 @@ func file_proto_agent_proto_init() {
 	if File_proto_agent_proto != nil {
 		return
 	}
-	file_proto_agent_proto_msgTypes[8].OneofWrappers = []any{
+	file_proto_agent_proto_msgTypes[2].OneofWrappers = []any{
 		(*ShellInput_Data)(nil),
 		(*ShellInput_Signal)(nil),
 	}
@@ -778,7 +421,7 @@ func file_proto_agent_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_agent_proto_rawDesc), len(file_proto_agent_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   12,
+			NumMessages:   5,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

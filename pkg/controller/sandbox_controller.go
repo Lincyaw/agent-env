@@ -270,19 +270,6 @@ func (r *SandboxReconciler) Name() string {
 func (r *SandboxReconciler) handleReadySandbox(ctx context.Context, sandbox *arlv1alpha1.Sandbox) (ctrl.Result, error) {
 	logger := log.FromContext(ctx)
 
-	// Check if sandbox should be cleaned up (non-keepAlive after task completion)
-	if !sandbox.Spec.KeepAlive {
-		cleanupCond := findCondition(sandbox.Status.Conditions, "ReadyForCleanup")
-		if cleanupCond != nil && cleanupCond.Status == metav1.ConditionTrue {
-			logger.Info("Deleting non-keepAlive sandbox after task completion",
-				"sandbox", sandbox.Name)
-			if err := r.Delete(ctx, sandbox); err != nil {
-				return ctrl.Result{}, fmt.Errorf("failed to delete sandbox: %w", err)
-			}
-			return ctrl.Result{}, nil
-		}
-	}
-
 	// Use creation time as fallback if LastTaskTime is not set
 	if sandbox.Status.LastTaskTime == nil {
 		sandbox.Status.LastTaskTime = &sandbox.CreationTimestamp

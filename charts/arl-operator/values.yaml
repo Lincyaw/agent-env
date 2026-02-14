@@ -16,6 +16,31 @@ sidecar:
   httpPort: 8080
   grpcPort: 9090
 
+# Executor agent configuration
+executorAgent:
+  image:
+    repository: arl-executor-agent
+    pullPolicy: IfNotPresent
+    tag: "latest"
+
+# Gateway configuration
+gateway:
+  enabled: true
+  replicaCount: 1
+  image:
+    repository: arl-gateway
+    pullPolicy: IfNotPresent
+    tag: "latest"
+  port: 8080
+  sidecarGrpcPort: 9090
+  resources:
+    limits:
+      cpu: 500m
+      memory: 256Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+
 imagePullSecrets: []
 nameOverride: ""
 fullnameOverride: ""
@@ -62,12 +87,10 @@ pool:
   defaultRequeueDelay: "10s"
   sandboxCheckInterval: "2s"
 
-# Cleanup configuration
-cleanup:
-  enableAutoCleanup: true
-  taskRetentionDays: 30
-  sandboxIdleTimeoutSeconds: 3600
-  ttlCheckInterval: "30s"
+# Sandbox lifecycle configuration
+sandbox:
+  idleTimeoutSeconds: 3600
+  maxLifetimeSeconds: 0
 
 # Altinity ClickHouse Operator (installed as dependency)
 clickhouse-operator:
@@ -85,6 +108,8 @@ clickhouse:
   password: "clickhouse123"
   batchSize: 100
   flushInterval: "10s"
+  # Data retention
+  retentionDays: 30
   # Storage configuration
   storageClassName: "juicefs-sc"
   storageSize: "10Gi"

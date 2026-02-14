@@ -4,37 +4,13 @@ package arl.sidecar;
 
 option go_package = "github.com/Lincyaw/agent-env/pkg/pb";
 
-// AgentService provides file operations, process control, and environment management
-// Note: RPC method numbers 6-20 are reserved for future observation interfaces
-// (e.g., ReadFile, ListDirectory, GetProcessStatus, etc.)
+// AgentService provides command execution and interactive shell
 service AgentService {
-  // UpdateFiles applies file patches or overwrites
-  rpc UpdateFiles(FileRequest) returns (FileResponse);
-  
   // Execute runs a command (Job mode) or starts a background service (Service mode)
   rpc Execute(ExecRequest) returns (stream ExecLog);
-  
-  // SignalProcess sends signals (SIGTERM/SIGKILL) to processes
-  rpc SignalProcess(SignalRequest) returns (SignalResponse);
-  
-  // Reset cleans the workspace
-  rpc Reset(ResetRequest) returns (ResetResponse);
-  
+
   // InteractiveShell provides bidirectional streaming for interactive shell sessions
   rpc InteractiveShell(stream ShellInput) returns (stream ShellOutput);
-}
-
-// FileRequest contains file operations to perform
-message FileRequest {
-  string base_path = 1;
-  map<string, string> files = 2;  // path -> content
-  string patch = 3;  // Optional: unified diff format
-}
-
-// FileResponse indicates success or failure of file operations
-message FileResponse {
-  bool success = 1;
-  string message = 2;
 }
 
 // ExecRequest specifies a command to execute
@@ -52,29 +28,6 @@ message ExecLog {
   string stderr = 2;
   int32 exit_code = 3;
   bool done = 4;
-}
-
-// SignalRequest specifies a signal to send to a process
-message SignalRequest {
-  int32 pid = 1;
-  string signal = 2;  // e.g., "SIGTERM", "SIGKILL"
-}
-
-// SignalResponse indicates success or failure of signal operation
-message SignalResponse {
-  bool success = 1;
-  string message = 2;
-}
-
-// ResetRequest triggers workspace cleanup
-message ResetRequest {
-  bool preserve_files = 1;  // Keep files but kill processes
-}
-
-// ResetResponse indicates success or failure of reset operation
-message ResetResponse {
-  bool success = 1;
-  string message = 2;
 }
 
 // ShellInput represents input to an interactive shell session

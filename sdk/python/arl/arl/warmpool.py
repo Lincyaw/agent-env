@@ -1,267 +1,141 @@
-"""WarmPool management for ARL."""
+"""WarmPool management for ARL via Gateway API."""
+
+from __future__ import annotations
 
 import time
-from typing import Any, cast
 
-from kubernetes import client, config
+from arl.gateway_client import GatewayClient, PoolNotReadyError
+from arl.types import PoolInfo, ToolsSpec
 
 
 class WarmPoolManager:
-    """Manager for creating and managing WarmPools.
-
-    Provides high-level API for WarmPool lifecycle management without
-    requiring users to understand Kubernetes YAML configurations.
+    """Manager for creating and managing WarmPools via the Gateway API.
 
     Examples:
-        Create a WarmPool with default Python image:
-
-        >>> manager = WarmPoolManager(namespace="default")
+        >>> manager = WarmPoolManager()
         >>> manager.create_warmpool(
-        ...     name="python-39-std",
+        ...     name="python-39",
         ...     image="python:3.9-slim",
-        ...     replicas=2
-        ... )
-
-        Create a WarmPool for SWE-bench:
-
-        >>> manager = WarmPoolManager(namespace="default")
-        >>> manager.create_warmpool(
-        ...     name="swebench-emotion",
-        ...     image="swebench/swesmith.x86_64.emotion_1776_js-emotion.b882bcba",
         ...     replicas=2,
-        ...     sidecar_image="10.10.10.240/library/arl-sidecar:latest"
         ... )
+        >>> info = manager.wait_for_ready("python-39")
+        >>> print(f"Ready: {info.ready_replicas}/{info.replicas}")
     """
 
     def __init__(
         self,
         namespace: str = "default",
-        timeout: int = 300,
+        gateway_url: str = "http://localhost:8080",
+        timeout: float = 300.0,
     ) -> None:
-        """Initialize WarmPool manager.
-
-        Args:
-            namespace: Kubernetes namespace (default: "default")
-            timeout: Maximum seconds to wait for operations (default: 300)
-        """
         self.namespace = namespace
-        self.timeout = timeout
-        self._custom_api: client.CustomObjectsApi | None = None
-
-    @property
-    def custom_api(self) -> client.CustomObjectsApi:
-        """Get Kubernetes custom objects API client (lazy initialization)."""
-        if self._custom_api is None:
-            try:
-                config.load_incluster_config()
-            except config.ConfigException:
-                config.load_kube_config()
-            self._custom_api = client.CustomObjectsApi()
-        return self._custom_api
+        self._client = GatewayClient(base_url=gateway_url, timeout=timeout)
 
     def create_warmpool(
         self,
         name: str,
         image: str,
-        sidecar_image: str,
         replicas: int = 2,
-        command: list[str] | None = None,
-        workspace_path: str = "/workspace",
-        testbed_path: str | None = None,
-    ) -> dict[str, Any]:
+        tools: ToolsSpec | None = None,
+    ) -> None:
         """Create a new WarmPool.
 
         Args:
-            name: Name of the WarmPool
-            image: Container image for the executor (e.g., "python:3.9-slim")
-            replicas: Number of warm pods to maintain (default: 2)
-            sidecar_image: Sidecar agent image (default: ARL sidecar)
-            command: Command to run in executor container (default: ["sh", "-c", "sleep infinity"])
-            workspace_path: Path to mount workspace volume (default: "/workspace")
-            testbed_path: Optional path to mount testbed volume (for SWE-bench scenarios)
-
-        Returns:
-            WarmPool resource dictionary
-
-        Raises:
-            RuntimeError: If WarmPool creation fails
-
-        Examples:
-            Create a basic Python pool:
-
-            >>> manager = WarmPoolManager()
-            >>> manager.create_warmpool("python-39", "python:3.9-slim")
-
-            Create a SWE-bench pool with testbed:
-
-            >>> manager = WarmPoolManager()
-            >>> manager.create_warmpool(
-            ...     name="swebench-emotion",
-            ...     image="swebench/swesmith.x86_64.emotion_1776_js-emotion.b882bcba",
-            ...     testbed_path="/testbed"
-            ... )
+            name: Name of the WarmPool.
+            image: Container image for the executor.
+            replicas: Number of warm pods to maintain.
+            tools: Optional tools specification to provision in the executor container.
         """
-        if command is None:
-            command = ["/bin/sh", "-c", "sleep infinity"]
-
-        # Build volumes configuration
-        volumes: list[dict[str, Any]] = [
-            {"name": "workspace", "emptyDir": {}},
-        ]
-
-        # Build volume mounts for executor
-        executor_volume_mounts: list[dict[str, Any]] = [
-            {"name": "workspace", "mountPath": workspace_path},
-        ]
-
-        # Build volume mounts for sidecar
-        sidecar_volume_mounts: list[dict[str, Any]] = [
-            {"name": "workspace", "mountPath": workspace_path},
-        ]
-
-        # Add testbed volume if specified
-        if testbed_path:
-            volumes.append({"name": "testbed", "emptyDir": {}})
-            executor_volume_mounts.append({"name": "testbed", "mountPath": testbed_path})
-            sidecar_volume_mounts.append({"name": "testbed", "mountPath": testbed_path})
-
-        # Build WarmPool specification
-        warmpool_body: dict[str, Any] = {
-            "apiVersion": "arl.infra.io/v1alpha1",
-            "kind": "WarmPool",
-            "metadata": {
-                "name": name,
-                "namespace": self.namespace,
-            },
-            "spec": {
-                "replicas": replicas,
-                "template": {
-                    "spec": {
-                        "containers": [
-                            {
-                                "name": "executor",
-                                "image": image,
-                                "command": command,
-                                "volumeMounts": executor_volume_mounts,
-                            },
-                            {
-                                "name": "sidecar",
-                                "image": sidecar_image,
-                                "imagePullPolicy": "Always",
-                                "ports": [
-                                    {
-                                        "name": "http",
-                                        "containerPort": 8080,
-                                        "protocol": "TCP",
-                                    },
-                                    {
-                                        "name": "grpc",
-                                        "containerPort": 9090,
-                                        "protocol": "TCP",
-                                    },
-                                ],
-                                "volumeMounts": sidecar_volume_mounts,
-                            },
-                        ],
-                        "volumes": volumes,
-                    }
-                },
-            },
-        }
-
-        # Create WarmPool resource
-        warmpool = self.custom_api.create_namespaced_custom_object(
-            group="arl.infra.io",
-            version="v1alpha1",
+        self._client.create_pool(
+            name=name,
             namespace=self.namespace,
-            plural="warmpools",
-            body=warmpool_body,
+            image=image,
+            replicas=replicas,
+            tools=tools,
         )
 
-        return cast(dict[str, Any], warmpool)
-
-    def get_warmpool(self, name: str) -> dict[str, Any]:
-        """Get WarmPool status.
+    def get_warmpool(self, name: str) -> PoolInfo:
+        """Get WarmPool info.
 
         Args:
-            name: Name of the WarmPool
+            name: Name of the WarmPool.
 
         Returns:
-            WarmPool resource dictionary
+            PoolInfo with current pool status.
+        """
+        return self._client.get_pool(name, namespace=self.namespace)
+
+    def wait_for_ready(
+        self,
+        name: str,
+        timeout: float = 300.0,
+        poll_interval: float = 5.0,
+    ) -> PoolInfo:
+        """Wait for a WarmPool to have ready replicas.
+
+        Polls the pool status and returns when ready replicas are available.
+        Raises PoolNotReadyError immediately if pods are failing (e.g.,
+        ImagePullBackOff, CrashLoopBackOff) instead of waiting until timeout.
+
+        Args:
+            name: Name of the WarmPool.
+            timeout: Maximum time to wait in seconds.
+            poll_interval: Time between polls in seconds.
+
+        Returns:
+            PoolInfo when pool has ready replicas.
 
         Raises:
-            client.ApiException: If WarmPool not found
+            PoolNotReadyError: If pods are failing with no ready replicas.
+            TimeoutError: If timeout is exceeded without pool becoming ready.
         """
-        warmpool_obj: object = self.custom_api.get_namespaced_custom_object(
-            group="arl.infra.io",
-            version="v1alpha1",
-            namespace=self.namespace,
-            plural="warmpools",
-            name=name,
-        )
-        return cast(dict[str, Any], warmpool_obj)
+        deadline = time.monotonic() + timeout
+        last_info: PoolInfo | None = None
+        consecutive_failures = 0
+
+        while time.monotonic() < deadline:
+            info = self.get_warmpool(name)
+            last_info = info
+
+            if info.ready_replicas > 0:
+                return info
+
+            # Check for failing pods
+            for cond in info.conditions:
+                if cond.type == "PodsFailing" and cond.status == "True":
+                    consecutive_failures += 1
+                    # Fail fast after 2 consecutive checks with failures and no ready pods
+                    # (gives the system a brief chance to recover)
+                    if consecutive_failures >= 2:
+                        raise PoolNotReadyError(
+                            pool_name=name,
+                            message=cond.message or cond.reason,
+                            conditions=info.conditions,
+                        )
+                    break
+            else:
+                consecutive_failures = 0
+
+            time.sleep(poll_interval)
+
+        # Timeout reached
+        diag = ""
+        if last_info:
+            diag = (
+                f"replicas={last_info.replicas} "
+                f"ready={last_info.ready_replicas} "
+                f"allocated={last_info.allocated_replicas}"
+            )
+            for cond in last_info.conditions:
+                if cond.status == "True" or (cond.type == "Ready" and cond.status == "False"):
+                    diag += f" [{cond.type}: {cond.message}]"
+
+        raise TimeoutError(f"Pool '{name}' not ready after {timeout}s: {diag}")
 
     def delete_warmpool(self, name: str) -> None:
         """Delete a WarmPool.
 
         Args:
-            name: Name of the WarmPool to delete
-
-        Raises:
-            client.ApiException: If deletion fails
+            name: Name of the WarmPool to delete.
         """
-        self.custom_api.delete_namespaced_custom_object(
-            group="arl.infra.io",
-            version="v1alpha1",
-            namespace=self.namespace,
-            plural="warmpools",
-            name=name,
-        )
-
-    def wait_for_warmpool_ready(self, name: str, poll_interval: float = 2.0) -> None:
-        """Wait for WarmPool to have ready replicas.
-
-        Args:
-            name: Name of the WarmPool
-            poll_interval: Seconds between status checks (default: 2.0)
-
-        Raises:
-            RuntimeError: If WarmPool doesn't become ready within timeout
-        """
-        start_time: float = time.time()
-        last_ready_count: int = -1
-
-        print(f"⏳ Waiting for WarmPool '{name}' to be ready...")
-
-        while time.time() - start_time < self.timeout:
-            try:
-                warmpool = self.get_warmpool(name)
-                status: dict[str, Any] = cast(dict[str, Any], warmpool.get("status", {}))
-                ready_replicas: int = status.get("readyReplicas", 0)
-                desired_replicas: int = warmpool.get("spec", {}).get("replicas", 0)
-
-                # Show progress updates
-                if ready_replicas != last_ready_count:
-                    if ready_replicas > 0 or desired_replicas > 0:
-                        print(f"   {ready_replicas}/{desired_replicas} pods ready")
-                    last_ready_count = ready_replicas
-
-                if ready_replicas >= desired_replicas and desired_replicas > 0:
-                    print(f"✓ WarmPool '{name}' is ready with {ready_replicas} pods")
-                    return
-
-            except client.ApiException as e:
-                if e.status == 404:
-                    raise RuntimeError(
-                        f"WarmPool '{name}' not found in namespace '{self.namespace}'"
-                    ) from e
-                if e.status != 404:
-                    raise RuntimeError(f"Failed to get WarmPool status: {e.reason}") from e
-
-            time.sleep(poll_interval)
-
-        raise RuntimeError(
-            f"WarmPool '{name}' not ready after {self.timeout}s. "
-            f"Ready pods: {last_ready_count}. "
-            f"Check 'kubectl describe warmpool {name} -n {self.namespace}' for status."
-        )
+        self._client.delete_pool(name, namespace=self.namespace)

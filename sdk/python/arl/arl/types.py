@@ -1,196 +1,163 @@
-"""Type definitions for ARL wrapper."""
+"""Type definitions for ARL SDK using Pydantic models."""
 
-from typing import TypedDict
+from __future__ import annotations
+
+from datetime import datetime
+
+from pydantic import BaseModel, Field
 
 
-class TaskStep(TypedDict, total=False):
-    """Task step configuration.
-
-    Attributes:
-        name: Step identifier
-        type: Step type - "Command" or "FilePatch"
-        command: Command and arguments (for Command type)
-        env: Environment variables (optional)
-        workDir: Working directory (optional)
-        path: File path (for FilePatch type)
-        content: File content (for FilePatch type)
-        traceID: Optional trace ID for distributed tracing
-        container: Container to execute in ("sidecar" or "executor", default: "sidecar")
-    """
+class StepRequest(BaseModel):
+    """A single execution step request."""
 
     name: str
-    type: str  # "Command" or "FilePatch"
-    # For Command steps
-    command: list[str]
-    env: dict[str, str]
-    workDir: str
-    # For FilePatch steps
-    path: str
-    content: str
-    # For distributed tracing
-    traceID: str
-    # Container selection
-    container: str  # "sidecar" or "executor"
+    command: list[str] | None = None
+    env: dict[str, str] | None = None
+    work_dir: str | None = Field(None, alias="workDir")
+    timeout: int | None = None
 
 
-class KubernetesMetadata(TypedDict, total=False):
-    """Kubernetes resource metadata.
+class StepOutput(BaseModel):
+    """Output of a single execution step."""
 
-    Attributes:
-        name: Resource name
-        namespace: Kubernetes namespace
-        labels: Resource labels
-        annotations: Resource annotations
-        uid: Resource UID
-        resourceVersion: Resource version
-        creationTimestamp: Creation timestamp
-    """
+    stdout: str = ""
+    stderr: str = ""
+    exit_code: int = 0
 
+
+class StepResult(BaseModel):
+    """Result of a single execution step including metadata."""
+
+    index: int
     name: str
+    output: StepOutput
+    snapshot_id: str = ""
+    duration_ms: int = 0
+    timestamp: datetime | None = None
+
+
+class SessionInfo(BaseModel):
+    """Information about an active session."""
+
+    id: str
+    sandbox_name: str = Field(alias="sandboxName")
     namespace: str
-    labels: dict[str, str]
-    annotations: dict[str, str]
-    uid: str
-    resourceVersion: str
-    creationTimestamp: str
+    pool_ref: str = Field(alias="poolRef")
+    pod_ip: str = Field("", alias="podIP")
+    pod_name: str = Field("", alias="podName")
+    created_at: datetime | None = Field(None, alias="createdAt")
+
+    model_config = {"populate_by_name": True}
 
 
-class SandboxSpec(TypedDict, total=False):
-    """Sandbox specification.
+class ExecuteResponse(BaseModel):
+    """Response from executing steps."""
 
-    Attributes:
-        poolRef: Name of the WarmPool to allocate from
-        keepAlive: Whether sandbox should persist
-    """
+    session_id: str = Field(alias="sessionID")
+    results: list[StepResult] = []
+    total_duration_ms: int = Field(0, alias="totalDurationMs")
 
-    poolRef: str
-    keepAlive: bool
+    model_config = {"populate_by_name": True}
 
 
-class SandboxCondition(TypedDict, total=False):
-    """Sandbox status condition.
-
-    Attributes:
-        type: Condition type
-        status: Condition status (True/False)
-        reason: Reason for condition
-        message: Human-readable message
-        lastTransitionTime: Last transition timestamp
-    """
+class PoolCondition(BaseModel):
+    """A condition on a warm pool."""
 
     type: str
     status: str
-    reason: str
-    message: str
-    lastTransitionTime: str
+    reason: str = ""
+    message: str = ""
 
 
-class SandboxStatus(TypedDict, total=False):
-    """Sandbox status.
-
-    Attributes:
-        phase: Current phase (Pending/Ready/Failed)
-        podName: Name of the backing pod
-        conditions: List of status conditions
-        message: Status message
-    """
-
-    phase: str
-    podName: str
-    conditions: list[SandboxCondition]
-    message: str
-
-
-class SandboxResource(TypedDict, total=False):
-    """Kubernetes Sandbox resource.
-
-    Attributes:
-        apiVersion: API version
-        kind: Resource kind
-        metadata: Resource metadata
-        spec: Sandbox specification
-        status: Sandbox status
-    """
-
-    apiVersion: str
-    kind: str
-    metadata: KubernetesMetadata
-    spec: SandboxSpec
-    status: SandboxStatus
-
-
-class TaskSpec(TypedDict, total=False):
-    """Task specification.
-
-    Attributes:
-        sandboxRef: Reference to sandbox
-        steps: List of task steps
-        traceID: Optional trace ID
-    """
-
-    sandboxRef: str
-    steps: list[TaskStep]
-    traceID: str
-
-
-class TaskStepResult(TypedDict, total=False):
-    """Result of a single task step.
-
-    Attributes:
-        name: Step name
-        exitCode: Exit code
-        stdout: Standard output
-        stderr: Standard error
-        error: Error message if step failed
-    """
+class PoolInfo(BaseModel):
+    """Information about a warm pool."""
 
     name: str
-    exitCode: int
-    stdout: str
-    stderr: str
+    namespace: str
+    replicas: int = 0
+    ready_replicas: int = Field(0, alias="readyReplicas")
+    allocated_replicas: int = Field(0, alias="allocatedReplicas")
+    conditions: list[PoolCondition] = []
+
+    model_config = {"populate_by_name": True}
+
+
+class TrajectoryEntry(BaseModel):
+    """A single trajectory entry for RL/SFT export."""
+
+    session_id: str
+    step: int
+    action: dict[str, object]
+    observation: dict[str, object]
+    snapshot_id: str = ""
+    timestamp: datetime | None = None
+
+
+class ErrorResponse(BaseModel):
+    """Error response from the gateway."""
+
     error: str
+    detail: str = ""
 
 
-class TaskStatus(TypedDict, total=False):
-    """Task status.
-
-    Attributes:
-        state: Current state (Pending/Running/Succeeded/Failed)
-        startTime: Task start time
-        completionTime: Task completion time
-        steps: Results of individual steps
-        stdout: Combined stdout (for backward compatibility)
-        stderr: Combined stderr (for backward compatibility)
-        exitCode: Exit code (for backward compatibility)
-        message: Status message
-    """
-
-    state: str
-    startTime: str
-    completionTime: str
-    steps: list[TaskStepResult]
-    stdout: str
-    stderr: str
-    exitCode: int
-    message: str
+# --- Tool types ---
 
 
-class TaskResource(TypedDict, total=False):
-    """Kubernetes Task resource.
+class ToolManifest(BaseModel):
+    """A single tool manifest from registry.json."""
 
-    Attributes:
-        apiVersion: API version
-        kind: Resource kind
-        metadata: Resource metadata
-        spec: Task specification
-        status: Task status
-        callback_result: Optional callback execution result
-    """
+    name: str
+    description: str = ""
+    parameters: dict[str, object] = {}
+    entrypoint: str
+    runtime: str
+    timeout: str = ""
 
-    apiVersion: str
-    kind: str
-    metadata: KubernetesMetadata
-    spec: TaskSpec
-    status: TaskStatus
-    # For execute_with_callback
-    callback_result: "TaskResource"
+
+class ToolsRegistry(BaseModel):
+    """Registry of all available tools in a sandbox."""
+
+    tools: list[ToolManifest] = []
+
+
+class ToolResult(BaseModel):
+    """Result of a tool call (parsed JSON stdout)."""
+
+    raw_output: str = ""
+    parsed: dict[str, object] = {}
+    exit_code: int = 0
+    stderr: str = ""
+
+
+class InlineToolSpec(BaseModel):
+    """Inline tool definition for WarmPool creation."""
+
+    name: str
+    description: str = ""
+    parameters: dict[str, object] = {}
+    runtime: str
+    entrypoint: str
+    timeout: str = ""
+    files: dict[str, str]
+
+
+class ToolsImageSource(BaseModel):
+    """Reference to a container image containing tools."""
+
+    image: str
+
+
+class ToolsConfigMapSource(BaseModel):
+    """Reference to a ConfigMap containing tools."""
+
+    name: str
+
+
+class ToolsSpec(BaseModel):
+    """Tools specification for a WarmPool."""
+
+    images: list[ToolsImageSource] = []
+    config_maps: list[ToolsConfigMapSource] = Field(default=[], alias="configMaps")
+    inline: list[InlineToolSpec] = []
+
+    model_config = {"populate_by_name": True}

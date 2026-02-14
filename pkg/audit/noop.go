@@ -14,8 +14,8 @@ func NewNoOpWriter() *NoOpWriter {
 	return &NoOpWriter{}
 }
 
-// WriteTaskCompletion is a no-op
-func (n *NoOpWriter) WriteTaskCompletion(_ context.Context, _ interfaces.TaskAuditRecord) error {
+// WriteSessionStep is a no-op
+func (n *NoOpWriter) WriteSessionStep(_ context.Context, _ interfaces.SessionStepAuditRecord) error {
 	return nil
 }
 

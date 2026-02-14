@@ -7,8 +7,8 @@ import (
 
 // AuditWriter defines the interface for writing audit logs
 type AuditWriter interface {
-	// WriteTaskCompletion writes a task completion audit record
-	WriteTaskCompletion(ctx context.Context, record TaskAuditRecord) error
+	// WriteSessionStep writes a session step audit record (replaces task completion)
+	WriteSessionStep(ctx context.Context, record SessionStepAuditRecord) error
 
 	// WriteSandboxEvent writes a sandbox lifecycle event audit record
 	WriteSandboxEvent(ctx context.Context, record SandboxAuditRecord) error
@@ -20,24 +20,21 @@ type AuditWriter interface {
 	Close() error
 }
 
-// TaskAuditRecord represents a task audit log entry
-type TaskAuditRecord struct {
-	TraceID        string
-	Namespace      string
-	Name           string
-	SandboxRef     string
-	State          string
-	ExitCode       int32
-	Duration       string
-	StartTime      time.Time
-	CompletionTime time.Time
-	StepCount      int
-	// Input is the JSON-serialized task steps (input commands/content)
-	Input string
-	// Stdout is the standard output from task execution
-	Stdout string
-	// Stderr is the standard error output from task execution
-	Stderr string
+// SessionStepAuditRecord represents a session step audit log entry (replaces TaskAuditRecord)
+type SessionStepAuditRecord struct {
+	SessionID  string
+	TraceID    string
+	Namespace  string
+	StepIndex  int
+	StepName   string
+	StepType   string
+	Input      string
+	Stdout     string
+	Stderr     string
+	ExitCode   int32
+	SnapshotID string
+	DurationMs int64
+	Timestamp  time.Time
 }
 
 // SandboxAuditRecord represents a sandbox audit log entry
@@ -54,7 +51,7 @@ type SandboxAuditRecord struct {
 // NoOpAuditWriter is a no-op implementation for when auditing is disabled
 type NoOpAuditWriter struct{}
 
-func (n *NoOpAuditWriter) WriteTaskCompletion(_ context.Context, _ TaskAuditRecord) error {
+func (n *NoOpAuditWriter) WriteSessionStep(_ context.Context, _ SessionStepAuditRecord) error {
 	return nil
 }
 

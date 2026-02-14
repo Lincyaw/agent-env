@@ -10,36 +10,19 @@ import (
 
 // PrometheusCollector implements interfaces.MetricsCollector using Prometheus
 type PrometheusCollector struct {
-	taskDuration        *prometheus.HistogramVec
-	taskStateCounter    *prometheus.CounterVec
 	poolUtilization     *prometheus.GaugeVec
 	sandboxAllocation   prometheus.Histogram
 	reconcileTotal      *prometheus.CounterVec
 	reconcileErrors     *prometheus.CounterVec
-	taskCleanupTotal    *prometheus.CounterVec
 	sandboxIdleDuration *prometheus.HistogramVec
 	auditWriteErrors    *prometheus.CounterVec
-	resourceAge         *prometheus.HistogramVec
+	gatewayStepDuration *prometheus.HistogramVec
+	gatewayStepResult   *prometheus.CounterVec
 }
 
 // NewPrometheusCollector creates a new Prometheus metrics collector
 func NewPrometheusCollector() interfaces.MetricsCollector {
 	c := &PrometheusCollector{
-		taskDuration: prometheus.NewHistogramVec(
-			prometheus.HistogramOpts{
-				Name:    "arl_task_duration_seconds",
-				Help:    "Duration of task execution in seconds",
-				Buckets: []float64{0.1, 0.5, 1, 5, 10, 30, 60, 120, 300},
-			},
-			[]string{"namespace", "task"},
-		),
-		taskStateCounter: prometheus.NewCounterVec(
-			prometheus.CounterOpts{
-				Name: "arl_task_state_total",
-				Help: "Total number of task state changes",
-			},
-			[]string{"namespace", "task", "state"},
-		),
 		poolUtilization: prometheus.NewGaugeVec(
 			prometheus.GaugeOpts{
 				Name: "arl_pool_utilization",
@@ -68,13 +51,6 @@ func NewPrometheusCollector() interfaces.MetricsCollector {
 			},
 			[]string{"controller"},
 		),
-		taskCleanupTotal: prometheus.NewCounterVec(
-			prometheus.CounterOpts{
-				Name: "arl_task_cleanup_total",
-				Help: "Total number of tasks cleaned up",
-			},
-			[]string{"namespace", "state"},
-		),
 		sandboxIdleDuration: prometheus.NewHistogramVec(
 			prometheus.HistogramOpts{
 				Name:    "arl_sandbox_idle_duration_seconds",
@@ -90,80 +66,66 @@ func NewPrometheusCollector() interfaces.MetricsCollector {
 			},
 			[]string{"resource_type"},
 		),
-		resourceAge: prometheus.NewHistogramVec(
+		gatewayStepDuration: prometheus.NewHistogramVec(
 			prometheus.HistogramOpts{
-				Name:    "arl_resource_age_seconds",
-				Help:    "Age of resources in seconds",
-				Buckets: []float64{60, 300, 600, 1800, 3600, 7200, 14400, 28800, 86400},
+				Name:    "arl_gateway_step_duration_seconds",
+				Help:    "Duration of gateway step execution in seconds",
+				Buckets: []float64{0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1, 5, 10, 30},
 			},
-			[]string{"resource_type", "namespace"},
+			[]string{"session_id", "step_type"},
+		),
+		gatewayStepResult: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "arl_gateway_step_result_total",
+				Help: "Total number of gateway step executions by result",
+			},
+			[]string{"session_id", "step_type"},
 		),
 	}
 
-	// Register metrics with controller-runtime metrics registry
 	metrics.Registry.MustRegister(
-		c.taskDuration,
-		c.taskStateCounter,
 		c.poolUtilization,
 		c.sandboxAllocation,
 		c.reconcileTotal,
 		c.reconcileErrors,
-		c.taskCleanupTotal,
 		c.sandboxIdleDuration,
 		c.auditWriteErrors,
-		c.resourceAge,
+		c.gatewayStepDuration,
+		c.gatewayStepResult,
 	)
 
 	return c
 }
 
-// RecordTaskDuration records task execution duration
-func (c *PrometheusCollector) RecordTaskDuration(namespace, taskName string, duration time.Duration) {
-	c.taskDuration.WithLabelValues(namespace, taskName).Observe(duration.Seconds())
-}
-
-// RecordTaskState records task state changes
-func (c *PrometheusCollector) RecordTaskState(namespace, taskName, state string) {
-	c.taskStateCounter.WithLabelValues(namespace, taskName, state).Inc()
-}
-
-// RecordPoolUtilization records warm pool utilization
 func (c *PrometheusCollector) RecordPoolUtilization(poolName string, ready, allocated int32) {
 	c.poolUtilization.WithLabelValues(poolName, "ready").Set(float64(ready))
 	c.poolUtilization.WithLabelValues(poolName, "allocated").Set(float64(allocated))
 }
 
-// RecordSandboxAllocation records sandbox allocation time
-func (c *PrometheusCollector) RecordSandboxAllocation(poolName string, duration time.Duration) {
+func (c *PrometheusCollector) RecordSandboxAllocation(_ string, duration time.Duration) {
 	c.sandboxAllocation.Observe(duration.Seconds())
 }
 
-// IncrementReconcileTotal increments reconciliation counter
 func (c *PrometheusCollector) IncrementReconcileTotal(controller, result string) {
 	c.reconcileTotal.WithLabelValues(controller, result).Inc()
 }
 
-// IncrementReconcileErrors increments reconciliation error counter
 func (c *PrometheusCollector) IncrementReconcileErrors(controller string) {
 	c.reconcileErrors.WithLabelValues(controller).Inc()
 }
 
-// RecordTaskCleanup records task cleanup events
-func (c *PrometheusCollector) RecordTaskCleanup(namespace, state string) {
-	c.taskCleanupTotal.WithLabelValues(namespace, state).Inc()
-}
-
-// RecordSandboxIdleDuration records sandbox idle duration
 func (c *PrometheusCollector) RecordSandboxIdleDuration(namespace string, duration time.Duration) {
 	c.sandboxIdleDuration.WithLabelValues(namespace).Observe(duration.Seconds())
 }
 
-// RecordAuditWriteError records audit write errors
 func (c *PrometheusCollector) RecordAuditWriteError(resourceType string) {
 	c.auditWriteErrors.WithLabelValues(resourceType).Inc()
 }
 
-// RecordResourceAge records resource age
-func (c *PrometheusCollector) RecordResourceAge(resourceType, namespace string, age time.Duration) {
-	c.resourceAge.WithLabelValues(resourceType, namespace).Observe(age.Seconds())
+func (c *PrometheusCollector) RecordGatewayStepDuration(sessionID, stepType string, duration time.Duration) {
+	c.gatewayStepDuration.WithLabelValues(sessionID, stepType).Observe(duration.Seconds())
+}
+
+func (c *PrometheusCollector) RecordGatewayStepResult(sessionID, stepType string, _ int32) {
+	c.gatewayStepResult.WithLabelValues(sessionID, stepType).Inc()
 }

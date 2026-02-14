@@ -41,12 +41,15 @@ type Config struct {
 	ClickHouseBatchSize     int
 	ClickHouseFlushInterval time.Duration
 
-	// Cleanup configuration
-	TaskRetentionDays         int
+	// Sandbox lifecycle configuration
 	SandboxIdleTimeoutSeconds int32
 	SandboxMaxLifetimeSeconds int32
-	EnableAutoCleanup         bool
-	TTLCheckInterval          time.Duration
+
+	// Executor agent configuration
+	ExecutorAgentImage string
+
+	// Gateway configuration
+	GatewayPort int
 }
 
 // DefaultConfig returns the default configuration
@@ -74,11 +77,10 @@ func DefaultConfig() *Config {
 		ClickHousePassword:        "",
 		ClickHouseBatchSize:       100,
 		ClickHouseFlushInterval:   10 * time.Second,
-		TaskRetentionDays:         30,
 		SandboxIdleTimeoutSeconds: 600,
 		SandboxMaxLifetimeSeconds: 3600,
-		EnableAutoCleanup:         true,
-		TTLCheckInterval:          30 * time.Second,
+		ExecutorAgentImage:        "arl-executor-agent:latest",
+		GatewayPort:               8080,
 	}
 }
 
@@ -175,13 +177,7 @@ func LoadFromEnv() *Config {
 		}
 	}
 
-	// Cleanup configuration
-	if days := os.Getenv("TASK_RETENTION_DAYS"); days != "" {
-		if d, err := strconv.Atoi(days); err == nil {
-			cfg.TaskRetentionDays = d
-		}
-	}
-
+	// Sandbox lifecycle configuration
 	if timeout := os.Getenv("SANDBOX_IDLE_TIMEOUT_SECONDS"); timeout != "" {
 		if t, err := strconv.ParseInt(timeout, 10, 32); err == nil {
 			cfg.SandboxIdleTimeoutSeconds = int32(t)
@@ -194,13 +190,15 @@ func LoadFromEnv() *Config {
 		}
 	}
 
-	if enable := os.Getenv("ENABLE_AUTO_CLEANUP"); enable == "false" {
-		cfg.EnableAutoCleanup = false
+	// Executor agent configuration
+	if image := os.Getenv("EXECUTOR_AGENT_IMAGE"); image != "" {
+		cfg.ExecutorAgentImage = image
 	}
 
-	if interval := os.Getenv("TTL_CHECK_INTERVAL"); interval != "" {
-		if d, err := time.ParseDuration(interval); err == nil {
-			cfg.TTLCheckInterval = d
+	// Gateway configuration
+	if port := os.Getenv("GATEWAY_PORT"); port != "" {
+		if p, err := strconv.Atoi(port); err == nil {
+			cfg.GatewayPort = p
 		}
 	}
 
@@ -255,11 +253,7 @@ func (c *Config) Validate() error {
 		}
 	}
 
-	// Validate cleanup configuration
-	if c.TaskRetentionDays < 0 {
-		return fmt.Errorf("task retention days cannot be negative: %d", c.TaskRetentionDays)
-	}
-
+	// Validate sandbox lifecycle configuration
 	if c.SandboxIdleTimeoutSeconds < 0 {
 		return fmt.Errorf("sandbox idle timeout cannot be negative: %d", c.SandboxIdleTimeoutSeconds)
 	}
@@ -268,8 +262,9 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("sandbox max lifetime cannot be negative: %d", c.SandboxMaxLifetimeSeconds)
 	}
 
-	if c.EnableAutoCleanup && c.TTLCheckInterval <= 0 {
-		return fmt.Errorf("TTL check interval must be positive when auto cleanup is enabled: %v", c.TTLCheckInterval)
+	// Validate gateway configuration
+	if c.GatewayPort < 1 || c.GatewayPort > 65535 {
+		return fmt.Errorf("invalid gateway port: %d (must be 1-65535)", c.GatewayPort)
 	}
 
 	return nil

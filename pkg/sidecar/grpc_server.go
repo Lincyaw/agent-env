@@ -1,7 +1,6 @@
 package sidecar
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"log"
@@ -25,13 +24,25 @@ type GRPCServer struct {
 	grpcServer *grpc.Server
 }
 
-// NewGRPCServer creates a new gRPC server
+// NewGRPCServer creates a new gRPC server (without executor agent).
 func NewGRPCServer(workspaceDir string, port int) *GRPCServer {
-	srv := &GRPCServer{
+	return &GRPCServer{
 		service: NewAgentService(workspaceDir),
 		port:    port,
 	}
-	return srv
+}
+
+// NewGRPCServerWithExecutor creates a new gRPC server that proxies to an executor agent.
+func NewGRPCServerWithExecutor(workspaceDir string, port int, executorSocket string) *GRPCServer {
+	return &GRPCServer{
+		service: NewAgentServiceWithExecutor(workspaceDir, executorSocket),
+		port:    port,
+	}
+}
+
+// Service returns the underlying agent service (for init operations).
+func (s *GRPCServer) Service() *AgentService {
+	return s.service
 }
 
 // Start starts the gRPC server
@@ -53,25 +64,6 @@ func (s *GRPCServer) Stop() {
 	if s.grpcServer != nil {
 		s.grpcServer.GracefulStop()
 	}
-}
-
-// UpdateFiles implements the gRPC UpdateFiles method
-func (s *GRPCServer) UpdateFiles(ctx context.Context, req *pb.FileRequest) (*pb.FileResponse, error) {
-	fileReq := &FileRequest{
-		BasePath: req.GetBasePath(),
-		Files:    req.GetFiles(),
-		Patch:    req.GetPatch(),
-	}
-
-	resp, err := s.service.UpdateFiles(ctx, fileReq)
-	if err != nil {
-		return nil, err
-	}
-
-	return &pb.FileResponse{
-		Success: resp.Success,
-		Message: resp.Message,
-	}, nil
 }
 
 // Execute implements the gRPC Execute method with streaming
@@ -103,46 +95,10 @@ func (s *GRPCServer) Execute(req *pb.ExecRequest, stream grpc.ServerStreamingSer
 	return nil
 }
 
-// SignalProcess implements the gRPC SignalProcess method
-func (s *GRPCServer) SignalProcess(ctx context.Context, req *pb.SignalRequest) (*pb.SignalResponse, error) {
-	signalReq := &SignalRequest{
-		PID:    req.GetPid(),
-		Signal: req.GetSignal(),
-	}
-
-	resp, err := s.service.SignalProcess(ctx, signalReq)
-	if err != nil {
-		return nil, err
-	}
-
-	return &pb.SignalResponse{
-		Success: resp.Success,
-		Message: resp.Message,
-	}, nil
-}
-
-// Reset implements the gRPC Reset method
-func (s *GRPCServer) Reset(ctx context.Context, req *pb.ResetRequest) (*pb.ResetResponse, error) {
-	resetReq := &ResetRequest{
-		PreserveFiles: req.GetPreserveFiles(),
-	}
-
-	resp, err := s.service.Reset(ctx, resetReq)
-	if err != nil {
-		return nil, err
-	}
-
-	return &pb.ResetResponse{
-		Success: resp.Success,
-		Message: resp.Message,
-	}, nil
-}
-
 // InteractiveShell implements bidirectional streaming for interactive shell sessions
 func (s *GRPCServer) InteractiveShell(stream grpc.BidiStreamingServer[pb.ShellInput, pb.ShellOutput]) error {
 	ctx := stream.Context()
 
-	// Start a shell process
 	shell := os.Getenv("SHELL")
 	if shell == "" {
 		shell = "/bin/sh"
@@ -173,49 +129,50 @@ func (s *GRPCServer) InteractiveShell(stream grpc.BidiStreamingServer[pb.ShellIn
 
 	var wg sync.WaitGroup
 
-	// Read stdout and stderr using blocking reads
+	// Stream stdout to client
 	wg.Add(2)
 	go func() {
 		defer wg.Done()
 		buf := make([]byte, 4096)
 		for {
-			n, err := stdout.Read(buf)
+			n, readErr := stdout.Read(buf)
 			if n > 0 {
 				if sendErr := stream.Send(&pb.ShellOutput{Data: string(buf[:n])}); sendErr != nil {
 					return
 				}
 			}
-			if err != nil {
+			if readErr != nil {
 				return
 			}
 		}
 	}()
 
+	// Stream stderr to client
 	go func() {
 		defer wg.Done()
 		buf := make([]byte, 4096)
 		for {
-			n, err := stderr.Read(buf)
+			n, readErr := stderr.Read(buf)
 			if n > 0 {
 				if sendErr := stream.Send(&pb.ShellOutput{Data: string(buf[:n])}); sendErr != nil {
 					return
 				}
 			}
-			if err != nil {
+			if readErr != nil {
 				return
 			}
 		}
 	}()
 
-	// Handle input from client
+	// Read input from client
 	go func() {
 		for {
-			input, err := stream.Recv()
-			if err == io.EOF {
+			input, recvErr := stream.Recv()
+			if recvErr == io.EOF {
 				stdin.Close()
 				return
 			}
-			if err != nil {
+			if recvErr != nil {
 				stdin.Close()
 				return
 			}
@@ -245,7 +202,6 @@ func (s *GRPCServer) InteractiveShell(stream grpc.BidiStreamingServer[pb.ShellIn
 		}
 	}()
 
-	// Wait for shell to exit
 	exitCode := int32(0)
 	if err := cmd.Wait(); err != nil {
 		if exitErr, ok := err.(*exec.ExitError); ok {
@@ -257,7 +213,6 @@ func (s *GRPCServer) InteractiveShell(stream grpc.BidiStreamingServer[pb.ShellIn
 
 	wg.Wait()
 
-	// Send final message with exit code
 	return stream.Send(&pb.ShellOutput{
 		ExitCode: exitCode,
 		Closed:   true,

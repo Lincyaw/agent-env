@@ -15,14 +15,16 @@ import (
 
 func main() {
 	var (
-		workspaceDir string
-		httpPort     int
-		grpcPort     int
+		workspaceDir   string
+		httpPort       int
+		grpcPort       int
+		executorSocket string
 	)
 
 	flag.StringVar(&workspaceDir, "workspace", "/workspace", "Workspace directory")
 	flag.IntVar(&httpPort, "http-port", 8080, "HTTP server port (health checks)")
 	flag.IntVar(&grpcPort, "grpc-port", 9090, "gRPC server port")
+	flag.StringVar(&executorSocket, "executor-socket", "", "Unix socket path for executor agent (empty = local execution)")
 	flag.Parse()
 
 	// Ensure workspace exists
@@ -31,7 +33,23 @@ func main() {
 	}
 
 	httpServer := sidecar.NewServer(httpPort)
-	grpcServer := sidecar.NewGRPCServer(workspaceDir, grpcPort)
+
+	var grpcServer *sidecar.GRPCServer
+	if executorSocket != "" {
+		grpcServer = sidecar.NewGRPCServerWithExecutor(workspaceDir, grpcPort, executorSocket)
+		log.Printf("Executor agent mode: proxying to %s", executorSocket)
+
+		// Wait for executor agent to be ready
+		execClient := sidecar.NewExecutorClient(executorSocket)
+		waitCtx, waitCancel := context.WithTimeout(context.Background(), 60*time.Second)
+		if err := execClient.WaitForReady(waitCtx, 60*time.Second); err != nil {
+			log.Printf("Warning: executor agent not ready: %v (will retry on first request)", err)
+		}
+		waitCancel()
+	} else {
+		grpcServer = sidecar.NewGRPCServer(workspaceDir, grpcPort)
+		log.Println("Local execution mode (no executor agent)")
+	}
 
 	// Setup signal handling for graceful shutdown
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
