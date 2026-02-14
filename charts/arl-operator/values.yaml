@@ -92,16 +92,17 @@ sandbox:
   idleTimeoutSeconds: 3600
   maxLifetimeSeconds: 0
 
-# Altinity ClickHouse Operator (installed as dependency)
-clickhouse-operator:
-  enabled: false
-
-# ClickHouse configuration (for audit logging)
+# ClickHouse configuration (for audit logging and trajectory)
 clickhouse:
-  # Enable audit logging to ClickHouse
+  # Enable ClickHouse deployment
   enabled: false
-  # ClickHouse connection settings
-  host: "clickhouse-clickhouse-arl"
+  # Image (use private registry since nodes cannot access Docker Hub)
+  image:
+    repository: pair-diag-cn-guangzhou.cr.volces.com/pair/clickhouse-server
+    tag: "24.8"
+    pullPolicy: IfNotPresent
+  # Connection settings
+  host: ""  # auto-resolved via helper to <fullname>-clickhouse
   port: 9000
   database: "arl"
   username: "default"
@@ -111,12 +112,20 @@ clickhouse:
   # Data retention
   retentionDays: 30
   # Storage configuration
-  storageClassName: "juicefs-sc"
+  storageClassName: "ebs-ssd"
   storageSize: "10Gi"
   # Service configuration
   serviceType: "NodePort"
-  httpNodePort: 30123  # Port for HTTP interface (8123)
-  nativeNodePort: 30000  # Port for native protocol (9000)
+  httpNodePort: 30123   # Port for HTTP interface (8123)
+  nativeNodePort: 30000 # Port for native protocol (9000)
+  # Resources
+  resources:
+    requests:
+      cpu: 500m
+      memory: 2Gi
+    limits:
+      cpu: "1"
+      memory: 4Gi
 
 # CRD installation
 crds:

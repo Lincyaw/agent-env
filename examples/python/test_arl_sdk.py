@@ -40,6 +40,7 @@ from arl import (
     GatewayError,
     InteractiveShellClient,
     PoolNotReadyError,
+    ResourceRequirements,
     SandboxSession,
     WarmPoolManager,
 )
@@ -73,13 +74,31 @@ class TestResult:
 def print_header(args: argparse.Namespace) -> None:
     """Print test suite header."""
     console.print()
+
+    resource_info = ""
+    if args.cpu_request or args.memory_request or args.cpu_limit or args.memory_limit:
+        resource_info = "\nResources:\n"
+        if args.cpu_request:
+            resource_info += f"  CPU request: [yellow]{args.cpu_request}[/yellow]\n"
+        if args.memory_request:
+            resource_info += f"  Memory request: [yellow]{args.memory_request}[/yellow]\n"
+        if args.cpu_limit:
+            resource_info += f"  CPU limit: [yellow]{args.cpu_limit}[/yellow]\n"
+        if args.memory_limit:
+            resource_info += f"  Memory limit: [yellow]{args.memory_limit}[/yellow]"
+
+    workspace_info = ""
+    if args.workspace_dir != "/workspace":
+        workspace_info = f"\nWorkspace: [yellow]{args.workspace_dir}[/yellow]"
+
     console.print(
         Panel.fit(
             f"[bold cyan]ARL SDK Integration Tests[/bold cyan]\n\n"
             f"Gateway: [yellow]{args.gateway_url}[/yellow]\n"
             f"Pool: [yellow]{args.pool_name}[/yellow]\n"
             f"Image: [yellow]{args.pool_image}[/yellow]\n"
-            f"Namespace: [yellow]{NAMESPACE}[/yellow]",
+            f"Namespace: [yellow]{NAMESPACE}[/yellow]"
+            f"{resource_info}{workspace_info}",
             border_style="cyan",
         )
     )
@@ -109,7 +128,12 @@ def test_health(client: GatewayClient, verbose: bool) -> tuple[bool, float]:
 
 
 def test_pool_lifecycle(
-    pool_mgr: WarmPoolManager, pool_name: str, pool_image: str, verbose: bool
+    pool_mgr: WarmPoolManager,
+    pool_name: str,
+    pool_image: str,
+    verbose: bool,
+    resources: ResourceRequirements | None = None,
+    workspace_dir: str = "/workspace",
 ) -> tuple[bool, float]:
     """Test 2: WarmPool creation and readiness."""
     start = time.time()
@@ -119,9 +143,19 @@ def test_pool_lifecycle(
         console.print(
             f"  Creating pool '[cyan]{pool_name}[/cyan]' with image '[cyan]{pool_image}[/cyan]'..."
         )
+        if resources:
+            console.print(f"  Resources: {resources.model_dump(exclude_none=True)}")
+        if workspace_dir != "/workspace":
+            console.print(f"  Workspace: {workspace_dir}")
 
     try:
-        pool_mgr.create_warmpool(name=pool_name, image=pool_image, replicas=3)
+        pool_mgr.create_warmpool(
+            name=pool_name,
+            image=pool_image,
+            replicas=3,
+            resources=resources,
+            workspace_dir=workspace_dir,
+        )
         if verbose:
             console.print("  [green]✓[/green] Pool created")
     except GatewayError as e:
@@ -336,7 +370,23 @@ def test_history_trajectory(gateway_url: str, pool_name: str, verbose: bool) -> 
             console.print(f"\n  Trajectory JSONL lines: {len(lines)}")
             for line in lines[:3]:  # Show first 3 lines
                 entry = json.loads(line)
-                console.print(f"    {entry.get('name', 'unknown')}")
+                step = entry.get("step", "?")
+                snapshot = entry.get("snapshot_id", "none")
+                action = entry.get("action", {})
+                observation = entry.get("observation", {})
+
+                # Extract command from action
+                cmd = action.get("command", []) if isinstance(action, dict) else []
+                cmd_str = " ".join(cmd[:3]) if cmd else "N/A"
+
+                # Extract exit code from observation
+                exit_code = (
+                    observation.get("exit_code", "?") if isinstance(observation, dict) else "?"
+                )
+
+                console.print(
+                    f"    step {step}: cmd=[cyan]{cmd_str}[/cyan] exit=[yellow]{exit_code}[/yellow] snapshot={snapshot}"
+                )
 
         ok = len(history) == 3 and len(lines) == 3
         duration = time.time() - start
@@ -598,8 +648,53 @@ def main() -> None:
     parser.add_argument(
         "--skip-cleanup", action="store_true", help="Skip pool cleanup after tests (for debugging)"
     )
+    parser.add_argument(
+        "--cpu-request",
+        help="CPU request (e.g., '100m', '0.5', '1')",
+    )
+    parser.add_argument(
+        "--memory-request",
+        help="Memory request (e.g., '128Mi', '512Mi', '1Gi')",
+    )
+    parser.add_argument(
+        "--cpu-limit",
+        help="CPU limit (e.g., '1', '2', '4')",
+    )
+    parser.add_argument(
+        "--memory-limit",
+        help="Memory limit (e.g., '1Gi', '2Gi', '4Gi')",
+    )
+    parser.add_argument(
+        "--workspace-dir",
+        default="/workspace",
+        help="Workspace directory mount path (default: /workspace)",
+    )
 
     args = parser.parse_args()
+
+    # Build resource requirements if any resource args provided
+    resources = None
+    if args.cpu_request or args.memory_request or args.cpu_limit or args.memory_limit:
+        requests = {}
+        limits = {}
+        if args.cpu_request:
+            requests["cpu"] = args.cpu_request
+        if args.memory_request:
+            requests["memory"] = args.memory_request
+        if args.cpu_limit:
+            limits["cpu"] = args.cpu_limit
+        if args.memory_limit:
+            limits["memory"] = args.memory_limit
+
+        try:
+            resources = ResourceRequirements(requests=requests, limits=limits)
+            if args.verbose:
+                console.print(
+                    f"\n[dim]Resource requirements: {resources.model_dump(exclude_none=True)}[/dim]"
+                )
+        except ValueError as e:
+            console.print(f"\n[red]Invalid resource specification: {e}[/red]")
+            sys.exit(1)
 
     # Print header
     print_header(args)
@@ -637,7 +732,12 @@ def main() -> None:
     ) as progress:
         task = progress.add_task(f"[2/{test_count}] WarmPool Management", total=None)
         passed, duration = test_pool_lifecycle(
-            pool_mgr, args.pool_name, args.pool_image, args.verbose
+            pool_mgr,
+            args.pool_name,
+            args.pool_image,
+            args.verbose,
+            resources=resources,
+            workspace_dir=args.workspace_dir,
         )
         progress.update(task, completed=True)
 

@@ -11,11 +11,13 @@ import (
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	arlv1alpha1 "github.com/Lincyaw/agent-env/api/v1alpha1"
+	"github.com/Lincyaw/agent-env/pkg/audit"
 	"github.com/Lincyaw/agent-env/pkg/interfaces"
 	"github.com/Lincyaw/agent-env/pkg/sidecar"
 )
@@ -28,18 +30,18 @@ type session struct {
 
 // Gateway manages sessions and forwards execution to sidecars.
 type Gateway struct {
-	k8sClient     client.Client
-	sidecarClient interfaces.SidecarClient
-	auditWriter   interfaces.AuditWriter
-	sessions      sync.Map // sessionID → *session
+	k8sClient        client.Client
+	sidecarClient    interfaces.SidecarClient
+	trajectoryWriter *audit.TrajectoryWriter
+	sessions         sync.Map // sessionID → *session
 }
 
-// New creates a new gateway.
-func New(k8sClient client.Client, sidecarClient interfaces.SidecarClient, auditWriter interfaces.AuditWriter) *Gateway {
+// New creates a new gateway. trajectoryWriter may be nil to disable trajectory recording.
+func New(k8sClient client.Client, sidecarClient interfaces.SidecarClient, trajectoryWriter *audit.TrajectoryWriter) *Gateway {
 	return &Gateway{
-		k8sClient:     k8sClient,
-		sidecarClient: sidecarClient,
-		auditWriter:   auditWriter,
+		k8sClient:        k8sClient,
+		sidecarClient:    sidecarClient,
+		trajectoryWriter: trajectoryWriter,
 	}
 }
 
@@ -217,14 +219,37 @@ func (g *Gateway) ExecuteSteps(ctx context.Context, sessionID string, req Execut
 		resp.Results = append(resp.Results, result)
 
 		// Record in history
-		s.History.Add(StepRecord{
+		stepRecord := StepRecord{
 			Name:       result.Name,
 			Input:      result.Input,
 			Output:     result.Output,
 			SnapshotID: result.SnapshotID,
 			DurationMs: result.DurationMs,
 			Timestamp:  result.Timestamp,
-		})
+		}
+		s.History.Add(stepRecord)
+
+		// Write to ClickHouse trajectory if configured
+		if g.trajectoryWriter != nil {
+			obsJSON, _ := json.Marshal(result.Output)
+			entry := audit.TrajectoryEntry{
+				SessionID:   sessionID,
+				Step:        globalIdx,
+				Name:        result.Name,
+				Action:      result.Input,
+				Observation: obsJSON,
+				SnapshotID:  result.SnapshotID,
+				DurationMs:  result.DurationMs,
+				Timestamp:   result.Timestamp,
+			}
+			// Write asynchronously to avoid blocking execution
+			go func(e audit.TrajectoryEntry) {
+				bgCtx := context.Background()
+				if err := g.trajectoryWriter.WriteEntry(bgCtx, e); err != nil {
+					log.Printf("Warning: failed to write trajectory entry: %v", err)
+				}
+			}(entry)
+		}
 	}
 
 	resp.TotalDurationMs = time.Since(totalStart).Milliseconds()
@@ -383,6 +408,27 @@ func (g *Gateway) CreatePool(ctx context.Context, req CreatePoolRequest) error {
 		replicas = 2
 	}
 
+	// Set default resources if not specified
+	resources := req.Resources
+	if resources == nil {
+		resources = &corev1.ResourceRequirements{
+			Requests: corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("100m"),
+				corev1.ResourceMemory: resource.MustParse("128Mi"),
+			},
+			Limits: corev1.ResourceList{
+				corev1.ResourceCPU:    resource.MustParse("1000m"),
+				corev1.ResourceMemory: resource.MustParse("1Gi"),
+			},
+		}
+	}
+
+	// Set default workspace dir if not specified
+	workspaceDir := req.WorkspaceDir
+	if workspaceDir == "" {
+		workspaceDir = "/workspace"
+	}
+
 	pool := &arlv1alpha1.WarmPool{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      req.Name,
@@ -394,11 +440,12 @@ func (g *Gateway) CreatePool(ctx context.Context, req CreatePoolRequest) error {
 				Spec: corev1.PodSpec{
 					Containers: []corev1.Container{
 						{
-							Name:    "executor",
-							Image:   req.Image,
-							Command: []string{"sh", "-c", "sleep infinity"},
+							Name:      "executor",
+							Image:     req.Image,
+							Command:   []string{"sh", "-c", "sleep infinity"},
+							Resources: *resources,
 							VolumeMounts: []corev1.VolumeMount{
-								{Name: "workspace", MountPath: "/workspace"},
+								{Name: "workspace", MountPath: workspaceDir},
 							},
 						},
 					},

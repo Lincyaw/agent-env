@@ -27,7 +27,7 @@ data:
     ) ENGINE = MergeTree()
     PARTITION BY toYYYYMMDD(created_at)
     ORDER BY (created_at, session_id, step_index)
-    TTL created_at + INTERVAL {{ .Values.clickhouse.retentionDays }} DAY;
+    TTL toDateTime(created_at) + INTERVAL {{ .Values.clickhouse.retentionDays }} DAY;
 
     -- Sandbox audit table
     CREATE TABLE IF NOT EXISTS {{ .Values.clickhouse.database }}.sandbox_audit (
@@ -42,5 +42,5 @@ data:
     ) ENGINE = MergeTree()
     PARTITION BY toYYYYMMDD(timestamp)
     ORDER BY (timestamp, namespace, name)
-    TTL timestamp + INTERVAL {{ .Values.clickhouse.retentionDays }} DAY;
+    TTL toDateTime(timestamp) + INTERVAL {{ .Values.clickhouse.retentionDays }} DAY;
 {{- end }}

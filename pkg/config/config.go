@@ -41,6 +41,10 @@ type Config struct {
 	ClickHouseBatchSize     int
 	ClickHouseFlushInterval time.Duration
 
+	// Trajectory storage configuration (uses ClickHouse with GORM)
+	TrajectoryEnabled bool
+	TrajectoryDebug   bool
+
 	// Sandbox lifecycle configuration
 	SandboxIdleTimeoutSeconds int32
 	SandboxMaxLifetimeSeconds int32
@@ -77,6 +81,8 @@ func DefaultConfig() *Config {
 		ClickHousePassword:        "",
 		ClickHouseBatchSize:       100,
 		ClickHouseFlushInterval:   10 * time.Second,
+		TrajectoryEnabled:         false,
+		TrajectoryDebug:           false,
 		SandboxIdleTimeoutSeconds: 600,
 		SandboxMaxLifetimeSeconds: 3600,
 		ExecutorAgentImage:        "arl-executor-agent:latest",
@@ -175,6 +181,15 @@ func LoadFromEnv() *Config {
 		if d, err := time.ParseDuration(interval); err == nil {
 			cfg.ClickHouseFlushInterval = d
 		}
+	}
+
+	// Trajectory configuration
+	if enable := os.Getenv("TRAJECTORY_ENABLED"); enable == "true" {
+		cfg.TrajectoryEnabled = true
+	}
+
+	if debug := os.Getenv("TRAJECTORY_DEBUG"); debug == "true" {
+		cfg.TrajectoryDebug = true
 	}
 
 	// Sandbox lifecycle configuration

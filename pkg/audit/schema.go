@@ -20,7 +20,7 @@ CREATE TABLE IF NOT EXISTS session_step_audit (
 ) ENGINE = MergeTree()
 PARTITION BY toYYYYMMDD(created_at)
 ORDER BY (created_at, session_id, step_index)
-TTL created_at + INTERVAL 30 DAY
+TTL toDateTime(created_at) + INTERVAL 30 DAY
 `
 
 // SandboxAuditTableSQL is the SQL to create the sandbox_audit table
@@ -37,5 +37,5 @@ CREATE TABLE IF NOT EXISTS sandbox_audit (
 ) ENGINE = MergeTree()
 PARTITION BY toYYYYMMDD(timestamp)
 ORDER BY (timestamp, namespace, name)
-TTL timestamp + INTERVAL 30 DAY
+TTL toDateTime(timestamp) + INTERVAL 30 DAY
 `

@@ -119,6 +119,8 @@ profiles:
           sidecar.image.repository: pair-diag-cn-guangzhou.cr.volces.com/pair/arl-sidecar
           gateway.image.repository: pair-diag-cn-guangzhou.cr.volces.com/pair/arl-gateway
           executorAgent.image.repository: pair-diag-cn-guangzhou.cr.volces.com/pair/arl-executor-agent
+          clickhouse.enabled: true
+          clickhouse.storageClassName: ebs-ssd
         setValueTemplates:
           image.tag: "{{.IMAGE_TAG}}"
           sidecar.image.tag: "{{.IMAGE_TAG2}}"

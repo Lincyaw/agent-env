@@ -9,7 +9,9 @@ import httpx
 from arl.types import (
     ErrorResponse,
     ExecuteResponse,
+    PoolCondition,
     PoolInfo,
+    ResourceRequirements,
     SessionInfo,
     StepResult,
     ToolsSpec,
@@ -38,7 +40,7 @@ class PoolNotReadyError(Exception):
     """
 
     def __init__(
-        self, pool_name: str, message: str, conditions: list[object] | None = None
+        self, pool_name: str, message: str, conditions: list[PoolCondition] | None = None
     ) -> None:
         self.pool_name = pool_name
         self.conditions = conditions or []
@@ -126,15 +128,20 @@ class GatewayClient:
         image: str,
         replicas: int = 2,
         tools: ToolsSpec | None = None,
+        resources: ResourceRequirements | None = None,
+        workspace_dir: str = "/workspace",
     ) -> None:
         body: dict[str, Any] = {
             "name": name,
             "namespace": namespace,
             "image": image,
             "replicas": replicas,
+            "workspaceDir": workspace_dir,
         }
         if tools is not None:
             body["tools"] = tools.model_dump(by_alias=True, exclude_none=True)
+        if resources is not None:
+            body["resources"] = resources.model_dump(exclude_none=True)
         resp = self._client.post("/v1/pools", json=body)
         self._handle_error(resp)
 

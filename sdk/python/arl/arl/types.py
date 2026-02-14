@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
+import re
 from datetime import datetime
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, ValidationInfo, field_validator
 
 
 class StepRequest(BaseModel):
@@ -216,7 +217,7 @@ class InlineToolSpec(BaseModel):
 
     @field_validator("entrypoint")
     @classmethod
-    def validate_entrypoint_in_files(cls, v: str, info) -> str:
+    def validate_entrypoint_in_files(cls, v: str, info: ValidationInfo) -> str:
         """Ensure entrypoint exists in files dict."""
         if info.data.get("files") and v not in info.data["files"]:
             raise ValueError(f"entrypoint '{v}' must exist in files dict")
@@ -233,6 +234,99 @@ class ToolsConfigMapSource(BaseModel):
     """Reference to a ConfigMap containing tools."""
 
     name: str
+
+
+class ResourceRequirements(BaseModel):
+    """Kubernetes resource requirements (CPU/memory requests and limits).
+
+    Attributes:
+        requests: Minimum resources required (e.g. {"cpu": "100m", "memory": "128Mi"})
+        limits: Maximum resources allowed (e.g. {"cpu": "1", "memory": "1Gi"})
+
+    Supported resource types:
+        - cpu: CPU cores (e.g., "100m" = 0.1 cores, "1" = 1 core, "2.5" = 2.5 cores)
+        - memory: Memory bytes (e.g., "128Mi", "1Gi", "512M")
+        - ephemeral-storage: Ephemeral storage (e.g., "1Gi", "10Gi")
+        - Custom resources: vendor-specific (e.g., "nvidia.com/gpu": "1")
+
+    Quantity format:
+        - Integer: "1", "2"
+        - Decimal: "0.5", "2.5"
+        - Milliunits (cpu): "100m", "500m"
+        - Binary (memory): "128Mi", "1Gi", "1Ti"
+        - Decimal (memory): "128M", "1G", "1T"
+
+    Examples:
+        >>> # Basic usage with CPU and memory
+        >>> ResourceRequirements(
+        ...     requests={"cpu": "100m", "memory": "128Mi"},
+        ...     limits={"cpu": "1", "memory": "1Gi"}
+        ... )
+        >>> # Requests only (no hard limits)
+        >>> ResourceRequirements(requests={"cpu": "500m", "memory": "512Mi"})
+        >>> # With ephemeral storage
+        >>> ResourceRequirements(
+        ...     requests={"cpu": "1", "memory": "1Gi", "ephemeral-storage": "10Gi"}
+        ... )
+        >>> # With custom GPU resource
+        >>> ResourceRequirements(
+        ...     limits={"nvidia.com/gpu": "2"}
+        ... )
+    """
+
+    requests: dict[str, str] = Field(default_factory=dict)
+    limits: dict[str, str] = Field(default_factory=dict)
+
+    @field_validator("requests", "limits")
+    @classmethod
+    def validate_resource_quantities(cls, v: dict[str, str]) -> dict[str, str]:
+        """Validate that resource quantities follow Kubernetes format.
+
+        Valid formats:
+        - Integer: 1, 2, 100
+        - Decimal: 0.5, 2.5
+        - Milliunits: 100m, 500m (for CPU)
+        - Binary suffixes: Ki, Mi, Gi, Ti, Pi, Ei
+        - Decimal suffixes: k, M, G, T, P, E
+        """
+        # Kubernetes quantity regex pattern
+        # Matches: integers, decimals, milliunits (m), and suffixes (Ki, Mi, Gi, k, M, G, etc.)
+        quantity_pattern = re.compile(r"^([+-]?)(\d+(\.\d+)?|\.\d+)([eE][+-]?\d+)?[numkKMGTPE]?i?$")
+
+        for resource_name, quantity in v.items():
+            if not quantity:
+                raise ValueError(f"Resource '{resource_name}' has empty quantity")
+
+            if not quantity_pattern.match(quantity):
+                raise ValueError(
+                    f"Invalid quantity format for '{resource_name}': '{quantity}'. "
+                    f"Expected Kubernetes quantity format (e.g., '100m', '1', '128Mi', '1Gi')"
+                )
+
+            # Additional validation for common resources
+            if resource_name == "cpu":
+                # CPU should be reasonable (not more than 1000 cores typically)
+                if quantity.endswith("m"):
+                    try:
+                        millicores = int(quantity[:-1])
+                        if millicores <= 0 or millicores > 1_000_000:
+                            raise ValueError(
+                                f"CPU millicores '{quantity}' out of reasonable range (1m-1000000m)"
+                            )
+                    except ValueError:
+                        pass  # Let the quantity_pattern catch format errors
+
+            elif resource_name == "memory":
+                # Memory should have a suffix (Mi, Gi, M, G, etc.)
+                if not re.search(r"[KMGTPE]i?$", quantity):
+                    # Allow plain numbers but warn they might be interpreted as bytes
+                    if not quantity.isdigit():
+                        raise ValueError(
+                            f"Memory quantity '{quantity}' should include a unit suffix "
+                            f"(e.g., 'Mi', 'Gi', 'M', 'G')"
+                        )
+
+        return v
 
 
 class ToolsSpec(BaseModel):

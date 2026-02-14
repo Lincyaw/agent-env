@@ -25,6 +25,13 @@ dependencies = [
 ]
 
 [dependency-groups]
+prefetch = [
+    "polars>=1.38.1",
+    "pyarrow>=23.0.0",
+    "hf-transfer>=0.1.9",
+    "huggingface-hub>=1.4.1",
+    "typer>=0.16.0",
+]
 dev = [
     "bandit>=1.9.2",
     "mypy>=1.19.1",

@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
+
 	arlv1alpha1 "github.com/Lincyaw/agent-env/api/v1alpha1"
 )
 
@@ -38,11 +40,13 @@ type RestoreRequest struct {
 
 // CreatePoolRequest is the body for POST /v1/pools
 type CreatePoolRequest struct {
-	Name      string                 `json:"name"`
-	Image     string                 `json:"image"`
-	Replicas  int32                  `json:"replicas,omitempty"`
-	Namespace string                 `json:"namespace,omitempty"`
-	Tools     *arlv1alpha1.ToolsSpec `json:"tools,omitempty"`
+	Name         string                       `json:"name"`
+	Image        string                       `json:"image"`
+	Replicas     int32                        `json:"replicas,omitempty"`
+	Namespace    string                       `json:"namespace,omitempty"`
+	Tools        *arlv1alpha1.ToolsSpec       `json:"tools,omitempty"`
+	Resources    *corev1.ResourceRequirements `json:"resources,omitempty"`
+	WorkspaceDir string                       `json:"workspaceDir,omitempty"`
 }
 
 // --- Response types ---

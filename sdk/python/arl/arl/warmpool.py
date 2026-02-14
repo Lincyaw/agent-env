@@ -5,7 +5,7 @@ from __future__ import annotations
 import time
 
 from arl.gateway_client import GatewayClient, PoolNotReadyError
-from arl.types import PoolInfo, ToolsSpec
+from arl.types import PoolInfo, ResourceRequirements, ToolsSpec
 
 
 class WarmPoolManager:
@@ -37,6 +37,8 @@ class WarmPoolManager:
         image: str,
         replicas: int = 2,
         tools: ToolsSpec | None = None,
+        resources: ResourceRequirements | None = None,
+        workspace_dir: str = "/workspace",
     ) -> None:
         """Create a new WarmPool.
 
@@ -45,6 +47,10 @@ class WarmPoolManager:
             image: Container image for the executor.
             replicas: Number of warm pods to maintain.
             tools: Optional tools specification to provision in the executor container.
+            resources: Optional resource requirements (CPU/memory requests and limits).
+                      If not specified, uses defaults: requests={cpu: 100m, memory: 128Mi},
+                      limits={cpu: 1000m, memory: 1Gi}.
+            workspace_dir: Workspace directory mount path (default: /workspace).
         """
         self._client.create_pool(
             name=name,
@@ -52,6 +58,8 @@ class WarmPoolManager:
             image=image,
             replicas=replicas,
             tools=tools,
+            resources=resources,
+            workspace_dir=workspace_dir,
         )
 
     def get_warmpool(self, name: str) -> PoolInfo:

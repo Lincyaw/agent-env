@@ -41,9 +41,9 @@ from rich.table import Table
 # Defaults (overridable via env vars or CLI flags)
 # ---------------------------------------------------------------------------
 DEFAULT_GATEWAY_URL = "http://localhost:8080"
-DEFAULT_POOL_NAME = "test-pool"
+DEFAULT_POOL_NAME = "numpy"
 DEFAULT_NAMESPACE = "arl"
-DEFAULT_POOL_IMAGE = "pair-diag-cn-guangzhou.cr.volces.com/pair/ubuntu:22.04"
+DEFAULT_POOL_IMAGE = "aibrix-docker-mirror-cn-beijing.cr.volces.com/namanjain12/numpy_final:6df0b6e2b79aad40715f933b561660f951693289"
 
 console = Console(stderr=True)
 

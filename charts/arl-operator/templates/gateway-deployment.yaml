@@ -35,6 +35,8 @@ spec:
             {{- if .Values.clickhouse.enabled }}
             - name: CLICKHOUSE_ENABLED
               value: "true"
+            - name: TRAJECTORY_ENABLED
+              value: "true"
             - name: CLICKHOUSE_ADDR
               value: {{ include "arl-operator.clickhouseAddr" . | quote }}
             - name: CLICKHOUSE_DATABASE

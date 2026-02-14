@@ -11,7 +11,6 @@ import (
 	"syscall"
 	"time"
 
-	_ "github.com/ClickHouse/clickhouse-go/v2"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
@@ -23,7 +22,6 @@ import (
 	"github.com/Lincyaw/agent-env/pkg/client"
 	"github.com/Lincyaw/agent-env/pkg/config"
 	"github.com/Lincyaw/agent-env/pkg/gateway"
-	"github.com/Lincyaw/agent-env/pkg/interfaces"
 )
 
 var scheme = runtime.NewScheme()
@@ -55,28 +53,25 @@ func main() {
 	// Create sidecar gRPC client
 	sidecarClient := client.NewGRPCSidecarClient(grpcPort, cfg.HTTPClientTimeout)
 
-	// Create audit writer
-	var auditWriter interfaces.AuditWriter
-	if cfg.ClickHouseEnabled {
-		chWriter, err := audit.NewClickHouseWriter(audit.ClickHouseConfig{
-			Addr:          cfg.ClickHouseAddr,
-			Database:      cfg.ClickHouseDatabase,
-			Username:      cfg.ClickHouseUsername,
-			Password:      cfg.ClickHousePassword,
-			BatchSize:     cfg.ClickHouseBatchSize,
-			FlushInterval: cfg.ClickHouseFlushInterval,
+	// Create trajectory writer (optional)
+	var trajectoryWriter *audit.TrajectoryWriter
+	if cfg.TrajectoryEnabled {
+		tw, err := audit.NewTrajectoryWriter(audit.TrajectoryConfig{
+			Addr:     cfg.ClickHouseAddr,
+			Database: cfg.ClickHouseDatabase,
+			Username: cfg.ClickHouseUsername,
+			Password: cfg.ClickHousePassword,
+			Debug:    cfg.TrajectoryDebug,
 		})
 		if err != nil {
-			log.Printf("Warning: ClickHouse init failed: %v (using no-op)", err)
-			auditWriter = audit.NewNoOpWriter()
+			log.Printf("Warning: Trajectory writer init failed: %v (trajectory disabled)", err)
 		} else {
-			auditWriter = chWriter
+			trajectoryWriter = tw
+			log.Println("Trajectory writer enabled")
 		}
-	} else {
-		auditWriter = audit.NewNoOpWriter()
 	}
 
-	gw := gateway.New(k8sClient, sidecarClient, auditWriter)
+	gw := gateway.New(k8sClient, sidecarClient, trajectoryWriter)
 
 	mux := http.NewServeMux()
 	gateway.SetupRoutes(mux, gw)
@@ -107,7 +102,9 @@ func main() {
 
 	server.Shutdown(shutdownCtx)
 	sidecarClient.Close()
-	auditWriter.Close()
+	if trajectoryWriter != nil {
+		trajectoryWriter.Close()
+	}
 
 	log.Println("Gateway stopped")
 }
