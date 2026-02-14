@@ -87,6 +87,7 @@ source = { editable = "sdk/python/arl" }
 dependencies = [
     { name = "httpx" },
     { name = "pydantic" },
+    { name = "rich" },
 ]
 
 [package.optional-dependencies]
@@ -107,6 +108,7 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.2.1" },
     { name = "pytest-cov", marker = "extra == 'dev'", specifier = ">=2.8.1" },
+    { name = "rich", specifier = ">=13.0.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.8.0" },
     { name = "websockets", marker = "extra == 'shell'", specifier = ">=12.0" },
 ]

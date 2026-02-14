@@ -51,6 +51,41 @@ result = session.execute([
 ])
 ```
 
+## Integration Tests
+
+**test_arl_sdk.py** - Comprehensive test suite with beautiful output
+
+Run all integration tests to verify your ARL setup:
+
+```bash
+# Basic run with summary
+uv run python test_arl_sdk.py
+
+# Verbose output with detailed steps
+uv run python test_arl_sdk.py --verbose
+
+# Custom gateway URL
+uv run python test_arl_sdk.py --gateway-url http://localhost:8080
+
+# Keep pool for debugging
+uv run python test_arl_sdk.py --skip-cleanup
+```
+
+Tests include:
+- Health check and pool management
+- Command execution and multi-step workflows
+- Snapshot & restore mechanism
+- Session history and trajectory export
+- Tool provisioning and calling
+- Interactive WebSocket shell
+
+**test_interactive_shell.py** - Interactive terminal for manual exploration
+
+```bash
+# Connect to an interactive shell
+uv run python test_interactive_shell.py
+```
+
 ## More Information
 
 - [Full Documentation](https://lincyaw.github.io/agent-env/)
