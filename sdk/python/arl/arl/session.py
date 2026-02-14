@@ -52,6 +52,12 @@ class SandboxSession:
         ...     session.execute([...])
         ...     session.execute([...])
         ...     jsonl = session.export_trajectory()
+
+        Attach to an existing persistent session:
+
+        >>> session = SandboxSession.attach("gw-12345", gateway_url="...")
+        >>> result = session.execute([{"name": "ls", "command": ["ls"]}])
+        >>> session.delete_sandbox()  # explicit cleanup when done
     """
 
     def __init__(
@@ -71,6 +77,48 @@ class SandboxSession:
         self._client = GatewayClient(base_url=gateway_url, timeout=timeout)
         self._session_id: str | None = None
         self._session_info: SessionInfo | None = None
+
+    @classmethod
+    def attach(
+        cls,
+        session_id: str,
+        gateway_url: str = "http://localhost:8080",
+        timeout: float = 300.0,
+        keep_alive: bool = True,
+    ) -> SandboxSession:
+        """Attach to an existing session by session ID.
+
+        Retrieves session info from the Gateway and returns a
+        SandboxSession bound to that session. No new sandbox is
+        created.
+
+        Args:
+            session_id: The session ID to attach to.
+            gateway_url: Gateway base URL.
+            timeout: HTTP request timeout.
+            keep_alive: If False, exiting a context manager will
+                delete the session.  Defaults to True to avoid
+                accidentally destroying a session you attached to.
+
+        Returns:
+            SandboxSession bound to the existing session.
+
+        Raises:
+            GatewayError: If the session does not exist.
+        """
+        client = GatewayClient(base_url=gateway_url, timeout=timeout)
+        info = client.get_session(session_id)
+
+        instance = cls(
+            pool_ref=info.pool_ref,
+            namespace=info.namespace,
+            gateway_url=gateway_url,
+            keep_alive=keep_alive,
+            timeout=timeout,
+        )
+        instance._session_id = info.id
+        instance._session_info = info
+        return instance
 
     @property
     def session_id(self) -> str | None:

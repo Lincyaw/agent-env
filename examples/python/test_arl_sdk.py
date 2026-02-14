@@ -481,6 +481,63 @@ def test_interactive_shell(gateway_url: str, pool_name: str, verbose: bool) -> t
         return False, time.time() - start
 
 
+def test_keep_alive_reattach(gateway_url: str, pool_name: str, verbose: bool) -> tuple[bool, float]:
+    """Test 8: Keep-alive session and reattach by session ID."""
+    start = time.time()
+
+    # Phase 1: create a keep_alive session, write data, exit without cleanup
+    session1 = SandboxSession(
+        pool_ref=pool_name,
+        namespace=NAMESPACE,
+        gateway_url=gateway_url,
+        keep_alive=True,
+    )
+    session1.create_sandbox()
+    sid = session1.session_id
+    assert sid is not None
+    if verbose:
+        console.print(f"  Phase 1 - created session: [cyan]{sid}[/cyan]")
+
+    r1 = session1.execute(
+        [{"name": "write", "command": ["sh", "-c", "echo persist-ok > /workspace/flag.txt"]}]
+    )
+    if verbose:
+        console.print(f"  Phase 1 - wrote flag: exit_code={r1.results[0].output.exit_code}")
+    # Intentionally do NOT call delete_sandbox — session stays alive
+
+    # Phase 2: reattach using session ID
+    try:
+        session2 = SandboxSession.attach(sid, gateway_url=gateway_url)
+    except Exception as e:
+        console.print(f"  [red]\u2717 Failed to attach: {e}[/red]")
+        # Cleanup
+        session1.delete_sandbox()
+        return False, time.time() - start
+
+    if verbose:
+        info = session2.session_info
+        pod = info.pod_name if info else "unknown"
+        console.print(f"  Phase 2 - attached to session: [cyan]{sid}[/cyan] (pod={pod})")
+
+    r2 = session2.execute([{"name": "read", "command": ["cat", "/workspace/flag.txt"]}])
+    content = r2.results[0].output.stdout.strip()
+    if verbose:
+        console.print(f"  Phase 2 - read flag: '[yellow]{content}[/yellow]'")
+
+    # Phase 3: verify history spans both phases
+    history = session2.get_history()
+    if verbose:
+        console.print(f"  Phase 2 - history entries: {len(history)}")
+
+    # Cleanup
+    session2.delete_sandbox()
+    if verbose:
+        console.print("  [green]\u2713[/green] Session cleaned up")
+
+    ok = content == "persist-ok" and len(history) >= 2
+    return ok, time.time() - start
+
+
 def print_summary(results: list[TestResult]) -> None:
     """Print test results summary table."""
     table = Table(title="\n[bold]Test Results[/bold]", show_header=True, header_style="bold cyan")
@@ -552,7 +609,7 @@ def main() -> None:
     pool_mgr = WarmPoolManager(namespace=NAMESPACE, gateway_url=args.gateway_url)
 
     results: list[TestResult] = []
-    test_count = 7
+    test_count = 8
 
     # Test 1: Health check
     with Progress(
@@ -668,6 +725,20 @@ def main() -> None:
         status = "[green]✓[/green]" if passed else "[red]✗[/red]"
         console.print(f"[7/{test_count}] {status} Interactive Shell ([cyan]{duration:.2f}s[/cyan])")
         results.append(TestResult("Interactive Shell", passed, duration))
+
+    # Test 8: Keep-alive & reattach
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        console=console,
+    ) as progress:
+        task = progress.add_task(f"[8/{test_count}] Keep-Alive & Reattach", total=None)
+        passed, duration = test_keep_alive_reattach(args.gateway_url, args.pool_name, args.verbose)
+        progress.update(task, completed=True)
+
+    status = "[green]\u2713[/green]" if passed else "[red]\u2717[/red]"
+    console.print(f"[8/{test_count}] {status} Keep-Alive & Reattach ([cyan]{duration:.2f}s[/cyan])")
+    results.append(TestResult("Keep-Alive & Reattach", passed, duration))
 
     # Cleanup
     if not args.skip_cleanup:

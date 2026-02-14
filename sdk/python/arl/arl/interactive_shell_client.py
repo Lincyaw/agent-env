@@ -53,7 +53,7 @@ class InteractiveShellClient:
         if self._ws is None:
             raise RuntimeError("Not connected. Call connect() first.")
         msg = json.dumps({"type": "input", "data": data})
-        self._ws.send(msg)  # type: ignore[union-attr]
+        self._ws.send(msg)  # type: ignore[attr-defined]
 
     def send_signal(self, sig: str = "SIGINT") -> None:
         """Send an out-of-band signal to the remote shell process.
@@ -64,7 +64,7 @@ class InteractiveShellClient:
         if self._ws is None:
             raise RuntimeError("Not connected. Call connect() first.")
         msg = json.dumps({"type": "signal", "signal": sig})
-        self._ws.send(msg)  # type: ignore[union-attr]
+        self._ws.send(msg)  # type: ignore[attr-defined]
 
     def send_resize(self, cols: int, rows: int) -> None:
         """Notify the remote PTY of a terminal size change.
@@ -76,7 +76,7 @@ class InteractiveShellClient:
         if self._ws is None:
             raise RuntimeError("Not connected. Call connect() first.")
         msg = json.dumps({"type": "resize", "cols": cols, "rows": rows})
-        self._ws.send(msg)  # type: ignore[union-attr]
+        self._ws.send(msg)  # type: ignore[attr-defined]
 
     def read_message(self, timeout: float = 1.0) -> ShellMessage | None:
         """Read the next WebSocket message as a typed :class:`ShellMessage`.
@@ -95,7 +95,7 @@ class InteractiveShellClient:
             return None
 
         try:
-            raw = self._ws.recv(timeout=timeout)  # type: ignore[union-attr]
+            raw = self._ws.recv(timeout=timeout)  # type: ignore[attr-defined]
             if isinstance(raw, bytes):
                 raw = raw.decode()
             data = json.loads(raw)
@@ -123,7 +123,7 @@ class InteractiveShellClient:
         """Close the shell connection."""
         if self._ws is not None:
             try:
-                self._ws.close()  # type: ignore[union-attr]
+                self._ws.close()  # type: ignore[attr-defined]
             except Exception:
                 pass
             self._ws = None
