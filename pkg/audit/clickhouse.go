@@ -17,7 +17,7 @@ type ClickHouseWriter struct {
 	batchSize     int
 	flushInterval time.Duration
 
-	taskRecords    []interfaces.TaskAuditRecord
+	stepRecords    []interfaces.SessionStepAuditRecord
 	sandboxRecords []interfaces.SandboxAuditRecord
 	mu             sync.Mutex
 
@@ -36,10 +36,7 @@ type ClickHouseConfig struct {
 }
 
 // NewClickHouseWriter creates a new ClickHouse audit writer
-// Note: Requires the ClickHouse driver to be imported in the main package:
-// import _ "github.com/ClickHouse/clickhouse-go/v2"
 func NewClickHouseWriter(cfg ClickHouseConfig) (*ClickHouseWriter, error) {
-	// URL-encode password to handle special characters safely
 	encodedPassword := url.QueryEscape(cfg.Password)
 	dsn := fmt.Sprintf("clickhouse://%s:%s@%s/%s",
 		cfg.Username, encodedPassword, cfg.Addr, cfg.Database)
@@ -54,10 +51,9 @@ func NewClickHouseWriter(cfg ClickHouseConfig) (*ClickHouseWriter, error) {
 		return nil, fmt.Errorf("failed to ping clickhouse: %w", err)
 	}
 
-	// Create tables if they don't exist
-	if _, err := db.Exec(TaskAuditTableSQL); err != nil {
+	if _, err := db.Exec(SessionStepAuditTableSQL); err != nil {
 		db.Close()
-		return nil, fmt.Errorf("failed to create task_audit table: %w", err)
+		return nil, fmt.Errorf("failed to create session_step_audit table: %w", err)
 	}
 	if _, err := db.Exec(SandboxAuditTableSQL); err != nil {
 		db.Close()
@@ -87,15 +83,15 @@ func NewClickHouseWriter(cfg ClickHouseConfig) (*ClickHouseWriter, error) {
 	return w, nil
 }
 
-// WriteTaskCompletion writes a task completion audit record
-func (w *ClickHouseWriter) WriteTaskCompletion(_ context.Context, record interfaces.TaskAuditRecord) error {
+// WriteSessionStep writes a session step audit record
+func (w *ClickHouseWriter) WriteSessionStep(_ context.Context, record interfaces.SessionStepAuditRecord) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	w.taskRecords = append(w.taskRecords, record)
+	w.stepRecords = append(w.stepRecords, record)
 
-	if len(w.taskRecords) >= w.batchSize {
-		return w.flushTaskRecordsLocked()
+	if len(w.stepRecords) >= w.batchSize {
+		return w.flushStepRecordsLocked()
 	}
 
 	return nil
@@ -120,7 +116,7 @@ func (w *ClickHouseWriter) Flush(_ context.Context) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	if err := w.flushTaskRecordsLocked(); err != nil {
+	if err := w.flushStepRecordsLocked(); err != nil {
 		return err
 	}
 	return w.flushSandboxRecordsLocked()
@@ -132,7 +128,7 @@ func (w *ClickHouseWriter) Close() error {
 	<-w.doneCh
 
 	w.mu.Lock()
-	_ = w.flushTaskRecordsLocked()
+	_ = w.flushStepRecordsLocked()
 	_ = w.flushSandboxRecordsLocked()
 	w.mu.Unlock()
 
@@ -150,15 +146,15 @@ func (w *ClickHouseWriter) flushLoop() {
 			return
 		case <-ticker.C:
 			w.mu.Lock()
-			_ = w.flushTaskRecordsLocked()
+			_ = w.flushStepRecordsLocked()
 			_ = w.flushSandboxRecordsLocked()
 			w.mu.Unlock()
 		}
 	}
 }
 
-func (w *ClickHouseWriter) flushTaskRecordsLocked() error {
-	if len(w.taskRecords) == 0 {
+func (w *ClickHouseWriter) flushStepRecordsLocked() error {
+	if len(w.stepRecords) == 0 {
 		return nil
 	}
 
@@ -168,9 +164,9 @@ func (w *ClickHouseWriter) flushTaskRecordsLocked() error {
 	}
 
 	stmt, err := tx.Prepare(`
-		INSERT INTO task_audit (
-			trace_id, namespace, name, sandbox_ref, state, exit_code,
-			duration, start_time, completion_time, step_count, input, stdout, stderr
+		INSERT INTO session_step_audit (
+			session_id, trace_id, namespace, step_index, step_name, step_type,
+			input, stdout, stderr, exit_code, snapshot_id, duration_ms, timestamp
 		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 	`)
 	if err != nil {
@@ -179,13 +175,13 @@ func (w *ClickHouseWriter) flushTaskRecordsLocked() error {
 	}
 	defer stmt.Close()
 
-	for _, r := range w.taskRecords {
+	for _, r := range w.stepRecords {
 		if _, err := stmt.Exec(
-			r.TraceID, r.Namespace, r.Name, r.SandboxRef, r.State, r.ExitCode,
-			r.Duration, r.StartTime, r.CompletionTime, r.StepCount, r.Input, r.Stdout, r.Stderr,
+			r.SessionID, r.TraceID, r.Namespace, r.StepIndex, r.StepName, r.StepType,
+			r.Input, r.Stdout, r.Stderr, r.ExitCode, r.SnapshotID, r.DurationMs, r.Timestamp,
 		); err != nil {
 			tx.Rollback()
-			return fmt.Errorf("failed to insert task audit record: %w", err)
+			return fmt.Errorf("failed to insert session step audit record: %w", err)
 		}
 	}
 
@@ -193,7 +189,7 @@ func (w *ClickHouseWriter) flushTaskRecordsLocked() error {
 		return fmt.Errorf("failed to commit transaction: %w", err)
 	}
 
-	w.taskRecords = w.taskRecords[:0]
+	w.stepRecords = w.stepRecords[:0]
 	return nil
 }
 

@@ -16,53 +16,44 @@ graph TB
         PythonSDK[Python SDK]
         User --> PythonSDK
         User --> |kubectl apply| K8sAPI[Kubernetes API]
-        PythonSDK --> |kubernetes client| K8sAPI
+        PythonSDK --> |REST API| Gateway[Gateway]
     end
 
     subgraph "Kubernetes Control Plane"
         K8sAPI
-        
+        Gateway --> |kubernetes client| K8sAPI
+
         subgraph "ARL Operator"
             Operator[Operator Main]
-            
+
             subgraph "Controllers"
                 WPCtrl[WarmPool Controller]
                 SBCtrl[Sandbox Controller]
-                TaskCtrl[Task Controller]
-                TTLCtrl[TTL Controller]
             end
-            
+
             subgraph "Webhooks"
                 WPWebhook[WarmPool Validator]
                 SBWebhook[Sandbox Validator]
-                TaskWebhook[Task Validator]
             end
-            
+
             Operator --> WPCtrl
             Operator --> SBCtrl
-            Operator --> TaskCtrl
-            Operator --> TTLCtrl
             Operator --> WPWebhook
             Operator --> SBWebhook
-            Operator --> TaskWebhook
         end
-        
+
         K8sAPI --> |validate| WPWebhook
         K8sAPI --> |validate| SBWebhook
-        K8sAPI --> |validate| TaskWebhook
         K8sAPI --> |watch/update| WPCtrl
         K8sAPI --> |watch/update| SBCtrl
-        K8sAPI --> |watch/update| TaskCtrl
-        K8sAPI --> |watch/delete| TTLCtrl
     end
 
     subgraph "Kubernetes Data Plane"
         subgraph "Custom Resources"
             WP[WarmPool CRD]
             SB[Sandbox CRD]
-            Task[Task CRD]
         end
-        
+
         subgraph "Warm Pool Pods"
             Pod1[Pod 1 - Ready]
             Pod2[Pod 2 - Allocated]
@@ -73,14 +64,13 @@ graph TB
     WPCtrl --> |create/manage| Pod1
     WPCtrl --> |create/manage| Pod2
     WPCtrl --> |create/manage| Pod3
-    
+
     SBCtrl --> |allocate| Pod2
     SBCtrl --> |read| WP
-    
-    TaskCtrl --> |gRPC| Pod2
-    TaskCtrl --> |read| SB
-    
-    Task --> |references| SB
+
+    Gateway --> |gRPC| Pod2
+    Gateway --> |read| SB
+
     SB --> |references| WP
 ```
 
@@ -94,8 +84,7 @@ The operator is the central control component running in the `arl-system` namesp
 |-----------|----------------|
 | **WarmPool Controller** | Maintains pod pools, ensures desired replica count |
 | **Sandbox Controller** | Allocates pods from pools, manages sandbox lifecycle |
-| **Task Controller** | Executes tasks via gRPC calls to sidecars |
-| **TTL Controller** | Cleans up completed tasks and idle sandboxes |
+| **Gateway** | REST API for session management and command execution via gRPC |
 | **Webhooks** | Validates CRD resources before creation |
 
 ### Sidecar Agent
@@ -114,12 +103,12 @@ graph LR
         Sidecar[Sidecar Container<br/>gRPC Server :50051]
         Executor[Executor Container<br/>User Code]
         Volume[(Shared Volume<br/>/workspace)]
-        
+
         Sidecar -.-> Volume
         Executor -.-> Volume
     end
-    
-    TaskCtrl[Task Controller] --> |gRPC| Sidecar
+
+    Gateway[Gateway] --> |gRPC| Sidecar
 ```
 
 ### Custom Resources
@@ -153,38 +142,21 @@ metadata:
   name: my-sandbox
 spec:
   poolRef: python-pool  # Which pool to allocate from
-  keepAlive: true       # Keep for multiple tasks
-```
-
-#### Task
-
-A unit of work to execute.
-
-```yaml
-apiVersion: arl.infra.io/v1alpha1
-kind: Task
-metadata:
-  name: my-task
-spec:
-  sandboxRef: my-sandbox
-  timeout: 30s
-  steps:
-    - name: run
-      type: Command
-      command: ["python", "-c", "print('hello')"]
+  keepAlive: true       # Keep for multiple executions
 ```
 
 ## Interaction Flow
 
-### Task Execution Flow
+### Execution Flow
 
 ```mermaid
 sequenceDiagram
     participant User
+    participant SDK as Python SDK
+    participant GW as Gateway API
     participant API as Kubernetes API
     participant WPC as WarmPool Controller
     participant SBC as Sandbox Controller
-    participant TC as Task Controller
     participant Pod as Pod (Sidecar)
 
     Note over User,Pod: Phase 1: Create Pod Pool
@@ -194,24 +166,23 @@ sequenceDiagram
     Note over Pod: Pods Ready
 
     Note over User,Pod: Phase 2: Allocate Sandbox
-    User->>API: Create Sandbox
+    User->>SDK: Create SandboxSession
+    SDK->>GW: Create Sandbox
+    GW->>API: Create Sandbox CRD
     API->>SBC: Watch Sandbox
     SBC->>API: Query WarmPool
     SBC->>API: Allocate Pod (update labels)
     Note over Pod: Pod Allocated
     SBC->>API: Update Sandbox Status (Ready)
 
-    Note over User,Pod: Phase 3: Execute Task
-    User->>API: Create Task
-    API->>TC: Watch Task
-    TC->>API: Get Sandbox (pod IP)
-    TC->>Pod: gRPC: UpdateFiles
-    Pod-->>TC: Success
-    TC->>Pod: gRPC: Execute
-    Pod-->>TC: stdout, stderr, exitCode
-    TC->>API: Update Task Status (Succeeded)
-    User->>API: Get Task Status
-    API-->>User: Results
+    Note over User,Pod: Phase 3: Execute Commands
+    User->>SDK: session.execute(steps)
+    SDK->>GW: POST /execute
+    GW->>API: Get Sandbox (pod IP)
+    GW->>Pod: gRPC: Execute
+    Pod-->>GW: stdout, stderr, exitCode
+    GW-->>SDK: ExecuteResponse
+    SDK-->>User: Results
 ```
 
 ### Data Flow
@@ -219,33 +190,33 @@ sequenceDiagram
 ```mermaid
 flowchart LR
     subgraph "Input"
-        YAML[YAML/Python SDK]
+        SDK[Python SDK]
     end
-    
+
+    subgraph "Gateway"
+        GW[REST API]
+    end
+
     subgraph "Kubernetes Resources"
         WP[WarmPool]
         SB[Sandbox]
-        Task[Task]
     end
-    
+
     subgraph "Pod Execution"
-        File[FilePatch]
-        Cmd[Command]
+        Cmd[Command via gRPC]
     end
-    
+
     subgraph "Output"
-        Status[Task.Status<br/>stdout/stderr/exitCode]
+        Status[ExecuteResponse<br/>stdout/stderr/exitCode]
     end
-    
-    YAML --> WP
+
+    SDK --> GW
+    GW --> SB
     WP --> |provides| SB
-    YAML --> SB
-    SB --> |binds Pod| Task
-    YAML --> Task
-    Task --> File
-    Task --> Cmd
-    File --> Status
+    SB --> |binds Pod| Cmd
     Cmd --> Status
+    Status --> GW
+    GW --> SDK
 ```
 
 ## Design Decisions
@@ -267,9 +238,16 @@ Warm pools provide the best balance of low latency and strong isolation.
 - **Security**: Sidecar has limited permissions, user code is sandboxed
 - **Observability**: Sidecar can collect metrics and logs
 
-### Why CRD-based API?
+### Why Gateway-based Execution?
 
-- **Kubernetes-native**: Uses familiar kubectl commands
+- **Low latency**: Direct gRPC calls to sidecars without creating Kubernetes resources per execution
+- **Simplicity**: No Task CRD lifecycle to manage
+- **Scalability**: Gateway can route and load-balance execution requests
+- **Flexibility**: Supports restore, trajectory export, and tool invocation beyond simple command execution
+
+### Why CRD-based Resource Management?
+
+- **Kubernetes-native**: Uses familiar kubectl commands for WarmPool and Sandbox management
 - **Declarative**: Desired state is explicitly defined
 - **Extensible**: Easy to add new resource types
 - **Auditable**: All changes tracked by Kubernetes
@@ -282,13 +260,18 @@ agent-env/
 │   └── v1alpha1/
 ├── cmd/
 │   ├── operator/          # Operator entrypoint
-│   └── sidecar/           # Sidecar entrypoint
+│   ├── sidecar/           # Sidecar entrypoint
+│   ├── gateway/           # Gateway entrypoint
+│   └── executor-agent/    # Executor agent entrypoint
 ├── config/
 │   └── crd/               # Generated CRD manifests
 ├── pkg/
-│   ├── controllers/       # Reconciliation logic
+│   ├── controller/        # Reconciliation logic
+│   ├── gateway/           # Gateway REST API
+│   ├── execagent/         # Executor agent logic
+│   ├── scheduler/         # Pod scheduling logic
 │   ├── pb/                # Generated protobuf code
-│   └── webhooks/          # Validation webhooks
+│   └── webhook/           # Validation webhooks
 ├── proto/                 # Protocol buffer definitions
 ├── sdk/python/            # Python SDK
 └── charts/                # Helm charts

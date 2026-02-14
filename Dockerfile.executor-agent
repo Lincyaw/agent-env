@@ -1,0 +1,18 @@
+FROM golang:1.25-alpine AS builder
+
+WORKDIR /workspace
+
+# Set Go proxy with multiple fallbacks for reliability
+ENV GOPROXY=https://goproxy.cn,https://goproxy.io,https://proxy.golang.org,direct
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY pkg/execagent/ pkg/execagent/
+COPY cmd/executor-agent/ cmd/executor-agent/
+
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o executor-agent cmd/executor-agent/main.go
+
+FROM busybox:latest
+COPY --from=builder /workspace/executor-agent /executor-agent
+ENTRYPOINT ["/executor-agent"]

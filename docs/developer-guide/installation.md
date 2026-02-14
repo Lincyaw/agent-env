@@ -110,14 +110,13 @@ If you prefer manual installation:
 ### Generate Code
 
 ```bash
-# Generate all code (proto, CRDs, deepcopy, Python SDK)
+# Generate all code (proto, CRDs, deepcopy)
 make generate
 
 # Or individually:
 make proto-go      # Generate Go gRPC code from proto files
 make manifests     # Generate CRD manifests
 make deepcopy      # Generate deepcopy code
-make sdk-python    # Generate Python SDK from CRDs
 ```
 
 ### Code Quality
@@ -168,7 +167,6 @@ Expected output:
 
 ```
 sandboxes.arl.infra.io           2024-01-01T00:00:00Z
-tasks.arl.infra.io               2024-01-01T00:00:00Z
 warmpools.arl.infra.io           2024-01-01T00:00:00Z
 ```
 

@@ -19,10 +19,7 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	AgentService_UpdateFiles_FullMethodName      = "/arl.sidecar.AgentService/UpdateFiles"
 	AgentService_Execute_FullMethodName          = "/arl.sidecar.AgentService/Execute"
-	AgentService_SignalProcess_FullMethodName    = "/arl.sidecar.AgentService/SignalProcess"
-	AgentService_Reset_FullMethodName            = "/arl.sidecar.AgentService/Reset"
 	AgentService_InteractiveShell_FullMethodName = "/arl.sidecar.AgentService/InteractiveShell"
 )
 
@@ -30,18 +27,10 @@ const (
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
-// AgentService provides file operations, process control, and environment management
-// Note: RPC method numbers 6-20 are reserved for future observation interfaces
-// (e.g., ReadFile, ListDirectory, GetProcessStatus, etc.)
+// AgentService provides command execution and interactive shell
 type AgentServiceClient interface {
-	// UpdateFiles applies file patches or overwrites
-	UpdateFiles(ctx context.Context, in *FileRequest, opts ...grpc.CallOption) (*FileResponse, error)
 	// Execute runs a command (Job mode) or starts a background service (Service mode)
 	Execute(ctx context.Context, in *ExecRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ExecLog], error)
-	// SignalProcess sends signals (SIGTERM/SIGKILL) to processes
-	SignalProcess(ctx context.Context, in *SignalRequest, opts ...grpc.CallOption) (*SignalResponse, error)
-	// Reset cleans the workspace
-	Reset(ctx context.Context, in *ResetRequest, opts ...grpc.CallOption) (*ResetResponse, error)
 	// InteractiveShell provides bidirectional streaming for interactive shell sessions
 	InteractiveShell(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[ShellInput, ShellOutput], error)
 }
@@ -52,16 +41,6 @@ type agentServiceClient struct {
 
 func NewAgentServiceClient(cc grpc.ClientConnInterface) AgentServiceClient {
 	return &agentServiceClient{cc}
-}
-
-func (c *agentServiceClient) UpdateFiles(ctx context.Context, in *FileRequest, opts ...grpc.CallOption) (*FileResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(FileResponse)
-	err := c.cc.Invoke(ctx, AgentService_UpdateFiles_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
 }
 
 func (c *agentServiceClient) Execute(ctx context.Context, in *ExecRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ExecLog], error) {
@@ -83,26 +62,6 @@ func (c *agentServiceClient) Execute(ctx context.Context, in *ExecRequest, opts 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type AgentService_ExecuteClient = grpc.ServerStreamingClient[ExecLog]
 
-func (c *agentServiceClient) SignalProcess(ctx context.Context, in *SignalRequest, opts ...grpc.CallOption) (*SignalResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(SignalResponse)
-	err := c.cc.Invoke(ctx, AgentService_SignalProcess_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
-func (c *agentServiceClient) Reset(ctx context.Context, in *ResetRequest, opts ...grpc.CallOption) (*ResetResponse, error) {
-	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(ResetResponse)
-	err := c.cc.Invoke(ctx, AgentService_Reset_FullMethodName, in, out, cOpts...)
-	if err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 func (c *agentServiceClient) InteractiveShell(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[ShellInput, ShellOutput], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	stream, err := c.cc.NewStream(ctx, &AgentService_ServiceDesc.Streams[1], AgentService_InteractiveShell_FullMethodName, cOpts...)
@@ -120,18 +79,10 @@ type AgentService_InteractiveShellClient = grpc.BidiStreamingClient[ShellInput, 
 // All implementations must embed UnimplementedAgentServiceServer
 // for forward compatibility.
 //
-// AgentService provides file operations, process control, and environment management
-// Note: RPC method numbers 6-20 are reserved for future observation interfaces
-// (e.g., ReadFile, ListDirectory, GetProcessStatus, etc.)
+// AgentService provides command execution and interactive shell
 type AgentServiceServer interface {
-	// UpdateFiles applies file patches or overwrites
-	UpdateFiles(context.Context, *FileRequest) (*FileResponse, error)
 	// Execute runs a command (Job mode) or starts a background service (Service mode)
 	Execute(*ExecRequest, grpc.ServerStreamingServer[ExecLog]) error
-	// SignalProcess sends signals (SIGTERM/SIGKILL) to processes
-	SignalProcess(context.Context, *SignalRequest) (*SignalResponse, error)
-	// Reset cleans the workspace
-	Reset(context.Context, *ResetRequest) (*ResetResponse, error)
 	// InteractiveShell provides bidirectional streaming for interactive shell sessions
 	InteractiveShell(grpc.BidiStreamingServer[ShellInput, ShellOutput]) error
 	mustEmbedUnimplementedAgentServiceServer()
@@ -144,17 +95,8 @@ type AgentServiceServer interface {
 // pointer dereference when methods are called.
 type UnimplementedAgentServiceServer struct{}
 
-func (UnimplementedAgentServiceServer) UpdateFiles(context.Context, *FileRequest) (*FileResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method UpdateFiles not implemented")
-}
 func (UnimplementedAgentServiceServer) Execute(*ExecRequest, grpc.ServerStreamingServer[ExecLog]) error {
 	return status.Error(codes.Unimplemented, "method Execute not implemented")
-}
-func (UnimplementedAgentServiceServer) SignalProcess(context.Context, *SignalRequest) (*SignalResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method SignalProcess not implemented")
-}
-func (UnimplementedAgentServiceServer) Reset(context.Context, *ResetRequest) (*ResetResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method Reset not implemented")
 }
 func (UnimplementedAgentServiceServer) InteractiveShell(grpc.BidiStreamingServer[ShellInput, ShellOutput]) error {
 	return status.Error(codes.Unimplemented, "method InteractiveShell not implemented")
@@ -180,24 +122,6 @@ func RegisterAgentServiceServer(s grpc.ServiceRegistrar, srv AgentServiceServer)
 	s.RegisterService(&AgentService_ServiceDesc, srv)
 }
 
-func _AgentService_UpdateFiles_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(FileRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(AgentServiceServer).UpdateFiles(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: AgentService_UpdateFiles_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(AgentServiceServer).UpdateFiles(ctx, req.(*FileRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
 func _AgentService_Execute_Handler(srv interface{}, stream grpc.ServerStream) error {
 	m := new(ExecRequest)
 	if err := stream.RecvMsg(m); err != nil {
@@ -208,42 +132,6 @@ func _AgentService_Execute_Handler(srv interface{}, stream grpc.ServerStream) er
 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type AgentService_ExecuteServer = grpc.ServerStreamingServer[ExecLog]
-
-func _AgentService_SignalProcess_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(SignalRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(AgentServiceServer).SignalProcess(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: AgentService_SignalProcess_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(AgentServiceServer).SignalProcess(ctx, req.(*SignalRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
-
-func _AgentService_Reset_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(ResetRequest)
-	if err := dec(in); err != nil {
-		return nil, err
-	}
-	if interceptor == nil {
-		return srv.(AgentServiceServer).Reset(ctx, in)
-	}
-	info := &grpc.UnaryServerInfo{
-		Server:     srv,
-		FullMethod: AgentService_Reset_FullMethodName,
-	}
-	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(AgentServiceServer).Reset(ctx, req.(*ResetRequest))
-	}
-	return interceptor(ctx, in, info, handler)
-}
 
 func _AgentService_InteractiveShell_Handler(srv interface{}, stream grpc.ServerStream) error {
 	return srv.(AgentServiceServer).InteractiveShell(&grpc.GenericServerStream[ShellInput, ShellOutput]{ServerStream: stream})
@@ -258,20 +146,7 @@ type AgentService_InteractiveShellServer = grpc.BidiStreamingServer[ShellInput, 
 var AgentService_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "arl.sidecar.AgentService",
 	HandlerType: (*AgentServiceServer)(nil),
-	Methods: []grpc.MethodDesc{
-		{
-			MethodName: "UpdateFiles",
-			Handler:    _AgentService_UpdateFiles_Handler,
-		},
-		{
-			MethodName: "SignalProcess",
-			Handler:    _AgentService_SignalProcess_Handler,
-		},
-		{
-			MethodName: "Reset",
-			Handler:    _AgentService_Reset_Handler,
-		},
-	},
+	Methods:     []grpc.MethodDesc{},
 	Streams: []grpc.StreamDesc{
 		{
 			StreamName:    "Execute",

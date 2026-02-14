@@ -26,6 +26,20 @@ spec:
             type: object
           spec:
             properties:
+              imageLocality:
+                properties:
+                  enabled:
+                    type: boolean
+                  spreadFactor:
+                    maximum: 10
+                    minimum: 0
+                    type: number
+                  weight:
+                    format: int32
+                    maximum: 100
+                    minimum: 1
+                    type: integer
+                type: object
               replicas:
                 format: int32
                 type: integer
@@ -3819,6 +3833,61 @@ spec:
                     required:
                     - containers
                     type: object
+                type: object
+              tools:
+                properties:
+                  configMaps:
+                    items:
+                      properties:
+                        name:
+                          type: string
+                      required:
+                      - name
+                      type: object
+                    type: array
+                  images:
+                    items:
+                      properties:
+                        image:
+                          type: string
+                      required:
+                      - image
+                      type: object
+                    type: array
+                  inline:
+                    items:
+                      properties:
+                        description:
+                          type: string
+                        entrypoint:
+                          maxLength: 255
+                          pattern: ^[a-zA-Z0-9][a-zA-Z0-9_.-]*$
+                          type: string
+                        files:
+                          additionalProperties:
+                            type: string
+                          type: object
+                        name:
+                          maxLength: 63
+                          pattern: ^[a-zA-Z0-9][a-zA-Z0-9_.-]*$
+                          type: string
+                        parameters:
+                          x-kubernetes-preserve-unknown-fields: true
+                        runtime:
+                          enum:
+                          - bash
+                          - python
+                          - binary
+                          type: string
+                        timeout:
+                          type: string
+                      required:
+                      - entrypoint
+                      - files
+                      - name
+                      - runtime
+                      type: object
+                    type: array
                 type: object
             required:
             - replicas

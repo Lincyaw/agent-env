@@ -57,6 +57,28 @@ k8s-setup: ## Setup prerequisites for new K8s cluster (ClickHouse operator, Helm
 	@echo "✅ Setup complete. Now run 'skaffold run --profile=dev' to deploy."
 
 
+##@ Build
+
+.PHONY: build
+build: ## Build all Go binaries
+	go build ./...
+
+.PHONY: build-gateway
+build-gateway: ## Build gateway binary
+	CGO_ENABLED=0 go build -o bin/gateway cmd/gateway/main.go
+
+.PHONY: build-executor-agent
+build-executor-agent: ## Build executor agent binary
+	CGO_ENABLED=0 go build -ldflags="-s -w" -o bin/executor-agent cmd/executor-agent/main.go
+
+.PHONY: build-sidecar
+build-sidecar: ## Build sidecar binary
+	CGO_ENABLED=0 go build -o bin/sidecar cmd/sidecar/main.go
+
+.PHONY: build-operator
+build-operator: ## Build operator binary
+	CGO_ENABLED=0 go build -o bin/operator cmd/operator/main.go
+
 ##@ Development
 
 .PHONY: fmt
@@ -81,7 +103,7 @@ check: fmt vet tidy ## Run all code quality checks
 ##@ Code Generation
 
 .PHONY: generate
-generate: proto-go manifests deepcopy sdk-python ## Generate all code (proto, CRDs, deepcopy, Python SDK)
+generate: proto-go manifests deepcopy ## Generate all code (proto, CRDs, deepcopy)
 
 .PHONY: proto-go
 proto-go: ## Generate Go gRPC code from proto files
@@ -91,26 +113,18 @@ proto-go: ## Generate Go gRPC code from proto files
 		proto/agent.proto
 	@mv proto/*.pb.go pkg/pb/ 2>/dev/null || true
 
-
-
 .PHONY: manifests
 manifests: ## Generate CRD manifests
-	go run sigs.k8s.io/controller-tools/cmd/controller-gen crd:maxDescLen=0 paths="./api/..." output:crd:artifacts:config=config/crd
+	go run sigs.k8s.io/controller-tools/cmd/controller-gen crd:maxDescLen=0,allowDangerousTypes=true paths="./api/..." output:crd:artifacts:config=config/crd
 
 .PHONY: deepcopy
 deepcopy: ## Generate deepcopy code
 	go run sigs.k8s.io/controller-tools/cmd/controller-gen object:headerFile="hack/boilerplate.go.txt" paths="./api/..."
 
-.PHONY: sdk-python
-sdk-python: ## Generate Python SDK from CRDs
-	./hack/generate-sdk.sh
-	uv run ruff format . || true
-	uv run ruff check --fix . --unsafe-fixes || true
-
 ##@ Python SDK
 
 .PHONY: build-sdk
-build-sdk: sdk-python ## Build Python SDK package
+build-sdk: ## Build Python SDK package
 	cd sdk/python/arl && uv build
 
 .PHONY: publish-test
@@ -124,7 +138,6 @@ publish: build-sdk ## Publish to Production PyPI (requires UV_PUBLISH_TOKEN)
 .PHONY: clean-sdk
 clean-sdk: ## Clean Python SDK build artifacts
 	rm -rf sdk/python/arl/dist sdk/python/arl/build sdk/python/arl/*.egg-info
-	rm -rf sdk/python/arl/arl/arl_client
 
 ##@ Architecture
 

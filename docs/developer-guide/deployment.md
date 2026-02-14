@@ -300,9 +300,6 @@ skaffold delete --profile=k8s
 ### Manual Cleanup
 
 ```bash
-# Delete all tasks
-kubectl delete tasks --all
-
 # Delete all sandboxes
 kubectl delete sandboxes --all
 
@@ -344,11 +341,14 @@ kubectl describe warmpool <name>
 make logs
 ```
 
-### Task Not Executing
+### Execution Not Working
 
 ```bash
-# Check Task status
-kubectl describe task <name>
+# Check Gateway is running
+kubectl get pods -n arl-system -l app=arl-gateway
+
+# Check Gateway logs
+kubectl logs -n arl-system -l app=arl-gateway
 
 # Check sandbox status
 kubectl describe sandbox <sandbox-name>

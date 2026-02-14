@@ -57,7 +57,7 @@ kubectl get pods -n arl-system
 kubectl get crds | grep arl.infra.io
 
 # Check custom resources
-kubectl get warmpools,sandboxes,tasks
+kubectl get warmpools,sandboxes
 
 # View operator logs
 make logs
@@ -74,7 +74,7 @@ After deploying ARL-Infra, proceed to:
 
 ## Quick Test
 
-Create a simple warm pool and execute a task:
+Create a simple warm pool and sandbox:
 
 ```bash
 # Create a warm pool
@@ -106,25 +106,10 @@ spec:
   poolRef: test-pool
   keepAlive: true
 EOF
-
-# Execute a task
-cat <<EOF | kubectl apply -f -
-apiVersion: arl.infra.io/v1alpha1
-kind: Task
-metadata:
-  name: test-task
-spec:
-  sandboxRef: test-sandbox
-  timeout: 30s
-  steps:
-    - name: hello
-      type: Command
-      command: ["echo", "Hello from ARL-Infra!"]
-EOF
-
-# Check the result
-kubectl get task test-task -o jsonpath='{.status.stdout}'
 ```
+
+!!! note "Execution via Gateway API"
+    Task execution is handled through the Gateway REST API or the Python SDK, not via kubectl. See the [SDK User Guide](sdk-users.md) or the [Python SDK documentation](../user-guide/python-sdk.md) for details on executing commands in sandboxes.
 
 ## Troubleshooting
 

@@ -64,35 +64,6 @@ func (c *GRPCSidecarClient) getOrCreateConn(podIP string) (*grpc.ClientConn, err
 	return conn, nil
 }
 
-// UpdateFiles sends file update request to sidecar
-func (c *GRPCSidecarClient) UpdateFiles(ctx context.Context, podIP string, req interfaces.FileUpdateRequest) (interfaces.FileUpdateResponse, error) {
-	conn, err := c.getOrCreateConn(podIP)
-	if err != nil {
-		return nil, err
-	}
-
-	client := pb.NewAgentServiceClient(conn)
-
-	ctx, cancel := context.WithTimeout(ctx, c.timeout)
-	defer cancel()
-
-	pbReq := &pb.FileRequest{
-		BasePath: req.GetBasePath(),
-		Files:    req.GetFiles(),
-		Patch:    req.GetPatch(),
-	}
-
-	resp, err := client.UpdateFiles(ctx, pbReq)
-	if err != nil {
-		return nil, fmt.Errorf("gRPC UpdateFiles failed: %w", err)
-	}
-
-	return &sidecar.FileResponse{
-		Success: resp.GetSuccess(),
-		Message: resp.GetMessage(),
-	}, nil
-}
-
 // Execute sends command execution request and returns aggregated result
 func (c *GRPCSidecarClient) Execute(ctx context.Context, podIP string, req interfaces.ExecRequest) (interfaces.ExecResponse, error) {
 	conn, err := c.getOrCreateConn(podIP)
@@ -206,33 +177,6 @@ func (c *GRPCSidecarClient) ExecuteStream(ctx context.Context, podIP string, req
 	return resultChan, nil
 }
 
-// Reset sends reset request to sidecar
-func (c *GRPCSidecarClient) Reset(ctx context.Context, podIP string, req interfaces.ResetRequest) (interfaces.ResetResponse, error) {
-	conn, err := c.getOrCreateConn(podIP)
-	if err != nil {
-		return nil, err
-	}
-
-	client := pb.NewAgentServiceClient(conn)
-
-	ctx, cancel := context.WithTimeout(ctx, c.timeout)
-	defer cancel()
-
-	pbReq := &pb.ResetRequest{
-		PreserveFiles: req.ShouldPreserveFiles(),
-	}
-
-	resp, err := client.Reset(ctx, pbReq)
-	if err != nil {
-		return nil, fmt.Errorf("gRPC Reset failed: %w", err)
-	}
-
-	return &sidecar.ResetResponse{
-		Success: resp.GetSuccess(),
-		Message: resp.GetMessage(),
-	}, nil
-}
-
 // HealthCheck checks if sidecar is healthy by verifying gRPC connection state
 func (c *GRPCSidecarClient) HealthCheck(ctx context.Context, podIP string) error {
 	conn, err := c.getOrCreateConn(podIP)
@@ -262,4 +206,56 @@ func (c *GRPCSidecarClient) Close() error {
 		delete(c.conns, podIP)
 	}
 	return lastErr
+}
+
+// grpcShellStream wraps a gRPC bidi stream as interfaces.ShellStream.
+type grpcShellStream struct {
+	stream grpc.BidiStreamingClient[pb.ShellInput, pb.ShellOutput]
+}
+
+func (s *grpcShellStream) Send(input interfaces.ShellInput) error {
+	pbInput := &pb.ShellInput{
+		Resize: input.Resize,
+		Rows:   input.Rows,
+		Cols:   input.Cols,
+	}
+	if input.Signal != "" {
+		pbInput.Input = &pb.ShellInput_Signal{Signal: input.Signal}
+	} else if input.Data != "" {
+		pbInput.Input = &pb.ShellInput_Data{Data: input.Data}
+	}
+	return s.stream.Send(pbInput)
+}
+
+func (s *grpcShellStream) Recv() (interfaces.ShellOutput, error) {
+	out, err := s.stream.Recv()
+	if err != nil {
+		return interfaces.ShellOutput{}, err
+	}
+	return interfaces.ShellOutput{
+		Data:     out.GetData(),
+		ExitCode: out.GetExitCode(),
+		Closed:   out.GetClosed(),
+	}, nil
+}
+
+func (s *grpcShellStream) Close() error {
+	return s.stream.CloseSend()
+}
+
+// InteractiveShell opens a bidirectional shell session via sidecar gRPC
+func (c *GRPCSidecarClient) InteractiveShell(ctx context.Context, podIP string) (interfaces.ShellStream, error) {
+	conn, err := c.getOrCreateConn(podIP)
+	if err != nil {
+		return nil, err
+	}
+
+	client := pb.NewAgentServiceClient(conn)
+
+	stream, err := client.InteractiveShell(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("gRPC InteractiveShell failed: %w", err)
+	}
+
+	return &grpcShellStream{stream: stream}, nil
 }

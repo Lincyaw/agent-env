@@ -13,6 +13,7 @@ RUN go mod download
 # Copy source code
 COPY api/ api/
 COPY pkg/sidecar/ pkg/sidecar/
+COPY pkg/execagent/ pkg/execagent/
 COPY pkg/pb/ pkg/pb/
 COPY cmd/sidecar/ cmd/sidecar/
 

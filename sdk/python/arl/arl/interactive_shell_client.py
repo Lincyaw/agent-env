@@ -1,237 +1,165 @@
-"""Interactive shell client for Python SDK.
+"""Interactive shell client for ARL SDK via Gateway WebSocket."""
 
-This module provides a Python client for interactive shell sessions
-that can be integrated with frontends via WebSocket.
-"""
+from __future__ import annotations
 
-import asyncio
+import json
 from collections.abc import Callable
 
-from kubernetes import client, config
-from kubernetes.stream import stream
+from arl.types import ShellMessage
 
 
 class InteractiveShellClient:
-    """Client for interactive shell sessions with pods.
-
-    This provides a Python interface to execute interactive shells
-    in pods, suitable for WebSocket integration.
+    """Client for interactive shell sessions via the Gateway WebSocket API.
 
     Examples:
-        >>> client = InteractiveShellClient()
-        >>> await client.connect("default", "my-pod", "executor")
-        >>> await client.send_input("ls -la\\n")
-        >>> output = await client.read_output()
-        >>> await client.close()
+        >>> client = InteractiveShellClient(gateway_url="http://localhost:8080")
+        >>> client.connect("session-123")
+        >>> client.send_input("ls -la\\n")
+        >>> output = client.read_output()
+        >>> client.close()
     """
 
-    def __init__(self):
-        """Initialize the interactive shell client."""
-        config.load_kube_config()
-        self.v1 = client.CoreV1Api()
-        self.ws_client = None
-        self.namespace = None
-        self.pod_name = None
-        self.container = None
-        self._read_task: asyncio.Task[None] | None = None
+    def __init__(self, gateway_url: str = "http://localhost:8080") -> None:
+        self._gateway_url = gateway_url.rstrip("/")
+        ws_url = self._gateway_url.replace("http://", "ws://").replace("https://", "wss://")
+        self._ws_base_url = ws_url
+        self._ws: object | None = None
+        self._session_id: str | None = None
 
-    def connect_sync(
-        self,
-        namespace: str,
-        pod_name: str,
-        container: str = "executor",
-        command: list[str] | None = None,
-    ) -> None:
-        """Connect to a pod's interactive shell (synchronous).
+    def connect(self, session_id: str) -> None:
+        """Connect to a session's interactive shell via WebSocket.
 
         Args:
-            namespace: Kubernetes namespace
-            pod_name: Pod name
-            container: Container name (default: executor)
-            command: Shell command to run (default: ["/bin/sh"])
+            session_id: Session ID to connect to.
         """
-        self.namespace = namespace
-        self.pod_name = pod_name
-        self.container = container
+        try:
+            import websockets.sync.client as ws_client
+        except ImportError:
+            raise ImportError(
+                "websockets is required for interactive shell. "
+                "Install it with: pip install websockets"
+            ) from None
 
-        if command is None:
-            command = ["/bin/sh"]
+        self._session_id = session_id
+        url = f"{self._ws_base_url}/v1/sessions/{session_id}/shell"
+        self._ws = ws_client.connect(url)
 
-        # Create WebSocket connection to pod
-        self.ws_client = stream(
-            self.v1.connect_get_namespaced_pod_exec,
-            pod_name,
-            namespace,
-            container=container,
-            command=command,
-            stderr=True,
-            stdin=True,
-            stdout=True,
-            tty=False,
-            _preload_content=False,
-        )
-
-    async def connect(
-        self,
-        namespace: str,
-        pod_name: str,
-        container: str = "executor",
-        command: list[str] | None = None,
-    ) -> None:
-        """Connect to a pod's interactive shell (async wrapper).
+    def send_input(self, data: str) -> None:
+        """Send input to the shell.
 
         Args:
-            namespace: Kubernetes namespace
-            pod_name: Pod name
-            container: Container name (default: executor)
-            command: Shell command to run (default: ["/bin/sh"])
+            data: Input data to send.
         """
-        self.connect_sync(namespace, pod_name, container, command)
+        if self._ws is None:
+            raise RuntimeError("Not connected. Call connect() first.")
+        msg = json.dumps({"type": "input", "data": data})
+        self._ws.send(msg)  # type: ignore[attr-defined]
 
-    async def send_input(self, data: str) -> None:
-        """Send input to the shell (async).
+    def send_signal(self, sig: str = "SIGINT") -> None:
+        """Send an out-of-band signal to the remote shell process.
 
         Args:
-            data: Input data to send
+            sig: Signal name (e.g. ``SIGINT``, ``SIGTERM``, ``SIGKILL``).
         """
-        self.send_input_sync(data)
+        if self._ws is None:
+            raise RuntimeError("Not connected. Call connect() first.")
+        msg = json.dumps({"type": "signal", "signal": sig})
+        self._ws.send(msg)  # type: ignore[attr-defined]
 
-    def send_input_sync(self, data: str) -> None:
-        """Send input to the shell (synchronous).
+    def send_resize(self, cols: int, rows: int) -> None:
+        """Notify the remote PTY of a terminal size change.
 
         Args:
-            data: Input data to send
+            cols: Number of columns.
+            rows: Number of rows.
         """
-        if self.ws_client:
-            self.ws_client.write_stdin(data)
+        if self._ws is None:
+            raise RuntimeError("Not connected. Call connect() first.")
+        msg = json.dumps({"type": "resize", "cols": cols, "rows": rows})
+        self._ws.send(msg)  # type: ignore[attr-defined]
 
-    async def read_output(self, timeout: float = 0.1) -> str:
-        """Read output from the shell (async).
+    def read_message(self, timeout: float = 1.0) -> ShellMessage | None:
+        """Read the next WebSocket message as a typed :class:`ShellMessage`.
+
+        Unlike :meth:`read_output` this returns the full message including
+        ``exit`` and ``error`` types, giving callers the ability to react to
+        shell termination and errors.
 
         Args:
-            timeout: Read timeout in seconds
+            timeout: Read timeout in seconds.
 
         Returns:
-            Output data
+            Parsed :class:`ShellMessage`, or ``None`` on timeout / closed.
         """
-        return self.read_output_sync(timeout)
-
-    def read_output_sync(self, timeout: float = 0.1) -> str:
-        """Read output from the shell (synchronous).
-
-        Args:
-            timeout: Read timeout in seconds
-
-        Returns:
-            Output data
-        """
-        if not self.ws_client:
-            return ""
-
-        output = ""
+        if self._ws is None:
+            return None
 
         try:
-            # IMPORTANT: Must call update() to process WebSocket data
-            self.ws_client.update(timeout=timeout)
-
-            # Read stdout
-            while self.ws_client.peek_stdout():
-                data = self.ws_client.read_stdout()
-                if data:
-                    output += data
-                else:
-                    break
-
-            # Read stderr
-            while self.ws_client.peek_stderr():
-                data = self.ws_client.read_stderr()
-                if data:
-                    output += data
-                else:
-                    break
+            raw = self._ws.recv(timeout=timeout)  # type: ignore[attr-defined]
+            if isinstance(raw, bytes):
+                raw = raw.decode()
+            data = json.loads(raw)
+            return ShellMessage(**data)
+        except TimeoutError:
+            return None
         except Exception:
-            # Ignore read errors
-            pass
+            return None
 
-        return output
+    def read_output(self, timeout: float = 1.0) -> str:
+        """Read output from the shell.
 
-    async def close(self) -> None:
-        """Close the shell connection (async)."""
-        self.close_sync()
-
-    def close_sync(self) -> None:
-        """Close the shell connection (synchronous)."""
-        if self.ws_client:
-            self.ws_client.close()
-            self.ws_client = None
-
-    def is_open(self) -> bool:
-        """Check if the connection is open.
+        Args:
+            timeout: Read timeout in seconds.
 
         Returns:
-            True if connection is open
+            Output data.
         """
-        return self.ws_client is not None and self.ws_client.is_open()
+        msg = self.read_message(timeout)
+        if msg is not None and msg.type == "output":
+            return msg.data
+        return ""
+
+    def close(self) -> None:
+        """Close the shell connection."""
+        if self._ws is not None:
+            try:
+                self._ws.close()  # type: ignore[attr-defined]
+            except Exception:
+                pass
+            self._ws = None
+
+    def is_open(self) -> bool:
+        """Check if the connection is open."""
+        return self._ws is not None
+
+    def __enter__(self) -> InteractiveShellClient:
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        self.close()
 
 
-async def create_websocket_proxy(
-    namespace: str,
-    pod_name: str,
-    container: str,
-    on_output: Callable[[str], None],
+def create_websocket_proxy(
+    gateway_url: str,
+    session_id: str,
     on_error: Callable[[str], None],
-    on_close: Callable[[], None],
 ) -> InteractiveShellClient:
     """Create a WebSocket proxy for interactive shell.
 
-    This is a helper function for integrating with WebSocket servers.
-
     Args:
-        namespace: Kubernetes namespace
-        pod_name: Pod name
-        container: Container name
-        on_output: Callback for output data
-        on_error: Callback for errors
-        on_close: Callback when connection closes
+        gateway_url: Gateway base URL.
+        session_id: Session ID to connect to.
+        on_output: Callback for output data.
+        on_error: Callback for errors.
+        on_close: Callback when connection closes.
 
     Returns:
-        InteractiveShellClient instance
-
-    Example:
-        >>> async def handle_output(data):
-        ...     print(f"Output: {data}")
-        >>>
-        >>> client = await create_websocket_proxy(
-        ...     "default", "my-pod", "executor",
-        ...     on_output=handle_output,
-        ...     on_error=lambda e: print(f"Error: {e}"),
-        ...     on_close=lambda: print("Closed")
-        ... )
+        InteractiveShellClient instance.
     """
-    client = InteractiveShellClient()
-
+    shell_client = InteractiveShellClient(gateway_url=gateway_url)
     try:
-        await client.connect(namespace, pod_name, container)
-
-        # Start output reading loop
-        async def read_loop():
-            try:
-                while client.is_open():
-                    output = await client.read_output()
-                    if output:
-                        on_output(output)
-                    await asyncio.sleep(0.01)
-            except Exception as e:
-                on_error(str(e))
-            finally:
-                on_close()
-
-        # Start the read loop in background
-        task = asyncio.create_task(read_loop())
-        client._read_task = task  # Store reference to prevent garbage collection
-
-        return client
-
+        shell_client.connect(session_id)
     except Exception as e:
         on_error(str(e))
         raise
+    return shell_client

@@ -1,607 +1,292 @@
-"""Sandbox session management for ARL."""
+"""Sandbox session management for ARL via Gateway API."""
 
-import time
-from collections.abc import Callable
-from typing import TYPE_CHECKING, cast
+from __future__ import annotations
 
-from kubernetes import client, config
+import base64
+import json
+import re
+from typing import Any
 
-from arl.types import SandboxResource, TaskResource, TaskStep
+from arl.gateway_client import GatewayClient
+from arl.types import (
+    ExecuteResponse,
+    SessionInfo,
+    StepResult,
+    ToolResult,
+    ToolsRegistry,
+)
 
-if TYPE_CHECKING:
-    from arl.interactive_shell_client import InteractiveShellClient
-
-# Type alias for callback functions
-TaskCallback = Callable[[TaskResource], None]
+_SAFE_TOOL_NAME = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]*$")
 
 
 class SandboxSession:
-    """High-level sandbox session manager with automatic lifecycle management.
+    """High-level sandbox session manager via the Gateway API.
 
-    Provides context manager support for automatic resource cleanup and
-    simplified task execution against sandboxes. Supports callback functions
-    that can be triggered after task completion.
+    All execution goes through the Gateway HTTP API (no direct K8s API calls).
+    Execute returns results synchronously - no polling needed.
 
     Examples:
         Using context manager (automatic cleanup):
 
-        >>> with SandboxSession(pool_ref="python-39", namespace="default") as session:
-        ...     result = session.execute([{"name": "test", "type": "Command",
-        ...                                "command": ["echo", "hello"]}])
+        >>> with SandboxSession(pool_ref="python-39") as session:
+        ...     result = session.execute([
+        ...         {"name": "hello", "type": "command", "command": ["echo", "hello"]}
+        ...     ])
+        ...     print(result.results[0].output.stdout)
 
-        Manual lifecycle management (for sandbox reuse):
+        Manual lifecycle management with restore:
 
-        >>> session = SandboxSession(pool_ref="python-39", namespace="default",
-        ...                          keep_alive=True)
+        >>> session = SandboxSession(pool_ref="python-39", keep_alive=True)
         >>> try:
         ...     session.create_sandbox()
-        ...     result1 = session.execute([...])
-        ...     result2 = session.execute([...])  # Reuses same sandbox
+        ...     r1 = session.execute([...])
+        ...     snap_id = r1.results[0].snapshot_id  # auto snapshot after each step
+        ...     r2 = session.execute([...])
+        ...     session.restore(snap_id)  # rollback to step 1 state
         ... finally:
         ...     session.delete_sandbox()
 
-        Using callbacks:
+        Export trajectory for RL/SFT:
 
-        >>> def on_task_complete(result):
-        ...     print(f"Task completed: {result['status']['state']}")
-        >>>
-        >>> session = SandboxSession(pool_ref="python-39", namespace="default")
-        >>> session.register_callback("on_complete", on_task_complete)
-        >>> with session:
-        ...     result = session.execute([...])  # Callback triggered after completion
+        >>> with SandboxSession(pool_ref="python-39") as session:
+        ...     session.execute([...])
+        ...     session.execute([...])
+        ...     jsonl = session.export_trajectory()
+
+        Attach to an existing persistent session:
+
+        >>> session = SandboxSession.attach("gw-12345", gateway_url="...")
+        >>> result = session.execute([{"name": "ls", "command": ["ls"]}])
+        >>> session.delete_sandbox()  # explicit cleanup when done
     """
 
     def __init__(
         self,
         pool_ref: str,
         namespace: str = "default",
+        gateway_url: str = "http://localhost:8080",
         keep_alive: bool = False,
-        timeout: int = 300,
+        timeout: float = 300.0,
         idle_timeout_seconds: int | None = None,
     ) -> None:
-        """Initialize sandbox session.
-
-        Args:
-            pool_ref: Name of the WarmPool to allocate sandbox from
-            namespace: Kubernetes namespace (default: "default")
-            keep_alive: If True, sandbox persists after context exit
-            timeout: Maximum seconds to wait for operations (default: 300)
-            idle_timeout_seconds: Idle timeout in seconds before sandbox is cleaned up.
-                If None and keep_alive=True, defaults to 1800 (30 minutes).
-                If None and keep_alive=False, no idle timeout is set.
-        """
         self.pool_ref = pool_ref
         self.namespace = namespace
         self.keep_alive = keep_alive
-        self.timeout = timeout
         self.idle_timeout_seconds = idle_timeout_seconds
 
-        self.sandbox_name: str | None = None
-        self._custom_api: client.CustomObjectsApi | None = None
-        self._callbacks: dict[str, list[TaskCallback]] = {}
+        self._client = GatewayClient(base_url=gateway_url, timeout=timeout)
+        self._session_id: str | None = None
+        self._session_info: SessionInfo | None = None
 
-    def register_callback(self, event: str, callback: TaskCallback) -> None:
-        """Register a callback function for a specific event.
+    @classmethod
+    def attach(
+        cls,
+        session_id: str,
+        gateway_url: str = "http://localhost:8080",
+        timeout: float = 300.0,
+        keep_alive: bool = True,
+    ) -> SandboxSession:
+        """Attach to an existing session by session ID.
 
-        Supported events:
-        - "on_task_complete": Triggered after task execution completes
-        - "on_task_success": Triggered when task succeeds
-        - "on_task_failure": Triggered when task fails
-
-        Args:
-            event: Event name to trigger callback on
-            callback: Callback function that accepts task result dict
-
-        Example:
-            >>> def log_result(result):
-            ...     print(f"Task state: {result['status']['state']}")
-            >>> session.register_callback("on_task_complete", log_result)
-        """
-        if event not in self._callbacks:
-            self._callbacks[event] = []
-        self._callbacks[event].append(callback)
-
-    def unregister_callback(self, event: str, callback: TaskCallback | None = None) -> None:
-        """Unregister callback(s) for a specific event.
+        Retrieves session info from the Gateway and returns a
+        SandboxSession bound to that session. No new sandbox is
+        created.
 
         Args:
-            event: Event name to unregister callbacks from
-            callback: Specific callback to remove. If None, removes all callbacks for event.
-        """
-        if event not in self._callbacks:
-            return
-
-        if callback is None:
-            self._callbacks[event] = []
-        else:
-            self._callbacks[event] = [cb for cb in self._callbacks[event] if cb != callback]
-
-    def _trigger_callbacks(self, event: str, result: TaskResource) -> None:
-        """Trigger all callbacks registered for an event.
-
-        Args:
-            event: Event name
-            result: Task result to pass to callbacks
-        """
-        if event in self._callbacks:
-            for callback in self._callbacks[event]:
-                try:
-                    callback(result)
-                except Exception as e:
-                    # Log but don't fail on callback errors
-                    print(f"Warning: Callback error for {event}: {e}")
-
-    def execute_with_callback(
-        self,
-        steps: list[TaskStep],
-        callback_script: str | None = None,
-        trace_id: str | None = None,
-    ) -> TaskResource:
-        """Execute task steps and optionally run a callback script afterward.
-
-        This is useful for SWE-bench scenarios where you want to run a test
-        script after applying patches.
-
-        Args:
-            steps: List of task steps to execute
-            callback_script: Optional shell script to run after task completes
-            trace_id: Optional trace ID for distributed tracing
+            session_id: The session ID to attach to.
+            gateway_url: Gateway base URL.
+            timeout: HTTP request timeout.
+            keep_alive: If False, exiting a context manager will
+                delete the session.  Defaults to True to avoid
+                accidentally destroying a session you attached to.
 
         Returns:
-            Task result including callback execution results if provided
+            SandboxSession bound to the existing session.
 
-        Example:
-            >>> result = session.execute_with_callback(
-            ...     steps=[{"name": "apply_patch", "type": "FilePatch", ...}],
-            ...     callback_script="/testbed/run_tests.sh"
-            ... )
+        Raises:
+            GatewayError: If the session does not exist.
         """
-        # Execute main task
-        result = self.execute(steps, trace_id)
+        client = GatewayClient(base_url=gateway_url, timeout=timeout)
+        info = client.get_session(session_id)
 
-        # If callback script provided, execute it as a follow-up task
-        if callback_script and result.get("status", {}).get("state") == "Succeeded":
-            callback_steps: list[TaskStep] = [
-                {
-                    "name": "callback_script",
-                    "type": "Command",
-                    "command": ["/bin/bash", callback_script],
-                }
-            ]
-            callback_result = self.execute(callback_steps, trace_id)
-
-            # Merge callback results into main result
-            result["callback_result"] = callback_result
-
-        return result
+        instance = cls(
+            pool_ref=info.pool_ref,
+            namespace=info.namespace,
+            gateway_url=gateway_url,
+            keep_alive=keep_alive,
+            timeout=timeout,
+        )
+        instance._session_id = info.id
+        instance._session_info = info
+        return instance
 
     @property
-    def custom_api(self) -> client.CustomObjectsApi:
-        """Get Kubernetes custom objects API client (lazy initialization)."""
-        if self._custom_api is None:
-            try:
-                config.load_incluster_config()
-            except config.ConfigException:
-                config.load_kube_config()
-            self._custom_api = client.CustomObjectsApi()
-        return self._custom_api
+    def session_id(self) -> str | None:
+        return self._session_id
 
-    def get_pool_status(self) -> dict[str, int]:
-        """Get the current status of the WarmPool.
+    @property
+    def session_info(self) -> SessionInfo | None:
+        return self._session_info
+
+    def create_sandbox(self) -> SessionInfo:
+        """Create a new session (sandbox) via the Gateway.
 
         Returns:
-            Dictionary with pool status:
-            - total: Total number of pods in the pool
-            - ready_idle: Number of ready idle pods available for allocation
-            - allocated: Number of pods currently allocated to sandboxes
-            - available: Number of sandboxes that can be created immediately
-
-        Example:
-            >>> session = SandboxSession(pool_ref="my-pool", namespace="default")
-            >>> status = session.get_pool_status()
-            >>> print(f"Available sandboxes: {status['available']}")
-            >>> print(f"Total capacity: {status['total']}")
+            SessionInfo with sandbox details (pod IP, pod name, etc.)
         """
-        try:
-            # Get WarmPool resource
-            pool_obj: object = self.custom_api.get_namespaced_custom_object(
-                group="arl.infra.io",
-                version="v1alpha1",
-                namespace=self.namespace,
-                plural="warmpools",
-                name=self.pool_ref,
-            )
-
-            if not isinstance(pool_obj, dict):
-                raise RuntimeError("Invalid pool object returned")
-
-            spec = pool_obj.get("spec", {})
-            status = pool_obj.get("status", {})
-
-            if not isinstance(spec, dict):
-                spec = {}
-            if not isinstance(status, dict):
-                status = {}
-
-            total = spec.get("replicas", 0)
-            ready_idle = status.get("readyReplicas", 0)
-            allocated = status.get("allocatedReplicas", 0)
-
-            if not isinstance(total, int):
-                total = 0
-            if not isinstance(ready_idle, int):
-                ready_idle = 0
-            if not isinstance(allocated, int):
-                allocated = 0
-
-            return {
-                "total": total,
-                "ready_idle": ready_idle,
-                "allocated": allocated,
-                "available": ready_idle,  # Available = ready idle pods
-            }
-
-        except client.ApiException as e:
-            if e.status == 404:
-                raise ValueError(
-                    f"WarmPool '{self.pool_ref}' not found in namespace '{self.namespace}'"
-                ) from e
-            raise RuntimeError(f"Failed to get pool status: {e.reason}") from e
-
-    def create_sandbox(self) -> SandboxResource:
-        """Create a new sandbox from the warm pool.
-
-        Returns:
-            Sandbox resource dictionary
-
-        Raises:
-            RuntimeError: If sandbox creation fails or times out
-            ValueError: If WarmPool does not exist
-        """
-        # First check if the WarmPool exists
-        try:
-            self.custom_api.get_namespaced_custom_object(
-                group="arl.infra.io",
-                version="v1alpha1",
-                namespace=self.namespace,
-                plural="warmpools",
-                name=self.pool_ref,
-            )
-        except client.ApiException as e:
-            if e.status == 404:
-                # List available pools to help user
-                try:
-                    pools = self.custom_api.list_namespaced_custom_object(
-                        group="arl.infra.io",
-                        version="v1alpha1",
-                        namespace=self.namespace,
-                        plural="warmpools",
-                    )
-                    available = [p["metadata"]["name"] for p in pools.get("items", [])]
-                    pool_list = ", ".join(available) if available else "(none)"
-                    raise ValueError(
-                        f"WarmPool '{self.pool_ref}' not found in namespace '{self.namespace}'.\n"
-                        f"Available pools: {pool_list}\n"
-                        f"Create a pool first using WarmPoolManager.create_warmpool()"
-                    ) from e
-                except client.ApiException:
-                    raise ValueError(
-                        f"WarmPool '{self.pool_ref}' not found in namespace '{self.namespace}'. "
-                        f"Create it first using WarmPoolManager.create_warmpool()"
-                    ) from e
-            raise RuntimeError(f"Failed to check WarmPool: {e}") from e
-
-        sandbox_name = f"session-{int(time.time())}"
-
-        # Set default idle timeout for keep_alive sandboxes (30 minutes)
         idle_timeout = self.idle_timeout_seconds
         if self.keep_alive and idle_timeout is None:
-            idle_timeout = 1800
+            idle_timeout = 1800  # 30 minutes default for keep_alive
 
-        sandbox_body = {
-            "apiVersion": "arl.infra.io/v1alpha1",
-            "kind": "Sandbox",
-            "metadata": {
-                "name": sandbox_name,
-                "namespace": self.namespace,
-            },
-            "spec": {
-                "poolRef": self.pool_ref,
-                "keepAlive": self.keep_alive,
-                "idleTimeoutSeconds": idle_timeout,
-            },
-        }
-
-        # Create sandbox resource
-        try:
-            sandbox = self.custom_api.create_namespaced_custom_object(
-                group="arl.infra.io",
-                version="v1alpha1",
-                namespace=self.namespace,
-                plural="sandboxes",
-                body=sandbox_body,
-            )
-        except client.ApiException as e:
-            raise RuntimeError(f"Failed to create sandbox: {e.reason}") from e
-
-        self.sandbox_name = sandbox_name
-
-        # Wait for sandbox to be ready
-        self._wait_for_sandbox_ready()
-
-        return cast(SandboxResource, sandbox)
-
-    def _wait_for_sandbox_ready(self, poll_interval: float = 1.0) -> None:
-        """Wait for sandbox to reach Ready state.
-
-        Args:
-            poll_interval: Seconds between status checks
-
-        Raises:
-            RuntimeError: If sandbox doesn't become ready within timeout
-        """
-        if self.sandbox_name is None:
-            raise RuntimeError("No sandbox created")
-
-        start_time: float = time.time()
-        last_phase: str | None = None
-        shown_waiting_msg = False
-
-        while time.time() - start_time < self.timeout:
-            try:
-                sandbox_obj: object = self.custom_api.get_namespaced_custom_object(
-                    group="arl.infra.io",
-                    version="v1alpha1",
-                    namespace=self.namespace,
-                    plural="sandboxes",
-                    name=self.sandbox_name,
-                )
-
-                if not isinstance(sandbox_obj, dict):
-                    continue
-
-                sandbox_resource = cast(SandboxResource, sandbox_obj)
-                status = sandbox_resource.get("status", {})
-                phase = status.get("phase")
-
-                # Show progress updates when phase changes
-                if phase != last_phase:
-                    if phase == "Allocating":
-                        print(f"⏳ Allocating sandbox from pool '{self.pool_ref}'...")
-                    elif phase == "Pending":
-                        if not shown_waiting_msg:
-                            print(f"⏳ Waiting for pod from pool '{self.pool_ref}'...")
-                            print("   (This may take longer if pool has no available pods)")
-                            shown_waiting_msg = True
-                    last_phase = phase
-
-                if phase == "Ready":
-                    print(f"✓ Sandbox ready: {self.sandbox_name}")
-                    return
-                elif phase == "Failed":
-                    conditions = status.get("conditions", [])
-                    msg: str = (
-                        conditions[0].get("message", "Unknown error")
-                        if conditions
-                        else "Unknown error"
-                    )
-                    raise RuntimeError(
-                        f"Sandbox failed to start: {msg}\n"
-                        f"Check: kubectl describe sandbox {self.sandbox_name} -n {self.namespace}"
-                    )
-
-            except client.ApiException as e:
-                if e.status != 404:
-                    raise RuntimeError(f"Failed to get sandbox status: {e.reason}") from e
-
-            time.sleep(poll_interval)
-
-        raise RuntimeError(
-            f"Sandbox '{self.sandbox_name}' not ready after {self.timeout}s. "
-            f"Current phase: {last_phase or 'unknown'}. "
-            f"Check: kubectl describe sandbox {self.sandbox_name} -n {self.namespace}"
-        )
-
-    def execute(self, steps: list[TaskStep], trace_id: str | None = None) -> TaskResource:
-        """Execute task steps in the sandbox.
-
-        Triggers registered callbacks after task completion:
-        - "on_task_complete": Always triggered after task finishes
-        - "on_task_success": Triggered only if task succeeds
-        - "on_task_failure": Triggered only if task fails
-
-        Args:
-            steps: List of task steps to execute
-            trace_id: Optional trace ID for distributed tracing (e.g., uuid.uuid4())
-
-        Returns:
-            Task resource dictionary with status
-
-        Raises:
-            RuntimeError: If no sandbox exists or task execution fails
-        """
-        if self.sandbox_name is None:
-            raise RuntimeError("No sandbox created. Call create_sandbox() first.")
-
-        task_name = f"{self.sandbox_name}-task-{int(time.time() * 1000)}"
-
-        task_body = {
-            "apiVersion": "arl.infra.io/v1alpha1",
-            "kind": "Task",
-            "metadata": {
-                "name": task_name,
-                "namespace": self.namespace,
-            },
-            "spec": {
-                "sandboxRef": self.sandbox_name,
-                "steps": steps,
-            },
-        }
-
-        # Add trace ID if provided
-        if trace_id is not None:
-            spec = task_body["spec"]
-            if isinstance(spec, dict):
-                spec["traceID"] = trace_id
-
-        # Create task resource
-        self.custom_api.create_namespaced_custom_object(
-            group="arl.infra.io",
-            version="v1alpha1",
+        info = self._client.create_session(
+            pool_ref=self.pool_ref,
             namespace=self.namespace,
-            plural="tasks",
-            body=task_body,
+            idle_timeout_seconds=idle_timeout,
         )
+        self._session_id = info.id
+        self._session_info = info
+        return info
 
-        # Wait for task completion
-        result = self._wait_for_task_completion(task_name)
-
-        # Trigger callbacks based on task state
-        self._trigger_callbacks("on_task_complete", result)
-
-        task_state = result.get("status", {}).get("state")
-        if task_state == "Succeeded":
-            self._trigger_callbacks("on_task_success", result)
-        elif task_state == "Failed":
-            self._trigger_callbacks("on_task_failure", result)
-
-        return result
-
-    def _wait_for_task_completion(self, task_name: str, poll_interval: float = 0.5) -> TaskResource:
-        """Wait for task to complete.
+    def execute(
+        self,
+        steps: list[dict[str, Any]],
+        trace_id: str | None = None,
+    ) -> ExecuteResponse:
+        """Execute steps in the sandbox. Returns synchronously.
 
         Args:
-            task_name: Name of the task resource
-            poll_interval: Seconds between status checks
+            steps: List of step dicts, each with 'name' and 'command'.
+            trace_id: Optional trace ID for distributed tracing.
 
         Returns:
-            Completed task resource dictionary
-
-        Raises:
-            RuntimeError: If task doesn't complete within timeout
+            ExecuteResponse with per-step results, snapshot IDs, and durations.
         """
-        start_time: float = time.time()
-        last_state: str | None = None
+        if self._session_id is None:
+            raise RuntimeError("No session created. Call create_sandbox() first.")
+        return self._client.execute(self._session_id, steps, trace_id)
 
-        while time.time() - start_time < self.timeout:
-            try:
-                task_obj: object = self.custom_api.get_namespaced_custom_object(
-                    group="arl.infra.io",
-                    version="v1alpha1",
-                    namespace=self.namespace,
-                    plural="tasks",
-                    name=task_name,
-                )
+    def restore(self, snapshot_id: str) -> None:
+        """Restore workspace to a previous step's snapshot.
 
-                if not isinstance(task_obj, dict):
-                    continue
-
-                task_resource = cast(TaskResource, task_obj)
-                status = task_resource.get("status", {})
-                state = status.get("state")
-
-                # Show progress updates when state changes
-                if state != last_state and state:
-                    if state == "Running":
-                        print(f"⚙️  Task executing: {task_name}")
-                    last_state = state
-
-                if state in ("Succeeded", "Failed"):
-                    if state == "Failed":
-                        stderr = status.get("stderr", "")
-                        if stderr:
-                            print(f"❌ Task failed: {task_name}")
-                            print(f"   Error: {stderr[:200]}")
-                    return task_resource
-
-            except client.ApiException as e:
-                if e.status != 404:
-                    raise RuntimeError(f"Failed to get task status: {e.reason}") from e
-
-            time.sleep(poll_interval)
-
-        raise RuntimeError(
-            f"Task '{task_name}' did not complete after {self.timeout}s. "
-            f"Current state: {last_state or 'unknown'}. "
-            f"Check: kubectl describe task {task_name} -n {self.namespace}"
-        )
-
-    def create_interactive_shell(self, container: str = "executor") -> "InteractiveShellClient":
-        """Create an interactive shell client for this sandbox.
+        Each step execution automatically creates a snapshot. Use the
+        snapshot_id from a StepResult to restore to that step's state.
 
         Args:
-            container: Container name (default: "executor")
+            snapshot_id: Snapshot ID (git commit SHA) from a step result.
+        """
+        if self._session_id is None:
+            raise RuntimeError("No session created. Call create_sandbox() first.")
+        self._client.restore(self._session_id, snapshot_id)
+
+    def get_history(self) -> list[StepResult]:
+        """Get complete execution history for this session.
 
         Returns:
-            InteractiveShellClient instance ready to use
+            List of StepResult with input, output, snapshot IDs, and durations.
+        """
+        if self._session_id is None:
+            raise RuntimeError("No session created. Call create_sandbox() first.")
+        return self._client.get_history(self._session_id)
+
+    def export_trajectory(self) -> str:
+        """Export execution history as JSONL trajectory (for RL/SFT).
+
+        Returns:
+            JSONL string, one entry per step.
+        """
+        if self._session_id is None:
+            raise RuntimeError("No session created. Call create_sandbox() first.")
+        return self._client.get_trajectory(self._session_id)
+
+    def list_tools(self) -> ToolsRegistry:
+        """List all available tools in the sandbox.
+
+        Reads /opt/arl/tools/registry.json from the executor container.
+
+        Returns:
+            ToolsRegistry with all tool manifests.
 
         Raises:
-            RuntimeError: If no sandbox is created or sandbox not ready
-
-        Example:
-            >>> session.create_sandbox()
-            >>> shell = session.create_interactive_shell()
-            >>> # Use shell for interactive commands
+            RuntimeError: If no session created or registry file not found.
         """
-        from arl.interactive_shell_client import InteractiveShellClient
+        if self._session_id is None:
+            raise RuntimeError("No session created. Call create_sandbox() first.")
+        result = self._client.execute(
+            self._session_id,
+            [
+                {"name": "_list_tools", "command": ["cat", "/opt/arl/tools/registry.json"]},
+            ],
+        )
+        step = result.results[0]
+        if step.output.exit_code != 0:
+            raise RuntimeError(f"Failed to read tool registry: {step.output.stderr}")
+        return ToolsRegistry.model_validate_json(step.output.stdout)
 
-        if self.sandbox_name is None:
-            raise RuntimeError("No sandbox created. Call create_sandbox() first.")
+    def call_tool(
+        self,
+        tool_name: str,
+        params: dict[str, object] | None = None,
+    ) -> ToolResult:
+        """Call a tool by name with JSON parameters.
 
-        # Get pod info
+        Pipes JSON params to the tool's entrypoint script via stdin.
+        Uses base64 encoding to safely pass parameters without shell injection.
+
+        Args:
+            tool_name: Name of the tool (must exist in registry).
+            params: Parameters dict (passed as JSON stdin to the tool).
+
+        Returns:
+            ToolResult with parsed JSON output, exit code, and stderr.
+
+        Raises:
+            ValueError: If tool_name contains unsafe characters.
+            RuntimeError: If no session created.
+        """
+        if self._session_id is None:
+            raise RuntimeError("No session created. Call create_sandbox() first.")
+        if not _SAFE_TOOL_NAME.match(tool_name):
+            raise ValueError(f"Invalid tool name: {tool_name!r}")
+
+        params_json = json.dumps(params or {})
+        params_b64 = base64.b64encode(params_json.encode()).decode()
+        tool_dir = f"/opt/arl/tools/{tool_name}"
+        # Use base64 to safely pass JSON without shell injection risk.
+        # Read entrypoint from manifest via sed (busybox-compatible).
+        cmd = (
+            f"ENTRYPOINT=$(cat {tool_dir}/manifest.json"
+            ' | sed -n \'s/.*"entrypoint":"\\([^"]*\\)".*/\\1/p\')'
+            f" && printf '%s' '{params_b64}' | base64 -d | {tool_dir}/$ENTRYPOINT"
+        )
+
+        result = self._client.execute(
+            self._session_id,
+            [
+                {"name": f"_call_{tool_name}", "command": ["sh", "-c", cmd]},
+            ],
+        )
+        step = result.results[0]
+        parsed: dict[str, object] = {}
         try:
-            sandbox_obj = self.custom_api.get_namespaced_custom_object(
-                group="arl.infra.io",
-                version="v1alpha1",
-                namespace=self.namespace,
-                plural="sandboxes",
-                name=self.sandbox_name,
-            )
-
-            if not isinstance(sandbox_obj, dict):
-                raise RuntimeError("Invalid sandbox object returned")
-
-            sandbox_resource = cast(SandboxResource, sandbox_obj)
-            status = sandbox_resource.get("status", {})
-            pod_name = status.get("podName")
-
-            if not pod_name:
-                raise RuntimeError(
-                    f"Sandbox '{self.sandbox_name}' is not ready yet. Pod has not been allocated."
-                )
-
-            # Create and return shell client
-            shell = InteractiveShellClient()
-            shell.connect_sync(self.namespace, pod_name, container)
-            return shell
-
-        except client.ApiException as e:
-            raise RuntimeError(f"Failed to create interactive shell: {e.reason}") from e
+            parsed = json.loads(step.output.stdout)
+        except (json.JSONDecodeError, ValueError):
+            pass
+        return ToolResult(
+            raw_output=step.output.stdout,
+            parsed=parsed,
+            exit_code=step.output.exit_code,
+            stderr=step.output.stderr,
+        )
 
     def delete_sandbox(self) -> None:
-        """Delete the sandbox resource.
-
-        This method is idempotent and safe to call multiple times.
-        """
-        if self.sandbox_name is None:
+        """Delete the session and its underlying sandbox."""
+        if self._session_id is None:
             return
+        self._client.delete_session(self._session_id)
+        self._session_id = None
+        self._session_info = None
 
-        try:
-            self.custom_api.delete_namespaced_custom_object(
-                group="arl.infra.io",
-                version="v1alpha1",
-                namespace=self.namespace,
-                plural="sandboxes",
-                name=self.sandbox_name,
-            )
-        except client.ApiException as e:
-            if e.status != 404:
-                raise
-
-        self.sandbox_name = None
-
-    def __enter__(self) -> "SandboxSession":
-        """Enter context manager - create sandbox."""
+    def __enter__(self) -> SandboxSession:
         if self.keep_alive:
             import warnings
 
@@ -621,6 +306,5 @@ class SandboxSession:
         exc_val: BaseException | None,
         exc_tb: object | None,
     ) -> None:
-        """Exit context manager - cleanup sandbox unless keep_alive=True."""
         if not self.keep_alive:
             self.delete_sandbox()

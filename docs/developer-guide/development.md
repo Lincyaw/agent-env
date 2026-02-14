@@ -16,14 +16,20 @@ agent-env/
 │   └── v1alpha1/
 ├── cmd/
 │   ├── operator/          # Operator entrypoint
-│   └── sidecar/           # Sidecar entrypoint
+│   ├── sidecar/           # Sidecar entrypoint
+│   ├── gateway/           # Gateway entrypoint
+│   └── executor-agent/    # Executor agent entrypoint
 ├── config/
 │   ├── crd/               # Generated CRD manifests
 │   └── samples/           # Sample resources
 ├── pkg/
-│   ├── controllers/       # Reconciliation logic
+│   ├── controller/        # Reconciliation logic
+│   ├── gateway/           # Gateway REST API
+│   ├── execagent/         # Executor agent logic
+│   ├── scheduler/         # Image-locality pod scheduling
+│   ├── sidecar/           # Sidecar gRPC server
 │   ├── pb/                # Generated protobuf code
-│   └── webhooks/          # Validation webhooks
+│   └── webhook/           # Validation webhooks
 ├── proto/                 # Protocol buffer definitions
 ├── sdk/python/            # Python SDK
 │   └── arl/
@@ -55,8 +61,10 @@ Edit code in the relevant directories:
 | Change Type | Directory |
 |-------------|-----------|
 | CRD definitions | `api/v1alpha1/` |
-| Controller logic | `pkg/controllers/` |
+| Controller logic | `pkg/controller/` |
+| Gateway logic | `pkg/gateway/` |
 | Sidecar code | `cmd/sidecar/`, `pkg/sidecar/` |
+| Executor agent | `cmd/executor-agent/`, `pkg/execagent/` |
 | gRPC definitions | `proto/` |
 | Python SDK | `sdk/python/arl/` |
 
@@ -71,9 +79,6 @@ make deepcopy     # Regenerate deepcopy methods
 
 # After changing proto/*.proto
 make proto-go     # Regenerate Go gRPC code
-
-# After changing CRDs
-make sdk-python   # Regenerate Python SDK
 
 # Or regenerate everything
 make generate
@@ -103,7 +108,7 @@ skaffold run --profile=with-samples
 make logs
 
 # Check resource status
-kubectl get warmpools,sandboxes,tasks
+kubectl get warmpools,sandboxes
 ```
 
 ## Code Generation Details
@@ -139,16 +144,6 @@ make proto-go
 Input: `proto/agent.proto`
 Output: `pkg/pb/*.pb.go`
 
-### Python SDK
-
-Generated from CRD OpenAPI schemas:
-
-```bash
-make sdk-python
-```
-
-Output: `sdk/python/arl/arl/arl_client/`
-
 ## Architecture Validation
 
 Validate architecture documentation:
@@ -179,10 +174,10 @@ This checks:
 2. Regenerate code:
 
     ```bash
-    make manifests deepcopy sdk-python
+    make manifests deepcopy
     ```
 
-3. Update controller logic in `pkg/controllers/`
+3. Update controller logic in `pkg/controller/`
 
 4. Run checks:
 
@@ -192,7 +187,7 @@ This checks:
 
 ### Adding a New Controller
 
-1. Create controller file in `pkg/controllers/`
+1. Create controller file in `pkg/controller/`
 2. Register in `cmd/operator/main.go`
 3. Add necessary RBAC markers
 4. Regenerate manifests:
@@ -210,7 +205,7 @@ This checks:
     make proto-go
     ```
 
-3. Update sidecar implementation in `cmd/sidecar/`
+3. Update sidecar implementation in `pkg/sidecar/`
 
 ## Debugging
 

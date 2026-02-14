@@ -64,29 +64,13 @@ spec:
   poolRef: python-pool
 ```
 
-### 3. Task
-
-A **Task** is a unit of work executed in a sandbox - the "parking and retrieval operation."
-
-```yaml
-apiVersion: arl.infra.io/v1alpha1
-kind: Task
-metadata:
-  name: run-code
-spec:
-  sandboxRef: my-workspace
-  steps:
-    - name: execute
-      type: Command
-      command: ["python", "-c", "print('Hello!')"]
-```
-
 ## Workflow
 
 ```mermaid
 sequenceDiagram
     participant User
     participant SDK
+    participant Gateway as Gateway API
     participant K8s as Kubernetes API
     participant Operator
     participant Pod
@@ -98,13 +82,12 @@ sequenceDiagram
     Operator->>Pod: Create pods (pre-warm)
 
     Note over User,Pod: Execution Phase (fast!)
-    User->>SDK: Execute task
-    SDK->>K8s: Create Sandbox + Task
-    K8s->>Operator: Watch events
-    Operator->>Pod: Allocate pod & execute
-    Pod-->>Operator: Return results
-    Operator->>K8s: Update Task status
-    K8s-->>SDK: Task completed
+    User->>SDK: Execute command
+    SDK->>Gateway: REST API call
+    Gateway->>K8s: Look up Sandbox pod
+    Gateway->>Pod: gRPC execute
+    Pod-->>Gateway: stdout, stderr, exitCode
+    Gateway-->>SDK: ExecuteResponse
     SDK-->>User: Return results
 ```
 

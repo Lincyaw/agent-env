@@ -12,6 +12,12 @@ build:
   - image: arl-sidecar
     docker:
       dockerfile: Dockerfile.sidecar
+  - image: arl-gateway
+    docker:
+      dockerfile: Dockerfile.gateway
+  - image: arl-executor-agent
+    docker:
+      dockerfile: Dockerfile.executor-agent
   tagPolicy:
     gitCommit: {}
 
@@ -23,6 +29,7 @@ manifests:
       chartPath: charts/arl-operator
       namespace: arl-system
       createNamespace: true
+      skipBuildDependencies: true
       setValues:
         crds.install: true
       setValueTemplates:
@@ -49,6 +56,12 @@ profiles:
     - image: 10.10.10.240/library/arl-sidecar
       docker:
         dockerfile: Dockerfile.sidecar
+    - image: 10.10.10.240/library/arl-gateway
+      docker:
+        dockerfile: Dockerfile.gateway
+    - image: 10.10.10.240/library/arl-executor-agent
+      docker:
+        dockerfile: Dockerfile.executor-agent
     tagPolicy:
       sha256: {}
   manifests:
@@ -62,9 +75,13 @@ profiles:
           crds.install: true
           image.repository: 10.10.10.240/library/arl-operator
           sidecar.image.repository: 10.10.10.240/library/arl-sidecar
+          gateway.image.repository: 10.10.10.240/library/arl-gateway
+          executorAgent.image.repository: 10.10.10.240/library/arl-executor-agent
         setValueTemplates:
           image.tag: "{{.IMAGE_TAG}}"
           sidecar.image.tag: "{{.IMAGE_TAG2}}"
+          gateway.image.tag: "{{.IMAGE_TAG3}}"
+          executorAgent.image.tag: "{{.IMAGE_TAG4}}"
   deploy:
     kubectl:
       flags:
@@ -80,6 +97,12 @@ profiles:
     - image: pair-diag-cn-guangzhou.cr.volces.com/pair/arl-sidecar
       docker:
         dockerfile: Dockerfile.sidecar
+    - image: pair-diag-cn-guangzhou.cr.volces.com/pair/arl-gateway
+      docker:
+        dockerfile: Dockerfile.gateway
+    - image: pair-diag-cn-guangzhou.cr.volces.com/pair/arl-executor-agent
+      docker:
+        dockerfile: Dockerfile.executor-agent
     tagPolicy:
       sha256: {}
   manifests:
@@ -87,15 +110,20 @@ profiles:
       releases:
       - name: arl-operator
         chartPath: charts/arl-operator
-        namespace: arl-system
+        namespace: arl
         createNamespace: true
+        skipBuildDependencies: true
         setValues:
           crds.install: true
           image.repository: pair-diag-cn-guangzhou.cr.volces.com/pair/arl-operator
           sidecar.image.repository: pair-diag-cn-guangzhou.cr.volces.com/pair/arl-sidecar
+          gateway.image.repository: pair-diag-cn-guangzhou.cr.volces.com/pair/arl-gateway
+          executorAgent.image.repository: pair-diag-cn-guangzhou.cr.volces.com/pair/arl-executor-agent
         setValueTemplates:
           image.tag: "{{.IMAGE_TAG}}"
           sidecar.image.tag: "{{.IMAGE_TAG2}}"
+          gateway.image.tag: "{{.IMAGE_TAG3}}"
+          executorAgent.image.tag: "{{.IMAGE_TAG4}}"
   deploy:
     kubectl:
       flags:

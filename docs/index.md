@@ -58,24 +58,25 @@ graph TB
         User --> SDK
     end
 
-    subgraph "Kubernetes Control Plane"
+    subgraph "Control Plane"
+        Gateway[Gateway API]
         API[Kubernetes API]
         Operator[ARL Operator]
-        SDK --> API
+        SDK --> Gateway
+        Gateway --> API
         API --> Operator
     end
 
     subgraph "Data Plane"
         WP[WarmPool]
         SB[Sandbox]
-        Task[Task]
         Pods[Pod Pool]
-        
+
         Operator --> WP
         Operator --> SB
-        Operator --> Task
         WP --> Pods
         SB --> Pods
+        Gateway --> |gRPC| Pods
     end
 ```
 

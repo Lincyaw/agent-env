@@ -22,5 +22,4 @@ var (
 func init() {
 	SchemeBuilder.Register(&WarmPool{}, &WarmPoolList{})
 	SchemeBuilder.Register(&Sandbox{}, &SandboxList{})
-	SchemeBuilder.Register(&Task{}, &TaskList{})
 }

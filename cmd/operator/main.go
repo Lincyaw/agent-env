@@ -15,12 +15,12 @@ import (
 
 	arlv1alpha1 "github.com/Lincyaw/agent-env/api/v1alpha1"
 	"github.com/Lincyaw/agent-env/pkg/audit"
-	"github.com/Lincyaw/agent-env/pkg/client"
 	"github.com/Lincyaw/agent-env/pkg/config"
 	"github.com/Lincyaw/agent-env/pkg/controller"
 	"github.com/Lincyaw/agent-env/pkg/interfaces"
 	"github.com/Lincyaw/agent-env/pkg/metrics"
 	"github.com/Lincyaw/agent-env/pkg/middleware"
+	"github.com/Lincyaw/agent-env/pkg/scheduler"
 )
 
 var (
@@ -112,53 +112,34 @@ func main() {
 		setupLog.Info("audit logging disabled")
 	}
 
-	sidecarClient := client.NewGRPCSidecarClient(cfg.SidecarGRPCPort, cfg.HTTPClientTimeout)
-
-	// Initialize PodExecClient for executing commands in executor containers
-	podExecClient, err := client.NewPodExecClient(ctrl.GetConfigOrDie())
-	if err != nil {
-		setupLog.Error(err, "failed to create PodExecClient, executor container execution will be disabled")
-		podExecClient = nil
-	} else {
-		setupLog.Info("PodExecClient initialized for executor container execution")
-	}
-
 	// Setup middleware chains for each controller
 	warmPoolMiddleware := middleware.NewChain()
 	sandboxMiddleware := middleware.NewChain()
-	taskMiddleware := middleware.NewChain()
-	ttlMiddleware := middleware.NewChain()
 
 	if cfg.EnableMiddleware {
-		// Add logging hooks
 		warmPoolMiddleware.AddBefore(middleware.NewLoggingHook("WarmPool")).
 			AddAfter(middleware.NewLoggingHook("WarmPool"))
 		sandboxMiddleware.AddBefore(middleware.NewLoggingHook("Sandbox")).
 			AddAfter(middleware.NewLoggingHook("Sandbox"))
-		taskMiddleware.AddBefore(middleware.NewLoggingHook("Task")).
-			AddAfter(middleware.NewLoggingHook("Task"))
-		ttlMiddleware.AddBefore(middleware.NewLoggingHook("TTL")).
-			AddAfter(middleware.NewLoggingHook("TTL"))
 
-		// Add metrics hooks
 		warmPoolMiddleware.AddBefore(middleware.NewMetricsHook("WarmPool", metricsCollector)).
 			AddAfter(middleware.NewMetricsHook("WarmPool", metricsCollector))
 		sandboxMiddleware.AddBefore(middleware.NewMetricsHook("Sandbox", metricsCollector)).
 			AddAfter(middleware.NewMetricsHook("Sandbox", metricsCollector))
-		taskMiddleware.AddBefore(middleware.NewMetricsHook("Task", metricsCollector)).
-			AddAfter(middleware.NewMetricsHook("Task", metricsCollector))
-		ttlMiddleware.AddBefore(middleware.NewMetricsHook("TTL", metricsCollector)).
-			AddAfter(middleware.NewMetricsHook("TTL", metricsCollector))
 	}
 
-	// Register controllers using the registrar pattern
+	// Initialize image-locality scheduler
+	imageScheduler := scheduler.NewImageScheduler(mgr.GetClient())
+
+	// Register controllers (Task and TTL removed — execution via Gateway)
 	controllers := []interfaces.ControllerRegistrar{
 		&controller.WarmPoolReconciler{
-			Client:     mgr.GetClient(),
-			Scheme:     mgr.GetScheme(),
-			Config:     cfg,
-			Metrics:    metricsCollector,
-			Middleware: warmPoolMiddleware,
+			Client:         mgr.GetClient(),
+			Scheme:         mgr.GetScheme(),
+			Config:         cfg,
+			Metrics:        metricsCollector,
+			Middleware:     warmPoolMiddleware,
+			ImageScheduler: imageScheduler,
 		},
 		&controller.SandboxReconciler{
 			Client:      mgr.GetClient(),
@@ -168,29 +149,6 @@ func main() {
 			AuditWriter: auditWriter,
 			Middleware:  sandboxMiddleware,
 		},
-		&controller.TaskReconciler{
-			Client:        mgr.GetClient(),
-			Scheme:        mgr.GetScheme(),
-			Config:        cfg,
-			SidecarClient: sidecarClient,
-			PodExecClient: podExecClient,
-			Metrics:       metricsCollector,
-			AuditWriter:   auditWriter,
-			Middleware:    taskMiddleware,
-		},
-	}
-
-	// Add TTL controller if auto cleanup is enabled
-	if cfg.EnableAutoCleanup {
-		controllers = append(controllers, &controller.TTLReconciler{
-			Client:      mgr.GetClient(),
-			Scheme:      mgr.GetScheme(),
-			Config:      cfg,
-			AuditWriter: auditWriter,
-			Metrics:     metricsCollector,
-			Middleware:  ttlMiddleware,
-		})
-		setupLog.Info("TTL controller enabled for automatic task cleanup")
 	}
 
 	// Setup all controllers
@@ -201,6 +159,13 @@ func main() {
 		}
 		setupLog.Info("registered controller", "controller", c.Name())
 	}
+
+	// Setup image-locality scheduler node watcher
+	if err := imageScheduler.SetupWithManager(mgr); err != nil {
+		setupLog.Error(err, "unable to setup image scheduler")
+		os.Exit(1)
+	}
+	setupLog.Info("registered image-locality scheduler")
 
 	// Add health checks
 	if err := mgr.AddHealthzCheck("healthz", healthz.Ping); err != nil {
