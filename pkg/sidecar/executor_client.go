@@ -158,3 +158,98 @@ func (c *ExecutorClient) WaitForReady(ctx context.Context, timeout time.Duration
 		}
 	}
 }
+
+// ShellSession represents an interactive shell running in the executor container.
+type ShellSession struct {
+	conn    net.Conn
+	mu      sync.Mutex
+	encoder *json.Encoder
+	id      string
+	Output  chan execagent.Response
+}
+
+// StartShell opens a connection to the executor agent and starts an interactive shell.
+func (c *ExecutorClient) StartShell(ctx context.Context, workDir string, env map[string]string) (*ShellSession, error) {
+	conn, err := c.dial()
+	if err != nil {
+		return nil, err
+	}
+
+	id := fmt.Sprintf("shell-%d", time.Now().UnixNano())
+	encoder := json.NewEncoder(conn)
+
+	req := execagent.Request{
+		ID:      id,
+		Type:    "shell",
+		WorkDir: workDir,
+		Env:     env,
+	}
+	if err := encoder.Encode(req); err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("send shell request: %w", err)
+	}
+
+	session := &ShellSession{
+		conn:    conn,
+		encoder: encoder,
+		id:      id,
+		Output:  make(chan execagent.Response, 100),
+	}
+
+	// Read responses from the executor agent into the Output channel
+	go func() {
+		defer close(session.Output)
+
+		scanner := bufio.NewScanner(conn)
+		scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
+
+		for scanner.Scan() {
+			var resp execagent.Response
+			if err := json.Unmarshal(scanner.Bytes(), &resp); err != nil {
+				session.Output <- execagent.Response{ID: id, Error: fmt.Sprintf("decode: %v", err), Done: true}
+				return
+			}
+
+			select {
+			case session.Output <- resp:
+			case <-ctx.Done():
+				return
+			}
+
+			if resp.Done {
+				return
+			}
+		}
+	}()
+
+	return session, nil
+}
+
+// SendInput sends stdin data to the shell session.
+func (s *ShellSession) SendInput(data string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return s.encoder.Encode(execagent.Request{
+		ID:   s.id,
+		Type: "stdin",
+		Data: data,
+	})
+}
+
+// SendSignal sends a signal to the shell process.
+func (s *ShellSession) SendSignal(signal string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return s.encoder.Encode(execagent.Request{
+		ID:     s.id,
+		Type:   "signal",
+		Signal: signal,
+	})
+}
+
+// Close closes the underlying connection, which causes the shell to exit.
+func (s *ShellSession) Close() error {
+	return s.conn.Close()
+}

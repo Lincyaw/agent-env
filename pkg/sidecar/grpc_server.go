@@ -5,11 +5,7 @@ import (
 	"io"
 	"log"
 	"net"
-	"os"
-	"os/exec"
 	"strings"
-	"sync"
-	"syscall"
 
 	"google.golang.org/grpc"
 
@@ -96,125 +92,78 @@ func (s *GRPCServer) Execute(req *pb.ExecRequest, stream grpc.ServerStreamingSer
 }
 
 // InteractiveShell implements bidirectional streaming for interactive shell sessions
+// by proxying through the executor agent in the main container.
 func (s *GRPCServer) InteractiveShell(stream grpc.BidiStreamingServer[pb.ShellInput, pb.ShellOutput]) error {
 	ctx := stream.Context()
 
-	shell := os.Getenv("SHELL")
-	if shell == "" {
-		shell = "/bin/sh"
+	if s.service.executorClient == nil {
+		return fmt.Errorf("executor agent not configured: sidecar started without --executor-socket")
 	}
 
-	cmd := exec.CommandContext(ctx, shell)
-	cmd.Dir = s.service.workspaceDir
-	cmd.Env = os.Environ()
-
-	stdin, err := cmd.StdinPipe()
+	session, err := s.service.executorClient.StartShell(ctx, s.service.workspaceDir, nil)
 	if err != nil {
-		return fmt.Errorf("failed to create stdin pipe: %w", err)
+		return fmt.Errorf("start executor shell: %w", err)
 	}
+	defer session.Close()
 
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return fmt.Errorf("failed to create stdout pipe: %w", err)
-	}
-
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		return fmt.Errorf("failed to create stderr pipe: %w", err)
-	}
-
-	if err := cmd.Start(); err != nil {
-		return fmt.Errorf("failed to start shell: %w", err)
-	}
-
-	var wg sync.WaitGroup
-
-	// Stream stdout to client
-	wg.Add(2)
+	// Goroutine: read executor output and forward to gRPC stream
+	done := make(chan error, 1)
 	go func() {
-		defer wg.Done()
-		buf := make([]byte, 4096)
-		for {
-			n, readErr := stdout.Read(buf)
-			if n > 0 {
-				if sendErr := stream.Send(&pb.ShellOutput{Data: string(buf[:n])}); sendErr != nil {
+		for resp := range session.Output {
+			out := &pb.ShellOutput{}
+			if resp.Stdout != "" {
+				out.Data = resp.Stdout
+			} else if resp.Stderr != "" {
+				out.Data = resp.Stderr
+			}
+			if resp.Done {
+				exitCode := int32(0)
+				if resp.ExitCode != nil {
+					exitCode = int32(*resp.ExitCode)
+				}
+				out.ExitCode = exitCode
+				out.Closed = true
+			}
+			if out.Data != "" || out.Closed {
+				if sendErr := stream.Send(out); sendErr != nil {
+					done <- sendErr
 					return
 				}
 			}
-			if readErr != nil {
+			if resp.Done {
+				done <- nil
 				return
 			}
 		}
+		done <- nil
 	}()
 
-	// Stream stderr to client
-	go func() {
-		defer wg.Done()
-		buf := make([]byte, 4096)
-		for {
-			n, readErr := stderr.Read(buf)
-			if n > 0 {
-				if sendErr := stream.Send(&pb.ShellOutput{Data: string(buf[:n])}); sendErr != nil {
-					return
-				}
-			}
-			if readErr != nil {
-				return
-			}
-		}
-	}()
-
-	// Read input from client
+	// Main loop: read gRPC input and forward to executor shell
 	go func() {
 		for {
 			input, recvErr := stream.Recv()
 			if recvErr == io.EOF {
-				stdin.Close()
+				session.Close()
 				return
 			}
 			if recvErr != nil {
-				stdin.Close()
+				session.Close()
 				return
 			}
 
 			switch v := input.GetInput().(type) {
 			case *pb.ShellInput_Data:
-				if _, writeErr := stdin.Write([]byte(v.Data)); writeErr != nil {
+				if err := session.SendInput(v.Data); err != nil {
 					return
 				}
 			case *pb.ShellInput_Signal:
 				signalStr := strings.ToUpper(v.Signal)
-				var sig syscall.Signal
-				switch signalStr {
-				case "SIGINT":
-					sig = syscall.SIGINT
-				case "SIGTERM":
-					sig = syscall.SIGTERM
-				case "SIGKILL":
-					sig = syscall.SIGKILL
-				default:
-					continue
-				}
-				if cmd.Process != nil {
-					cmd.Process.Signal(sig)
+				if err := session.SendSignal(signalStr); err != nil {
+					return
 				}
 			}
 		}
 	}()
 
-	exitCode := int32(0)
-	if err := cmd.Wait(); err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			exitCode = int32(exitErr.ExitCode())
-		} else {
-			exitCode = 1
-		}
-	}
-
-	wg.Wait()
-
-	return stream.Send(&pb.ShellOutput{
-		ExitCode: exitCode,
-		Closed:   true,
-	})
+	return <-done
 }

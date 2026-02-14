@@ -254,10 +254,8 @@ func (r *WarmPoolReconciler) constructPod(pool *arlv1alpha1.WarmPool) *corev1.Po
 		Spec: pool.Spec.Template.Spec,
 	}
 
-	// Inject executor agent init container if image is configured
-	if r.Config.ExecutorAgentImage != "" {
-		r.injectExecutorAgent(pod)
-	}
+	// Inject executor agent into pod
+	r.injectExecutorAgent(pod)
 
 	// Inject tools init containers and volumes if tools are configured
 	if pool.Spec.Tools != nil {
@@ -282,17 +280,10 @@ func (r *WarmPoolReconciler) constructPod(pool *arlv1alpha1.WarmPool) *corev1.Po
 			"--http-port=" + fmt.Sprintf("%d", r.Config.SidecarHTTPPort),
 			"--grpc-port=" + fmt.Sprintf("%d", r.Config.SidecarGRPCPort),
 		}
-		if r.Config.ExecutorAgentImage != "" {
-			sidecarArgs = append(sidecarArgs, "--executor-socket=/var/run/arl/exec.sock")
-		}
 
 		sidecarVolumeMounts := []corev1.VolumeMount{
 			{Name: "workspace", MountPath: r.Config.WorkspaceDir},
-		}
-		if r.Config.ExecutorAgentImage != "" {
-			sidecarVolumeMounts = append(sidecarVolumeMounts,
-				corev1.VolumeMount{Name: "arl-socket", MountPath: "/var/run/arl"},
-			)
+			{Name: "arl-socket", MountPath: "/var/run/arl"},
 		}
 
 		sidecarContainer := corev1.Container{
@@ -336,9 +327,7 @@ func (r *WarmPoolReconciler) constructPod(pool *arlv1alpha1.WarmPool) *corev1.Po
 	}
 
 	// Add shared volumes for executor agent
-	if r.Config.ExecutorAgentImage != "" {
-		r.ensureExecutorVolumes(pod)
-	}
+	r.ensureExecutorVolumes(pod)
 
 	// Set owner reference
 	ctrl.SetControllerReference(pool, pod, r.Scheme)
@@ -561,20 +550,19 @@ func (r *WarmPoolReconciler) injectExecutorAgent(pod *corev1.Pod) {
 			corev1.VolumeMount{Name: "arl-socket", MountPath: "/var/run/arl"},
 		)
 
-		// Wrap the existing command to also start the executor agent
-		// If command is ["sh", "-c", "sleep infinity"], wrap it
-		agentCmd := "/arl-bin/executor-agent --socket=/var/run/arl/exec.sock --workspace=" + r.Config.WorkspaceDir + " &"
+		// Run executor agent in foreground (logs visible via kubectl logs).
+		// User process runs in background; agent is exec'd so it becomes PID 1.
+		agentExec := "exec /arl-bin/executor-agent --socket=/var/run/arl/exec.sock --workspace=" + r.Config.WorkspaceDir
 		if len(c.Command) > 0 {
-			// Preserve original command by running it after the agent
 			originalCmd := ""
 			if len(c.Command) >= 3 && (c.Command[0] == "/bin/sh" || c.Command[0] == "sh") && c.Command[1] == "-c" {
 				originalCmd = c.Command[2]
 			} else {
-				originalCmd = "exec " + joinCmd(c.Command)
+				originalCmd = joinCmd(c.Command)
 			}
-			c.Command = []string{"/bin/sh", "-c", agentCmd + " " + originalCmd}
+			c.Command = []string{"/bin/sh", "-c", originalCmd + " & " + agentExec}
 		} else {
-			c.Command = []string{"/bin/sh", "-c", agentCmd + " sleep infinity"}
+			c.Command = []string{"/bin/sh", "-c", agentExec}
 		}
 		c.Args = nil // Clear args since we've embedded them in command
 
@@ -584,10 +572,6 @@ func (r *WarmPoolReconciler) injectExecutorAgent(pod *corev1.Pod) {
 
 // ensureSidecarVolumeMounts adds executor-related volume mounts to an existing sidecar
 func (r *WarmPoolReconciler) ensureSidecarVolumeMounts(c *corev1.Container) {
-	if r.Config.ExecutorAgentImage == "" {
-		return
-	}
-
 	hasSocket := false
 	for _, vm := range c.VolumeMounts {
 		if vm.Name == "arl-socket" {

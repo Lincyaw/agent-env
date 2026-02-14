@@ -35,7 +35,7 @@ from arl import (
     WarmPoolManager,
 )
 
-GATEWAY_URL = "http://localhost:8080"
+GATEWAY_URL = "http://14.103.184.145:8080"
 POOL_NAME = "test-pool"
 POOL_IMAGE = "pair-diag-cn-guangzhou.cr.volces.com/pair/ubuntu:22.04"
 NAMESPACE = "arl"
@@ -113,6 +113,8 @@ def test_basic_execution() -> bool:
             print(f"    [{r.index}] {r.name}: exit_code={r.output.exit_code}")
             if r.output.stdout:
                 print(f"         stdout: {r.output.stdout.strip()[:80]}")
+            if r.output.stderr:
+                print(f"         stderr: {r.output.stderr.strip()[:80]}")
             if r.snapshot_id:
                 print(f"         snapshot: {r.snapshot_id}")
 
@@ -131,6 +133,7 @@ def test_basic_execution() -> bool:
                     "name": "run_file",
                     "command": ["sh", "/workspace/hello.sh"],
                 },
+                {"name": "apt", "command": ["apt", "--help"]},
             ]
         )
 
@@ -139,6 +142,8 @@ def test_basic_execution() -> bool:
             print(f"    [{r.index}] {r.name}: exit_code={r.output.exit_code}")
             if r.output.stdout:
                 print(f"         stdout: {r.output.stdout.strip()[:80]}")
+            if r.output.stderr:
+                print(f"         stderr: {r.output.stderr.strip()[:80]}")
 
         ok = all(r.output.exit_code == 0 for r in result.results + result2.results)
         print(f"\n  Basic execution: {'PASSED' if ok else 'FAILED'}")

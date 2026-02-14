@@ -1,14 +1,10 @@
 package sidecar
 
 import (
-	"bufio"
 	"context"
 	"fmt"
-	"os"
 	"os/exec"
 	"strings"
-	"sync"
-	"time"
 
 	"github.com/Lincyaw/agent-env/pkg/execagent"
 	"github.com/google/uuid"
@@ -95,6 +91,11 @@ func NewAgentServiceWithExecutor(workspaceDir, executorSocket string) *AgentServ
 	}
 }
 
+// HasExecutor reports whether an executor agent is configured.
+func (s *AgentService) HasExecutor() bool {
+	return s.executorClient != nil
+}
+
 // Execute runs a command and streams output.
 // If an executor client is configured, commands are forwarded to the executor agent.
 func (s *AgentService) Execute(ctx context.Context, req *ExecRequest, stream chan<- *ExecLog) error {
@@ -109,12 +110,17 @@ func (s *AgentService) Execute(ctx context.Context, req *ExecRequest, stream cha
 		return nil
 	}
 
-	// Proxy to executor agent if available
-	if s.executorClient != nil {
-		return s.executeViaAgent(ctx, req, stream)
+	// All commands must execute in the executor (main) container
+	if s.executorClient == nil {
+		stream <- &ExecLog{
+			Stderr:   "executor agent not configured: sidecar started without --executor-socket",
+			ExitCode: 1,
+			Done:     true,
+		}
+		return nil
 	}
 
-	return s.executeLocal(ctx, req, stream)
+	return s.executeViaAgent(ctx, req, stream)
 }
 
 // executeViaAgent forwards execution to the executor agent in the main container.
@@ -159,131 +165,6 @@ func (s *AgentService) executeViaAgent(ctx context.Context, req *ExecRequest, st
 		case <-ctx.Done():
 			return nil
 		}
-	}
-
-	return nil
-}
-
-// executeLocal runs the command directly in the sidecar container (fallback).
-func (s *AgentService) executeLocal(ctx context.Context, req *ExecRequest, stream chan<- *ExecLog) error {
-
-	workDir := req.WorkingDir
-	if workDir == "" {
-		workDir = s.workspaceDir
-	}
-
-	cmd := exec.CommandContext(ctx, req.Command[0], req.Command[1:]...)
-	cmd.Dir = workDir
-
-	// Set environment variables
-	cmd.Env = os.Environ()
-	for k, v := range req.Env {
-		cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", k, v))
-	}
-
-	// Create pipes for stdout and stderr
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		stream <- &ExecLog{
-			Stderr:   fmt.Sprintf("failed to create stdout pipe: %v", err),
-			ExitCode: 1,
-			Done:     true,
-		}
-		return nil
-	}
-
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		stream <- &ExecLog{
-			Stderr:   fmt.Sprintf("failed to create stderr pipe: %v", err),
-			ExitCode: 1,
-			Done:     true,
-		}
-		return nil
-	}
-
-	// Start the command
-	if err := cmd.Start(); err != nil {
-		stream <- &ExecLog{
-			Stderr:   fmt.Sprintf("failed to start command: %v", err),
-			ExitCode: 1,
-			Done:     true,
-		}
-		return nil
-	}
-
-	// Store process if background
-	if req.Background {
-		s.processes[cmd.Process.Pid] = cmd
-	}
-
-	// Use WaitGroup to ensure all goroutines complete
-	var wg sync.WaitGroup
-	wg.Add(2)
-
-	// Read stdout
-	go func() {
-		defer wg.Done()
-		scanner := bufio.NewScanner(stdout)
-		for scanner.Scan() {
-			select {
-			case stream <- &ExecLog{
-				Stdout: scanner.Text() + "\n",
-				Done:   false,
-			}:
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
-
-	// Read stderr
-	go func() {
-		defer wg.Done()
-		scanner := bufio.NewScanner(stderr)
-		for scanner.Scan() {
-			select {
-			case stream <- &ExecLog{
-				Stderr: scanner.Text() + "\n",
-				Done:   false,
-			}:
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
-
-	// Apply timeout if specified
-	if req.TimeoutSeconds > 0 {
-		timer := time.AfterFunc(time.Duration(req.TimeoutSeconds)*time.Second, func() {
-			if cmd.Process != nil {
-				cmd.Process.Kill()
-			}
-		})
-		defer timer.Stop()
-	}
-
-	// Wait for command to complete
-	exitCode := int32(0)
-	if err := cmd.Wait(); err != nil {
-		if exitErr, ok := err.(*exec.ExitError); ok {
-			exitCode = int32(exitErr.ExitCode())
-		} else {
-			exitCode = 1
-		}
-	}
-
-	// Wait for all output to be read
-	wg.Wait()
-
-	// Remove from processes map
-	if cmd.Process != nil {
-		delete(s.processes, cmd.Process.Pid)
-	}
-
-	stream <- &ExecLog{
-		ExitCode: exitCode,
-		Done:     true,
 	}
 
 	return nil

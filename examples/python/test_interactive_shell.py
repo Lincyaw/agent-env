@@ -23,7 +23,7 @@ import threading
 
 from arl import GatewayClient, InteractiveShellClient, SandboxSession
 
-GATEWAY_URL = "http://localhost:8080"
+GATEWAY_URL = "http://14.103.184.145:8080"
 POOL_NAME = "test-pool"
 NAMESPACE = "arl"
 

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"os"
@@ -91,12 +92,20 @@ func (a *Agent) handleConn(ctx context.Context, conn net.Conn) {
 
 		switch req.Type {
 		case "exec":
+			log.Printf("[exec] id=%s cmd=%v workdir=%s", req.ID, req.Cmd, req.WorkDir)
 			a.handleExec(ctx, req, encoder)
+		case "shell":
+			log.Printf("[shell] id=%s workdir=%s", req.ID, req.WorkDir)
+			a.handleShell(ctx, req, scanner, encoder)
+			return // shell owns this connection until exit
 		case "signal":
+			log.Printf("[signal] id=%s pid=%d signal=%s", req.ID, req.PID, req.Signal)
 			a.handleSignal(req, encoder)
 		case "ping":
+			log.Printf("[ping] id=%s", req.ID)
 			encoder.Encode(Response{ID: req.ID, Done: true})
 		default:
+			log.Printf("[unknown] id=%s type=%s", req.ID, req.Type)
 			encoder.Encode(Response{ID: req.ID, Error: fmt.Sprintf("unknown type: %s", req.Type), Done: true})
 		}
 	}
@@ -186,6 +195,7 @@ func (a *Agent) handleExec(ctx context.Context, req Request, encoder *json.Encod
 	delete(a.processes, cmd.Process.Pid)
 	a.mu.Unlock()
 
+	log.Printf("[exec] id=%s exit_code=%d cmd=%v", req.ID, exitCode, req.Cmd)
 	encoder.Encode(Response{ID: req.ID, ExitCode: &exitCode, Done: true})
 }
 
@@ -215,4 +225,142 @@ func (a *Agent) handleSignal(req Request, encoder *json.Encoder) {
 	}
 
 	encoder.Encode(Response{ID: req.ID, Done: true})
+}
+
+func (a *Agent) handleShell(ctx context.Context, req Request, scanner *bufio.Scanner, encoder *json.Encoder) {
+	// Prefer bash, fall back to /bin/sh
+	shellPath := "/bin/bash"
+	if _, err := exec.LookPath("bash"); err != nil {
+		shellPath = "/bin/sh"
+	}
+
+	workDir := req.WorkDir
+	if workDir == "" {
+		workDir = a.workspaceDir
+	}
+
+	cmd := exec.CommandContext(ctx, shellPath)
+	cmd.Dir = workDir
+	cmd.Env = os.Environ()
+	for k, v := range req.Env {
+		cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", k, v))
+	}
+
+	stdin, err := cmd.StdinPipe()
+	if err != nil {
+		encoder.Encode(Response{ID: req.ID, Error: fmt.Sprintf("stdin pipe: %v", err), Done: true})
+		return
+	}
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		encoder.Encode(Response{ID: req.ID, Error: fmt.Sprintf("stdout pipe: %v", err), Done: true})
+		return
+	}
+
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		encoder.Encode(Response{ID: req.ID, Error: fmt.Sprintf("stderr pipe: %v", err), Done: true})
+		return
+	}
+
+	if err := cmd.Start(); err != nil {
+		encoder.Encode(Response{ID: req.ID, Error: fmt.Sprintf("start shell: %v", err), Done: true})
+		return
+	}
+
+	a.mu.Lock()
+	a.processes[cmd.Process.Pid] = cmd
+	a.mu.Unlock()
+
+	var mu sync.Mutex // protects encoder
+	send := func(resp Response) {
+		mu.Lock()
+		encoder.Encode(resp)
+		mu.Unlock()
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+
+	// Goroutine 1: stream stdout
+	go func() {
+		defer wg.Done()
+		buf := make([]byte, 4096)
+		for {
+			n, readErr := stdout.Read(buf)
+			if n > 0 {
+				send(Response{ID: req.ID, Stdout: string(buf[:n])})
+			}
+			if readErr != nil {
+				return
+			}
+		}
+	}()
+
+	// Goroutine 2: stream stderr
+	go func() {
+		defer wg.Done()
+		buf := make([]byte, 4096)
+		for {
+			n, readErr := stderr.Read(buf)
+			if n > 0 {
+				send(Response{ID: req.ID, Stderr: string(buf[:n])})
+			}
+			if readErr != nil {
+				return
+			}
+		}
+	}()
+
+	// Goroutine 3: read subsequent requests (stdin data, signals)
+	go func() {
+		for scanner.Scan() {
+			var sub Request
+			if err := json.Unmarshal(scanner.Bytes(), &sub); err != nil {
+				continue
+			}
+			switch sub.Type {
+			case "stdin":
+				if _, err := io.WriteString(stdin, sub.Data); err != nil {
+					return
+				}
+			case "signal":
+				var sig syscall.Signal
+				switch strings.ToUpper(sub.Signal) {
+				case "SIGTERM":
+					sig = syscall.SIGTERM
+				case "SIGKILL":
+					sig = syscall.SIGKILL
+				case "SIGINT":
+					sig = syscall.SIGINT
+				default:
+					continue
+				}
+				if cmd.Process != nil {
+					cmd.Process.Signal(sig)
+				}
+			}
+		}
+		// Scanner stopped (connection closed) -> close stdin to let shell exit
+		stdin.Close()
+	}()
+
+	exitCode := 0
+	if err := cmd.Wait(); err != nil {
+		if exitErr, ok := err.(*exec.ExitError); ok {
+			exitCode = exitErr.ExitCode()
+		} else {
+			exitCode = 1
+		}
+	}
+
+	wg.Wait()
+
+	a.mu.Lock()
+	delete(a.processes, cmd.Process.Pid)
+	a.mu.Unlock()
+
+	log.Printf("[shell] id=%s exit_code=%d", req.ID, exitCode)
+	send(Response{ID: req.ID, ExitCode: &exitCode, Done: true})
 }

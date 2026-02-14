@@ -29,6 +29,7 @@ manifests:
       chartPath: charts/arl-operator
       namespace: arl-system
       createNamespace: true
+      skipBuildDependencies: true
       setValues:
         crds.install: true
       setValueTemplates:
@@ -111,6 +112,7 @@ profiles:
         chartPath: charts/arl-operator
         namespace: arl
         createNamespace: true
+        skipBuildDependencies: true
         setValues:
           crds.install: true
           image.repository: pair-diag-cn-guangzhou.cr.volces.com/pair/arl-operator
