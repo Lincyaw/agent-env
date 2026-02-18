@@ -49,6 +49,13 @@ type CreatePoolRequest struct {
 	WorkspaceDir string                       `json:"workspaceDir,omitempty"`
 }
 
+// ScalePoolRequest is the body for PATCH /v1/pools/{name}
+type ScalePoolRequest struct {
+	Replicas  int32                        `json:"replicas"`
+	Namespace string                       `json:"namespace,omitempty"`
+	Resources *corev1.ResourceRequirements `json:"resources,omitempty"`
+}
+
 // --- Response types ---
 
 // SessionInfo describes a session

@@ -52,7 +52,28 @@ class GatewayClient:
 
     def __init__(self, base_url: str = "http://localhost:8080", timeout: float = 300.0) -> None:
         self._base_url = base_url.rstrip("/")
-        self._client = httpx.Client(base_url=self._base_url, timeout=timeout)
+        # Use explicit timeout configuration with longer connect timeout
+        timeout_config = httpx.Timeout(
+            connect=30.0,  # 30s for TCP connection (fail fast, rely on retries)
+            read=timeout,  # Use provided timeout for read operations
+            write=timeout,  # Use provided timeout for write operations
+            pool=timeout,  # Use provided timeout for pool operations
+        )
+        # Configure transport with retries and keepalive management to avoid
+        # stale connections causing ConnectTimeout during long polling loops.
+        transport = httpx.HTTPTransport(
+            retries=3,  # TCP-level retries on connection failure
+            limits=httpx.Limits(
+                max_connections=20,
+                max_keepalive_connections=5,
+                keepalive_expiry=30.0,  # Close idle connections before LB/NAT timeout
+            ),
+        )
+        self._client = httpx.Client(
+            base_url=self._base_url,
+            timeout=timeout_config,
+            transport=transport,
+        )
 
     def _handle_error(self, response: httpx.Response) -> None:
         if response.status_code >= 400:
@@ -159,6 +180,33 @@ class GatewayClient:
             params["namespace"] = namespace
         resp = self._client.delete(f"/v1/pools/{name}", params=params)
         self._handle_error(resp)
+
+    def scale_pool(
+        self,
+        name: str,
+        replicas: int,
+        namespace: str = "",
+        resources: ResourceRequirements | None = None,
+    ) -> PoolInfo:
+        """Scale a WarmPool and optionally update resource requirements.
+
+        Args:
+            name: Name of the WarmPool.
+            replicas: Desired number of replicas (non-negative).
+            namespace: Kubernetes namespace (default: "").
+            resources: Optional resource requirements (CPU/memory requests and limits).
+
+        Returns:
+            Updated PoolInfo.
+        """
+        body: dict[str, Any] = {"replicas": replicas}
+        if namespace:
+            body["namespace"] = namespace
+        if resources is not None:
+            body["resources"] = resources.model_dump(exclude_none=True)
+        resp = self._client.patch(f"/v1/pools/{name}", json=body)
+        self._handle_error(resp)
+        return PoolInfo.model_validate(resp.json())
 
     # --- Health ---
 

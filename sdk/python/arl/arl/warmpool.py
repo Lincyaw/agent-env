@@ -2,10 +2,15 @@
 
 from __future__ import annotations
 
+import logging
 import time
+
+import httpx
 
 from arl.gateway_client import GatewayClient, PoolNotReadyError
 from arl.types import PoolInfo, ResourceRequirements, ToolsSpec
+
+logger = logging.getLogger(__name__)
 
 
 class WarmPoolManager:
@@ -102,7 +107,12 @@ class WarmPoolManager:
         consecutive_failures = 0
 
         while time.monotonic() < deadline:
-            info = self.get_warmpool(name)
+            try:
+                info = self.get_warmpool(name)
+            except (httpx.ConnectError, httpx.ConnectTimeout, httpx.RemoteProtocolError) as exc:
+                logger.warning("Network error polling pool '%s', will retry: %s", name, exc)
+                time.sleep(poll_interval)
+                continue
             last_info = info
 
             if info.ready_replicas > 0:
@@ -147,3 +157,40 @@ class WarmPoolManager:
             name: Name of the WarmPool to delete.
         """
         self._client.delete_pool(name, namespace=self.namespace)
+
+    def scale_warmpool(
+        self,
+        name: str,
+        replicas: int,
+        resources: ResourceRequirements | None = None,
+    ) -> PoolInfo:
+        """Scale a WarmPool and optionally update resource requirements.
+
+        Args:
+            name: Name of the WarmPool.
+            replicas: Desired number of replicas (non-negative).
+            resources: Optional resource requirements (CPU/memory requests and limits).
+                      Example: ResourceRequirements(
+                          requests={"cpu": "500m", "memory": "512Mi"},
+                          limits={"cpu": "2", "memory": "2Gi"},
+                      )
+
+        Returns:
+            Updated PoolInfo with current pool status.
+        """
+        return self._client.scale_pool(
+            name,
+            replicas=replicas,
+            namespace=self.namespace,
+            resources=resources,
+        )
+
+    def close(self) -> None:
+        """Close the underlying HTTP client."""
+        self._client.close()
+
+    def __enter__(self) -> WarmPoolManager:
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        self.close()

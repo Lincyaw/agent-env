@@ -26,6 +26,7 @@ func SetupRoutes(mux *http.ServeMux, gw *Gateway) {
 	// Pool management
 	mux.HandleFunc("POST /v1/pools", handleCreatePool(gw))
 	mux.HandleFunc("GET /v1/pools/{name}", handleGetPool(gw))
+	mux.HandleFunc("PATCH /v1/pools/{name}", handleScalePool(gw))
 	mux.HandleFunc("DELETE /v1/pools/{name}", handleDeletePool(gw))
 
 	// Health
@@ -187,6 +188,31 @@ func handleGetPool(gw *Gateway) http.HandlerFunc {
 			writeError(w, http.StatusNotFound, err.Error())
 			return
 		}
+		writeJSON(w, http.StatusOK, info)
+	}
+}
+
+func handleScalePool(gw *Gateway) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		name := r.PathValue("name")
+
+		var req ScalePoolRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		if req.Replicas < 0 {
+			writeError(w, http.StatusBadRequest, "replicas must be non-negative")
+			return
+		}
+
+		info, err := gw.ScalePool(r.Context(), name, req)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+
 		writeJSON(w, http.StatusOK, info)
 	}
 }

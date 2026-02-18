@@ -489,6 +489,36 @@ func (g *Gateway) GetPool(ctx context.Context, name, namespace string) (*PoolInf
 	return info, nil
 }
 
+// ScalePool updates the replica count of a WarmPool.
+func (g *Gateway) ScalePool(ctx context.Context, name string, req ScalePoolRequest) (*PoolInfo, error) {
+	ns := req.Namespace
+	if ns == "" {
+		ns = "default"
+	}
+
+	pool := &arlv1alpha1.WarmPool{}
+	if err := g.k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: ns}, pool); err != nil {
+		return nil, fmt.Errorf("get pool: %w", err)
+	}
+
+	pool.Spec.Replicas = req.Replicas
+
+	if req.Resources != nil {
+		for i := range pool.Spec.Template.Spec.Containers {
+			if pool.Spec.Template.Spec.Containers[i].Name == "executor" {
+				pool.Spec.Template.Spec.Containers[i].Resources = *req.Resources
+				break
+			}
+		}
+	}
+
+	if err := g.k8sClient.Update(ctx, pool); err != nil {
+		return nil, fmt.Errorf("update pool: %w", err)
+	}
+
+	return g.GetPool(ctx, name, ns)
+}
+
 // DeletePool deletes a WarmPool CRD.
 func (g *Gateway) DeletePool(ctx context.Context, name, namespace string) error {
 	if namespace == "" {
