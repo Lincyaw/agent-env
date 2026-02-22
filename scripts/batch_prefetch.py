@@ -34,7 +34,7 @@ import typer
 from arl.gateway_client import GatewayError, PoolNotReadyError
 from arl.warmpool import WarmPoolManager
 
-MIRROR_REGISTRY = "aibrix-docker-mirror-cn-beijing.cr.volces.com"
+MIRROR_REGISTRY = "pair-cn-shanghai.cr.volces.com"
 HF_DATASET = "hf://datasets/R2E-Gym/R2E-Gym-Subset/data/train-*.parquet"
 COLUMNS = ["repo_name", "docker_image", "commit_hash"]
 MAX_K8S_NAME_LEN = 63
