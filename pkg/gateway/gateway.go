@@ -78,7 +78,7 @@ func (g *Gateway) CreateSession(ctx context.Context, req CreateSessionRequest) (
 	}
 
 	// Poll until sandbox is Ready (with timeout)
-	pollCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
+	pollCtx, cancel := context.WithTimeout(ctx, 300*time.Second)
 	defer cancel()
 
 	var podIP, podName string
@@ -307,7 +307,7 @@ func (g *Gateway) Restore(ctx context.Context, sessionID string, snapshotID stri
 	}
 
 	// Poll until sandbox is Ready
-	pollCtx, cancel := context.WithTimeout(ctx, 120*time.Second)
+	pollCtx, cancel := context.WithTimeout(ctx, 300*time.Second)
 	defer cancel()
 
 	var newPodIP, newPodName string
