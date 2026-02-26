@@ -2,6 +2,8 @@ package gateway
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -57,7 +59,7 @@ func (g *Gateway) CreateSession(ctx context.Context, req CreateSessionRequest) (
 		return nil, fmt.Errorf("pool not ready: %w", err)
 	}
 
-	sessionID := fmt.Sprintf("gw-%d", time.Now().UnixMilli())
+	sessionID := fmt.Sprintf("gw-%d-%s", time.Now().UnixMilli(), randomSuffix(4))
 	sandboxName := sessionID
 
 	sandbox := &arlv1alpha1.Sandbox{
@@ -607,4 +609,11 @@ func (g *Gateway) extractSandboxFailure(sb *arlv1alpha1.Sandbox) string {
 		}
 	}
 	return "unknown reason"
+}
+
+// randomSuffix returns a hex string of n random bytes (2n hex chars).
+func randomSuffix(n int) string {
+	b := make([]byte, n)
+	_, _ = rand.Read(b)
+	return hex.EncodeToString(b)
 }
