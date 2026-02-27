@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from typing import Any
 
 import httpx
@@ -59,10 +60,15 @@ class GatewayClient:
             write=timeout,  # Use provided timeout for write operations
             pool=timeout,  # Use provided timeout for pool operations
         )
+        # Respect standard HTTP proxy environment variables.
+        # httpx does not auto-detect proxies when a custom transport is provided,
+        # so we read them explicitly and forward to HTTPTransport.
+        proxy_url = os.environ.get("http_proxy") or os.environ.get("HTTP_PROXY")
         # Configure transport with retries and keepalive management to avoid
         # stale connections causing ConnectTimeout during long polling loops.
         transport = httpx.HTTPTransport(
             retries=3,  # TCP-level retries on connection failure
+            proxy=proxy_url,
             limits=httpx.Limits(
                 max_connections=20,
                 max_keepalive_connections=5,

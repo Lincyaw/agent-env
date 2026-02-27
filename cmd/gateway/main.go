@@ -80,7 +80,7 @@ func main() {
 		Addr:         fmt.Sprintf(":%d", port),
 		Handler:      mux,
 		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 120 * time.Second,
+		WriteTimeout: 600 * time.Second,
 		IdleTimeout:  60 * time.Second,
 	}
 
