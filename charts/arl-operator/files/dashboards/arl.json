@@ -1,0 +1,337 @@
+{
+  "annotations": { "list": [] },
+  "description": "ARL Infra — Operator, Gateway, Pool & Sandbox monitoring",
+  "editable": true,
+  "graphTooltip": 1,
+  "links": [],
+  "panels": [
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 0 },
+      "id": 100,
+      "title": "Overview",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "arl-prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null },
+            { "color": "orange", "value": 80 },
+            { "color": "red", "value": 100 }
+          ]},
+          "mappings": [],
+          "unit": "short"
+        }
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 1 },
+      "id": 1,
+      "options": { "colorMode": "background", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [{ "datasource": { "type": "prometheus", "uid": "arl-prometheus" }, "expr": "arl_gateway_active_sessions", "legendFormat": "Sessions" }],
+      "title": "Active Sessions",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "arl-prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "red", "value": null },
+            { "color": "orange", "value": 1 },
+            { "color": "green", "value": 3 }
+          ]},
+          "unit": "short"
+        }
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 1 },
+      "id": 2,
+      "options": { "colorMode": "background", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [{ "datasource": { "type": "prometheus", "uid": "arl-prometheus" }, "expr": "sum(arl_pool_utilization{pool=~\"$pool\", status=\"ready\"})", "legendFormat": "Ready" }],
+      "title": "Pool Ready Pods",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "arl-prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null },
+            { "color": "orange", "value": 5 },
+            { "color": "red", "value": 10 }
+          ]},
+          "unit": "short"
+        }
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 1 },
+      "id": 3,
+      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [{ "datasource": { "type": "prometheus", "uid": "arl-prometheus" }, "expr": "sum(arl_pool_utilization{pool=~\"$pool\", status=\"allocated\"})", "legendFormat": "Allocated" }],
+      "title": "Allocated Pods",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "arl-prometheus" },
+      "fieldConfig": {
+        "defaults": {
+          "color": { "mode": "thresholds" },
+          "thresholds": { "mode": "absolute", "steps": [
+            { "color": "green", "value": null },
+            { "color": "orange", "value": 3 },
+            { "color": "red", "value": 10 }
+          ]},
+          "unit": "short"
+        }
+      },
+      "gridPos": { "h": 4, "w": 4, "x": 12, "y": 1 },
+      "id": 4,
+      "options": { "colorMode": "value", "graphMode": "area", "reduceOptions": { "calcs": ["lastNotNull"] } },
+      "targets": [{ "datasource": { "type": "prometheus", "uid": "arl-prometheus" }, "expr": "sum(arl_warmpool_pending_pods{pool=~\"$pool\"})", "legendFormat": "Pending" }],
+      "title": "Pending Pods",
+      "type": "stat"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "arl-prometheus" },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" }, "unit": "short", "custom": { "lineWidth": 2, "fillOpacity": 10 } }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 5 },
+      "id": 5,
+      "options": { "tooltip": { "mode": "multi" }, "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull"] } },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "arl-prometheus" }, "expr": "arl_pool_utilization{pool=~\"$pool\", status=\"ready\"}", "legendFormat": "{{pool}} ready" },
+        { "datasource": { "type": "prometheus", "uid": "arl-prometheus" }, "expr": "arl_pool_utilization{pool=~\"$pool\", status=\"allocated\"}", "legendFormat": "{{pool}} allocated" }
+      ],
+      "title": "Pool Utilization",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "arl-prometheus" },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" }, "unit": "ops", "custom": { "lineWidth": 2, "fillOpacity": 10 } }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 5 },
+      "id": 6,
+      "options": { "tooltip": { "mode": "multi" }, "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull"] } },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "arl-prometheus" }, "expr": "sum by (controller, result) (rate(arl_reconcile_total[5m]))", "legendFormat": "{{controller}} / {{result}}" }
+      ],
+      "title": "Reconcile Rate",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 13 },
+      "id": 101,
+      "title": "Pod Lifecycle",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "arl-prometheus" },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" }, "unit": "s", "custom": { "lineWidth": 2, "fillOpacity": 10 } }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 14 },
+      "id": 7,
+      "options": { "tooltip": { "mode": "multi" }, "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull"] } },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "arl-prometheus" }, "expr": "histogram_quantile(0.50, sum by (pool, le) (rate(arl_warmpool_pod_ready_seconds_bucket{pool=~\"$pool\"}[5m])))", "legendFormat": "p50 {{pool}}" },
+        { "datasource": { "type": "prometheus", "uid": "arl-prometheus" }, "expr": "histogram_quantile(0.95, sum by (pool, le) (rate(arl_warmpool_pod_ready_seconds_bucket{pool=~\"$pool\"}[5m])))", "legendFormat": "p95 {{pool}}" }
+      ],
+      "title": "Pod Ready Duration (creation→ready)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "arl-prometheus" },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" }, "unit": "s", "custom": { "lineWidth": 2, "fillOpacity": 10 } }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 14 },
+      "id": 8,
+      "options": { "tooltip": { "mode": "multi" }, "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull"] } },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "arl-prometheus" }, "expr": "histogram_quantile(0.50, sum by (pool, container, le) (rate(arl_warmpool_container_start_seconds_bucket{pool=~\"$pool\"}[5m])))", "legendFormat": "p50 {{pool}}/{{container}}" },
+        { "datasource": { "type": "prometheus", "uid": "arl-prometheus" }, "expr": "histogram_quantile(0.95, sum by (pool, container, le) (rate(arl_warmpool_container_start_seconds_bucket{pool=~\"$pool\"}[5m])))", "legendFormat": "p95 {{pool}}/{{container}}" }
+      ],
+      "title": "Container Start Duration",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "arl-prometheus" },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" }, "unit": "s", "custom": { "lineWidth": 2, "fillOpacity": 10 } }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 22 },
+      "id": 9,
+      "options": { "tooltip": { "mode": "multi" }, "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull"] } },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "arl-prometheus" }, "expr": "histogram_quantile(0.50, sum by (pool, le) (rate(arl_warmpool_first_pod_ready_seconds_bucket{pool=~\"$pool\"}[5m])))", "legendFormat": "p50 first pod {{pool}}" },
+        { "datasource": { "type": "prometheus", "uid": "arl-prometheus" }, "expr": "histogram_quantile(0.50, sum by (pool, le) (rate(arl_warmpool_all_pods_ready_seconds_bucket{pool=~\"$pool\"}[5m])))", "legendFormat": "p50 all pods {{pool}}" }
+      ],
+      "title": "Scale-out Readiness Duration",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "arl-prometheus" },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" }, "unit": "ops", "custom": { "lineWidth": 2, "fillOpacity": 10 } }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 22 },
+      "id": 10,
+      "options": { "tooltip": { "mode": "multi" }, "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull"] } },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "arl-prometheus" }, "expr": "sum by (pool, reason) (rate(arl_warmpool_image_pull_errors_total{pool=~\"$pool\"}[5m]))", "legendFormat": "{{pool}} / {{reason}}" },
+        { "datasource": { "type": "prometheus", "uid": "arl-prometheus" }, "expr": "sum by (pool, reason) (rate(arl_warmpool_pod_delete_total{pool=~\"$pool\"}[5m]))", "legendFormat": "delete {{pool}} / {{reason}}" }
+      ],
+      "title": "Image Pull Errors & Pod Deletions Rate",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 30 },
+      "id": 102,
+      "title": "Sandbox",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "arl-prometheus" },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" }, "unit": "s", "custom": { "lineWidth": 2, "fillOpacity": 10 } }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 31 },
+      "id": 11,
+      "options": { "tooltip": { "mode": "multi" }, "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "mean"] } },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "arl-prometheus" }, "expr": "histogram_quantile(0.50, sum by (pool, le) (rate(arl_sandbox_e2e_ready_seconds_bucket{pool=~\"$pool\"}[5m])))", "legendFormat": "p50 {{pool}}" },
+        { "datasource": { "type": "prometheus", "uid": "arl-prometheus" }, "expr": "histogram_quantile(0.95, sum by (pool, le) (rate(arl_sandbox_e2e_ready_seconds_bucket{pool=~\"$pool\"}[5m])))", "legendFormat": "p95 {{pool}}" },
+        { "datasource": { "type": "prometheus", "uid": "arl-prometheus" }, "expr": "histogram_quantile(0.99, sum by (pool, le) (rate(arl_sandbox_e2e_ready_seconds_bucket{pool=~\"$pool\"}[5m])))", "legendFormat": "p99 {{pool}}" }
+      ],
+      "title": "Sandbox E2E Ready Latency (user-visible)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "arl-prometheus" },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" }, "unit": "ops", "custom": { "lineWidth": 2, "fillOpacity": 10 } }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 31 },
+      "id": 12,
+      "options": { "tooltip": { "mode": "multi" }, "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull"] } },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "arl-prometheus" }, "expr": "sum by (pool) (rate(arl_sandbox_no_idle_pods_total{pool=~\"$pool\"}[5m]))", "legendFormat": "no-idle {{pool}}" }
+      ],
+      "title": "No Idle Pods Rate (pool pressure)",
+      "type": "timeseries"
+    },
+    {
+      "collapsed": false,
+      "gridPos": { "h": 1, "w": 24, "x": 0, "y": 39 },
+      "id": 103,
+      "title": "Gateway Execution",
+      "type": "row"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "arl-prometheus" },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" }, "unit": "s", "custom": { "lineWidth": 2, "fillOpacity": 10 } }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 40 },
+      "id": 13,
+      "options": { "tooltip": { "mode": "multi" }, "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "mean"] } },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "arl-prometheus" }, "expr": "histogram_quantile(0.50, sum by (step_type, le) (rate(arl_gateway_step_duration_seconds_bucket[5m])))", "legendFormat": "p50 {{step_type}}" },
+        { "datasource": { "type": "prometheus", "uid": "arl-prometheus" }, "expr": "histogram_quantile(0.95, sum by (step_type, le) (rate(arl_gateway_step_duration_seconds_bucket[5m])))", "legendFormat": "p95 {{step_type}}" },
+        { "datasource": { "type": "prometheus", "uid": "arl-prometheus" }, "expr": "histogram_quantile(0.99, sum by (step_type, le) (rate(arl_gateway_step_duration_seconds_bucket[5m])))", "legendFormat": "p99 {{step_type}}" }
+      ],
+      "title": "Step Execution Duration",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "arl-prometheus" },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" }, "unit": "ops", "custom": { "lineWidth": 2, "fillOpacity": 10 } }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 40 },
+      "id": 14,
+      "options": { "tooltip": { "mode": "multi" }, "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull"] } },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "arl-prometheus" }, "expr": "sum by (step_type, result) (rate(arl_gateway_step_result_total[5m]))", "legendFormat": "{{step_type}} / {{result}}" }
+      ],
+      "title": "Step Result Rate (success / error)",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "arl-prometheus" },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" }, "unit": "s", "custom": { "lineWidth": 2, "fillOpacity": 10 } }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 48 },
+      "id": 15,
+      "options": { "tooltip": { "mode": "multi" }, "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "mean"] } },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "arl-prometheus" }, "expr": "histogram_quantile(0.50, sum by (method, le) (rate(arl_gateway_sidecar_call_seconds_bucket[5m])))", "legendFormat": "p50 {{method}}" },
+        { "datasource": { "type": "prometheus", "uid": "arl-prometheus" }, "expr": "histogram_quantile(0.95, sum by (method, le) (rate(arl_gateway_sidecar_call_seconds_bucket[5m])))", "legendFormat": "p95 {{method}}" }
+      ],
+      "title": "Sidecar gRPC Call Latency",
+      "type": "timeseries"
+    },
+    {
+      "datasource": { "type": "prometheus", "uid": "arl-prometheus" },
+      "fieldConfig": {
+        "defaults": { "color": { "mode": "palette-classic" }, "unit": "s", "custom": { "lineWidth": 2, "fillOpacity": 10 } }
+      },
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 48 },
+      "id": 16,
+      "options": { "tooltip": { "mode": "multi" }, "legend": { "displayMode": "table", "placement": "bottom", "calcs": ["lastNotNull", "mean"] } },
+      "targets": [
+        { "datasource": { "type": "prometheus", "uid": "arl-prometheus" }, "expr": "histogram_quantile(0.50, rate(arl_gateway_restore_duration_seconds_bucket[5m]))", "legendFormat": "restore p50" },
+        { "datasource": { "type": "prometheus", "uid": "arl-prometheus" }, "expr": "histogram_quantile(0.95, rate(arl_gateway_restore_duration_seconds_bucket[5m]))", "legendFormat": "restore p95" },
+        { "datasource": { "type": "prometheus", "uid": "arl-prometheus" }, "expr": "sum by (result) (rate(arl_gateway_restore_result_total[5m]))", "legendFormat": "restore {{result}}" }
+      ],
+      "title": "Restore Duration & Results",
+      "type": "timeseries"
+    }
+  ],
+  "refresh": "30s",
+  "schemaVersion": 39,
+  "tags": ["arl", "kubernetes", "operator", "gateway"],
+  "templating": {
+    "list": [
+      {
+        "current": {},
+        "hide": 0,
+        "includeAll": false,
+        "name": "datasource",
+        "query": "prometheus",
+        "refresh": 1,
+        "type": "datasource",
+        "label": "Data Source"
+      },
+      {
+        "current": {},
+        "datasource": { "type": "prometheus", "uid": "arl-prometheus" },
+        "definition": "label_values(arl_pool_utilization, pool)",
+        "hide": 0,
+        "includeAll": true,
+        "allValue": ".*",
+        "multi": true,
+        "name": "pool",
+        "query": { "query": "label_values(arl_pool_utilization, pool)", "refId": "StandardVariableQuery" },
+        "refresh": 2,
+        "regex": "",
+        "sort": 1,
+        "type": "query",
+        "label": "Pool"
+      }
+    ]
+  },
+  "time": { "from": "now-1h", "to": "now" },
+  "timepicker": {},
+  "timezone": "browser",
+  "title": "ARL Infra",
+  "uid": "arl-infra",
+  "version": 1
+}

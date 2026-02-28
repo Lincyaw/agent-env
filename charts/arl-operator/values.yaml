@@ -135,18 +135,69 @@ crds:
   install: true
   keep: true
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Prometheus
+# ─────────────────────────────────────────────────────────────────────────────
+prometheus:
+  enabled: true
+  image: pair-diag-cn-guangzhou.cr.volces.com/pair/prometheus:v3.10.0
+  service:
+    type: ClusterIP
+  resources:
+    requests:
+      cpu: 200m
+      memory: 512Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+  persistence:
+    enabled: false
+    storageClass: ebs-ssd
+    size: 20Gi
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Grafana
+# ─────────────────────────────────────────────────────────────────────────────
+grafana:
+  enabled: true
+  image: pair-diag-cn-guangzhou.cr.volces.com/pair/grafana:12.3.1
+  adminUser: admin
+  adminPassword: admin  # CHANGE in production
+  service:
+    type: ClusterIP
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+  persistence:
+    enabled: false
+    storageClass: ebs-ssd
+    size: 20Gi
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Metrics / Prometheus scraping
+# ─────────────────────────────────────────────────────────────────────────────
 metrics:
   # Creates a dedicated ClusterIP Service exposing the operator's /metrics port
   service:
     enabled: true
     port: 8080
     targetPort: metrics
-  # Creates a VMServiceScrape (VictoriaMetrics) so the cluster's prometheus-agent
-  # automatically scrapes the operator's metrics endpoint.
+  # Creates VMServiceScrape (VictoriaMetrics) for both operator and gateway.
   serviceMonitor:
     enabled: true
     interval: "15s"
     # Labels required by the VictoriaMetrics agent in this cluster
     additionalLabels:
       volcengine.vmp: "true"
+  # Creates standard Prometheus ServiceMonitor (monitoring.coreos.com/v1)
+  # Enable this if using kube-prometheus-stack instead of VictoriaMetrics.
+  prometheusServiceMonitor:
+    enabled: false
+    interval: "15s"
+    # Labels to match your Prometheus operator's serviceMonitorSelector
+    # e.g. release: kube-prometheus-stack
+    additionalLabels: {}

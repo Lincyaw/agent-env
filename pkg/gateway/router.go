@@ -3,6 +3,9 @@ package gateway
 import (
 	"encoding/json"
 	"net/http"
+
+	"github.com/prometheus/client_golang/prometheus/promhttp"
+	ctrlmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 )
 
 // SetupRoutes registers all gateway routes.
@@ -34,6 +37,9 @@ func SetupRoutes(mux *http.ServeMux, gw *Gateway) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("ok"))
 	})
+
+	// Prometheus metrics
+	mux.Handle("GET /metrics", promhttp.HandlerFor(ctrlmetrics.Registry, promhttp.HandlerOpts{}))
 }
 
 func handleCreateSession(gw *Gateway) http.HandlerFunc {

@@ -125,6 +125,17 @@ profiles:
           executorAgent.image.repository: pair-diag-cn-guangzhou.cr.volces.com/pair/arl-executor-agent
           clickhouse.enabled: true
           clickhouse.storageClassName: ebs-ssd
+          # Prometheus
+          prometheus.enabled: true
+          prometheus.persistence.enabled: true
+          prometheus.persistence.storageClass: ebs-ssd
+          prometheus.persistence.size: 20Gi
+          # Grafana
+          grafana.enabled: true
+          grafana.service.type: LoadBalancer
+          grafana.persistence.enabled: true
+          grafana.persistence.storageClass: ebs-ssd
+          grafana.persistence.size: 20Gi
         setValueTemplates:
           image.tag: "{{.IMAGE_TAG}}"
           sidecar.image.tag: "{{.IMAGE_TAG2}}"

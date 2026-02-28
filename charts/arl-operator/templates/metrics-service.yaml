@@ -18,3 +18,24 @@ spec:
     {{- include "arl-operator.selectorLabels" . | nindent 4 }}
     app.kubernetes.io/component: operator
 {{- end }}
+{{- if and .Values.gateway.enabled .Values.metrics.service.enabled }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "arl-operator.fullname" . }}-gateway-metrics
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "arl-operator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: gateway
+spec:
+  type: ClusterIP
+  ports:
+    - name: metrics
+      port: {{ .Values.gateway.port }}
+      targetPort: http
+      protocol: TCP
+  selector:
+    {{- include "arl-operator.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: gateway
+{{- end }}

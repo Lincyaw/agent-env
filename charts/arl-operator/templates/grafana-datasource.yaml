@@ -1,0 +1,24 @@
+{{- if and .Values.prometheus.enabled .Values.grafana.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "arl-operator.fullname" . }}-grafana-datasource
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "arl-operator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: grafana
+data:
+  arl-prometheus.yaml: |
+    apiVersion: 1
+    datasources:
+      - name: ARL-Prometheus
+        type: prometheus
+        uid: arl-prometheus
+        url: http://{{ include "arl-operator.fullname" . }}-prometheus:9090
+        access: proxy
+        isDefault: true
+        jsonData:
+          timeInterval: "15s"
+          queryTimeout: "60s"
+          httpMethod: POST
+{{- end }}
