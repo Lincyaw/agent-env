@@ -107,7 +107,10 @@ class SandboxSession:
             GatewayError: If the session does not exist.
         """
         client = GatewayClient(base_url=gateway_url, timeout=timeout)
-        info = client.get_session(session_id)
+        try:
+            info = client.get_session(session_id)
+        finally:
+            client.close()
 
         instance = cls(
             pool_ref=info.pool_ref,
@@ -286,6 +289,10 @@ class SandboxSession:
         self._session_id = None
         self._session_info = None
 
+    def close(self) -> None:
+        """Close the underlying HTTP client."""
+        self._client.close()
+
     def __enter__(self) -> SandboxSession:
         if self.keep_alive:
             import warnings
@@ -306,5 +313,8 @@ class SandboxSession:
         exc_val: BaseException | None,
         exc_tb: object | None,
     ) -> None:
-        if not self.keep_alive:
-            self.delete_sandbox()
+        try:
+            if not self.keep_alive:
+                self.delete_sandbox()
+        finally:
+            self.close()

@@ -36,7 +36,9 @@ func handleShell(gw *Gateway) http.HandlerFunc {
 			return
 		}
 		s := val.(*session)
+		s.mu.RLock()
 		podIP := s.Info.PodIP
+		s.mu.RUnlock()
 
 		// Upgrade HTTP to WebSocket
 		ws, err := upgrader.Upgrade(w, r, nil)

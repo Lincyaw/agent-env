@@ -6,7 +6,7 @@ import re
 from datetime import datetime
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field, ValidationInfo, field_validator
+from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
 
 
 class StepRequest(BaseModel):
@@ -215,13 +215,14 @@ class InlineToolSpec(BaseModel):
     timeout: str = ""  # Go duration format: "30s", "1m", "1h"
     files: dict[str, str]  # filename -> content
 
-    @field_validator("entrypoint")
-    @classmethod
-    def validate_entrypoint_in_files(cls, v: str, info: ValidationInfo) -> str:
+    @model_validator(mode="after")
+    def validate_entrypoint_in_files(self) -> "InlineToolSpec":
         """Ensure entrypoint exists in files dict."""
-        if info.data.get("files") and v not in info.data["files"]:
-            raise ValueError(f"entrypoint '{v}' must exist in files dict")
-        return v
+        if self.files and self.entrypoint not in self.files:
+            raise ValueError(
+                f"entrypoint '{self.entrypoint}' must be a key in files"
+            )
+        return self
 
 
 class ToolsImageSource(BaseModel):
@@ -309,12 +310,12 @@ class ResourceRequirements(BaseModel):
                 if quantity.endswith("m"):
                     try:
                         millicores = int(quantity[:-1])
-                        if millicores <= 0 or millicores > 1_000_000:
-                            raise ValueError(
-                                f"CPU millicores '{quantity}' out of reasonable range (1m-1000000m)"
-                            )
                     except ValueError:
-                        pass  # Let the quantity_pattern catch format errors
+                        raise ValueError(f"Invalid cpu millicore quantity: {quantity}")
+                    if millicores <= 0 or millicores > 1_000_000:
+                        raise ValueError(
+                            f"CPU millicores must be between 1 and 1000000, got {millicores}"
+                        )
 
             elif resource_name == "memory":
                 # Memory should have a suffix (Mi, Gi, M, G, etc.)

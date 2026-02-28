@@ -121,6 +121,16 @@ class WarmPoolManager:
             # Check for failing pods
             for cond in info.conditions:
                 if cond.type == "PodsFailing" and cond.status == "True":
+                    # Transient rate-limit / QPS errors should not trigger fail-fast;
+                    # the registry will recover on its own.
+                    msg = (cond.message or cond.reason or "").lower()
+                    is_transient = any(
+                        kw in msg for kw in ("qps exceeded", "rate limit", "toomanyrequests", "429")
+                    )
+                    if is_transient:
+                        consecutive_failures = 0
+                        break
+
                     consecutive_failures += 1
                     # Fail fast after 2 consecutive checks with failures and no ready pods
                     # (gives the system a brief chance to recover)

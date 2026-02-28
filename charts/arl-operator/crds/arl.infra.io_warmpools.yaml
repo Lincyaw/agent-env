@@ -42,6 +42,7 @@ spec:
                 type: object
               replicas:
                 format: int32
+                minimum: 0
                 type: integer
               template:
                 properties:

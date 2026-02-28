@@ -9,6 +9,7 @@ import (
 	"log"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -26,6 +27,7 @@ import (
 
 // session holds internal session state.
 type session struct {
+	mu      sync.RWMutex
 	Info    SessionInfo
 	History *StepHistory
 }
@@ -34,15 +36,18 @@ type session struct {
 type Gateway struct {
 	k8sClient        client.Client
 	sidecarClient    interfaces.SidecarClient
+	metrics          interfaces.MetricsCollector
 	trajectoryWriter *audit.TrajectoryWriter
 	sessions         sync.Map // sessionID → *session
+	sessionCount     atomic.Int64
 }
 
-// New creates a new gateway. trajectoryWriter may be nil to disable trajectory recording.
-func New(k8sClient client.Client, sidecarClient interfaces.SidecarClient, trajectoryWriter *audit.TrajectoryWriter) *Gateway {
+// New creates a new gateway. metrics and trajectoryWriter may be nil.
+func New(k8sClient client.Client, sidecarClient interfaces.SidecarClient, metrics interfaces.MetricsCollector, trajectoryWriter *audit.TrajectoryWriter) *Gateway {
 	return &Gateway{
 		k8sClient:        k8sClient,
 		sidecarClient:    sidecarClient,
+		metrics:          metrics,
 		trajectoryWriter: trajectoryWriter,
 	}
 }
@@ -137,6 +142,10 @@ func (g *Gateway) CreateSession(ctx context.Context, req CreateSessionRequest) (
 		History: NewStepHistory(),
 	})
 
+	if g.metrics != nil {
+		g.metrics.SetActiveSessions(g.sessionCount.Add(1))
+	}
+
 	return &info, nil
 }
 
@@ -147,7 +156,10 @@ func (g *Gateway) GetSession(sessionID string) (*SessionInfo, error) {
 		return nil, fmt.Errorf("session %s not found", sessionID)
 	}
 	s := val.(*session)
-	return &s.Info, nil
+	s.mu.RLock()
+	info := s.Info
+	s.mu.RUnlock()
+	return &info, nil
 }
 
 // DeleteSession deletes the sandbox and removes the session.
@@ -158,10 +170,15 @@ func (g *Gateway) DeleteSession(ctx context.Context, sessionID string) error {
 	}
 	s := val.(*session)
 
+	s.mu.RLock()
+	sandboxName := s.Info.SandboxName
+	namespace := s.Info.Namespace
+	s.mu.RUnlock()
+
 	sandbox := &arlv1alpha1.Sandbox{
 		ObjectMeta: metav1.ObjectMeta{
-			Name:      s.Info.SandboxName,
-			Namespace: s.Info.Namespace,
+			Name:      sandboxName,
+			Namespace: namespace,
 		},
 	}
 
@@ -170,6 +187,11 @@ func (g *Gateway) DeleteSession(ctx context.Context, sessionID string) error {
 	}
 
 	g.sessions.Delete(sessionID)
+
+	if g.metrics != nil {
+		g.metrics.SetActiveSessions(g.sessionCount.Add(-1))
+	}
+
 	return nil
 }
 
@@ -180,7 +202,10 @@ func (g *Gateway) ExecuteSteps(ctx context.Context, sessionID string, req Execut
 		return nil, fmt.Errorf("session %s not found", sessionID)
 	}
 	s := val.(*session)
+
+	s.mu.RLock()
 	podIP := s.Info.PodIP
+	s.mu.RUnlock()
 
 	resp := &ExecuteResponse{
 		SessionID: sessionID,
@@ -192,10 +217,7 @@ func (g *Gateway) ExecuteSteps(ctx context.Context, sessionID string, req Execut
 		start := time.Now()
 		inputJSON, _ := json.Marshal(step)
 
-		globalIdx := s.History.Len()
-
 		var result StepResult
-		result.Index = globalIdx
 		result.Name = step.Name
 		result.Input = inputJSON
 		result.Timestamp = start
@@ -205,7 +227,11 @@ func (g *Gateway) ExecuteSteps(ctx context.Context, sessionID string, req Execut
 			Env:        step.Env,
 			WorkingDir: step.WorkDir,
 		}
+		grpcStart := time.Now()
 		execResp, err := g.sidecarClient.Execute(ctx, podIP, execReq)
+		if g.metrics != nil {
+			g.metrics.RecordSidecarCallDuration("Execute", time.Since(grpcStart))
+		}
 		if err != nil {
 			result.Output.Stderr = err.Error()
 			result.Output.ExitCode = 1
@@ -216,20 +242,35 @@ func (g *Gateway) ExecuteSteps(ctx context.Context, sessionID string, req Execut
 		}
 
 		result.DurationMs = time.Since(start).Milliseconds()
-		result.SnapshotID = fmt.Sprintf("%d", globalIdx)
 
-		resp.Results = append(resp.Results, result)
+		// Record step metrics
+		if g.metrics != nil {
+			stepType := step.Name
+			if stepType == "" {
+				stepType = "unnamed"
+			}
+			g.metrics.RecordGatewayStepDuration(stepType, time.Since(start))
+			outcome := "success"
+			if result.Output.ExitCode != 0 {
+				outcome = "error"
+			}
+			g.metrics.IncrementGatewayStepResult(stepType, outcome)
+		}
 
-		// Record in history
+		// Record in history and get the atomically assigned index
 		stepRecord := StepRecord{
 			Name:       result.Name,
 			Input:      result.Input,
 			Output:     result.Output,
-			SnapshotID: result.SnapshotID,
 			DurationMs: result.DurationMs,
 			Timestamp:  result.Timestamp,
 		}
-		s.History.Add(stepRecord)
+		globalIdx := s.History.Add(stepRecord)
+
+		result.Index = globalIdx
+		result.SnapshotID = fmt.Sprintf("%d", globalIdx)
+
+		resp.Results = append(resp.Results, result)
 
 		// Write to ClickHouse trajectory if configured
 		if g.trajectoryWriter != nil {
@@ -258,13 +299,29 @@ func (g *Gateway) ExecuteSteps(ctx context.Context, sessionID string, req Execut
 
 	// Update Sandbox status.lastTaskTime so the idle-timeout controller
 	// measures idle duration from the last execution, not from creation time.
-	go g.touchSandboxLastTaskTime(s.Info.SandboxName, s.Info.Namespace)
+	s.mu.RLock()
+	sandboxName := s.Info.SandboxName
+	namespace := s.Info.Namespace
+	s.mu.RUnlock()
+	go g.touchSandboxLastTaskTime(sandboxName, namespace)
 
 	return resp, nil
 }
 
 // Restore restores a session to a previous snapshot by creating a new sandbox and replaying steps.
-func (g *Gateway) Restore(ctx context.Context, sessionID string, snapshotID string) error {
+func (g *Gateway) Restore(ctx context.Context, sessionID string, snapshotID string) (retErr error) {
+	restoreStart := time.Now()
+	defer func() {
+		if g.metrics != nil {
+			g.metrics.RecordRestoreDuration(time.Since(restoreStart))
+			result := "success"
+			if retErr != nil {
+				result = "error"
+			}
+			g.metrics.IncrementRestoreResult(result)
+		}
+	}()
+
 	targetIdx, err := strconv.Atoi(snapshotID)
 	if err != nil {
 		return fmt.Errorf("invalid snapshot_id %q: must be a step index", snapshotID)
@@ -285,19 +342,22 @@ func (g *Gateway) Restore(ctx context.Context, sessionID string, snapshotID stri
 		}
 	}
 
-	// Save old sandbox info for cleanup
+	// Read current session info under read lock
+	s.mu.RLock()
 	oldSandboxName := s.Info.SandboxName
 	oldNamespace := s.Info.Namespace
+	poolRef := s.Info.PoolRef
+	s.mu.RUnlock()
 
 	// Create a new Sandbox CRD
 	newSandboxName := fmt.Sprintf("%s-r%d", sessionID, time.Now().UnixMilli())
 	sandbox := &arlv1alpha1.Sandbox{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      newSandboxName,
-			Namespace: s.Info.Namespace,
+			Namespace: oldNamespace,
 		},
 		Spec: arlv1alpha1.SandboxSpec{
-			PoolRef:   s.Info.PoolRef,
+			PoolRef:   poolRef,
 			KeepAlive: true,
 		},
 	}
@@ -319,7 +379,7 @@ func (g *Gateway) Restore(ctx context.Context, sessionID string, snapshotID stri
 		}
 
 		sb := &arlv1alpha1.Sandbox{}
-		if err := g.k8sClient.Get(pollCtx, types.NamespacedName{Name: newSandboxName, Namespace: s.Info.Namespace}, sb); err != nil {
+		if err := g.k8sClient.Get(pollCtx, types.NamespacedName{Name: newSandboxName, Namespace: oldNamespace}, sb); err != nil {
 			if errors.IsNotFound(err) {
 				continue
 			}
@@ -354,10 +414,12 @@ func (g *Gateway) Restore(ctx context.Context, sessionID string, snapshotID stri
 		}
 	}
 
-	// Update session to point at the new sandbox
+	// Update session to point at the new sandbox under write lock
+	s.mu.Lock()
 	s.Info.PodIP = newPodIP
 	s.Info.PodName = newPodName
 	s.Info.SandboxName = newSandboxName
+	s.mu.Unlock()
 
 	// Truncate history to records 0..targetIdx
 	s.History.TruncateTo(targetIdx)

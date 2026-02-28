@@ -8,14 +8,18 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
+	"golang.org/x/time/rate"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/client-go/util/workqueue"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/controller/controllerutil"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	arlv1alpha1 "github.com/Lincyaw/agent-env/api/v1alpha1"
 	"github.com/Lincyaw/agent-env/pkg/config"
@@ -45,13 +49,13 @@ type SandboxReconciler struct {
 // +kubebuilder:rbac:groups=arl.infra.io,resources=sandboxes/finalizers,verbs=update
 
 // Reconcile manages the Sandbox lifecycle
-func (r *SandboxReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+func (r *SandboxReconciler) Reconcile(ctx context.Context, req ctrl.Request) (result ctrl.Result, err error) {
 	// Execute middleware chain if enabled
 	if r.Middleware != nil {
 		if err := r.Middleware.ExecuteBefore(ctx, req); err != nil {
 			return ctrl.Result{}, err
 		}
-		defer r.Middleware.ExecuteAfter(ctx, req, nil)
+		defer func() { r.Middleware.ExecuteAfter(ctx, req, err) }()
 	}
 
 	return r.reconcile(ctx, req)
@@ -127,6 +131,7 @@ func (r *SandboxReconciler) reconcile(ctx context.Context, req ctrl.Request) (ct
 
 	// If pending, try to bind to a pod
 	if sandbox.Status.Phase == arlv1alpha1.SandboxPhasePending {
+
 		// Find an idle pod from the pool
 		podList := &corev1.PodList{}
 		if err := r.List(ctx, podList,
@@ -151,6 +156,9 @@ func (r *SandboxReconciler) reconcile(ctx context.Context, req ctrl.Request) (ct
 
 		if selectedPod == nil {
 			logger.Info("No idle pods available", "pool", sandbox.Spec.PoolRef, "sandbox", sandbox.Name)
+			if r.Metrics != nil {
+				r.Metrics.IncrementNoIdlePods(sandbox.Spec.PoolRef)
+			}
 			return ctrl.Result{RequeueAfter: DefaultPodWaitRequeueDelay}, nil
 		}
 
@@ -180,12 +188,6 @@ func (r *SandboxReconciler) reconcile(ctx context.Context, req ctrl.Request) (ct
 		if err := r.Status().Update(ctx, sandbox); err != nil {
 			return ctrl.Result{}, fmt.Errorf("failed to update Sandbox %s/%s status: %w",
 				sandbox.Namespace, sandbox.Name, err)
-		}
-
-		// Record metrics
-		if r.Metrics != nil {
-			allocationTime := time.Since(time.Now())
-			r.Metrics.RecordSandboxAllocation(sandbox.Spec.PoolRef, allocationTime)
 		}
 
 		logger.Info("Bound sandbox to pod",
@@ -243,6 +245,14 @@ func (r *SandboxReconciler) reconcile(ctx context.Context, req ctrl.Request) (ct
 				return ctrl.Result{}, err
 			}
 
+			// Record end-to-end sandbox allocation latency: creation → Ready
+			if r.Metrics != nil {
+				r.Metrics.RecordSandboxE2EReady(
+					sandbox.Spec.PoolRef,
+					time.Since(sandbox.CreationTimestamp.Time),
+				)
+			}
+
 			logger.Info("Sandbox is ready", "sandbox", sandbox.Name)
 			return ctrl.Result{}, nil
 		}
@@ -256,8 +266,22 @@ func (r *SandboxReconciler) reconcile(ctx context.Context, req ctrl.Request) (ct
 
 // SetupWithManager sets up the controller with the Manager
 func (r *SandboxReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	rl := workqueue.NewTypedMaxOfRateLimiter(
+		workqueue.NewTypedItemExponentialFailureRateLimiter[reconcile.Request](
+			time.Duration(r.Config.WarmPoolBaseDelayMs)*time.Millisecond,
+			time.Duration(r.Config.WarmPoolMaxDelayMs)*time.Millisecond,
+		),
+		&workqueue.TypedBucketRateLimiter[reconcile.Request]{
+			Limiter: rate.NewLimiter(rate.Limit(r.Config.WarmPoolRateLimitQPS), r.Config.WarmPoolRateLimitBurst),
+		},
+	)
+
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&arlv1alpha1.Sandbox{}).
+		WithOptions(controller.Options{
+			MaxConcurrentReconciles: r.Config.SandboxMaxConcurrent,
+			RateLimiter:             rl,
+		}).
 		Complete(r)
 }
 
@@ -307,7 +331,7 @@ func (r *SandboxReconciler) handleReadySandbox(ctx context.Context, sandbox *arl
 
 			// Record idle duration metric
 			if r.Metrics != nil {
-				r.Metrics.RecordSandboxIdleDuration(sandbox.Namespace, idleDuration)
+				r.Metrics.RecordSandboxIdleDuration(sandbox.Spec.PoolRef, sandbox.Namespace, idleDuration)
 			}
 
 			if err := r.Delete(ctx, sandbox); err != nil {
@@ -348,6 +372,9 @@ func (r *SandboxReconciler) handleDeletion(ctx context.Context, sandbox *arlv1al
 				logger.Error(err, "Failed to delete pod", "pod", pod.Name)
 				return ctrl.Result{}, fmt.Errorf("failed to delete pod: %w", err)
 			}
+			if r.Metrics != nil {
+				r.Metrics.IncrementPodDelete(sandbox.Spec.PoolRef, "sandbox_cleanup")
+			}
 			logger.Info("Deleted pod for complete cleanup", "pod", pod.Name)
 		} else if !errors.IsNotFound(err) {
 			return ctrl.Result{}, fmt.Errorf("failed to get pod: %w", err)
@@ -357,7 +384,7 @@ func (r *SandboxReconciler) handleDeletion(ctx context.Context, sandbox *arlv1al
 	// Record idle duration metric if applicable
 	if r.Metrics != nil && sandbox.Status.LastTaskTime != nil {
 		idleDuration := time.Since(sandbox.Status.LastTaskTime.Time)
-		r.Metrics.RecordSandboxIdleDuration(sandbox.Namespace, idleDuration)
+		r.Metrics.RecordSandboxIdleDuration(sandbox.Spec.PoolRef, sandbox.Namespace, idleDuration)
 	}
 
 	// Write audit record

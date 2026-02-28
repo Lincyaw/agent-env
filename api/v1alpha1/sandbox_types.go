@@ -20,6 +20,7 @@ const (
 // SandboxSpec defines the desired state of Sandbox
 type SandboxSpec struct {
 	// PoolRef is the name of the WarmPool to allocate from
+	// +kubebuilder:validation:MinLength=1
 	PoolRef string `json:"poolRef"`
 
 	// KeepAlive indicates whether to keep the pod after task completion

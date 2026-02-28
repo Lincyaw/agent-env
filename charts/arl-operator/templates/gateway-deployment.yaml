@@ -23,7 +23,7 @@ spec:
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
       {{- end }}
-      serviceAccountName: {{ include "arl-operator.serviceAccountName" . }}
+      serviceAccountName: {{ .Values.gateway.serviceAccount.name | default (printf "%s-gateway" (include "arl-operator.fullname" .)) }}
       containers:
         - name: gateway
           image: "{{ .Values.gateway.image.repository }}:{{ .Values.gateway.image.tag | default .Chart.AppVersion }}"

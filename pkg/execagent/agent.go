@@ -47,8 +47,8 @@ func (a *Agent) Run(ctx context.Context) error {
 	}
 	defer a.listener.Close()
 
-	// Make socket world-writable so sidecar container can connect
-	if err := os.Chmod(a.socketPath, 0777); err != nil {
+	// Make socket accessible to sidecar container (owner + group only)
+	if err := os.Chmod(a.socketPath, 0660); err != nil {
 		return fmt.Errorf("chmod socket: %w", err)
 	}
 
@@ -158,6 +158,14 @@ func (a *Agent) handleExec(ctx context.Context, req Request, encoder *json.Encod
 	a.processes[cmd.Process.Pid] = cmd
 	a.mu.Unlock()
 
+	// Mutex-protected send to avoid concurrent writes to the encoder
+	var encMu sync.Mutex
+	send := func(resp Response) {
+		encMu.Lock()
+		encoder.Encode(resp)
+		encMu.Unlock()
+	}
+
 	var wg sync.WaitGroup
 	wg.Add(2)
 
@@ -165,8 +173,12 @@ func (a *Agent) handleExec(ctx context.Context, req Request, encoder *json.Encod
 	go func() {
 		defer wg.Done()
 		s := bufio.NewScanner(stdout)
+		s.Buffer(make([]byte, 1024*1024), 1024*1024)
 		for s.Scan() {
-			encoder.Encode(Response{ID: req.ID, Stdout: s.Text() + "\n"})
+			send(Response{ID: req.ID, Stdout: s.Text() + "\n"})
+		}
+		if s.Err() != nil {
+			send(Response{ID: req.ID, Stderr: fmt.Sprintf("stdout read error: %v\n", s.Err())})
 		}
 	}()
 
@@ -174,8 +186,12 @@ func (a *Agent) handleExec(ctx context.Context, req Request, encoder *json.Encod
 	go func() {
 		defer wg.Done()
 		s := bufio.NewScanner(stderr)
+		s.Buffer(make([]byte, 1024*1024), 1024*1024)
 		for s.Scan() {
-			encoder.Encode(Response{ID: req.ID, Stderr: s.Text() + "\n"})
+			send(Response{ID: req.ID, Stderr: s.Text() + "\n"})
+		}
+		if s.Err() != nil {
+			send(Response{ID: req.ID, Stderr: fmt.Sprintf("stderr read error: %v\n", s.Err())})
 		}
 	}()
 
@@ -196,13 +212,17 @@ func (a *Agent) handleExec(ctx context.Context, req Request, encoder *json.Encod
 	a.mu.Unlock()
 
 	log.Printf("[exec] id=%s exit_code=%d cmd=%v", req.ID, exitCode, req.Cmd)
-	encoder.Encode(Response{ID: req.ID, ExitCode: &exitCode, Done: true})
+	send(Response{ID: req.ID, ExitCode: &exitCode, Done: true})
 }
 
 func (a *Agent) handleSignal(req Request, encoder *json.Encoder) {
-	process, err := os.FindProcess(req.PID)
-	if err != nil {
-		encoder.Encode(Response{ID: req.ID, Error: fmt.Sprintf("find process: %v", err), Done: true})
+	// Only allow signaling PIDs that we are tracking
+	a.mu.Lock()
+	cmd, tracked := a.processes[req.PID]
+	a.mu.Unlock()
+
+	if !tracked {
+		encoder.Encode(Response{ID: req.ID, Error: fmt.Sprintf("unknown or untracked PID: %d", req.PID), Done: true})
 		return
 	}
 
@@ -219,7 +239,7 @@ func (a *Agent) handleSignal(req Request, encoder *json.Encoder) {
 		return
 	}
 
-	if err := process.Signal(sig); err != nil {
+	if err := cmd.Process.Signal(sig); err != nil {
 		encoder.Encode(Response{ID: req.ID, Error: fmt.Sprintf("signal: %v", err), Done: true})
 		return
 	}

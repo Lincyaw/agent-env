@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/Lincyaw/agent-env/pkg/pb"
 )
@@ -64,6 +66,10 @@ func (s *GRPCServer) Stop() {
 
 // Execute implements the gRPC Execute method with streaming
 func (s *GRPCServer) Execute(req *pb.ExecRequest, stream grpc.ServerStreamingServer[pb.ExecLog]) error {
+	if req.GetBackground() {
+		return status.Errorf(codes.Unimplemented, "background execution is not yet supported")
+	}
+
 	execReq := &ExecRequest{
 		Command:        req.GetCommand(),
 		Env:            req.GetEnv(),

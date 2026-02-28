@@ -7,17 +7,24 @@ import (
 	"math"
 	"regexp"
 	"strings"
+	"sync"
+	"time"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
+	"golang.org/x/time/rate"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/util/workqueue"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+	"sigs.k8s.io/controller-runtime/pkg/controller"
 	"sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/reconcile"
 
 	arlv1alpha1 "github.com/Lincyaw/agent-env/api/v1alpha1"
 	"github.com/Lincyaw/agent-env/pkg/config"
@@ -42,6 +49,13 @@ type WarmPoolReconciler struct {
 	Metrics        interfaces.MetricsCollector
 	Middleware     *middleware.Chain
 	ImageScheduler *scheduler.ImageScheduler
+
+	// in-memory sets for one-time metric recording (keyed by pod UID / pool key)
+	recordedPods          sync.Map // types.UID → struct{}
+	recordedErrors        sync.Map // "<uid>/<container>/<reason>" → struct{}
+	scaleLastTarget       sync.Map // "<ns>/<pool>" → int32
+	scaleStartTime        sync.Map // "<ns>/<pool>" → time.Time
+	scaleFirstPodRecorded sync.Map // "<ns>/<pool>" → struct{} cleared on each scale-up
 }
 
 // +kubebuilder:rbac:groups=arl.infra.io,resources=warmpools,verbs=get;list;watch;create;update;patch;delete
@@ -51,13 +65,13 @@ type WarmPoolReconciler struct {
 // +kubebuilder:rbac:groups="",resources=nodes,verbs=get;list;watch
 
 // Reconcile manages the WarmPool lifecycle
-func (r *WarmPoolReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
+func (r *WarmPoolReconciler) Reconcile(ctx context.Context, req ctrl.Request) (result ctrl.Result, err error) {
 	// Execute middleware chain if enabled
 	if r.Middleware != nil {
 		if err := r.Middleware.ExecuteBefore(ctx, req); err != nil {
 			return ctrl.Result{}, err
 		}
-		defer r.Middleware.ExecuteAfter(ctx, req, nil)
+		defer func() { r.Middleware.ExecuteAfter(ctx, req, err) }()
 	}
 
 	return r.reconcile(ctx, req)
@@ -94,6 +108,9 @@ func (r *WarmPoolReconciler) reconcile(ctx context.Context, req ctrl.Request) (c
 	span.SetAttributes(
 		attribute.Int("pool.replicas.desired", int(pool.Spec.Replicas)),
 	)
+
+	// Detect scale-out events before processing pod state
+	r.detectAndTrackScale(pool)
 
 	// List all pods belonging to this pool
 	podList := &corev1.PodList{}
@@ -152,6 +169,9 @@ func (r *WarmPoolReconciler) reconcile(ctx context.Context, req ctrl.Request) (c
 					cs.Name, cs.State.Waiting.Reason, cs.State.Waiting.Message)
 			}
 		}
+
+		// Observe image-pull errors (deduplicated per pod+container+reason)
+		r.observeImagePullErrors(pool.Name, pod)
 	}
 
 	// Calculate how many pods to create - only create if total pods < desired
@@ -169,7 +189,15 @@ func (r *WarmPoolReconciler) reconcile(ctx context.Context, req ctrl.Request) (c
 	// Record metrics
 	if r.Metrics != nil {
 		r.Metrics.RecordPoolUtilization(pool.Name, readyIdle, allocated)
+		// Pods created but not yet in Running state
+		r.Metrics.SetPendingPods(pool.Name, totalPods-readyIdle-allocated)
 	}
+
+	// One-time per-pod startup latency and scale-complete metrics
+	r.observePodMetrics(pool, podList.Items)
+
+	// Prune sync.Maps so entries for deleted pods don't accumulate forever
+	r.pruneStaleEntries(podList.Items)
 
 	// Create new pods if needed
 	if needed > 0 {
@@ -206,6 +234,9 @@ func (r *WarmPoolReconciler) reconcile(ctx context.Context, req ctrl.Request) (c
 					logger.Error(err, "Failed to delete pod", "pod", pod.Name)
 					continue
 				}
+				if r.Metrics != nil {
+					r.Metrics.IncrementPodDelete(pool.Name, "scale_down")
+				}
 				logger.Info("Deleted excess pod", "pod", pod.Name)
 				deleted++
 			}
@@ -239,9 +270,160 @@ func (r *WarmPoolReconciler) reconcile(ctx context.Context, req ctrl.Request) (c
 		return ctrl.Result{}, err
 	}
 
+	// Emit scale duration when pool reaches desired ready count
+	r.checkScaleComplete(pool, readyIdle)
+
 	// Requeue to maintain the pool
 	requeueDelay := r.Config.DefaultRequeueDelay
 	return ctrl.Result{RequeueAfter: requeueDelay}, nil
+}
+
+// detectAndTrackScale stores the time when spec.replicas increases (scale-out event).
+func (r *WarmPoolReconciler) detectAndTrackScale(pool *arlv1alpha1.WarmPool) {
+	key := pool.Namespace + "/" + pool.Name
+	desired := pool.Spec.Replicas
+	if prev, ok := r.scaleLastTarget.Load(key); ok {
+		if desired > prev.(int32) {
+			r.scaleStartTime.Store(key, time.Now())
+			r.scaleFirstPodRecorded.Delete(key) // reset so next ready pod marks "first pod"
+		}
+	}
+	r.scaleLastTarget.Store(key, desired)
+}
+
+// checkScaleComplete emits arl_warmpool_all_pods_ready_seconds when readyIdle
+// reaches spec.replicas after a scale-out event.
+func (r *WarmPoolReconciler) checkScaleComplete(pool *arlv1alpha1.WarmPool, readyIdle int32) {
+	if r.Metrics == nil {
+		return
+	}
+	key := pool.Namespace + "/" + pool.Name
+	startVal, ok := r.scaleStartTime.Load(key)
+	if !ok {
+		return
+	}
+	if readyIdle >= pool.Spec.Replicas && pool.Spec.Replicas > 0 {
+		r.Metrics.RecordAllPodsReady(pool.Name, time.Since(startVal.(time.Time)))
+		r.scaleStartTime.Delete(key)
+	}
+}
+
+// observePodMetrics records one-time per-pod startup metrics for newly-ready pods.
+// It is safe to call on every reconcile; each pod is recorded at most once.
+func (r *WarmPoolReconciler) observePodMetrics(pool *arlv1alpha1.WarmPool, pods []corev1.Pod) {
+	if r.Metrics == nil {
+		return
+	}
+	for i := range pods {
+		pod := &pods[i]
+		if pod.DeletionTimestamp != nil || pod.Status.Phase != corev1.PodRunning {
+			continue
+		}
+		if _, loaded := r.recordedPods.LoadOrStore(pod.UID, struct{}{}); loaded {
+			continue // already recorded for this pod
+		}
+		createdAt := pod.CreationTimestamp.Time
+		nodeName := pod.Spec.NodeName
+
+		// Scheduling latency: creation → PodScheduled condition
+		for _, cond := range pod.Status.Conditions {
+			if cond.Type == corev1.PodScheduled && cond.Status == corev1.ConditionTrue {
+				r.Metrics.RecordPodScheduleDuration(pool.Name, cond.LastTransitionTime.Sub(createdAt))
+				break
+			}
+		}
+
+		// Pod ready latency: creation → Ready condition
+		// Also emit first-pod-ready for the first pod to become ready after a scale event.
+		for _, cond := range pod.Status.Conditions {
+			if cond.Type == corev1.PodReady && cond.Status == corev1.ConditionTrue {
+				readyDuration := cond.LastTransitionTime.Sub(createdAt)
+				r.Metrics.RecordPodReadyDuration(pool.Name, nodeName, readyDuration)
+
+				// Emit first-pod-ready once per scale event
+				key := pool.Namespace + "/" + pool.Name
+				if startVal, ok := r.scaleStartTime.Load(key); ok {
+					if _, alreadyRecorded := r.scaleFirstPodRecorded.LoadOrStore(key, struct{}{}); !alreadyRecorded {
+						r.Metrics.RecordFirstPodReady(pool.Name, time.Since(startVal.(time.Time)))
+					}
+				}
+				break
+			}
+		}
+
+		// Per-container start latency: creation → container Running
+		for _, cs := range pod.Status.ContainerStatuses {
+			if cs.State.Running != nil {
+				r.Metrics.RecordContainerStartDuration(pool.Name, cs.Name, cs.State.Running.StartedAt.Sub(createdAt))
+			}
+		}
+	}
+}
+
+// observeImagePullErrors increments image pull error counters for a pod.
+// Each unique (pod-uid, container, reason) triple is counted only once.
+func (r *WarmPoolReconciler) observeImagePullErrors(poolName string, pod corev1.Pod) {
+	if r.Metrics == nil {
+		return
+	}
+	track := func(containerName, reason string) {
+		key := string(pod.UID) + "/" + containerName + "/" + reason
+		if _, loaded := r.recordedErrors.LoadOrStore(key, struct{}{}); !loaded {
+			r.Metrics.IncrementImagePullError(poolName, reason)
+		}
+	}
+	for _, cs := range pod.Status.InitContainerStatuses {
+		if cs.State.Waiting == nil {
+			continue
+		}
+		switch cs.State.Waiting.Reason {
+		case "ImagePullBackOff", "ErrImagePull":
+			track(cs.Name, cs.State.Waiting.Reason)
+		}
+		if strings.Contains(cs.State.Waiting.Message, "pull QPS exceeded") {
+			track(cs.Name, "PullQPSExceeded")
+		}
+	}
+	for _, cs := range pod.Status.ContainerStatuses {
+		if cs.State.Waiting == nil {
+			continue
+		}
+		switch cs.State.Waiting.Reason {
+		case "ImagePullBackOff", "ErrImagePull":
+			track(cs.Name, cs.State.Waiting.Reason)
+		}
+		if strings.Contains(cs.State.Waiting.Message, "pull QPS exceeded") {
+			track(cs.Name, "PullQPSExceeded")
+		}
+	}
+}
+
+// pruneStaleEntries removes recordedPods and recordedErrors entries for pods
+// that no longer exist, preventing unbounded memory growth.
+func (r *WarmPoolReconciler) pruneStaleEntries(currentPods []corev1.Pod) {
+	alive := make(map[string]struct{}, len(currentPods))
+	for i := range currentPods {
+		alive[string(currentPods[i].UID)] = struct{}{}
+	}
+
+	r.recordedPods.Range(func(key, _ any) bool {
+		if _, ok := alive[string(key.(types.UID))]; !ok {
+			r.recordedPods.Delete(key)
+		}
+		return true
+	})
+
+	r.recordedErrors.Range(func(key, _ any) bool {
+		k := key.(string)
+		// key format: "<uid>/<container>/<reason>" — extract uid prefix
+		if idx := strings.Index(k, "/"); idx > 0 {
+			uid := k[:idx]
+			if _, ok := alive[uid]; !ok {
+				r.recordedErrors.Delete(key)
+			}
+		}
+		return true
+	})
 }
 
 // constructPod creates a Pod from the WarmPool template
@@ -563,9 +745,13 @@ func (r *WarmPoolReconciler) injectExecutorAgent(pod *corev1.Pod) {
 		if len(c.Command) > 0 {
 			originalCmd := ""
 			if len(c.Command) >= 3 && (c.Command[0] == "/bin/sh" || c.Command[0] == "sh") && c.Command[1] == "-c" {
-				originalCmd = c.Command[2]
+				// Already a shell command; combine the shell body with any Args
+				parts := append(c.Command[2:], c.Args...)
+				originalCmd = strings.Join(parts, " ")
 			} else {
-				originalCmd = joinCmd(c.Command)
+				// Build original command from Command + Args combined
+				full := append(c.Command, c.Args...)
+				originalCmd = joinCmd(full)
 			}
 			c.Command = []string{"/bin/sh", "-c", originalCmd + " & " + agentExec}
 		} else {
@@ -619,16 +805,18 @@ func (r *WarmPoolReconciler) ensureExecutorVolumes(pod *corev1.Pod) {
 	}
 }
 
-// joinCmd joins command parts into a shell-safe string
+// shellQuote wraps a string in single quotes, escaping any embedded single quotes.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
+}
+
+// joinCmd joins command parts into a shell-safe string with proper quoting.
 func joinCmd(parts []string) string {
-	result := ""
+	quoted := make([]string, len(parts))
 	for i, p := range parts {
-		if i > 0 {
-			result += " "
-		}
-		result += p
+		quoted[i] = shellQuote(p)
 	}
-	return result
+	return strings.Join(quoted, " ")
 }
 
 // injectImageLocality appends a PreferredSchedulingTerm to the pod's affinity
@@ -705,9 +893,22 @@ func (r *WarmPoolReconciler) injectImageLocality(pod *corev1.Pod, pool *arlv1alp
 
 // SetupWithManager sets up the controller with the Manager
 func (r *WarmPoolReconciler) SetupWithManager(mgr ctrl.Manager) error {
+	baseDelay := time.Duration(r.Config.WarmPoolBaseDelayMs) * time.Millisecond
+	maxDelay := time.Duration(r.Config.WarmPoolMaxDelayMs) * time.Millisecond
+	rl := workqueue.NewTypedMaxOfRateLimiter(
+		workqueue.NewTypedItemExponentialFailureRateLimiter[reconcile.Request](baseDelay, maxDelay),
+		&workqueue.TypedBucketRateLimiter[reconcile.Request]{
+			Limiter: rate.NewLimiter(rate.Limit(r.Config.WarmPoolRateLimitQPS), r.Config.WarmPoolRateLimitBurst),
+		},
+	)
+
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&arlv1alpha1.WarmPool{}).
 		Owns(&corev1.Pod{}).
+		WithOptions(controller.Options{
+			MaxConcurrentReconciles: r.Config.WarmPoolMaxConcurrent,
+			RateLimiter:             rl,
+		}).
 		Complete(r)
 }
 

@@ -1,0 +1,29 @@
+{{- if and .Values.metrics.service.enabled .Values.metrics.serviceMonitor.enabled }}
+apiVersion: operator.victoriametrics.com/v1beta1
+kind: VMServiceScrape
+metadata:
+  name: {{ include "arl-operator.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "arl-operator.labels" . | nindent 4 }}
+    {{- with .Values.metrics.serviceMonitor.additionalLabels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  selector:
+    matchLabels:
+      {{- include "arl-operator.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: operator
+  namespaceSelector:
+    matchNames:
+      - {{ .Release.Namespace }}
+  endpoints:
+    - port: metrics
+      interval: {{ .Values.metrics.serviceMonitor.interval }}
+      path: /metrics
+      relabelConfigs:
+        - targetLabel: cluster
+          replacement: {{ .Release.Namespace }}
+        - sourceLabels: [__meta_kubernetes_pod_node_name]
+          targetLabel: node
+{{- end }}

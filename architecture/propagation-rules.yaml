@@ -109,7 +109,8 @@ rules:
       - description: Update RBAC if new resources are accessed
         manual: true
         files:
-          - charts/arl-operator/templates/rbac.yaml
+          - charts/arl-operator/templates/clusterrole.yaml
+          - charts/arl-operator/templates/clusterrolebinding.yaml
     validation:
       - make vet
       - go build ./cmd/operator/
@@ -145,16 +146,11 @@ rules:
         - pkg/webhook/*.go
     impacts:
       - cmd/operator/main.go
-      - charts/arl-operator/templates/webhook.yaml
     actions:
       - description: Ensure webhook is registered in operator
         manual: true
         files:
           - cmd/operator/main.go
-      - description: Update webhook configuration in Helm chart
-        manual: true
-        files:
-          - charts/arl-operator/templates/webhook.yaml
     validation:
       - make vet
       - go build ./cmd/operator/

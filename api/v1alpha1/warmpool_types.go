@@ -9,6 +9,7 @@ import (
 // WarmPoolSpec defines the desired state of WarmPool
 type WarmPoolSpec struct {
 	// Replicas is the number of idle pods to maintain
+	// +kubebuilder:validation:Minimum=0
 	Replicas int32 `json:"replicas"`
 
 	// Template is the pod template for the warm pool

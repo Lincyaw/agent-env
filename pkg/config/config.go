@@ -54,6 +54,16 @@ type Config struct {
 
 	// Gateway configuration
 	GatewayPort int
+
+	// Control-plane tuning
+	WarmPoolMaxConcurrent  int
+	SandboxMaxConcurrent   int
+	K8sClientQPS           float32
+	K8sClientBurst         int
+	WarmPoolBaseDelayMs    int
+	WarmPoolMaxDelayMs     int
+	WarmPoolRateLimitQPS   float64
+	WarmPoolRateLimitBurst int
 }
 
 // DefaultConfig returns the default configuration
@@ -87,6 +97,14 @@ func DefaultConfig() *Config {
 		SandboxMaxLifetimeSeconds: 3600,
 		ExecutorAgentImage:        "arl-executor-agent:latest",
 		GatewayPort:               8080,
+		WarmPoolMaxConcurrent:     20,
+		SandboxMaxConcurrent:      10,
+		K8sClientQPS:              100,
+		K8sClientBurst:            200,
+		WarmPoolBaseDelayMs:       500,
+		WarmPoolMaxDelayMs:        30000,
+		WarmPoolRateLimitQPS:      50,
+		WarmPoolRateLimitBurst:    100,
 	}
 }
 
@@ -217,6 +235,54 @@ func LoadFromEnv() *Config {
 		}
 	}
 
+	if v := os.Getenv("WARMPOOL_MAX_CONCURRENT"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.WarmPoolMaxConcurrent = n
+		}
+	}
+
+	if v := os.Getenv("SANDBOX_MAX_CONCURRENT"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.SandboxMaxConcurrent = n
+		}
+	}
+
+	if v := os.Getenv("K8S_CLIENT_QPS"); v != "" {
+		if f, err := strconv.ParseFloat(v, 32); err == nil {
+			cfg.K8sClientQPS = float32(f)
+		}
+	}
+
+	if v := os.Getenv("K8S_CLIENT_BURST"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.K8sClientBurst = n
+		}
+	}
+
+	if v := os.Getenv("WARMPOOL_BASE_DELAY_MS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.WarmPoolBaseDelayMs = n
+		}
+	}
+
+	if v := os.Getenv("WARMPOOL_MAX_DELAY_MS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.WarmPoolMaxDelayMs = n
+		}
+	}
+
+	if v := os.Getenv("WARMPOOL_RATE_QPS"); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			cfg.WarmPoolRateLimitQPS = f
+		}
+	}
+
+	if v := os.Getenv("WARMPOOL_RATE_BURST"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.WarmPoolRateLimitBurst = n
+		}
+	}
+
 	return cfg
 }
 
@@ -259,6 +325,10 @@ func (c *Config) Validate() error {
 			return fmt.Errorf("ClickHouse database name is required when ClickHouse is enabled")
 		}
 
+		if c.ClickHousePassword == "" {
+			return fmt.Errorf("ClickHouse password is required when ClickHouse is enabled (set CLICKHOUSE_PASSWORD)")
+		}
+
 		if c.ClickHouseBatchSize < 1 {
 			return fmt.Errorf("ClickHouse batch size must be positive: %d", c.ClickHouseBatchSize)
 		}
@@ -280,6 +350,38 @@ func (c *Config) Validate() error {
 	// Validate gateway configuration
 	if c.GatewayPort < 1 || c.GatewayPort > 65535 {
 		return fmt.Errorf("invalid gateway port: %d (must be 1-65535)", c.GatewayPort)
+	}
+
+	if c.WarmPoolMaxConcurrent < 1 {
+		return fmt.Errorf("warm pool max concurrent must be >= 1: %d", c.WarmPoolMaxConcurrent)
+	}
+
+	if c.SandboxMaxConcurrent < 1 {
+		return fmt.Errorf("sandbox max concurrent must be >= 1: %d", c.SandboxMaxConcurrent)
+	}
+
+	if c.K8sClientQPS <= 0 {
+		return fmt.Errorf("k8s client QPS must be > 0: %v", c.K8sClientQPS)
+	}
+
+	if c.K8sClientBurst < 1 {
+		return fmt.Errorf("k8s client burst must be >= 1: %d", c.K8sClientBurst)
+	}
+
+	if c.WarmPoolBaseDelayMs < 1 {
+		return fmt.Errorf("warm pool base delay ms must be >= 1: %d", c.WarmPoolBaseDelayMs)
+	}
+
+	if c.WarmPoolMaxDelayMs < c.WarmPoolBaseDelayMs {
+		return fmt.Errorf("warm pool max delay ms must be >= base delay ms: %d < %d", c.WarmPoolMaxDelayMs, c.WarmPoolBaseDelayMs)
+	}
+
+	if c.WarmPoolRateLimitQPS <= 0 {
+		return fmt.Errorf("warm pool rate limit QPS must be > 0: %v", c.WarmPoolRateLimitQPS)
+	}
+
+	if c.WarmPoolRateLimitBurst < 1 {
+		return fmt.Errorf("warm pool rate limit burst must be >= 1: %d", c.WarmPoolRateLimitBurst)
 	}
 
 	return nil

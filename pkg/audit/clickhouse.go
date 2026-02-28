@@ -3,6 +3,7 @@ package audit
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"net/url"
 	"sync"
@@ -128,11 +129,19 @@ func (w *ClickHouseWriter) Close() error {
 	<-w.doneCh
 
 	w.mu.Lock()
-	_ = w.flushStepRecordsLocked()
-	_ = w.flushSandboxRecordsLocked()
-	w.mu.Unlock()
+	defer w.mu.Unlock()
 
-	return w.db.Close()
+	var errs []error
+	if err := w.flushStepRecordsLocked(); err != nil {
+		errs = append(errs, fmt.Errorf("flush step records: %w", err))
+	}
+	if err := w.flushSandboxRecordsLocked(); err != nil {
+		errs = append(errs, fmt.Errorf("flush sandbox records: %w", err))
+	}
+	if err := w.db.Close(); err != nil {
+		errs = append(errs, fmt.Errorf("close db: %w", err))
+	}
+	return errors.Join(errs...)
 }
 
 func (w *ClickHouseWriter) flushLoop() {

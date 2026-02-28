@@ -22,6 +22,7 @@ import (
 	"github.com/Lincyaw/agent-env/pkg/client"
 	"github.com/Lincyaw/agent-env/pkg/config"
 	"github.com/Lincyaw/agent-env/pkg/gateway"
+	"github.com/Lincyaw/agent-env/pkg/metrics"
 )
 
 var scheme = runtime.NewScheme()
@@ -42,9 +43,14 @@ func main() {
 	flag.Parse()
 
 	cfg := config.LoadFromEnv()
+	if err := cfg.Validate(); err != nil {
+		log.Fatalf("invalid configuration: %v", err)
+	}
 
 	// Create K8s client
 	k8sConfig := ctrl.GetConfigOrDie()
+	k8sConfig.QPS = cfg.K8sClientQPS
+	k8sConfig.Burst = cfg.K8sClientBurst
 	k8sClient, err := ctrlclient.New(k8sConfig, ctrlclient.Options{Scheme: scheme})
 	if err != nil {
 		log.Fatalf("Failed to create K8s client: %v", err)
@@ -71,7 +77,7 @@ func main() {
 		}
 	}
 
-	gw := gateway.New(k8sClient, sidecarClient, trajectoryWriter)
+	gw := gateway.New(k8sClient, sidecarClient, metrics.NewPrometheusCollector(), trajectoryWriter)
 
 	mux := http.NewServeMux()
 	gateway.SetupRoutes(mux, gw)

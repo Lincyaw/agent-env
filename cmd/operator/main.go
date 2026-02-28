@@ -67,7 +67,12 @@ func main() {
 		os.Exit(1)
 	}
 
-	mgr, err := ctrl.NewManager(ctrl.GetConfigOrDie(), ctrl.Options{
+	// Create manager with configured Kubernetes client QPS/Burst
+	restConfig := ctrl.GetConfigOrDie()
+	restConfig.QPS = cfg.K8sClientQPS
+	restConfig.Burst = cfg.K8sClientBurst
+
+	mgr, err := ctrl.NewManager(restConfig, ctrl.Options{
 		Scheme:                 scheme,
 		Metrics:                metricsserver.Options{BindAddress: cfg.MetricsAddr},
 		HealthProbeBindAddress: cfg.ProbeAddr,

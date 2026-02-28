@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"encoding/json"
+	"fmt"
 	"sync"
 	"time"
 )
@@ -30,12 +31,16 @@ func NewStepHistory() *StepHistory {
 }
 
 // Add adds a step record to the history, assigning the next global index.
-func (h *StepHistory) Add(record StepRecord) {
+// It returns the assigned index for use as a snapshot ID.
+func (h *StepHistory) Add(record StepRecord) int {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	record.Index = h.nextIndex
+	idx := h.nextIndex
+	record.Index = idx
+	record.SnapshotID = fmt.Sprintf("%d", idx)
 	h.nextIndex++
 	h.records = append(h.records, record)
+	return idx
 }
 
 // Len returns the total number of records.

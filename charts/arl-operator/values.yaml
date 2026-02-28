@@ -33,6 +33,8 @@ gateway:
     tag: "latest"
   port: 8080
   sidecarGrpcPort: 9090
+  serviceAccount:
+    name: ""
   resources:
     limits:
       cpu: 500m
@@ -106,6 +108,7 @@ clickhouse:
   port: 9000
   database: "arl"
   username: "default"
+  # REQUIRED: Must be set by the user. Do not use a default password.
   password: "clickhouse123"
   batchSize: 100
   flushInterval: "10s"
@@ -115,9 +118,9 @@ clickhouse:
   storageClassName: "ebs-ssd"
   storageSize: "10Gi"
   # Service configuration
-  serviceType: "NodePort"
-  httpNodePort: 30123   # Port for HTTP interface (8123)
-  nativeNodePort: 30000 # Port for native protocol (9000)
+  serviceType: "ClusterIP"
+  # httpNodePort: 30123   # Port for HTTP interface (8123) - uncomment if serviceType is NodePort
+  # nativeNodePort: 30000 # Port for native protocol (9000) - uncomment if serviceType is NodePort
   # Resources
   resources:
     requests:
@@ -131,3 +134,19 @@ clickhouse:
 crds:
   install: true
   keep: true
+
+# Metrics / Prometheus scraping
+metrics:
+  # Creates a dedicated ClusterIP Service exposing the operator's /metrics port
+  service:
+    enabled: true
+    port: 8080
+    targetPort: metrics
+  # Creates a VMServiceScrape (VictoriaMetrics) so the cluster's prometheus-agent
+  # automatically scrapes the operator's metrics endpoint.
+  serviceMonitor:
+    enabled: true
+    interval: "15s"
+    # Labels required by the VictoriaMetrics agent in this cluster
+    additionalLabels:
+      volcengine.vmp: "true"

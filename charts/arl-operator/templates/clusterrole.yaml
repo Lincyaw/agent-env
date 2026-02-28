@@ -10,7 +10,6 @@ rules:
     resources:
       - warmpools
       - sandboxes
-      - tasks
     verbs:
       - create
       - delete
@@ -24,7 +23,6 @@ rules:
     resources:
       - warmpools/status
       - sandboxes/status
-      - tasks/status
     verbs:
       - get
       - patch
@@ -34,7 +32,6 @@ rules:
     resources:
       - warmpools/finalizers
       - sandboxes/finalizers
-      - tasks/finalizers
     verbs:
       - update
   - apiGroups:

@@ -70,3 +70,5 @@ Chart.lockoperator
 
 # MkDocs
 site/
+*.parquet
+*.jsonl

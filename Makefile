@@ -116,6 +116,7 @@ proto-go: ## Generate Go gRPC code from proto files
 .PHONY: manifests
 manifests: ## Generate CRD manifests
 	go run sigs.k8s.io/controller-tools/cmd/controller-gen crd:maxDescLen=0,allowDangerousTypes=true paths="./api/..." output:crd:artifacts:config=config/crd
+	cp config/crd/*.yaml charts/arl-operator/crds/
 
 .PHONY: deepcopy
 deepcopy: ## Generate deepcopy code

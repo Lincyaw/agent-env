@@ -102,7 +102,6 @@ func (h *MetricsHook) After(ctx interface{}, resource interface{}, err error) {
 	result := "success"
 	if err != nil {
 		result = "error"
-		h.collector.IncrementReconcileErrors(h.controllerName)
 	}
 	h.collector.IncrementReconcileTotal(h.controllerName, result)
 }

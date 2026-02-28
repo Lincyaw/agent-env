@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/Lincyaw/agent-env/pkg/interfaces"
@@ -184,13 +185,25 @@ func (c *GRPCSidecarClient) HealthCheck(ctx context.Context, podIP string) error
 		return fmt.Errorf("health check failed: cannot connect to %s: %w", podIP, err)
 	}
 
-	// Check connection state
+	// Check connection state - only Ready is considered healthy
 	state := conn.GetState()
-	if state.String() == "SHUTDOWN" {
-		return fmt.Errorf("connection to %s is shutdown", podIP)
+	switch state {
+	case connectivity.Ready:
+		return nil
+	case connectivity.Idle:
+		// Trigger connection attempt and check
+		conn.Connect()
+		ctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		defer cancel()
+		if conn.WaitForStateChange(ctx, connectivity.Idle) {
+			if conn.GetState() == connectivity.Ready {
+				return nil
+			}
+		}
+		return fmt.Errorf("sidecar not ready, state: %s", conn.GetState())
+	default:
+		return fmt.Errorf("sidecar unhealthy, state: %s", state)
 	}
-
-	return nil
 }
 
 // Close cleans up all gRPC connections

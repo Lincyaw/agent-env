@@ -39,7 +39,12 @@ spec:
                 type: integer
               keepAlive:
                 type: boolean
+              maxLifetimeSeconds:
+                format: int32
+                minimum: 0
+                type: integer
               poolRef:
+                minLength: 1
                 type: string
               resources:
                 properties:

@@ -35,6 +35,8 @@ manifests:
       setValueTemplates:
         image.tag: "{{.IMAGE_TAG}}"
         sidecar.image.tag: "{{.IMAGE_TAG2}}"
+        gateway.image.tag: "{{.IMAGE_TAG3}}"
+        executorAgent.image.tag: "{{.IMAGE_TAG4}}"
 
 # Default deploy configuration (for minikube)
 deploy:
@@ -65,6 +67,8 @@ profiles:
     tagPolicy:
       sha256: {}
   manifests:
+    rawYaml:
+      - config/crd/*.yaml
     helm:
       releases:
       - name: arl-operator
@@ -72,7 +76,6 @@ profiles:
         namespace: arl-system
         createNamespace: true
         setValues:
-          crds.install: true
           image.repository: 10.10.10.240/library/arl-operator
           sidecar.image.repository: 10.10.10.240/library/arl-sidecar
           gateway.image.repository: 10.10.10.240/library/arl-gateway
@@ -106,6 +109,8 @@ profiles:
     tagPolicy:
       sha256: {}
   manifests:
+    rawYaml:
+      - config/crd/*.yaml
     helm:
       releases:
       - name: arl-operator
@@ -114,7 +119,6 @@ profiles:
         createNamespace: true
         skipBuildDependencies: true
         setValues:
-          crds.install: true
           image.repository: pair-diag-cn-guangzhou.cr.volces.com/pair/arl-operator
           sidecar.image.repository: pair-diag-cn-guangzhou.cr.volces.com/pair/arl-sidecar
           gateway.image.repository: pair-diag-cn-guangzhou.cr.volces.com/pair/arl-gateway
@@ -168,6 +172,8 @@ profiles:
         setValueTemplates:
           image.tag: "{{.IMAGE_TAG}}"
           sidecar.image.tag: "{{.IMAGE_TAG2}}"
+          gateway.image.tag: "{{.IMAGE_TAG3}}"
+          executorAgent.image.tag: "{{.IMAGE_TAG4}}"
   deploy:
     kubectl:
       flags:
@@ -189,6 +195,8 @@ profiles:
         setValueTemplates:
           image.tag: "{{.IMAGE_TAG}}"
           sidecar.image.tag: "{{.IMAGE_TAG2}}"
+          gateway.image.tag: "{{.IMAGE_TAG3}}"
+          executorAgent.image.tag: "{{.IMAGE_TAG4}}"
     rawYaml:
     - config/samples/*.yaml
   deploy:
@@ -224,6 +232,8 @@ profiles:
         setValueTemplates:
           image.tag: "{{.IMAGE_TAG}}"
           sidecar.image.tag: "{{.IMAGE_TAG2}}"
+          gateway.image.tag: "{{.IMAGE_TAG3}}"
+          executorAgent.image.tag: "{{.IMAGE_TAG4}}"
     rawYaml:
     - config/samples/*.yaml
   deploy:
