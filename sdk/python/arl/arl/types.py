@@ -6,7 +6,7 @@ import re
 from datetime import datetime
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, Field, ValidationInfo, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 
 class StepRequest(BaseModel):
@@ -216,7 +216,7 @@ class InlineToolSpec(BaseModel):
     files: dict[str, str]  # filename -> content
 
     @model_validator(mode="after")
-    def validate_entrypoint_in_files(self) -> "InlineToolSpec":
+    def validate_entrypoint_in_files(self) -> InlineToolSpec:
         """Ensure entrypoint exists in files dict."""
         if self.files and self.entrypoint not in self.files:
             raise ValueError(

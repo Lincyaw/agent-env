@@ -13,6 +13,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
+	"golang.org/x/sync/errgroup"
 	"golang.org/x/time/rate"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -199,18 +200,24 @@ func (r *WarmPoolReconciler) reconcile(ctx context.Context, req ctrl.Request) (c
 	// Prune sync.Maps so entries for deleted pods don't accumulate forever
 	r.pruneStaleEntries(podList.Items)
 
-	// Create new pods if needed
+	// Create new pods if needed (parallel)
 	if needed > 0 {
+		g, gCtx := errgroup.WithContext(ctx)
+		g.SetLimit(20) // cap concurrent API calls to avoid overwhelming API server
 		for i := int32(0); i < needed; i++ {
 			pod := r.constructPod(pool)
-			if err := r.Create(ctx, pod); err != nil {
-				logger.Error(err, "Failed to create pod")
-				continue
-			}
-			logger.Info("Created pod", "pod", pod.Name)
+			g.Go(func() error {
+				if err := r.Create(gCtx, pod); err != nil {
+					logger.Error(err, "Failed to create pod")
+					return nil // don't abort other creates
+				}
+				logger.Info("Created pod", "pod", pod.Name)
+				return nil
+			})
 		}
+		_ = g.Wait()
 	} else if needed < 0 {
-		// Delete excess pods (scale down)
+		// Delete excess pods (parallel)
 		toDelete := -needed
 		logger.Info("Scaling down pool", "toDelete", toDelete)
 
@@ -223,23 +230,27 @@ func (r *WarmPoolReconciler) reconcile(ctx context.Context, req ctrl.Request) (c
 			}); err != nil {
 			logger.Error(err, "Failed to list idle pods for deletion")
 		} else {
-			// Delete the excess idle pods
-			deleted := int32(0)
+			g, gCtx := errgroup.WithContext(ctx)
+			g.SetLimit(20)
 			for i := range idlePods.Items {
-				if deleted >= toDelete {
+				if int32(i) >= toDelete {
 					break
 				}
 				pod := &idlePods.Items[i]
-				if err := r.Delete(ctx, pod); err != nil {
-					logger.Error(err, "Failed to delete pod", "pod", pod.Name)
-					continue
-				}
-				if r.Metrics != nil {
-					r.Metrics.IncrementPodDelete(pool.Name, "scale_down")
-				}
-				logger.Info("Deleted excess pod", "pod", pod.Name)
-				deleted++
+				podName := pod.Name
+				g.Go(func() error {
+					if err := r.Delete(gCtx, pod); err != nil {
+						logger.Error(err, "Failed to delete pod", "pod", podName)
+						return nil
+					}
+					if r.Metrics != nil {
+						r.Metrics.IncrementPodDelete(pool.Name, "scale_down")
+					}
+					logger.Info("Deleted excess pod", "pod", podName)
+					return nil
+				})
 			}
+			_ = g.Wait()
 		}
 	}
 
@@ -273,8 +284,20 @@ func (r *WarmPoolReconciler) reconcile(ctx context.Context, req ctrl.Request) (c
 	// Emit scale duration when pool reaches desired ready count
 	r.checkScaleComplete(pool, readyIdle)
 
-	// Requeue to maintain the pool
+	// Smart requeue: skip for empty pools, longer interval for stable pools
+	if pool.Spec.Replicas == 0 && totalPods == 0 {
+		// Pool is dormant (replicas=0, no pods). No periodic requeue needed;
+		// the Watch on WarmPool spec changes will trigger reconciliation when
+		// the pool is scaled up again.
+		return ctrl.Result{}, nil
+	}
+
 	requeueDelay := r.Config.DefaultRequeueDelay
+	if readyIdle >= pool.Spec.Replicas-allocated && failedPods == 0 && needed == 0 {
+		// Pool is fully healthy and stable — use a longer requeue as a
+		// safety-net drift check. Pod events still trigger immediate reconcile.
+		requeueDelay = requeueDelay * 6 // e.g. 10s → 60s
+	}
 	return ctrl.Result{RequeueAfter: requeueDelay}, nil
 }
 
@@ -716,9 +739,10 @@ printf ']}' >> "$REGISTRY"
 func (r *WarmPoolReconciler) injectExecutorAgent(pod *corev1.Pod) {
 	// Add init container to copy executor agent binary
 	initContainer := corev1.Container{
-		Name:    "copy-executor-agent",
-		Image:   r.Config.ExecutorAgentImage,
-		Command: []string{"cp", "/executor-agent", "/arl-bin/executor-agent"},
+		Name:            "copy-executor-agent",
+		Image:           r.Config.ExecutorAgentImage,
+		ImagePullPolicy: corev1.PullIfNotPresent,
+		Command:         []string{"cp", "/executor-agent", "/arl-bin/executor-agent"},
 		VolumeMounts: []corev1.VolumeMount{
 			{Name: "arl-bin", MountPath: "/arl-bin"},
 		},
@@ -844,9 +868,10 @@ func (r *WarmPoolReconciler) injectImageLocality(pod *corev1.Pod, pool *arlv1alp
 		return
 	}
 
-	// Compute spread factor and weight with defaults
-	spreadFactor := 1.0
-	weight := int32(80)
+	// Priority: CRD spec > env config > hardcoded default.
+	// See Config.ImageLocalitySpreadFactor / ImageLocalityWeight for docs.
+	spreadFactor := r.Config.ImageLocalitySpreadFactor
+	weight := r.Config.ImageLocalityWeight
 	if spec != nil {
 		if spec.SpreadFactor != nil {
 			spreadFactor = *spec.SpreadFactor

@@ -83,20 +83,23 @@ class WarmPoolManager:
         name: str,
         timeout: float = 300.0,
         poll_interval: float = 5.0,
+        min_ready: int = 1,
     ) -> PoolInfo:
         """Wait for a WarmPool to have ready replicas.
 
-        Polls the pool status and returns when ready replicas are available.
-        Raises PoolNotReadyError immediately if pods are failing (e.g.,
-        ImagePullBackOff, CrashLoopBackOff) instead of waiting until timeout.
+        Polls the pool status and returns when ready replicas reach
+        ``min_ready``.  Raises PoolNotReadyError immediately if pods
+        are failing (e.g., ImagePullBackOff, CrashLoopBackOff) instead
+        of waiting until timeout.
 
         Args:
             name: Name of the WarmPool.
             timeout: Maximum time to wait in seconds.
             poll_interval: Time between polls in seconds.
+            min_ready: Minimum number of ready replicas to wait for (default 1).
 
         Returns:
-            PoolInfo when pool has ready replicas.
+            PoolInfo when pool has at least ``min_ready`` ready replicas.
 
         Raises:
             PoolNotReadyError: If pods are failing with no ready replicas.
@@ -115,7 +118,7 @@ class WarmPoolManager:
                 continue
             last_info = info
 
-            if info.ready_replicas > 0:
+            if info.ready_replicas >= min_ready:
                 return info
 
             # Check for failing pods

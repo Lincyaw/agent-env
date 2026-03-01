@@ -20,11 +20,32 @@ rules:
       - arl.infra.io
     resources:
       - sandboxes
+    verbs:
+      - get
+      - list
+      - watch
+      - create
+      - update
+      - patch
+      - delete
+  - apiGroups:
+      - arl.infra.io
+    resources:
       - warmpools
     verbs:
       - get
       - list
       - watch
+      - create
+      - update
+      - patch
+      - delete
+  - apiGroups:
+      - arl.infra.io
+    resources:
+      - warmpools/status
+    verbs:
+      - get
   - apiGroups:
       - ""
     resources:

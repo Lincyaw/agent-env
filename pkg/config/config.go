@@ -64,6 +64,26 @@ type Config struct {
 	WarmPoolMaxDelayMs     int
 	WarmPoolRateLimitQPS   float64
 	WarmPoolRateLimitBurst int
+
+	// Image-locality scheduling defaults.
+	// These are used when the WarmPool CRD does not specify imageLocality fields.
+	//
+	// ImageLocalitySpreadFactor controls how many nodes to prefer:
+	//   k = ceil(replicas × spreadFactor)
+	// A smaller value concentrates pods on fewer nodes, maximising image cache
+	// hits and reducing average pod startup latency (fewer image pulls).
+	// Examples with 8 replicas:
+	//   0.125 → 1 node   (maximum locality, risk of single-node failure)
+	//   0.25  → 2 nodes  (good balance: high cache hit, some spread)
+	//   0.5   → 4 nodes  (moderate spread)
+	//   1.0   → 8 nodes  (one pod per node, most image pulls)
+	//
+	// ImageLocalityWeight is the Kubernetes preferredDuringScheduling weight
+	// (1-100). Higher weight makes the scheduler try harder to place pods on
+	// the preferred nodes, but will still fall back to other nodes if resources
+	// are insufficient (soft affinity).
+	ImageLocalitySpreadFactor float64
+	ImageLocalityWeight       int32
 }
 
 // DefaultConfig returns the default configuration
@@ -97,14 +117,17 @@ func DefaultConfig() *Config {
 		SandboxMaxLifetimeSeconds: 3600,
 		ExecutorAgentImage:        "arl-executor-agent:latest",
 		GatewayPort:               8080,
-		WarmPoolMaxConcurrent:     20,
-		SandboxMaxConcurrent:      10,
-		K8sClientQPS:              100,
-		K8sClientBurst:            200,
-		WarmPoolBaseDelayMs:       500,
-		WarmPoolMaxDelayMs:        30000,
-		WarmPoolRateLimitQPS:      50,
-		WarmPoolRateLimitBurst:    100,
+		WarmPoolMaxConcurrent:     50,
+		SandboxMaxConcurrent:      20,
+		K8sClientQPS:              200,
+		K8sClientBurst:            400,
+		WarmPoolBaseDelayMs:       200,
+		WarmPoolMaxDelayMs:        15000,
+		WarmPoolRateLimitQPS:      200,
+		WarmPoolRateLimitBurst:    500,
+
+		ImageLocalitySpreadFactor: 0.25,
+		ImageLocalityWeight:       100,
 	}
 }
 
@@ -283,6 +306,18 @@ func LoadFromEnv() *Config {
 		}
 	}
 
+	if v := os.Getenv("IMAGE_LOCALITY_SPREAD_FACTOR"); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			cfg.ImageLocalitySpreadFactor = f
+		}
+	}
+
+	if v := os.Getenv("IMAGE_LOCALITY_WEIGHT"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n >= 1 && n <= 100 {
+			cfg.ImageLocalityWeight = int32(n)
+		}
+	}
+
 	return cfg
 }
 
@@ -382,6 +417,14 @@ func (c *Config) Validate() error {
 
 	if c.WarmPoolRateLimitBurst < 1 {
 		return fmt.Errorf("warm pool rate limit burst must be >= 1: %d", c.WarmPoolRateLimitBurst)
+	}
+
+	if c.ImageLocalitySpreadFactor < 0 || c.ImageLocalitySpreadFactor > 10 {
+		return fmt.Errorf("image locality spread factor must be 0-10: %v", c.ImageLocalitySpreadFactor)
+	}
+
+	if c.ImageLocalityWeight < 1 || c.ImageLocalityWeight > 100 {
+		return fmt.Errorf("image locality weight must be 1-100: %d", c.ImageLocalityWeight)
 	}
 
 	return nil

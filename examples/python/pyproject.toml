@@ -5,6 +5,8 @@ description = "Examples for ARL Python SDK"
 requires-python = ">=3.10"
 dependencies = [
     "arl-env",
+    "typer>=0.12",
+    "rich>=13.0",
 ]
 
 [build-system]

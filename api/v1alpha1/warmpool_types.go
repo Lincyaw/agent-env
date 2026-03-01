@@ -34,14 +34,15 @@ type ImageLocalitySpec struct {
 	Enabled *bool `json:"enabled,omitempty"`
 
 	// SpreadFactor controls preferred node count: k = ceil(replicas * spreadFactor).
-	// Default: 1.0
+	// Lower values concentrate pods on fewer nodes, maximising image cache hits.
+	// Default: 0.25 (e.g. 8 replicas → prefer 2 nodes)
 	// +optional
 	// +kubebuilder:validation:Minimum=0
 	// +kubebuilder:validation:Maximum=10
 	SpreadFactor *float64 `json:"spreadFactor,omitempty"`
 
 	// Weight for preferred NodeAffinity term (1-100).
-	// Default: 80
+	// Default: 100
 	// +optional
 	// +kubebuilder:validation:Minimum=1
 	// +kubebuilder:validation:Maximum=100

@@ -98,6 +98,11 @@ uv run python <script.py>
 
 # Install Python package
 uv add <package>
+
+# Batch prefetch WarmPool images (for SWE-Bench/R2E-Gym datasets)
+uv run --group prefetch python scripts/batch_prefetch.py --dry-run  # Preview
+uv run --group prefetch python scripts/batch_prefetch.py             # Execute
+uv run --group prefetch python scripts/batch_prefetch.py --dataset r2egym --concurrency 20
 ```
 
 ### Architecture Validation
@@ -177,14 +182,18 @@ The Gateway (port 8080) provides a REST API for session and execution management
 | GET | `/v1/sessions/{id}/trajectory` | Export trajectory as JSONL (for RL/SFT) |
 | POST | `/v1/pools` | Create a WarmPool (with optional ToolsSpec) |
 | GET | `/v1/pools/{name}` | Get pool status |
+| PATCH | `/v1/pools/{name}` | Scale a pool (update replicas and resources) |
 | DELETE | `/v1/pools/{name}` | Delete a pool |
 | GET | `/healthz` | Health check |
+| GET | `/metrics` | Prometheus metrics endpoint |
 
 **Key features:**
 - Synchronous execution (no polling needed)
 - Per-step snapshot IDs for restore/rollback
 - Step history tracking for trajectory export
 - Pool health checks before session creation
+- HTTP proxy support (respects `http_proxy`/`HTTP_PROXY` env vars)
+- Prometheus metrics for monitoring (sessions, steps, pool utilization, pod lifecycle)
 
 ### Sidecar gRPC Interface
 
@@ -228,11 +237,35 @@ The `ImageScheduler` provides image-locality-aware pod scheduling using Rendezvo
 
 ### Controllers
 
-**WarmPoolController**: Watches WarmPool and Pod resources, maintains desired replica count of warm pods. Integrates with ImageScheduler for node affinity.
+**WarmPoolController**: Watches WarmPool and Pod resources, maintains desired replica count of warm pods. Integrates with ImageScheduler for node affinity. Includes rate limiting and metrics for pod lifecycle events (startup latency, scale duration, image pull errors).
 
-**SandboxController**: Watches Sandbox, WarmPool, and Pod resources, allocates pods from warm pools, tracks sandbox lifecycle.
+**SandboxController**: Watches Sandbox, WarmPool, and Pod resources, allocates pods from warm pools, tracks sandbox lifecycle. Records end-to-end sandbox allocation latency (creation → Ready).
+
+**Performance Tuning**: Both controllers support rate limiting and concurrency control via environment variables:
+- `WARMPOOL_MAX_CONCURRENT`: Max concurrent WarmPool reconciliations (default: 20)
+- `SANDBOX_MAX_CONCURRENT`: Max concurrent Sandbox reconciliations (default: 10)
+- `WARMPOOL_RATE_QPS`: Rate limit QPS for WarmPool controller (default: 50)
+- `WARMPOOL_RATE_BURST`: Rate limit burst for WarmPool controller (default: 100)
+- `K8S_CLIENT_QPS`: Kubernetes client QPS (default: 100)
+- `K8S_CLIENT_BURST`: Kubernetes client burst (default: 200)
 
 Note: Execution is handled by the Gateway, not by a controller. There is no TaskController or TTLController.
+
+## Monitoring & Observability
+
+The system includes comprehensive Prometheus metrics and Grafana dashboards:
+
+**Metrics Categories:**
+- **Gateway metrics**: Active sessions, step execution duration, step results (success/error)
+- **Pool metrics**: Pool utilization (ready/allocated), pending pods, pod lifecycle events
+- **Pod metrics**: Startup latency (creation to ready), scale-out duration, image pull errors
+- **Sidecar metrics**: gRPC call duration and results
+
+**Deployment:**
+- Prometheus and Grafana can be enabled via Helm values (`prometheus.enabled`, `grafana.enabled`)
+- Metrics exposed at `/metrics` endpoint on gateway and operator
+- VictoriaMetrics ServiceScrape and Prometheus ServiceMonitor supported
+- Pre-configured Grafana dashboard for ARL-Infra monitoring
 
 ## Critical Workflow: Architecture Change Management
 
@@ -272,6 +305,8 @@ Note: Execution is handled by the Gateway, not by a controller. There is no Task
 
 The SDK communicates with the Gateway REST API via `GatewayClient`. No direct Kubernetes API calls.
 
+**HTTP Proxy Support**: The SDK respects standard `http_proxy` and `HTTP_PROXY` environment variables for proxy configuration.
+
 ```python
 from arl import SandboxSession, GatewayClient
 
@@ -306,6 +341,18 @@ client.create_pool(
 # Check pool status
 pool = client.get_pool("my-python-pool", namespace="default")
 print(f"Ready: {pool.ready_replicas}/{pool.replicas}")
+
+# Scale pool (update replicas and optionally resources)
+from arl import ResourceRequirements
+pool = client.scale_pool(
+    name="my-python-pool",
+    replicas=5,
+    namespace="default",
+    resources=ResourceRequirements(
+        requests={"cpu": "500m", "memory": "512Mi"},
+        limits={"cpu": "1", "memory": "1Gi"}
+    )
+)
 ```
 
 ### Restore (Rollback to Snapshot)
@@ -403,6 +450,7 @@ See `examples/frontend/interactive_shell.html` for complete example.
 - `examples/python/test_arl_sdk.py` - SDK usage example
 - `examples/python/bench_gateway.py` - Gateway benchmark
 - `examples/python/test_interactive_shell.py` - Interactive shell example
+- `scripts/batch_prefetch.py` - Batch WarmPool image prefetch for SWE-Bench/R2E-Gym datasets
 
 ## Documentation
 

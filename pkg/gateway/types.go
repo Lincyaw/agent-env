@@ -40,13 +40,14 @@ type RestoreRequest struct {
 
 // CreatePoolRequest is the body for POST /v1/pools
 type CreatePoolRequest struct {
-	Name         string                       `json:"name"`
-	Image        string                       `json:"image"`
-	Replicas     int32                        `json:"replicas,omitempty"`
-	Namespace    string                       `json:"namespace,omitempty"`
-	Tools        *arlv1alpha1.ToolsSpec       `json:"tools,omitempty"`
-	Resources    *corev1.ResourceRequirements `json:"resources,omitempty"`
-	WorkspaceDir string                       `json:"workspaceDir,omitempty"`
+	Name          string                         `json:"name"`
+	Image         string                         `json:"image"`
+	Replicas      int32                          `json:"replicas,omitempty"`
+	Namespace     string                         `json:"namespace,omitempty"`
+	Tools         *arlv1alpha1.ToolsSpec         `json:"tools,omitempty"`
+	Resources     *corev1.ResourceRequirements   `json:"resources,omitempty"`
+	WorkspaceDir  string                         `json:"workspaceDir,omitempty"`
+	ImageLocality *arlv1alpha1.ImageLocalitySpec `json:"imageLocality,omitempty"`
 }
 
 // ScalePoolRequest is the body for PATCH /v1/pools/{name}

@@ -71,6 +71,9 @@ func (g *Gateway) CreateSession(ctx context.Context, req CreateSessionRequest) (
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      sandboxName,
 			Namespace: ns,
+			Labels: map[string]string{
+				"arl.infra.io/pool": req.PoolRef,
+			},
 		},
 		Spec: arlv1alpha1.SandboxSpec{
 			PoolRef:   req.PoolRef,
@@ -355,6 +358,9 @@ func (g *Gateway) Restore(ctx context.Context, sessionID string, snapshotID stri
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      newSandboxName,
 			Namespace: oldNamespace,
+			Labels: map[string]string{
+				"arl.infra.io/pool": poolRef,
+			},
 		},
 		Spec: arlv1alpha1.SandboxSpec{
 			PoolRef:   poolRef,
@@ -504,10 +510,11 @@ func (g *Gateway) CreatePool(ctx context.Context, req CreatePoolRequest) error {
 				Spec: corev1.PodSpec{
 					Containers: []corev1.Container{
 						{
-							Name:      "executor",
-							Image:     req.Image,
-							Command:   []string{"sh", "-c", "sleep infinity"},
-							Resources: *resources,
+							Name:            "executor",
+							Image:           req.Image,
+							ImagePullPolicy: corev1.PullIfNotPresent,
+							Command:         []string{"sh", "-c", "sleep infinity"},
+							Resources:       *resources,
 							VolumeMounts: []corev1.VolumeMount{
 								{Name: "workspace", MountPath: workspaceDir},
 							},
@@ -515,7 +522,8 @@ func (g *Gateway) CreatePool(ctx context.Context, req CreatePoolRequest) error {
 					},
 				},
 			},
-			Tools: req.Tools,
+			Tools:         req.Tools,
+			ImageLocality: req.ImageLocality,
 		},
 	}
 
