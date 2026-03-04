@@ -145,11 +145,11 @@ prometheus:
     type: ClusterIP
   resources:
     requests:
-      cpu: 200m
-      memory: 512Mi
-    limits:
-      cpu: "1"
+      cpu: 500m
       memory: 1Gi
+    limits:
+      cpu: "2"
+      memory: 4Gi
   persistence:
     enabled: false
     storageClass: ebs-ssd
@@ -162,16 +162,16 @@ grafana:
   enabled: true
   image: pair-diag-cn-guangzhou.cr.volces.com/pair/grafana:12.3.1
   adminUser: admin
-  adminPassword: admin  # CHANGE in production
+  adminPassword: newpassword123
   service:
     type: ClusterIP
   resources:
     requests:
-      cpu: 100m
-      memory: 128Mi
+      cpu: 250m
+      memory: 256Mi
     limits:
-      cpu: 500m
-      memory: 512Mi
+      cpu: "4"
+      memory: 4Gi
   persistence:
     enabled: false
     storageClass: ebs-ssd
