@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -621,6 +622,11 @@ func (g *Gateway) checkPoolHealth(ctx context.Context, poolRef, namespace string
 	for _, cond := range pool.Status.Conditions {
 		if cond.Type == "PodsFailing" && cond.Status == "True" {
 			if pool.Status.ReadyReplicas == 0 {
+				if isTransientImagePullRateLimit(cond.Message) {
+					log.Printf("Warning: pool %q has transient image pull rate-limit with no ready replicas, continuing: %s",
+						poolRef, cond.Message)
+					return nil
+				}
 				return fmt.Errorf("pool %q has failing pods and no ready replicas: %s", poolRef, cond.Message)
 			}
 			// If some replicas are ready despite failures, log warning but allow
@@ -630,6 +636,23 @@ func (g *Gateway) checkPoolHealth(ctx context.Context, poolRef, namespace string
 	}
 
 	return nil
+}
+
+func isTransientImagePullRateLimit(message string) bool {
+	if message == "" {
+		return false
+	}
+
+	lower := strings.ToLower(message)
+	isPullFailure := strings.Contains(lower, "imagepullbackoff") || strings.Contains(lower, "errimagepull")
+	if !isPullFailure {
+		return false
+	}
+
+	return strings.Contains(lower, "qps exceeded") ||
+		strings.Contains(lower, "rate limit") ||
+		strings.Contains(lower, "toomanyrequests") ||
+		strings.Contains(lower, "429")
 }
 
 // diagnosePoolHealth returns a diagnostic string about pool health (used in timeout errors).
