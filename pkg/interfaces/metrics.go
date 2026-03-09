@@ -83,6 +83,14 @@ type MetricsCollector interface {
 
 	// RecordAuditWriteError records audit write errors.
 	RecordAuditWriteError(resourceType string)
+
+	// --- Pod allocation (Gateway PodAllocator) ---
+
+	// RecordPodAllocationDuration records the time to allocate a pod from the idle queue.
+	RecordPodAllocationDuration(poolName string, duration time.Duration)
+
+	// IncrementPodAllocationResult increments pod allocation outcome counter (success/timeout/error).
+	IncrementPodAllocationResult(poolName, result string)
 }
 
 // NoOpMetricsCollector is a no-op implementation for when metrics are disabled
@@ -115,3 +123,6 @@ func (n *NoOpMetricsCollector) RecordRestoreDuration(duration time.Duration)    
 func (n *NoOpMetricsCollector) IncrementRestoreResult(result string)              {}
 func (n *NoOpMetricsCollector) IncrementReconcileTotal(controller, result string) {}
 func (n *NoOpMetricsCollector) RecordAuditWriteError(resourceType string)         {}
+func (n *NoOpMetricsCollector) RecordPodAllocationDuration(poolName string, duration time.Duration) {
+}
+func (n *NoOpMetricsCollector) IncrementPodAllocationResult(poolName, result string) {}

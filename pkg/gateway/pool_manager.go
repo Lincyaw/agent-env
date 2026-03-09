@@ -20,6 +20,7 @@ import (
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	arlv1alpha1 "github.com/Lincyaw/agent-env/api/v1alpha1"
+	"github.com/Lincyaw/agent-env/pkg/labels"
 )
 
 // PoolManagerConfig holds auto-scaling configuration for managed pools.
@@ -156,6 +157,29 @@ func (pm *PoolManager) Recover(ctx context.Context) error {
 				activeCount++
 			}
 		}
+
+		// Supplement with pod-label-based counting: list pods with StatusAllocated label
+		// and take the max of Sandbox CRD count vs pod label count.
+		var podList corev1.PodList
+		if err := pm.k8sClient.List(ctx, &podList,
+			client.InNamespace(pool.Namespace),
+			client.MatchingLabels{
+				labels.PoolLabelKey:   pool.Name,
+				labels.StatusLabelKey: labels.StatusAllocated,
+			}); err != nil {
+			log.Printf("Warning: failed to list allocated pods for pool %s: %v", pool.Name, err)
+		} else {
+			podCount := int32(0)
+			for j := range podList.Items {
+				if podList.Items[j].DeletionTimestamp == nil {
+					podCount++
+				}
+			}
+			if podCount > activeCount {
+				activeCount = podCount
+			}
+		}
+
 		state.sessionCount.Store(activeCount)
 		if activeCount == 0 {
 			state.lastSessionEnd = time.Now()

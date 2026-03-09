@@ -30,16 +30,18 @@ import (
 	arlv1alpha1 "github.com/Lincyaw/agent-env/api/v1alpha1"
 	"github.com/Lincyaw/agent-env/pkg/config"
 	"github.com/Lincyaw/agent-env/pkg/interfaces"
+	"github.com/Lincyaw/agent-env/pkg/labels"
 	"github.com/Lincyaw/agent-env/pkg/middleware"
 	"github.com/Lincyaw/agent-env/pkg/scheduler"
 )
 
+// Re-export label constants for backward compatibility within the controller package.
 const (
-	PoolLabelKey    = "arl.infra.io/pool"
-	SandboxLabelKey = "arl.infra.io/sandbox"
-	StatusLabelKey  = "arl.infra.io/status"
-	StatusIdle      = "idle"
-	StatusAllocated = "allocated"
+	PoolLabelKey    = labels.PoolLabelKey
+	SandboxLabelKey = labels.SandboxLabelKey
+	StatusLabelKey  = labels.StatusLabelKey
+	StatusIdle      = labels.StatusIdle
+	StatusAllocated = labels.StatusAllocated
 )
 
 // WarmPoolReconciler reconciles a WarmPool object

@@ -59,6 +59,13 @@ func main() {
 	// Create sidecar gRPC client
 	sidecarClient := client.NewGRPCSidecarClient(grpcPort, cfg.HTTPClientTimeout)
 
+	// Create PodAllocator with Informer-backed pod cache
+	metricsCollector := metrics.NewPrometheusCollector()
+	podAllocator, err := gateway.NewPodAllocator(k8sClient, k8sConfig, scheme, metricsCollector)
+	if err != nil {
+		log.Fatalf("Failed to create PodAllocator: %v", err)
+	}
+
 	// Create trajectory writer (optional, with retry for startup ordering)
 	var trajectoryWriter *audit.TrajectoryWriter
 	if cfg.TrajectoryEnabled {
@@ -87,7 +94,7 @@ func main() {
 		}
 	}
 
-	gw := gateway.New(k8sClient, sidecarClient, metrics.NewPrometheusCollector(), trajectoryWriter, &gateway.PoolManagerConfig{
+	gw := gateway.New(k8sClient, podAllocator, sidecarClient, metricsCollector, trajectoryWriter, &gateway.PoolManagerConfig{
 		InitialReplicas: cfg.ManagedPoolInitialReplicas,
 		MinReplicas:     cfg.ManagedPoolMinReplicas,
 		MaxReplicas:     cfg.ManagedPoolMaxReplicas,
@@ -96,6 +103,13 @@ func main() {
 		EmptyPoolTTL:    cfg.ManagedPoolEmptyTTL,
 		SweepInterval:   cfg.ManagedPoolSweepInterval,
 	})
+
+	// Start PodAllocator cache and event handlers
+	allocCtx, allocCancel := context.WithCancel(context.Background())
+	if err := podAllocator.Start(allocCtx); err != nil {
+		allocCancel()
+		log.Fatalf("Failed to start PodAllocator: %v", err)
+	}
 
 	// Recover and start pool manager
 	if err := gw.StartPoolManager(context.Background()); err != nil {
@@ -130,6 +144,8 @@ func main() {
 	defer cancel()
 
 	server.Shutdown(shutdownCtx)
+	allocCancel() // Stop PodAllocator cache
+	podAllocator.Stop()
 	gw.StopPoolManager()
 	sidecarClient.Close()
 	if trajectoryWriter != nil {

@@ -37,6 +37,10 @@ type PrometheusCollector struct {
 	// Controller health
 	reconcileTotal   *prometheus.CounterVec
 	auditWriteErrors *prometheus.CounterVec
+
+	// Pod allocation (Gateway PodAllocator)
+	podAllocationDuration *prometheus.HistogramVec
+	podAllocationResult   *prometheus.CounterVec
 }
 
 // NewPrometheusCollector creates a new Prometheus metrics collector
@@ -217,6 +221,25 @@ func NewPrometheusCollector() interfaces.MetricsCollector {
 			},
 			[]string{"resource_type"},
 		),
+
+		// --- Pod allocation (Gateway PodAllocator) ---
+
+		podAllocationDuration: prometheus.NewHistogramVec(
+			prometheus.HistogramOpts{
+				Name:    "arl_gateway_pod_allocation_seconds",
+				Help:    "Time to allocate a pod from the idle queue, by pool.",
+				Buckets: []float64{0.001, 0.005, 0.01, 0.05, 0.1, 0.5, 1, 2, 5, 10, 30},
+			},
+			[]string{"pool"},
+		),
+
+		podAllocationResult: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "arl_gateway_pod_allocation_result_total",
+				Help: "Pod allocation outcomes by pool and result (success/timeout/error).",
+			},
+			[]string{"pool", "result"},
+		),
 	}
 
 	metrics.Registry.MustRegister(
@@ -240,6 +263,8 @@ func NewPrometheusCollector() interfaces.MetricsCollector {
 		c.restoreResult,
 		c.reconcileTotal,
 		c.auditWriteErrors,
+		c.podAllocationDuration,
+		c.podAllocationResult,
 	)
 
 	return c
@@ -324,4 +349,12 @@ func (c *PrometheusCollector) IncrementReconcileTotal(controller, result string)
 
 func (c *PrometheusCollector) RecordAuditWriteError(resourceType string) {
 	c.auditWriteErrors.WithLabelValues(resourceType).Inc()
+}
+
+func (c *PrometheusCollector) RecordPodAllocationDuration(poolName string, duration time.Duration) {
+	c.podAllocationDuration.WithLabelValues(poolName).Observe(duration.Seconds())
+}
+
+func (c *PrometheusCollector) IncrementPodAllocationResult(poolName, result string) {
+	c.podAllocationResult.WithLabelValues(poolName, result).Inc()
 }
