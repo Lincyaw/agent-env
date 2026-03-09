@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -9,7 +10,7 @@ import (
 )
 
 // SetupRoutes registers all gateway routes.
-func SetupRoutes(mux *http.ServeMux, gw *Gateway) {
+func SetupRoutes(mux *http.ServeMux, gw *Gateway, hc *HealthChecker) {
 	// Session management
 	mux.HandleFunc("POST /v1/sessions", handleCreateSession(gw))
 	mux.HandleFunc("GET /v1/sessions/{id}", handleGetSession(gw))
@@ -36,6 +37,12 @@ func SetupRoutes(mux *http.ServeMux, gw *Gateway) {
 	mux.HandleFunc("POST /v1/managed/sessions", handleCreateManagedSession(gw))
 	mux.HandleFunc("GET /v1/managed/experiments/{id}/sessions", handleListExperimentSessions(gw))
 	mux.HandleFunc("DELETE /v1/managed/experiments/{id}", handleDeleteExperiment(gw))
+
+	// Debug and internal endpoints
+	if hc != nil {
+		mux.HandleFunc("GET /debug/health", hc.HandleDebugHealth())
+		mux.HandleFunc("POST /internal/alertmanager-webhook", hc.HandleAlertManagerWebhook())
+	}
 
 	// Health
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
@@ -271,6 +278,10 @@ func handleCreateManagedSession(gw *Gateway) http.HandlerFunc {
 
 		info, err := gw.CreateManagedSession(r.Context(), req)
 		if err != nil {
+			if errors.Is(err, ErrPoolAtCapacity) {
+				writeError(w, http.StatusTooManyRequests, err.Error())
+				return
+			}
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}

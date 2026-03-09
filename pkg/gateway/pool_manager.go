@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
@@ -12,7 +13,7 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
-	"k8s.io/apimachinery/pkg/api/errors"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
@@ -111,11 +112,14 @@ func (pm *PoolManager) Stop() {
 }
 
 // Recover rebuilds in-memory state from existing managed WarmPool CRDs on startup.
-func (pm *PoolManager) Recover(ctx context.Context) error {
+// Returns orphaned pods (allocated but no session) that should be released by the caller.
+func (pm *PoolManager) Recover(ctx context.Context) ([]*corev1.Pod, error) {
+	var orphanPods []*corev1.Pod
+
 	var poolList arlv1alpha1.WarmPoolList
 	if err := pm.k8sClient.List(ctx, &poolList,
 		client.MatchingLabels{labelManaged: "true"}); err != nil {
-		return fmt.Errorf("list managed pools: %w", err)
+		return nil, fmt.Errorf("list managed pools: %w", err)
 	}
 
 	for i := range poolList.Items {
@@ -144,10 +148,10 @@ func (pm *PoolManager) Recover(ctx context.Context) error {
 		state.tools = pool.Spec.Tools
 
 		// Count active sessions using pod labels as primary source.
-		// Pod labels (StatusAllocated) are always present (written by PodAllocator),
-		// while Sandbox CRDs may not exist if SandboxProjection is disabled.
+		// Pod labels (StatusAllocated) are always present (written by PodAllocator).
+		// On recovery, allocated pods are orphans (no session exists in the gateway).
+		// We collect them so the caller can release them back to idle.
 		var podList corev1.PodList
-		activeCount := int32(0)
 		if err := pm.k8sClient.List(ctx, &podList,
 			client.InNamespace(pool.Namespace),
 			client.MatchingLabels{
@@ -156,49 +160,40 @@ func (pm *PoolManager) Recover(ctx context.Context) error {
 			}); err != nil {
 			log.Printf("Warning: failed to list allocated pods for pool %s: %v", pool.Name, err)
 		} else {
+			poolOrphans := 0
 			for j := range podList.Items {
-				if podList.Items[j].DeletionTimestamp == nil {
-					activeCount++
+				pod := &podList.Items[j]
+				if pod.DeletionTimestamp == nil {
+					orphanPods = append(orphanPods, pod.DeepCopy())
+					poolOrphans++
 				}
+			}
+			if poolOrphans > 0 {
+				log.Printf("Recovered pool %s: %d orphaned allocated pods to release", pool.Name, poolOrphans)
 			}
 		}
 
-		// Supplement with Sandbox CRD count as a fallback (in case pod labels are stale)
-		var sbList arlv1alpha1.SandboxList
-		if err := pm.k8sClient.List(ctx, &sbList,
-			client.InNamespace(pool.Namespace),
-			client.MatchingLabels{labelPool: pool.Name}); err != nil {
-			log.Printf("Warning: failed to list sandboxes for pool %s: %v", pool.Name, err)
-		} else {
-			sbCount := int32(0)
-			for j := range sbList.Items {
-				if sbList.Items[j].Status.Phase != arlv1alpha1.SandboxPhaseFailed {
-					sbCount++
-				}
-			}
-			if sbCount > activeCount {
-				activeCount = sbCount
-			}
-		}
-
-		state.sessionCount.Store(activeCount)
-		if activeCount == 0 {
-			state.lastSessionEnd = time.Now()
-		}
+		// Start with zero sessions — the gateway has no session entries yet.
+		// Orphaned pods will be released by the caller.
+		state.sessionCount.Store(0)
+		state.lastSessionEnd = time.Now()
 
 		pm.pools.Store(pool.Name, state)
-		log.Printf("Recovered pool %s (image=%s, sessions=%d, replicas=%d)", pool.Name, image, activeCount, pool.Spec.Replicas)
+		log.Printf("Recovered pool %s (image=%s, replicas=%d)", pool.Name, image, pool.Spec.Replicas)
 	}
 
-	return nil
+	return orphanPods, nil
 }
 
 const (
 	labelManaged           = "arl.infra.io/managed"
-	labelPool              = "arl.infra.io/pool"
 	labelExperiment        = "arl.infra.io/experiment"
 	annotationManagedImage = "arl.infra.io/managed-image"
 )
+
+// ErrPoolAtCapacity is returned when the pool has reached MaxReplicas
+// and cannot accommodate more sessions.
+var ErrPoolAtCapacity = errors.New("pool at maximum capacity")
 
 // AcquireSession ensures a pool exists for the given image, scales up if needed,
 // and returns the pool name for session creation.
@@ -269,6 +264,15 @@ func (pm *PoolManager) AcquireSession(ctx context.Context, req CreateManagedSess
 	if err := pm.ensureCapacity(ctx, state); err != nil {
 		state.sessionCount.Add(-1) // rollback on failure
 		return "", fmt.Errorf("ensure pool capacity: %w", err)
+	}
+
+	// Fast-fail: if total sessions exceed MaxReplicas, this session can never
+	// get a pod — the pool is at capacity and won't scale further.
+	// We check AFTER ensureCapacity so the pool is already scaled to its max.
+	if state.sessionCount.Load() > pm.config.MaxReplicas {
+		state.sessionCount.Add(-1)
+		return "", fmt.Errorf("%w: pool %s has %d/%d max replicas, %d sessions active",
+			ErrPoolAtCapacity, state.poolName, pm.config.MaxReplicas, pm.config.MaxReplicas, state.sessionCount.Load()+1)
 	}
 
 	return poolName, nil
@@ -373,7 +377,7 @@ func (pm *PoolManager) createPool(ctx context.Context, state *poolState, ns stri
 	}
 
 	if err := pm.k8sClient.Create(ctx, pool); err != nil {
-		if errors.IsAlreadyExists(err) {
+		if apierrors.IsAlreadyExists(err) {
 			// Another goroutine or previous run created it; that's fine
 			return nil
 		}
@@ -493,7 +497,7 @@ func (pm *PoolManager) doScaleUp(state *poolState) error {
 		desired = min(desired, pm.config.MaxReplicas)
 
 		if pool.Spec.Replicas >= desired {
-			return nil // Already enough capacity
+			return nil // Already at or above desired capacity
 		}
 
 		// Also ensure at least ScaleUpStep growth for responsiveness
@@ -546,8 +550,9 @@ func (pm *PoolManager) sweep() {
 		if err := pm.k8sClient.Get(ctx, types.NamespacedName{
 			Name: poolName, Namespace: state.namespace,
 		}, pool); err != nil {
-			if errors.IsNotFound(err) {
+			if apierrors.IsNotFound(err) {
 				// Pool was deleted externally; clean up state
+				pm.closeScaleCh(state)
 				pm.pools.Delete(poolName)
 			}
 			return true
@@ -562,9 +567,10 @@ func (pm *PoolManager) sweep() {
 			state.mu.RUnlock()
 
 			if !lastEnd.IsZero() && time.Since(lastEnd) > pm.config.EmptyPoolTTL {
-				if err := pm.k8sClient.Delete(ctx, pool); err != nil && !errors.IsNotFound(err) {
+				if err := pm.k8sClient.Delete(ctx, pool); err != nil && !apierrors.IsNotFound(err) {
 					log.Printf("Warning: failed to GC managed pool %s: %v", poolName, err)
 				} else {
+					pm.closeScaleCh(state)
 					pm.pools.Delete(poolName)
 					log.Printf("GC'd empty pool %s (image=%s, idle for %v)", poolName, state.image, time.Since(lastEnd))
 				}
@@ -618,6 +624,29 @@ func (pm *PoolManager) sweep() {
 
 		return true
 	})
+}
+
+// closeScaleCh closes the per-pool coalesce channel, causing scaleCoalesceLoop to exit.
+func (pm *PoolManager) closeScaleCh(state *poolState) {
+	state.mu.Lock()
+	if state.scaleCh != nil {
+		close(state.scaleCh)
+		state.scaleCh = nil
+	}
+	state.mu.Unlock()
+}
+
+// DiagnosticStats returns the total pool count and per-pool session counts.
+func (pm *PoolManager) DiagnosticStats() (poolCount int, perPool map[string]int32) {
+	perPool = make(map[string]int32)
+	pm.pools.Range(func(key, value any) bool {
+		poolName := key.(string)
+		state := value.(*poolState)
+		perPool[poolName] = state.sessionCount.Load()
+		poolCount++
+		return true
+	})
+	return poolCount, perPool
 }
 
 // managedPoolName generates a deterministic pool name from image and namespace.

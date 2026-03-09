@@ -30,23 +30,23 @@ import (
 
 // GatewayConfig holds Gateway-level configuration.
 type GatewayConfig struct {
-	IdleTimeout       time.Duration
-	MaxLifetime       time.Duration
-	SweepInterval     time.Duration
-	SandboxProjection bool // create Sandbox CRDs for kubectl visibility (default true)
+	IdleTimeout   time.Duration
+	MaxLifetime   time.Duration
+	SweepInterval time.Duration
 }
 
 // session holds internal session state.
 type session struct {
-	mu           sync.RWMutex
-	Info         SessionInfo
-	History      *StepHistory
-	managed      bool
-	experimentID string
-	lastTaskTime time.Time
-	idleTimeout  time.Duration
-	maxLifetime  time.Duration
-	createdAt    time.Time
+	mu                  sync.RWMutex
+	Info                SessionInfo
+	History             *StepHistory
+	managed             bool
+	experimentID        string
+	lastTaskTime        time.Time
+	lastAnnotationPatch time.Time
+	idleTimeout         time.Duration
+	maxLifetime         time.Duration
+	createdAt           time.Time
 }
 
 // Gateway manages sessions and forwards execution to sidecars.
@@ -86,9 +86,102 @@ func (g *Gateway) StartPoolManager(ctx context.Context) error {
 	if g.poolManager == nil {
 		return nil
 	}
-	if err := g.poolManager.Recover(ctx); err != nil {
+	orphans, err := g.poolManager.Recover(ctx)
+	if err != nil {
 		return fmt.Errorf("recover pool manager: %w", err)
 	}
+
+	// Recover sessions from allocated pods.
+	// For each pod with a recent last-activity annotation AND a session annotation,
+	// rebuild the in-memory session so clients can continue using their session IDs.
+	// Pods without recent activity or without session annotations are reclaimed to idle.
+	if len(orphans) > 0 {
+		idleTimeout := g.gwConfig.IdleTimeout
+		if idleTimeout <= 0 {
+			idleTimeout = 10 * time.Minute // conservative fallback
+		}
+		now := time.Now()
+		recovered := 0
+		reclaimed := 0
+
+		for _, pod := range orphans {
+			sessionID := pod.Annotations[labels.SessionAnnotation]
+			recentlyActive := false
+
+			if ts, ok := pod.Annotations[labels.LastActivityAnnotation]; ok {
+				lastActivity, parseErr := time.Parse(time.RFC3339, ts)
+				if parseErr == nil && now.Sub(lastActivity) <= idleTimeout {
+					recentlyActive = true
+				}
+			}
+
+			// If recently active AND has session annotation, rebuild the session
+			if recentlyActive && sessionID != "" {
+				poolRef := pod.Labels[labels.PoolLabelKey]
+				sandboxName := pod.Labels[labels.SandboxLabelKey]
+				managed := pod.Labels[labelManaged] == "true"
+				experimentID := pod.Labels[labelExperiment]
+				lastActivity, _ := time.Parse(time.RFC3339, pod.Annotations[labels.LastActivityAnnotation])
+
+				info := SessionInfo{
+					ID:          sessionID,
+					SandboxName: sandboxName,
+					Namespace:   pod.Namespace,
+					PoolRef:     poolRef,
+					PodIP:       pod.Status.PodIP,
+					PodName:     pod.Name,
+					CreatedAt:   pod.CreationTimestamp.Time,
+				}
+
+				s := &session{
+					Info:                info,
+					History:             NewStepHistory(),
+					managed:             managed,
+					experimentID:        experimentID,
+					lastTaskTime:        lastActivity,
+					lastAnnotationPatch: lastActivity,
+					createdAt:           pod.CreationTimestamp.Time,
+					idleTimeout:         g.gwConfig.IdleTimeout,
+					maxLifetime:         g.gwConfig.MaxLifetime,
+				}
+
+				g.sessions.Store(sessionID, s)
+				g.sessionCount.Add(1)
+				recovered++
+
+				// Restore pool manager session count for managed sessions
+				if managed {
+					if val, ok := g.poolManager.pools.Load(poolRef); ok {
+						state := val.(*poolState)
+						state.sessionCount.Add(1)
+					}
+				}
+
+				log.Printf("Recovered session %s (pod=%s/%s, pool=%s, lastActivity=%s)",
+					sessionID, pod.Namespace, pod.Name, poolRef, lastActivity.Format(time.RFC3339))
+			} else {
+				// Expired or missing session — workspace is tainted, delete the pod.
+				// WarmPoolController will create a clean replacement.
+				if err := g.k8sClient.Delete(ctx, pod); err != nil && !errors.IsNotFound(err) {
+					log.Printf("Warning: failed to delete orphaned pod %s/%s: %v", pod.Namespace, pod.Name, err)
+				} else {
+					reclaimed++
+				}
+			}
+		}
+
+		if recovered > 0 {
+			log.Printf("Recovered %d sessions from pod annotations", recovered)
+		}
+		if reclaimed > 0 {
+			log.Printf("Deleted %d orphaned allocated pods (workspace tainted)", reclaimed)
+		}
+
+		if g.metrics != nil {
+			g.metrics.SetActiveSessions(g.sessionCount.Load())
+		}
+	}
+
 	g.poolManager.Start()
 	return nil
 }
@@ -101,7 +194,6 @@ func (g *Gateway) StopPoolManager() {
 }
 
 // CreateSession allocates a pod from the pool via PodAllocator and registers a session.
-// A Sandbox CRD is created asynchronously for observability.
 func (g *Gateway) CreateSession(ctx context.Context, req CreateSessionRequest) (*SessionInfo, error) {
 	ns := req.Namespace
 	if ns == "" {
@@ -130,13 +222,17 @@ func (g *Gateway) CreateSession(ctx context.Context, req CreateSessionRequest) (
 	podIP := pod.Status.PodIP
 	podName := pod.Name
 
-	// Patch sandbox label onto the allocated pod
+	// Patch sandbox label and session annotation onto the allocated pod
 	patchPod := pod.DeepCopy()
 	patch := client.MergeFrom(pod.DeepCopy())
 	if patchPod.Labels == nil {
 		patchPod.Labels = make(map[string]string)
 	}
 	patchPod.Labels[labels.SandboxLabelKey] = sandboxName
+	if patchPod.Annotations == nil {
+		patchPod.Annotations = make(map[string]string)
+	}
+	patchPod.Annotations[labels.SessionAnnotation] = sessionID
 	if patchErr := g.k8sClient.Patch(ctx, patchPod, patch); patchErr != nil {
 		log.Printf("Warning: failed to patch sandbox label on pod %s: %v", podName, patchErr)
 	}
@@ -165,49 +261,6 @@ func (g *Gateway) CreateSession(ctx context.Context, req CreateSessionRequest) (
 		g.metrics.RecordSandboxE2EReady(req.PoolRef, time.Since(allocStart))
 	}
 
-	// Create Sandbox CRD asynchronously for observability (kubectl visibility)
-	if g.gwConfig.SandboxProjection {
-		extraLabels := req.ExtraLabels
-		go func() {
-			bgCtx, bgCancel := context.WithTimeout(context.Background(), 30*time.Second)
-			defer bgCancel()
-
-			crdLabels := map[string]string{
-				labels.PoolLabelKey: req.PoolRef,
-			}
-			for k, v := range extraLabels {
-				crdLabels[k] = v
-			}
-
-			sandbox := &arlv1alpha1.Sandbox{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      sandboxName,
-					Namespace: ns,
-					Labels:    crdLabels,
-				},
-				Spec: arlv1alpha1.SandboxSpec{
-					PoolRef:   req.PoolRef,
-					KeepAlive: req.KeepAlive,
-				},
-			}
-
-			if createErr := g.k8sClient.Create(bgCtx, sandbox); createErr != nil {
-				log.Printf("Warning: async Sandbox CRD creation failed for %s: %v", sandboxName, createErr)
-				return
-			}
-
-			// Patch Sandbox status to Ready with PodName/PodIP
-			sandbox.Status.Phase = arlv1alpha1.SandboxPhaseReady
-			sandbox.Status.PodName = podName
-			sandbox.Status.PodIP = podIP
-			now := metav1.Now()
-			sandbox.Status.LastTaskTime = &now
-			if statusErr := g.k8sClient.Status().Update(bgCtx, sandbox); statusErr != nil {
-				log.Printf("Warning: async Sandbox status update failed for %s: %v", sandboxName, statusErr)
-			}
-		}()
-	}
-
 	return &info, nil
 }
 
@@ -225,7 +278,6 @@ func (g *Gateway) GetSession(sessionID string) (*SessionInfo, error) {
 }
 
 // DeleteSession deletes the pod directly and removes the session.
-// Sandbox CRD is deleted asynchronously.
 func (g *Gateway) DeleteSession(ctx context.Context, sessionID string) error {
 	val, ok := g.sessions.Load(sessionID)
 	if !ok {
@@ -234,9 +286,8 @@ func (g *Gateway) DeleteSession(ctx context.Context, sessionID string) error {
 	s := val.(*session)
 
 	s.mu.RLock()
-	sandboxName := s.Info.SandboxName
-	namespace := s.Info.Namespace
 	podName := s.Info.PodName
+	namespace := s.Info.Namespace
 	poolRef := s.Info.PoolRef
 	managed := s.managed
 	s.mu.RUnlock()
@@ -255,23 +306,6 @@ func (g *Gateway) DeleteSession(ctx context.Context, sessionID string) error {
 	// Release from pool manager if managed
 	if managed && g.poolManager != nil {
 		g.poolManager.ReleaseSession(poolRef)
-	}
-
-	// Delete Sandbox CRD async (best-effort, for kubectl cleanup)
-	if g.gwConfig.SandboxProjection {
-		go func() {
-			bgCtx, bgCancel := context.WithTimeout(context.Background(), 10*time.Second)
-			defer bgCancel()
-			sandbox := &arlv1alpha1.Sandbox{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      sandboxName,
-					Namespace: namespace,
-				},
-			}
-			if err := g.k8sClient.Delete(bgCtx, sandbox); err != nil && !errors.IsNotFound(err) {
-				log.Printf("Warning: async Sandbox CRD deletion failed for %s: %v", sandboxName, err)
-			}
-		}()
 	}
 
 	return nil
@@ -424,7 +458,6 @@ func (g *Gateway) Restore(ctx context.Context, sessionID string, snapshotID stri
 	oldPodName := s.Info.PodName
 	oldNamespace := s.Info.Namespace
 	poolRef := s.Info.PoolRef
-	oldSandboxName := s.Info.SandboxName
 	s.mu.RUnlock()
 
 	// Allocate a new pod from the pool via PodAllocator
@@ -440,13 +473,17 @@ func (g *Gateway) Restore(ctx context.Context, sessionID string, snapshotID stri
 	newPodName := newPod.Name
 	newSandboxName := fmt.Sprintf("%s-r%d", sessionID, time.Now().UnixMilli())
 
-	// Patch sandbox label on the new pod
+	// Patch sandbox label and session annotation on the new pod
 	patchPod := newPod.DeepCopy()
 	patch := client.MergeFrom(newPod.DeepCopy())
 	if patchPod.Labels == nil {
 		patchPod.Labels = make(map[string]string)
 	}
 	patchPod.Labels[labels.SandboxLabelKey] = newSandboxName
+	if patchPod.Annotations == nil {
+		patchPod.Annotations = make(map[string]string)
+	}
+	patchPod.Annotations[labels.SessionAnnotation] = sessionID
 	if patchErr := g.k8sClient.Patch(ctx, patchPod, patch); patchErr != nil {
 		log.Printf("Warning: failed to patch sandbox label on pod %s: %v", newPodName, patchErr)
 	}
@@ -465,6 +502,14 @@ func (g *Gateway) Restore(ctx context.Context, sessionID string, snapshotID stri
 			WorkingDir: step.WorkDir,
 		}
 		if _, err := g.sidecarClient.Execute(ctx, newPodIP, execReq); err != nil {
+			// Release the newly allocated pod since restore failed
+			go func() {
+				bgCtx, bgCancel := context.WithTimeout(context.Background(), 10*time.Second)
+				defer bgCancel()
+				if relErr := g.podAllocator.Release(bgCtx, newPodName, oldNamespace); relErr != nil {
+					log.Printf("Warning: failed to release pod %s after restore failure: %v", newPodName, relErr)
+				}
+			}()
 			return fmt.Errorf("replay step %d failed: %w", record.Index, err)
 		}
 	}
@@ -487,51 +532,6 @@ func (g *Gateway) Restore(ctx context.Context, sessionID string, snapshotID stri
 			log.Printf("Warning: failed to delete old pod %s: %v", oldPodName, err)
 		}
 	}()
-
-	// Create/update Sandbox CRD async for observability
-	if g.gwConfig.SandboxProjection {
-		go func() {
-			bgCtx, bgCancel := context.WithTimeout(context.Background(), 30*time.Second)
-			defer bgCancel()
-
-			sandbox := &arlv1alpha1.Sandbox{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      newSandboxName,
-					Namespace: oldNamespace,
-					Labels: map[string]string{
-						labels.PoolLabelKey: poolRef,
-					},
-				},
-				Spec: arlv1alpha1.SandboxSpec{
-					PoolRef:   poolRef,
-					KeepAlive: true,
-				},
-			}
-			if createErr := g.k8sClient.Create(bgCtx, sandbox); createErr != nil {
-				log.Printf("Warning: async Sandbox CRD creation for restore failed for %s: %v", newSandboxName, createErr)
-				return
-			}
-			sandbox.Status.Phase = arlv1alpha1.SandboxPhaseReady
-			sandbox.Status.PodName = newPodName
-			sandbox.Status.PodIP = newPodIP
-			now := metav1.Now()
-			sandbox.Status.LastTaskTime = &now
-			if statusErr := g.k8sClient.Status().Update(bgCtx, sandbox); statusErr != nil {
-				log.Printf("Warning: async Sandbox status update for restore failed for %s: %v", newSandboxName, statusErr)
-			}
-
-			// Delete old sandbox CRD (best-effort)
-			oldSandbox := &arlv1alpha1.Sandbox{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      oldSandboxName,
-					Namespace: oldNamespace,
-				},
-			}
-			if delErr := g.k8sClient.Delete(bgCtx, oldSandbox); delErr != nil && !errors.IsNotFound(delErr) {
-				log.Printf("Warning: failed to delete old sandbox %s: %v", oldSandboxName, delErr)
-			}
-		}()
-	}
 
 	return nil
 }
@@ -763,16 +763,50 @@ func (g *Gateway) diagnosePoolHealth(ctx context.Context, poolRef, namespace str
 	return diag
 }
 
-// touchLastTaskTime updates the in-memory lastTaskTime for session idle tracking.
+// annotationPatchMinInterval is the minimum time between pod annotation patches
+// to avoid excessive K8s API calls.
+const annotationPatchMinInterval = 30 * time.Second
+
+// touchLastTaskTime updates the in-memory lastTaskTime for session idle tracking
+// and asynchronously patches the pod's last-activity annotation (throttled to at most once per 30s).
 func (g *Gateway) touchLastTaskTime(sessionID string) {
 	val, ok := g.sessions.Load(sessionID)
 	if !ok {
 		return
 	}
 	s := val.(*session)
+	now := time.Now()
+
 	s.mu.Lock()
-	s.lastTaskTime = time.Now()
+	s.lastTaskTime = now
+	shouldPatch := now.Sub(s.lastAnnotationPatch) >= annotationPatchMinInterval
+	if shouldPatch {
+		s.lastAnnotationPatch = now
+	}
+	podName := s.Info.PodName
+	namespace := s.Info.Namespace
 	s.mu.Unlock()
+
+	if shouldPatch {
+		go func() {
+			bgCtx, bgCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer bgCancel()
+
+			pod := &corev1.Pod{}
+			if err := g.k8sClient.Get(bgCtx, types.NamespacedName{Name: podName, Namespace: namespace}, pod); err != nil {
+				log.Printf("Warning: failed to get pod %s for annotation patch: %v", podName, err)
+				return
+			}
+			patch := client.MergeFrom(pod.DeepCopy())
+			if pod.Annotations == nil {
+				pod.Annotations = make(map[string]string)
+			}
+			pod.Annotations[labels.LastActivityAnnotation] = now.UTC().Format(time.RFC3339)
+			if err := g.k8sClient.Patch(bgCtx, pod, patch); err != nil {
+				log.Printf("Warning: failed to patch last-activity annotation on pod %s: %v", podName, err)
+			}
+		}()
+	}
 }
 
 // resolveIdleTimeout returns the idle timeout for a session request,
@@ -856,16 +890,6 @@ func (g *Gateway) sweepSessions() {
 
 		return true
 	})
-}
-
-// extractSandboxFailure returns a failure message from sandbox conditions.
-func (g *Gateway) extractSandboxFailure(sb *arlv1alpha1.Sandbox) string {
-	for _, cond := range sb.Status.Conditions {
-		if cond.Status == "False" && cond.Message != "" {
-			return fmt.Sprintf("%s: %s", cond.Reason, cond.Message)
-		}
-	}
-	return "unknown reason"
 }
 
 // randomSuffix returns a hex string of n random bytes (2n hex chars).
@@ -960,35 +984,6 @@ func (g *Gateway) DeleteExperiment(ctx context.Context, experimentID string) (in
 			log.Printf("Warning: failed to delete session %s in experiment %s: %v", s.ID, experimentID, err)
 		} else {
 			deleted++
-		}
-	}
-
-	// Also clean up any orphaned sandboxes via label selector (in case Gateway lost track)
-	var sbList arlv1alpha1.SandboxList
-	if err := g.k8sClient.List(ctx, &sbList,
-		client.MatchingLabels{
-			labelManaged:    "true",
-			labelExperiment: experimentID,
-		}); err != nil {
-		log.Printf("Warning: failed to list orphaned sandboxes for experiment %s: %v", experimentID, err)
-	} else {
-		for i := range sbList.Items {
-			sb := &sbList.Items[i]
-			// Check if we already deleted it via session
-			alreadyDeleted := false
-			for _, s := range sessions {
-				if s.SandboxName == sb.Name {
-					alreadyDeleted = true
-					break
-				}
-			}
-			if !alreadyDeleted {
-				if err := g.k8sClient.Delete(ctx, sb); err != nil && !errors.IsNotFound(err) {
-					log.Printf("Warning: failed to delete orphaned sandbox %s: %v", sb.Name, err)
-				} else {
-					deleted++
-				}
-			}
 		}
 	}
 

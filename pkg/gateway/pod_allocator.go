@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -27,6 +28,12 @@ type podQueue struct {
 func (q *podQueue) push(pod *corev1.Pod) {
 	q.mu.Lock()
 	defer q.mu.Unlock()
+	// Deduplicate: skip if already queued
+	for _, p := range q.pods {
+		if p.Name == pod.Name {
+			return
+		}
+	}
 	q.pods = append(q.pods, pod)
 }
 
@@ -60,7 +67,8 @@ func (q *podQueue) len() int {
 
 // waiter represents a blocked Allocate caller waiting for an idle pod.
 type waiter struct {
-	ch chan *corev1.Pod
+	ch        chan *corev1.Pod
+	cancelled atomic.Bool
 }
 
 // waiterList is a FIFO list of blocked callers for a single pool.
@@ -77,16 +85,25 @@ func (wl *waiterList) add() *waiter {
 	return w
 }
 
+func (wl *waiterList) len() int {
+	wl.mu.Lock()
+	defer wl.mu.Unlock()
+	return len(wl.waiters)
+}
+
 func (wl *waiterList) wakeFirst(pod *corev1.Pod) bool {
 	wl.mu.Lock()
 	defer wl.mu.Unlock()
-	if len(wl.waiters) == 0 {
-		return false
+	for len(wl.waiters) > 0 {
+		w := wl.waiters[0]
+		wl.waiters = wl.waiters[1:]
+		if w.cancelled.Load() {
+			continue // skip abandoned waiters
+		}
+		w.ch <- pod
+		return true
 	}
-	w := wl.waiters[0]
-	wl.waiters = wl.waiters[1:]
-	w.ch <- pod
-	return true
+	return false
 }
 
 // PodAllocator watches pods via an Informer-backed cache and provides
@@ -239,6 +256,7 @@ func (pa *PodAllocator) Allocate(ctx context.Context, poolName, namespace string
 			}
 			// Lost the race; loop again
 		case <-ctx.Done():
+			w.cancelled.Store(true)
 			if pa.metrics != nil {
 				pa.metrics.RecordPodAllocationDuration(poolName, time.Since(start))
 				pa.metrics.IncrementPodAllocationResult(poolName, "timeout")
@@ -275,12 +293,16 @@ func (pa *PodAllocator) claimPod(ctx context.Context, pod *corev1.Pod) (bool, er
 		return false, nil
 	}
 
-	// Patch labels: status -> allocated
+	// Patch labels: status -> allocated, and set last-activity annotation
 	patch := client.MergeFrom(current.DeepCopy())
 	if current.Labels == nil {
 		current.Labels = make(map[string]string)
 	}
 	current.Labels[labels.StatusLabelKey] = labels.StatusAllocated
+	if current.Annotations == nil {
+		current.Annotations = make(map[string]string)
+	}
+	current.Annotations[labels.LastActivityAnnotation] = time.Now().UTC().Format(time.RFC3339)
 	if err := pa.k8sClient.Patch(ctx, current, patch); err != nil {
 		return false, err
 	}
@@ -292,12 +314,17 @@ func (pa *PodAllocator) claimPod(ctx context.Context, pod *corev1.Pod) (bool, er
 
 // handlePodEvent processes a pod add/update event.
 func (pa *PodAllocator) handlePodEvent(pod *corev1.Pod) {
-	if !pa.isPodIdleAndReady(pod) {
+	key := pa.queueKey(pod)
+	if key == "" {
 		return
 	}
 
-	key := pa.queueKey(pod)
-	if key == "" {
+	if !pa.isPodIdleAndReady(pod) {
+		// Pod is no longer idle; remove stale entry from queue if present
+		if qVal, ok := pa.idlePods.Load(key); ok {
+			q := qVal.(*podQueue)
+			q.remove(pod.Name)
+		}
 		return
 	}
 
@@ -357,6 +384,34 @@ func (pa *PodAllocator) queueKey(pod *corev1.Pod) string {
 		return ""
 	}
 	return pod.Namespace + "/" + poolName
+}
+
+// AllocatorPoolStats holds diagnostic statistics for a single pool queue.
+type AllocatorPoolStats struct {
+	IdleCount   int `json:"idle_queue"`
+	WaiterCount int `json:"pending_waiters"`
+}
+
+// DiagnosticStats returns per-pool queue and waiter counts for health checking.
+func (pa *PodAllocator) DiagnosticStats() map[string]AllocatorPoolStats {
+	stats := make(map[string]AllocatorPoolStats)
+	pa.idlePods.Range(func(key, value any) bool {
+		k := key.(string)
+		q := value.(*podQueue)
+		s := stats[k]
+		s.IdleCount = q.len()
+		stats[k] = s
+		return true
+	})
+	pa.waiters.Range(func(key, value any) bool {
+		k := key.(string)
+		wl := value.(*waiterList)
+		s := stats[k]
+		s.WaiterCount = wl.len()
+		stats[k] = s
+		return true
+	})
+	return stats
 }
 
 func (pa *PodAllocator) getOrCreateQueue(key string) *podQueue {
