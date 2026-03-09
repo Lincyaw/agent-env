@@ -11,7 +11,7 @@ RUN go mod download
 COPY pkg/execagent/ pkg/execagent/
 COPY cmd/executor-agent/ cmd/executor-agent/
 
-RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o executor-agent cmd/executor-agent/main.go
+RUN CGO_ENABLED=0 GOOS=linux GOMAXPROCS=8 go build -p 8 -ldflags="-s -w" -o executor-agent cmd/executor-agent/main.go
 
 FROM busybox:latest
 COPY --from=builder /workspace/executor-agent /executor-agent

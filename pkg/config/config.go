@@ -98,7 +98,6 @@ type Config struct {
 	GatewayIdleTimeout   time.Duration
 	GatewayMaxLifetime   time.Duration
 	GatewaySweepInterval time.Duration
-	SandboxProjection    bool
 }
 
 // DefaultConfig returns the default configuration
@@ -155,7 +154,6 @@ func DefaultConfig() *Config {
 		GatewayIdleTimeout:   600 * time.Second,
 		GatewayMaxLifetime:   3600 * time.Second,
 		GatewaySweepInterval: 30 * time.Second,
-		SandboxProjection:    true,
 	}
 }
 
@@ -406,10 +404,6 @@ func LoadFromEnv() *Config {
 		if d, err := time.ParseDuration(v); err == nil {
 			cfg.GatewaySweepInterval = d
 		}
-	}
-
-	if v := os.Getenv("SANDBOX_PROJECTION"); v == "false" {
-		cfg.SandboxProjection = false
 	}
 
 	return cfg

@@ -1,0 +1,115 @@
+{{- if .Values.alerting.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "arl-operator.fullname" . }}-alertmanager-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "arl-operator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: alertmanager
+data:
+  alertmanager.yml: |
+    global:
+      resolve_timeout: 5m
+
+    route:
+      group_by: ['alertname', 'severity']
+      group_wait: 10s
+      group_interval: 5m
+      repeat_interval: 4h
+      receiver: feishu
+
+    receivers:
+      - name: feishu
+        webhook_configs:
+          - url: http://{{ include "arl-operator.fullname" . }}-gateway:{{ .Values.gateway.port }}/internal/alertmanager-webhook
+            send_resolved: true
+
+    inhibit_rules:
+      - source_matchers:
+          - severity="critical"
+        target_matchers:
+          - severity="warning"
+        equal: ['alertname']
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "arl-operator.fullname" . }}-alertmanager
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "arl-operator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: alertmanager
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "arl-operator.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: alertmanager
+  template:
+    metadata:
+      labels:
+        {{- include "arl-operator.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: alertmanager
+    spec:
+      securityContext:
+        fsGroup: 65534
+        runAsUser: 65534
+        runAsNonRoot: true
+      containers:
+        - name: alertmanager
+          image: {{ .Values.alerting.image }}
+          imagePullPolicy: IfNotPresent
+          args:
+            - --config.file=/etc/alertmanager/alertmanager.yml
+            - --storage.path=/alertmanager
+          ports:
+            - name: http
+              containerPort: 9093
+          livenessProbe:
+            httpGet:
+              path: /-/healthy
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /-/ready
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.alerting.resources | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/alertmanager
+            - name: storage
+              mountPath: /alertmanager
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "arl-operator.fullname" . }}-alertmanager-config
+        - name: storage
+          emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "arl-operator.fullname" . }}-alertmanager
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "arl-operator.labels" . | nindent 4 }}
+    app.kubernetes.io/component: alertmanager
+spec:
+  type: ClusterIP
+  ports:
+    - name: http
+      port: 9093
+      targetPort: http
+      protocol: TCP
+  selector:
+    {{- include "arl-operator.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: alertmanager
+{{- end }}

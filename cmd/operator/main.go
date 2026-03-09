@@ -94,7 +94,7 @@ func main() {
 		setupLog.Info("metrics collection disabled")
 	}
 
-	// Initialize audit writer
+	// Initialize audit writer (kept for future use; no controller consumes it currently)
 	var auditWriter interfaces.AuditWriter
 	if cfg.ClickHouseEnabled {
 		chWriter, err := audit.NewClickHouseWriter(audit.ClickHouseConfig{
@@ -116,27 +116,23 @@ func main() {
 		auditWriter = audit.NewNoOpWriter()
 		setupLog.Info("audit logging disabled")
 	}
+	_ = auditWriter
 
 	// Setup middleware chains for each controller
 	warmPoolMiddleware := middleware.NewChain()
-	sandboxMiddleware := middleware.NewChain()
 
 	if cfg.EnableMiddleware {
 		warmPoolMiddleware.AddBefore(middleware.NewLoggingHook("WarmPool")).
 			AddAfter(middleware.NewLoggingHook("WarmPool"))
-		sandboxMiddleware.AddBefore(middleware.NewLoggingHook("Sandbox")).
-			AddAfter(middleware.NewLoggingHook("Sandbox"))
 
 		warmPoolMiddleware.AddBefore(middleware.NewMetricsHook("WarmPool", metricsCollector)).
 			AddAfter(middleware.NewMetricsHook("WarmPool", metricsCollector))
-		sandboxMiddleware.AddBefore(middleware.NewMetricsHook("Sandbox", metricsCollector)).
-			AddAfter(middleware.NewMetricsHook("Sandbox", metricsCollector))
 	}
 
 	// Initialize image-locality scheduler
 	imageScheduler := scheduler.NewImageScheduler(mgr.GetClient())
 
-	// Register controllers (Task and TTL removed — execution via Gateway)
+	// Register controllers (Task, TTL, Sandbox removed — execution and sandbox lifecycle via Gateway)
 	controllers := []interfaces.ControllerRegistrar{
 		&controller.WarmPoolReconciler{
 			Client:         mgr.GetClient(),
@@ -145,14 +141,6 @@ func main() {
 			Metrics:        metricsCollector,
 			Middleware:     warmPoolMiddleware,
 			ImageScheduler: imageScheduler,
-		},
-		&controller.SandboxReconciler{
-			Client:      mgr.GetClient(),
-			Scheme:      mgr.GetScheme(),
-			Config:      cfg,
-			Metrics:     metricsCollector,
-			AuditWriter: auditWriter,
-			Middleware:  sandboxMiddleware,
 		},
 	}
 

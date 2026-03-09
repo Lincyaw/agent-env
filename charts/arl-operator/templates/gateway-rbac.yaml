@@ -19,25 +19,6 @@ rules:
   - apiGroups:
       - arl.infra.io
     resources:
-      - sandboxes
-    verbs:
-      - get
-      - list
-      - watch
-      - create
-      - update
-      - patch
-      - delete
-  - apiGroups:
-      - arl.infra.io
-    resources:
-      - sandboxes/status
-    verbs:
-      - get
-      - patch
-  - apiGroups:
-      - arl.infra.io
-    resources:
       - warmpools
     verbs:
       - get

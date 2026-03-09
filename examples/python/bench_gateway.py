@@ -225,7 +225,7 @@ def _ensure_pool(
     """
     try:
         info = pool_mgr.get_warmpool(name)
-        total_live = info.ready_replicas + info.allocated_replicas
+        info.ready_replicas + info.allocated_replicas
 
         # Clean up stale sessions that hold pods in allocated state
         if info.allocated_replicas > 0:
@@ -236,7 +236,7 @@ def _ensure_pool(
             _cleanup_stale_sessions(pool_mgr, name)
             # Re-check after cleanup
             info = pool_mgr.get_warmpool(name)
-            total_live = info.ready_replicas + info.allocated_replicas
+            info.ready_replicas + info.allocated_replicas
 
         if info.ready_replicas >= replicas:
             console.print(

@@ -91,6 +91,26 @@ type MetricsCollector interface {
 
 	// IncrementPodAllocationResult increments pod allocation outcome counter (success/timeout/error).
 	IncrementPodAllocationResult(poolName, result string)
+
+	// --- Gateway health check gauges ---
+
+	// SetGatewayGoroutines sets the current goroutine count.
+	SetGatewayGoroutines(count int)
+
+	// SetGatewaySessionsTotal sets the actual session count from sync.Map traversal.
+	SetGatewaySessionsTotal(count int)
+
+	// SetIdleQueueDepth sets the idle queue depth for a pool.
+	SetIdleQueueDepth(pool string, count int)
+
+	// SetPendingWaiters sets the pending waiter count for a pool.
+	SetPendingWaiters(pool string, count int)
+
+	// SetManagedPools sets the total managed pool count.
+	SetManagedPools(count int)
+
+	// SetPoolSessions sets the session count for a managed pool.
+	SetPoolSessions(pool string, count int32)
 }
 
 // NoOpMetricsCollector is a no-op implementation for when metrics are disabled
@@ -126,3 +146,9 @@ func (n *NoOpMetricsCollector) RecordAuditWriteError(resourceType string)       
 func (n *NoOpMetricsCollector) RecordPodAllocationDuration(poolName string, duration time.Duration) {
 }
 func (n *NoOpMetricsCollector) IncrementPodAllocationResult(poolName, result string) {}
+func (n *NoOpMetricsCollector) SetGatewayGoroutines(count int)                       {}
+func (n *NoOpMetricsCollector) SetGatewaySessionsTotal(count int)                    {}
+func (n *NoOpMetricsCollector) SetIdleQueueDepth(pool string, count int)             {}
+func (n *NoOpMetricsCollector) SetPendingWaiters(pool string, count int)             {}
+func (n *NoOpMetricsCollector) SetManagedPools(count int)                            {}
+func (n *NoOpMetricsCollector) SetPoolSessions(pool string, count int32)             {}

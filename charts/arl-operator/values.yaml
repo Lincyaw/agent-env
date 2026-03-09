@@ -162,6 +162,22 @@ apiPriority:
   matchingPrecedence: 900         # lower number = higher priority (exempt=1, system=900s)
 
 # ─────────────────────────────────────────────────────────────────────────────
+# Alerting (AlertManager + Feishu)
+# ─────────────────────────────────────────────────────────────────────────────
+alerting:
+  enabled: true
+  image: pair-diag-cn-guangzhou.cr.volces.com/pair/alertmanager:v0.27.0
+  feishu:
+    webhookURL: ""  # 飞书自定义机器人 Webhook URL
+  resources:
+    requests:
+      cpu: "100m"
+      memory: 128Mi
+    limits:
+      cpu: "500m"
+      memory: 256Mi
+
+# ─────────────────────────────────────────────────────────────────────────────
 # Prometheus
 # ─────────────────────────────────────────────────────────────────────────────
 prometheus:

@@ -41,6 +41,14 @@ type PrometheusCollector struct {
 	// Pod allocation (Gateway PodAllocator)
 	podAllocationDuration *prometheus.HistogramVec
 	podAllocationResult   *prometheus.CounterVec
+
+	// Gateway health check gauges
+	gatewayGoroutines    prometheus.Gauge
+	gatewaySessionsTotal prometheus.Gauge
+	idleQueueDepth       *prometheus.GaugeVec
+	pendingWaiters       *prometheus.GaugeVec
+	managedPools         prometheus.Gauge
+	poolSessions         *prometheus.GaugeVec
 }
 
 // NewPrometheusCollector creates a new Prometheus metrics collector
@@ -240,6 +248,53 @@ func NewPrometheusCollector() interfaces.MetricsCollector {
 			},
 			[]string{"pool", "result"},
 		),
+
+		// --- Gateway health check gauges ---
+
+		gatewayGoroutines: prometheus.NewGauge(
+			prometheus.GaugeOpts{
+				Name: "arl_gateway_goroutines",
+				Help: "Current number of goroutines in the gateway process.",
+			},
+		),
+
+		gatewaySessionsTotal: prometheus.NewGauge(
+			prometheus.GaugeOpts{
+				Name: "arl_gateway_sessions_total",
+				Help: "Actual session count from sync.Map traversal.",
+			},
+		),
+
+		idleQueueDepth: prometheus.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "arl_gateway_idle_queue_depth",
+				Help: "Number of idle pods in the allocator queue, by pool.",
+			},
+			[]string{"pool"},
+		),
+
+		pendingWaiters: prometheus.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "arl_gateway_pending_waiters",
+				Help: "Number of blocked waiters for pod allocation, by pool.",
+			},
+			[]string{"pool"},
+		),
+
+		managedPools: prometheus.NewGauge(
+			prometheus.GaugeOpts{
+				Name: "arl_gateway_managed_pools",
+				Help: "Total number of managed pools.",
+			},
+		),
+
+		poolSessions: prometheus.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "arl_gateway_pool_sessions",
+				Help: "Session count per managed pool.",
+			},
+			[]string{"pool"},
+		),
 	}
 
 	metrics.Registry.MustRegister(
@@ -265,6 +320,12 @@ func NewPrometheusCollector() interfaces.MetricsCollector {
 		c.auditWriteErrors,
 		c.podAllocationDuration,
 		c.podAllocationResult,
+		c.gatewayGoroutines,
+		c.gatewaySessionsTotal,
+		c.idleQueueDepth,
+		c.pendingWaiters,
+		c.managedPools,
+		c.poolSessions,
 	)
 
 	return c
@@ -357,4 +418,28 @@ func (c *PrometheusCollector) RecordPodAllocationDuration(poolName string, durat
 
 func (c *PrometheusCollector) IncrementPodAllocationResult(poolName, result string) {
 	c.podAllocationResult.WithLabelValues(poolName, result).Inc()
+}
+
+func (c *PrometheusCollector) SetGatewayGoroutines(count int) {
+	c.gatewayGoroutines.Set(float64(count))
+}
+
+func (c *PrometheusCollector) SetGatewaySessionsTotal(count int) {
+	c.gatewaySessionsTotal.Set(float64(count))
+}
+
+func (c *PrometheusCollector) SetIdleQueueDepth(pool string, count int) {
+	c.idleQueueDepth.WithLabelValues(pool).Set(float64(count))
+}
+
+func (c *PrometheusCollector) SetPendingWaiters(pool string, count int) {
+	c.pendingWaiters.WithLabelValues(pool).Set(float64(count))
+}
+
+func (c *PrometheusCollector) SetManagedPools(count int) {
+	c.managedPools.Set(float64(count))
+}
+
+func (c *PrometheusCollector) SetPoolSessions(pool string, count int32) {
+	c.poolSessions.WithLabelValues(pool).Set(float64(count))
 }

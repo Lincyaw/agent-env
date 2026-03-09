@@ -103,10 +103,9 @@ func main() {
 		EmptyPoolTTL:    cfg.ManagedPoolEmptyTTL,
 		SweepInterval:   cfg.ManagedPoolSweepInterval,
 	}, gateway.GatewayConfig{
-		IdleTimeout:       cfg.GatewayIdleTimeout,
-		MaxLifetime:       cfg.GatewayMaxLifetime,
-		SweepInterval:     cfg.GatewaySweepInterval,
-		SandboxProjection: cfg.SandboxProjection,
+		IdleTimeout:   cfg.GatewayIdleTimeout,
+		MaxLifetime:   cfg.GatewayMaxLifetime,
+		SweepInterval: cfg.GatewaySweepInterval,
 	})
 
 	// Start PodAllocator cache and event handlers
@@ -124,8 +123,13 @@ func main() {
 	// Start session sweep (idle timeout / max lifetime reaper)
 	gw.StartSessionSweep()
 
+	// Start health checker
+	feishuURL := os.Getenv("FEISHU_WEBHOOK_URL")
+	healthChecker := gateway.NewHealthChecker(gw, metricsCollector, feishuURL)
+	healthChecker.Start()
+
 	mux := http.NewServeMux()
-	gateway.SetupRoutes(mux, gw)
+	gateway.SetupRoutes(mux, gw, healthChecker)
 
 	server := &http.Server{
 		Addr:         fmt.Sprintf(":%d", port),
@@ -152,6 +156,7 @@ func main() {
 	defer cancel()
 
 	server.Shutdown(shutdownCtx)
+	healthChecker.Stop()
 	gw.StopSessionSweep()
 	allocCancel() // Stop PodAllocator cache
 	podAllocator.Stop()

@@ -11,7 +11,7 @@ COPY api/ api/
 COPY pkg/ pkg/
 COPY cmd/gateway/ cmd/gateway/
 
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -a -o gateway cmd/gateway/main.go
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOMAXPROCS=8 go build -p 8 -a -o gateway cmd/gateway/main.go
 
 FROM gcr.io/distroless/static:nonroot
 COPY --from=builder /workspace/gateway /gateway

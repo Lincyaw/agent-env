@@ -13,6 +13,16 @@ data:
       scrape_interval: 15s
       evaluation_interval: 15s
 
+    rule_files:
+      - /etc/prometheus/alert-rules.yml
+
+    {{- if .Values.alerting.enabled }}
+    alerting:
+      alertmanagers:
+        - static_configs:
+            - targets: ['{{ include "arl-operator.fullname" . }}-alertmanager:9093']
+    {{- end }}
+
     scrape_configs:
       - job_name: prometheus
         static_configs:
@@ -37,6 +47,86 @@ data:
             target_label: component
           - source_labels: [__meta_kubernetes_pod_node_name]
             target_label: node
+
+  alert-rules.yml: |
+    groups:
+      - name: arl-gateway
+        rules:
+          - alert: GoroutineLeaking
+            expr: deriv(arl_gateway_goroutines[15m]) > 2
+            for: 15m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Gateway goroutine count is steadily increasing"
+              description: "Goroutine count derivative > 2/s over 15m, possible goroutine leak."
+
+          - alert: GoroutineHigh
+            expr: arl_gateway_goroutines > 5000
+            for: 5m
+            labels:
+              severity: critical
+            annotations:
+              summary: "Gateway goroutine count exceeds 5000"
+              description: "Current goroutine count: {{ "{{" }} $value {{ "}}" }}."
+
+          - alert: PodAllocationTimeoutHigh
+            expr: |
+              rate(arl_gateway_pod_allocation_result_total{result="timeout"}[5m])
+              / on(pool) rate(arl_gateway_pod_allocation_result_total[5m]) > 0.1
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Pod allocation timeout rate > 10% for pool {{ "{{" }} $labels.pool {{ "}}" }}"
+              description: "More than 10% of pod allocation attempts are timing out."
+
+          - alert: NoIdlePods
+            expr: rate(arl_sandbox_no_idle_pods_total[5m]) > 0.5
+            for: 3m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Pool {{ "{{" }} $labels.pool {{ "}}" }} has no idle pods"
+              description: "No idle pods rate > 0.5/s, sessions may be waiting."
+
+          - alert: StepErrorRateHigh
+            expr: |
+              rate(arl_gateway_step_result_total{result="error"}[5m])
+              / on(step_type) rate(arl_gateway_step_result_total[5m]) > 0.3
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Step error rate > 30% for {{ "{{" }} $labels.step_type {{ "}}" }}"
+              description: "More than 30% of steps are failing."
+
+          - alert: PendingWaitersHigh
+            expr: arl_gateway_pending_waiters > 10
+            for: 3m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Pool {{ "{{" }} $labels.pool {{ "}}" }} has > 10 pending waiters"
+              description: "{{ "{{" }} $value {{ "}}" }} callers are blocked waiting for pods."
+
+          - alert: ImagePullErrorsPersistent
+            expr: rate(arl_warmpool_image_pull_errors_total[10m]) > 0.1
+            for: 10m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Persistent image pull errors for pool {{ "{{" }} $labels.pool {{ "}}" }}"
+              description: "Image pull errors rate > 0.1/min for 10 minutes."
+
+          - alert: GatewayDown
+            expr: up{component="gateway"} == 0
+            for: 1m
+            labels:
+              severity: critical
+            annotations:
+              summary: "Gateway is down"
+              description: "The gateway target has been unreachable for > 1 minute."
 ---
 apiVersion: apps/v1
 kind: Deployment
