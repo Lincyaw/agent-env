@@ -46,6 +46,14 @@ spec:
               value: "{{ .Values.managedPool.emptyTTL }}"
             - name: MANAGED_POOL_SWEEP_INTERVAL
               value: "{{ .Values.managedPool.sweepInterval }}"
+            - name: GATEWAY_IDLE_TIMEOUT
+              value: "{{ .Values.gateway.idleTimeout }}"
+            - name: GATEWAY_MAX_LIFETIME
+              value: "{{ .Values.gateway.maxLifetime }}"
+            - name: GATEWAY_SWEEP_INTERVAL
+              value: "{{ .Values.gateway.sweepInterval }}"
+            - name: SANDBOX_PROJECTION
+              value: "{{ .Values.gateway.sandboxProjection }}"
             {{- if .Values.clickhouse.enabled }}
             - name: CLICKHOUSE_ENABLED
               value: "true"

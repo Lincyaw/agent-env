@@ -24,6 +24,7 @@ type CreateSessionRequest struct {
 	Namespace          string            `json:"namespace,omitempty"`
 	KeepAlive          bool              `json:"keepAlive,omitempty"`
 	IdleTimeoutSeconds int               `json:"idleTimeoutSeconds,omitempty"`
+	MaxLifetimeSeconds int               `json:"maxLifetimeSeconds,omitempty"`
 	ExtraLabels        map[string]string `json:"-"` // internal use only, not exposed via JSON
 }
 

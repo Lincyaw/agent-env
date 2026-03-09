@@ -102,6 +102,11 @@ func main() {
 		IdleCooldown:    cfg.ManagedPoolIdleCooldown,
 		EmptyPoolTTL:    cfg.ManagedPoolEmptyTTL,
 		SweepInterval:   cfg.ManagedPoolSweepInterval,
+	}, gateway.GatewayConfig{
+		IdleTimeout:       cfg.GatewayIdleTimeout,
+		MaxLifetime:       cfg.GatewayMaxLifetime,
+		SweepInterval:     cfg.GatewaySweepInterval,
+		SandboxProjection: cfg.SandboxProjection,
 	})
 
 	// Start PodAllocator cache and event handlers
@@ -115,6 +120,9 @@ func main() {
 	if err := gw.StartPoolManager(context.Background()); err != nil {
 		log.Printf("Warning: pool manager recovery failed: %v (managed sessions disabled until first request)", err)
 	}
+
+	// Start session sweep (idle timeout / max lifetime reaper)
+	gw.StartSessionSweep()
 
 	mux := http.NewServeMux()
 	gateway.SetupRoutes(mux, gw)
@@ -144,6 +152,7 @@ func main() {
 	defer cancel()
 
 	server.Shutdown(shutdownCtx)
+	gw.StopSessionSweep()
 	allocCancel() // Stop PodAllocator cache
 	podAllocator.Stop()
 	gw.StopPoolManager()

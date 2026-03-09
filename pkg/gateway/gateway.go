@@ -28,6 +28,14 @@ import (
 	"github.com/Lincyaw/agent-env/pkg/sidecar"
 )
 
+// GatewayConfig holds Gateway-level configuration.
+type GatewayConfig struct {
+	IdleTimeout       time.Duration
+	MaxLifetime       time.Duration
+	SweepInterval     time.Duration
+	SandboxProjection bool // create Sandbox CRDs for kubectl visibility (default true)
+}
+
 // session holds internal session state.
 type session struct {
 	mu           sync.RWMutex
@@ -35,6 +43,10 @@ type session struct {
 	History      *StepHistory
 	managed      bool
 	experimentID string
+	lastTaskTime time.Time
+	idleTimeout  time.Duration
+	maxLifetime  time.Duration
+	createdAt    time.Time
 }
 
 // Gateway manages sessions and forwards execution to sidecars.
@@ -46,20 +58,22 @@ type Gateway struct {
 	trajectoryWriter *audit.TrajectoryWriter
 	sessions         sync.Map // sessionID → *session
 	sessionCount     atomic.Int64
-	lastTouchMu      sync.Mutex
-	lastTouchTime    map[string]time.Time // sandboxName → last K8s update time
 	poolManager      *PoolManager
+	gwConfig         GatewayConfig
+	sweepStopCh      chan struct{}
+	sweepWg          sync.WaitGroup
 }
 
 // New creates a new gateway. metrics and trajectoryWriter may be nil.
-func New(k8sClient client.Client, podAllocator *PodAllocator, sidecarClient interfaces.SidecarClient, metrics interfaces.MetricsCollector, trajectoryWriter *audit.TrajectoryWriter, pmConfig *PoolManagerConfig) *Gateway {
+func New(k8sClient client.Client, podAllocator *PodAllocator, sidecarClient interfaces.SidecarClient, metrics interfaces.MetricsCollector, trajectoryWriter *audit.TrajectoryWriter, pmConfig *PoolManagerConfig, gwConfig GatewayConfig) *Gateway {
 	gw := &Gateway{
 		k8sClient:        k8sClient,
 		podAllocator:     podAllocator,
 		sidecarClient:    sidecarClient,
 		metrics:          metrics,
 		trajectoryWriter: trajectoryWriter,
-		lastTouchTime:    make(map[string]time.Time),
+		gwConfig:         gwConfig,
+		sweepStopCh:      make(chan struct{}),
 	}
 	if pmConfig != nil {
 		gw.poolManager = NewPoolManager(k8sClient, *pmConfig)
@@ -138,8 +152,12 @@ func (g *Gateway) CreateSession(ctx context.Context, req CreateSessionRequest) (
 	}
 
 	g.sessions.Store(sessionID, &session{
-		Info:    info,
-		History: NewStepHistory(),
+		Info:         info,
+		History:      NewStepHistory(),
+		lastTaskTime: time.Now(),
+		createdAt:    time.Now(),
+		idleTimeout:  g.resolveIdleTimeout(req),
+		maxLifetime:  g.resolveMaxLifetime(req),
 	})
 
 	if g.metrics != nil {
@@ -148,45 +166,47 @@ func (g *Gateway) CreateSession(ctx context.Context, req CreateSessionRequest) (
 	}
 
 	// Create Sandbox CRD asynchronously for observability (kubectl visibility)
-	extraLabels := req.ExtraLabels
-	go func() {
-		bgCtx, bgCancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer bgCancel()
+	if g.gwConfig.SandboxProjection {
+		extraLabels := req.ExtraLabels
+		go func() {
+			bgCtx, bgCancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer bgCancel()
 
-		crdLabels := map[string]string{
-			labels.PoolLabelKey: req.PoolRef,
-		}
-		for k, v := range extraLabels {
-			crdLabels[k] = v
-		}
+			crdLabels := map[string]string{
+				labels.PoolLabelKey: req.PoolRef,
+			}
+			for k, v := range extraLabels {
+				crdLabels[k] = v
+			}
 
-		sandbox := &arlv1alpha1.Sandbox{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      sandboxName,
-				Namespace: ns,
-				Labels:    crdLabels,
-			},
-			Spec: arlv1alpha1.SandboxSpec{
-				PoolRef:   req.PoolRef,
-				KeepAlive: req.KeepAlive,
-			},
-		}
+			sandbox := &arlv1alpha1.Sandbox{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      sandboxName,
+					Namespace: ns,
+					Labels:    crdLabels,
+				},
+				Spec: arlv1alpha1.SandboxSpec{
+					PoolRef:   req.PoolRef,
+					KeepAlive: req.KeepAlive,
+				},
+			}
 
-		if createErr := g.k8sClient.Create(bgCtx, sandbox); createErr != nil {
-			log.Printf("Warning: async Sandbox CRD creation failed for %s: %v", sandboxName, createErr)
-			return
-		}
+			if createErr := g.k8sClient.Create(bgCtx, sandbox); createErr != nil {
+				log.Printf("Warning: async Sandbox CRD creation failed for %s: %v", sandboxName, createErr)
+				return
+			}
 
-		// Patch Sandbox status to Ready with PodName/PodIP
-		sandbox.Status.Phase = arlv1alpha1.SandboxPhaseReady
-		sandbox.Status.PodName = podName
-		sandbox.Status.PodIP = podIP
-		now := metav1.Now()
-		sandbox.Status.LastTaskTime = &now
-		if statusErr := g.k8sClient.Status().Update(bgCtx, sandbox); statusErr != nil {
-			log.Printf("Warning: async Sandbox status update failed for %s: %v", sandboxName, statusErr)
-		}
-	}()
+			// Patch Sandbox status to Ready with PodName/PodIP
+			sandbox.Status.Phase = arlv1alpha1.SandboxPhaseReady
+			sandbox.Status.PodName = podName
+			sandbox.Status.PodIP = podIP
+			now := metav1.Now()
+			sandbox.Status.LastTaskTime = &now
+			if statusErr := g.k8sClient.Status().Update(bgCtx, sandbox); statusErr != nil {
+				log.Printf("Warning: async Sandbox status update failed for %s: %v", sandboxName, statusErr)
+			}
+		}()
+	}
 
 	return &info, nil
 }
@@ -228,10 +248,6 @@ func (g *Gateway) DeleteSession(ctx context.Context, sessionID string) error {
 
 	g.sessions.Delete(sessionID)
 
-	g.lastTouchMu.Lock()
-	delete(g.lastTouchTime, sandboxName)
-	g.lastTouchMu.Unlock()
-
 	if g.metrics != nil {
 		g.metrics.SetActiveSessions(g.sessionCount.Add(-1))
 	}
@@ -242,19 +258,21 @@ func (g *Gateway) DeleteSession(ctx context.Context, sessionID string) error {
 	}
 
 	// Delete Sandbox CRD async (best-effort, for kubectl cleanup)
-	go func() {
-		bgCtx, bgCancel := context.WithTimeout(context.Background(), 10*time.Second)
-		defer bgCancel()
-		sandbox := &arlv1alpha1.Sandbox{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      sandboxName,
-				Namespace: namespace,
-			},
-		}
-		if err := g.k8sClient.Delete(bgCtx, sandbox); err != nil && !errors.IsNotFound(err) {
-			log.Printf("Warning: async Sandbox CRD deletion failed for %s: %v", sandboxName, err)
-		}
-	}()
+	if g.gwConfig.SandboxProjection {
+		go func() {
+			bgCtx, bgCancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer bgCancel()
+			sandbox := &arlv1alpha1.Sandbox{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      sandboxName,
+					Namespace: namespace,
+				},
+			}
+			if err := g.k8sClient.Delete(bgCtx, sandbox); err != nil && !errors.IsNotFound(err) {
+				log.Printf("Warning: async Sandbox CRD deletion failed for %s: %v", sandboxName, err)
+			}
+		}()
+	}
 
 	return nil
 }
@@ -361,13 +379,8 @@ func (g *Gateway) ExecuteSteps(ctx context.Context, sessionID string, req Execut
 
 	resp.TotalDurationMs = time.Since(totalStart).Milliseconds()
 
-	// Update Sandbox status.lastTaskTime so the idle-timeout controller
-	// measures idle duration from the last execution, not from creation time.
-	s.mu.RLock()
-	sandboxName := s.Info.SandboxName
-	namespace := s.Info.Namespace
-	s.mu.RUnlock()
-	go g.touchSandboxLastTaskTime(sandboxName, namespace)
+	// Update in-memory lastTaskTime for session idle tracking
+	g.touchLastTaskTime(sessionID)
 
 	return resp, nil
 }
@@ -476,47 +489,49 @@ func (g *Gateway) Restore(ctx context.Context, sessionID string, snapshotID stri
 	}()
 
 	// Create/update Sandbox CRD async for observability
-	go func() {
-		bgCtx, bgCancel := context.WithTimeout(context.Background(), 30*time.Second)
-		defer bgCancel()
+	if g.gwConfig.SandboxProjection {
+		go func() {
+			bgCtx, bgCancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer bgCancel()
 
-		sandbox := &arlv1alpha1.Sandbox{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      newSandboxName,
-				Namespace: oldNamespace,
-				Labels: map[string]string{
-					labels.PoolLabelKey: poolRef,
+			sandbox := &arlv1alpha1.Sandbox{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      newSandboxName,
+					Namespace: oldNamespace,
+					Labels: map[string]string{
+						labels.PoolLabelKey: poolRef,
+					},
 				},
-			},
-			Spec: arlv1alpha1.SandboxSpec{
-				PoolRef:   poolRef,
-				KeepAlive: true,
-			},
-		}
-		if createErr := g.k8sClient.Create(bgCtx, sandbox); createErr != nil {
-			log.Printf("Warning: async Sandbox CRD creation for restore failed for %s: %v", newSandboxName, createErr)
-			return
-		}
-		sandbox.Status.Phase = arlv1alpha1.SandboxPhaseReady
-		sandbox.Status.PodName = newPodName
-		sandbox.Status.PodIP = newPodIP
-		now := metav1.Now()
-		sandbox.Status.LastTaskTime = &now
-		if statusErr := g.k8sClient.Status().Update(bgCtx, sandbox); statusErr != nil {
-			log.Printf("Warning: async Sandbox status update for restore failed for %s: %v", newSandboxName, statusErr)
-		}
+				Spec: arlv1alpha1.SandboxSpec{
+					PoolRef:   poolRef,
+					KeepAlive: true,
+				},
+			}
+			if createErr := g.k8sClient.Create(bgCtx, sandbox); createErr != nil {
+				log.Printf("Warning: async Sandbox CRD creation for restore failed for %s: %v", newSandboxName, createErr)
+				return
+			}
+			sandbox.Status.Phase = arlv1alpha1.SandboxPhaseReady
+			sandbox.Status.PodName = newPodName
+			sandbox.Status.PodIP = newPodIP
+			now := metav1.Now()
+			sandbox.Status.LastTaskTime = &now
+			if statusErr := g.k8sClient.Status().Update(bgCtx, sandbox); statusErr != nil {
+				log.Printf("Warning: async Sandbox status update for restore failed for %s: %v", newSandboxName, statusErr)
+			}
 
-		// Delete old sandbox CRD (best-effort)
-		oldSandbox := &arlv1alpha1.Sandbox{
-			ObjectMeta: metav1.ObjectMeta{
-				Name:      oldSandboxName,
-				Namespace: oldNamespace,
-			},
-		}
-		if delErr := g.k8sClient.Delete(bgCtx, oldSandbox); delErr != nil && !errors.IsNotFound(delErr) {
-			log.Printf("Warning: failed to delete old sandbox %s: %v", oldSandboxName, delErr)
-		}
-	}()
+			// Delete old sandbox CRD (best-effort)
+			oldSandbox := &arlv1alpha1.Sandbox{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      oldSandboxName,
+					Namespace: oldNamespace,
+				},
+			}
+			if delErr := g.k8sClient.Delete(bgCtx, oldSandbox); delErr != nil && !errors.IsNotFound(delErr) {
+				log.Printf("Warning: failed to delete old sandbox %s: %v", oldSandboxName, delErr)
+			}
+		}()
+	}
 
 	return nil
 }
@@ -748,35 +763,99 @@ func (g *Gateway) diagnosePoolHealth(ctx context.Context, poolRef, namespace str
 	return diag
 }
 
-// touchSandboxLastTaskTime patches the Sandbox status.lastTaskTime to now.
-// Runs asynchronously so it doesn't block the execute response.
-// Debounced: skips the K8s API call if the same sandbox was updated within
-// the last 60 seconds, since idle-timeout precision of minutes is sufficient.
-const lastTaskTimeDebouncePeriod = 60 * time.Second
-
-func (g *Gateway) touchSandboxLastTaskTime(sandboxName, namespace string) {
-	g.lastTouchMu.Lock()
-	if last, ok := g.lastTouchTime[sandboxName]; ok && time.Since(last) < lastTaskTimeDebouncePeriod {
-		g.lastTouchMu.Unlock()
+// touchLastTaskTime updates the in-memory lastTaskTime for session idle tracking.
+func (g *Gateway) touchLastTaskTime(sessionID string) {
+	val, ok := g.sessions.Load(sessionID)
+	if !ok {
 		return
 	}
-	g.lastTouchTime[sandboxName] = time.Now()
-	g.lastTouchMu.Unlock()
+	s := val.(*session)
+	s.mu.Lock()
+	s.lastTaskTime = time.Now()
+	s.mu.Unlock()
+}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+// resolveIdleTimeout returns the idle timeout for a session request,
+// falling back to the gateway-wide default.
+func (g *Gateway) resolveIdleTimeout(req CreateSessionRequest) time.Duration {
+	if req.IdleTimeoutSeconds > 0 {
+		return time.Duration(req.IdleTimeoutSeconds) * time.Second
+	}
+	return g.gwConfig.IdleTimeout
+}
 
-	now := metav1.Now()
-	patch := client.MergeFrom(&arlv1alpha1.Sandbox{
-		ObjectMeta: metav1.ObjectMeta{Name: sandboxName, Namespace: namespace},
+// resolveMaxLifetime returns the max lifetime for a session request,
+// falling back to the gateway-wide default.
+func (g *Gateway) resolveMaxLifetime(req CreateSessionRequest) time.Duration {
+	if req.MaxLifetimeSeconds > 0 {
+		return time.Duration(req.MaxLifetimeSeconds) * time.Second
+	}
+	return g.gwConfig.MaxLifetime
+}
+
+// StartSessionSweep starts the background session reaper goroutine.
+func (g *Gateway) StartSessionSweep() {
+	g.sweepWg.Add(1)
+	go g.sessionSweepLoop()
+}
+
+// StopSessionSweep signals the session sweep goroutine to exit and waits.
+func (g *Gateway) StopSessionSweep() {
+	close(g.sweepStopCh)
+	g.sweepWg.Wait()
+}
+
+func (g *Gateway) sessionSweepLoop() {
+	defer g.sweepWg.Done()
+	ticker := time.NewTicker(g.gwConfig.SweepInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-g.sweepStopCh:
+			return
+		case <-ticker.C:
+			g.sweepSessions()
+		}
+	}
+}
+
+func (g *Gateway) sweepSessions() {
+	now := time.Now()
+	g.sessions.Range(func(key, value any) bool {
+		sessionID := key.(string)
+		s := value.(*session)
+
+		s.mu.RLock()
+		lastTask := s.lastTaskTime
+		created := s.createdAt
+		idleTimeout := s.idleTimeout
+		maxLifetime := s.maxLifetime
+		s.mu.RUnlock()
+
+		// Check max lifetime (0 means no limit)
+		if maxLifetime > 0 && now.Sub(created) > maxLifetime {
+			log.Printf("Session %s exceeded max lifetime (%v), deleting", sessionID, maxLifetime)
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			if err := g.DeleteSession(ctx, sessionID); err != nil {
+				log.Printf("Warning: failed to delete expired session %s: %v", sessionID, err)
+			}
+			cancel()
+			return true
+		}
+
+		// Check idle timeout (0 means no limit)
+		if idleTimeout > 0 && now.Sub(lastTask) > idleTimeout {
+			log.Printf("Session %s idle for %v (timeout=%v), deleting", sessionID, now.Sub(lastTask), idleTimeout)
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			if err := g.DeleteSession(ctx, sessionID); err != nil {
+				log.Printf("Warning: failed to delete idle session %s: %v", sessionID, err)
+			}
+			cancel()
+		}
+
+		return true
 	})
-	sb := &arlv1alpha1.Sandbox{
-		ObjectMeta: metav1.ObjectMeta{Name: sandboxName, Namespace: namespace},
-	}
-	sb.Status.LastTaskTime = &now
-	if err := g.k8sClient.Status().Patch(ctx, sb, patch); err != nil {
-		log.Printf("Warning: failed to patch sandbox %s lastTaskTime: %v", sandboxName, err)
-	}
 }
 
 // extractSandboxFailure returns a failure message from sandbox conditions.

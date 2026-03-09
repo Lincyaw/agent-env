@@ -45,6 +45,11 @@ gateway:
     requests:
       cpu: "1"
       memory: 2Gi
+  # Session lifecycle defaults
+  idleTimeout: "600s"       # Max idle time before session is reaped
+  maxLifetime: "3600s"      # Max total session lifetime
+  sweepInterval: "30s"      # How often to check for expired sessions
+  sandboxProjection: true   # Create Sandbox CRDs for kubectl visibility
 
 # Managed pool auto-scaling configuration (for POST /v1/managed/sessions)
 managedPool:

@@ -93,6 +93,12 @@ type Config struct {
 	ManagedPoolIdleCooldown    time.Duration
 	ManagedPoolEmptyTTL        time.Duration
 	ManagedPoolSweepInterval   time.Duration
+
+	// Gateway session lifecycle configuration
+	GatewayIdleTimeout   time.Duration
+	GatewayMaxLifetime   time.Duration
+	GatewaySweepInterval time.Duration
+	SandboxProjection    bool
 }
 
 // DefaultConfig returns the default configuration
@@ -145,6 +151,11 @@ func DefaultConfig() *Config {
 		ManagedPoolIdleCooldown:    5 * time.Minute,
 		ManagedPoolEmptyTTL:        10 * time.Minute,
 		ManagedPoolSweepInterval:   30 * time.Second,
+
+		GatewayIdleTimeout:   600 * time.Second,
+		GatewayMaxLifetime:   3600 * time.Second,
+		GatewaySweepInterval: 30 * time.Second,
+		SandboxProjection:    true,
 	}
 }
 
@@ -378,6 +389,29 @@ func LoadFromEnv() *Config {
 		}
 	}
 
+	// Gateway session lifecycle configuration
+	if v := os.Getenv("GATEWAY_IDLE_TIMEOUT"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			cfg.GatewayIdleTimeout = d
+		}
+	}
+
+	if v := os.Getenv("GATEWAY_MAX_LIFETIME"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			cfg.GatewayMaxLifetime = d
+		}
+	}
+
+	if v := os.Getenv("GATEWAY_SWEEP_INTERVAL"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			cfg.GatewaySweepInterval = d
+		}
+	}
+
+	if v := os.Getenv("SANDBOX_PROJECTION"); v == "false" {
+		cfg.SandboxProjection = false
+	}
+
 	return cfg
 }
 
@@ -511,6 +545,19 @@ func (c *Config) Validate() error {
 
 	if c.ManagedPoolEmptyTTL <= 0 {
 		return fmt.Errorf("managed pool empty TTL must be positive: %v", c.ManagedPoolEmptyTTL)
+	}
+
+	// Validate gateway session lifecycle configuration
+	if c.GatewayIdleTimeout < 0 {
+		return fmt.Errorf("gateway idle timeout cannot be negative: %v", c.GatewayIdleTimeout)
+	}
+
+	if c.GatewayMaxLifetime < 0 {
+		return fmt.Errorf("gateway max lifetime cannot be negative: %v", c.GatewayMaxLifetime)
+	}
+
+	if c.GatewaySweepInterval <= 0 {
+		return fmt.Errorf("gateway sweep interval must be positive: %v", c.GatewaySweepInterval)
 	}
 
 	return nil

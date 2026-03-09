@@ -143,24 +143,11 @@ func (pm *PoolManager) Recover(ctx context.Context) error {
 		}
 		state.tools = pool.Spec.Tools
 
-		// Count active sandboxes for this pool (exclude Failed/terminated)
-		var sbList arlv1alpha1.SandboxList
-		if err := pm.k8sClient.List(ctx, &sbList,
-			client.InNamespace(pool.Namespace),
-			client.MatchingLabels{labelPool: pool.Name}); err != nil {
-			log.Printf("Warning: failed to list sandboxes for pool %s: %v", pool.Name, err)
-			continue
-		}
-		activeCount := int32(0)
-		for j := range sbList.Items {
-			if sbList.Items[j].Status.Phase != arlv1alpha1.SandboxPhaseFailed {
-				activeCount++
-			}
-		}
-
-		// Supplement with pod-label-based counting: list pods with StatusAllocated label
-		// and take the max of Sandbox CRD count vs pod label count.
+		// Count active sessions using pod labels as primary source.
+		// Pod labels (StatusAllocated) are always present (written by PodAllocator),
+		// while Sandbox CRDs may not exist if SandboxProjection is disabled.
 		var podList corev1.PodList
+		activeCount := int32(0)
 		if err := pm.k8sClient.List(ctx, &podList,
 			client.InNamespace(pool.Namespace),
 			client.MatchingLabels{
@@ -169,14 +156,28 @@ func (pm *PoolManager) Recover(ctx context.Context) error {
 			}); err != nil {
 			log.Printf("Warning: failed to list allocated pods for pool %s: %v", pool.Name, err)
 		} else {
-			podCount := int32(0)
 			for j := range podList.Items {
 				if podList.Items[j].DeletionTimestamp == nil {
-					podCount++
+					activeCount++
 				}
 			}
-			if podCount > activeCount {
-				activeCount = podCount
+		}
+
+		// Supplement with Sandbox CRD count as a fallback (in case pod labels are stale)
+		var sbList arlv1alpha1.SandboxList
+		if err := pm.k8sClient.List(ctx, &sbList,
+			client.InNamespace(pool.Namespace),
+			client.MatchingLabels{labelPool: pool.Name}); err != nil {
+			log.Printf("Warning: failed to list sandboxes for pool %s: %v", pool.Name, err)
+		} else {
+			sbCount := int32(0)
+			for j := range sbList.Items {
+				if sbList.Items[j].Status.Phase != arlv1alpha1.SandboxPhaseFailed {
+					sbCount++
+				}
+			}
+			if sbCount > activeCount {
+				activeCount = sbCount
 			}
 		}
 
