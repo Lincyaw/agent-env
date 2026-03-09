@@ -365,6 +365,7 @@ class ManagedSession(SandboxSession):
         resources: ResourceRequirements | None = None,
         tools: ToolsSpec | None = None,
         workspace_dir: str = "/workspace",
+        max_replicas: int | None = None,
     ) -> None:
         super().__init__(
             pool_ref="",  # will be set by server
@@ -378,6 +379,7 @@ class ManagedSession(SandboxSession):
         self._resources = resources
         self._tools = tools
         self._workspace_dir = workspace_dir
+        self._max_replicas = max_replicas
 
     @property
     def experiment_id(self) -> str:
@@ -398,6 +400,7 @@ class ManagedSession(SandboxSession):
             resources=self._resources,
             tools=self._tools,
             workspace_dir=self._workspace_dir,
+            max_replicas=self._max_replicas,
         )
         self._session_id = info.id
         self._session_info = info

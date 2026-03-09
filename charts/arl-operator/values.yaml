@@ -40,17 +40,17 @@ gateway:
     name: ""
   resources:
     limits:
-      cpu: 500m
-      memory: 256Mi
+      cpu: "4"
+      memory: 8Gi
     requests:
-      cpu: 100m
-      memory: 128Mi
+      cpu: "1"
+      memory: 2Gi
 
 # Managed pool auto-scaling configuration (for POST /v1/managed/sessions)
 managedPool:
   initialReplicas: 2       # Starting replicas when pool is first created
   minReplicas: 0           # Scale-down floor
-  maxReplicas: 50          # Scale-up ceiling
+  maxReplicas: 100          # Scale-up ceiling
   scaleUpStep: 2           # Minimum replicas added per scale-up event
   idleCooldown: "5m"       # How long excess idle pods must persist before scale-down
   emptyTTL: "10m"          # How long to keep a pool with 0 sessions before deletion
@@ -73,11 +73,11 @@ securityContext: {}
 
 resources:
   limits:
-    cpu: 500m
-    memory: 256Mi
+    cpu: "4"
+    memory: 8Gi
   requests:
-    cpu: 100m
-    memory: 128Mi
+    cpu: "1"
+    memory: 2Gi
 
 nodeSelector: {}
 

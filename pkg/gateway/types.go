@@ -35,6 +35,7 @@ type CreateManagedSessionRequest struct {
 	Resources    *corev1.ResourceRequirements `json:"resources,omitempty"`
 	Tools        *arlv1alpha1.ToolsSpec       `json:"tools,omitempty"`
 	WorkspaceDir string                       `json:"workspaceDir,omitempty"`
+	MaxReplicas  int32                        `json:"maxReplicas,omitempty"` // per-session scale ceiling hint; server scales up eagerly to this value
 }
 
 // ExecuteRequest is the body for POST /v1/sessions/{id}/execute

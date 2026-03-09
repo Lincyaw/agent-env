@@ -225,6 +225,7 @@ class GatewayClient:
         resources: ResourceRequirements | None = None,
         tools: ToolsSpec | None = None,
         workspace_dir: str = "/workspace",
+        max_replicas: int | None = None,
     ) -> ManagedSessionInfo:
         """Create a managed session with automatic pool management.
 
@@ -238,6 +239,10 @@ class GatewayClient:
             resources: Optional CPU/memory requirements (used on first pool creation).
             tools: Optional tools specification (used on first pool creation).
             workspace_dir: Workspace mount path.
+            max_replicas: Optional per-pool scale ceiling hint. When set, the server
+                scales the pool eagerly up to this value on first request, instead of
+                scaling incrementally. Useful when you know the final concurrency target
+                (e.g., max_replicas=8 means "I will use at most 8 sessions for this image").
 
         Returns:
             ManagedSessionInfo with session details and experiment metadata.
@@ -252,6 +257,8 @@ class GatewayClient:
             body["resources"] = resources.model_dump(exclude_none=True)
         if tools is not None:
             body["tools"] = tools.model_dump(by_alias=True, exclude_none=True)
+        if max_replicas is not None:
+            body["maxReplicas"] = max_replicas
         resp = self._client.post("/v1/managed/sessions", json=body)
         self._handle_error(resp)
         return ManagedSessionInfo.model_validate(resp.json())

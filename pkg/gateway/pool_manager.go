@@ -16,6 +16,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/util/retry"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	arlv1alpha1 "github.com/Lincyaw/agent-env/api/v1alpha1"
@@ -52,6 +53,12 @@ func DefaultPoolManagerConfig() PoolManagerConfig {
 	}
 }
 
+// scaleReq is sent by AcquireSession callers into the per-pool coalesce channel.
+// The coalesce goroutine performs a single K8s Update for all pending requests.
+type scaleReq struct {
+	done chan error
+}
+
 // poolState tracks per-pool metadata for managed pools.
 type poolState struct {
 	mu             sync.RWMutex
@@ -65,23 +72,28 @@ type poolState struct {
 	resources      *corev1.ResourceRequirements
 	tools          *arlv1alpha1.ToolsSpec
 	workspaceDir   string
+	scaleCh        chan scaleReq // per-pool coalesce channel for scale-up requests
+	maxReplicas    atomic.Int32  // per-pool max replicas hint from clients (0 = use global config)
+	poolCreated    bool          // true once the WarmPool CRD has been successfully created
 }
 
 // PoolManager manages WarmPools automatically for the managed session API.
 type PoolManager struct {
-	k8sClient client.Client
-	config    PoolManagerConfig
-	pools     sync.Map // poolName → *poolState
-	stopCh    chan struct{}
-	wg        sync.WaitGroup
+	k8sClient      client.Client
+	config         PoolManagerConfig
+	pools          sync.Map // poolName → *poolState
+	stopCh         chan struct{}
+	wg             sync.WaitGroup
+	coalesceWindow time.Duration // how long to batch scale-up requests before writing
 }
 
 // NewPoolManager creates a new PoolManager.
 func NewPoolManager(k8sClient client.Client, config PoolManagerConfig) *PoolManager {
 	return &PoolManager{
-		k8sClient: k8sClient,
-		config:    config,
-		stopCh:    make(chan struct{}),
+		k8sClient:      k8sClient,
+		config:         config,
+		stopCh:         make(chan struct{}),
+		coalesceWindow: 50 * time.Millisecond,
 	}
 }
 
@@ -113,10 +125,11 @@ func (pm *PoolManager) Recover(ctx context.Context) error {
 		}
 
 		state := &poolState{
-			image:     image,
-			poolName:  pool.Name,
-			namespace: pool.Namespace,
-			createdAt: pool.CreationTimestamp.Time,
+			image:       image,
+			poolName:    pool.Name,
+			namespace:   pool.Namespace,
+			createdAt:   pool.CreationTimestamp.Time,
+			poolCreated: true, // recovered from existing CRD
 		}
 
 		// Restore resource/tools config from existing pool spec
@@ -187,24 +200,74 @@ func (pm *PoolManager) AcquireSession(ctx context.Context, req CreateManagedSess
 	state := actual.(*poolState)
 
 	if !loaded {
-		// First request for this image: create the WarmPool CRD
+		// First request for this image: create the WarmPool CRD.
+		// On failure, mark as not-created so the next caller retries, but
+		// do NOT delete from pools — other goroutines may already hold
+		// a reference to this state via LoadOrStore.
 		if err := pm.createPool(ctx, state, ns); err != nil {
+			state.mu.Lock()
+			state.poolCreated = false
+			state.mu.Unlock()
 			pm.pools.Delete(poolName)
 			return "", fmt.Errorf("create managed pool: %w", err)
 		}
+		state.mu.Lock()
+		state.poolCreated = true
+		state.mu.Unlock()
 		log.Printf("Created managed pool %s for image %s", poolName, image)
+	} else {
+		// Pool state exists, but the CRD might still be creating.
+		// Wait briefly for pool creation to finish.
+		if err := pm.waitPoolCreated(ctx, state); err != nil {
+			return "", err
+		}
 	}
 
 	// Increment BEFORE capacity check so concurrent calls see correct demand
 	state.sessionCount.Add(1)
 
+	// Update per-pool maxReplicas hint if the client provides a larger one.
+	// This is a CAS loop so concurrent callers always keep the highest value.
+	if req.MaxReplicas > 0 {
+		for {
+			cur := state.maxReplicas.Load()
+			if req.MaxReplicas <= cur {
+				break
+			}
+			if state.maxReplicas.CompareAndSwap(cur, req.MaxReplicas) {
+				break
+			}
+		}
+	}
+
 	// Check if we need to scale up
-	if err := pm.ensureCapacity(ctx, state, ns); err != nil {
+	if err := pm.ensureCapacity(ctx, state); err != nil {
 		state.sessionCount.Add(-1) // rollback on failure
 		return "", fmt.Errorf("ensure pool capacity: %w", err)
 	}
 
 	return poolName, nil
+}
+
+// waitPoolCreated waits for the pool CRD to be created by the first goroutine.
+func (pm *PoolManager) waitPoolCreated(ctx context.Context, state *poolState) error {
+	for {
+		state.mu.RLock()
+		created := state.poolCreated
+		state.mu.RUnlock()
+		if created {
+			return nil
+		}
+		// Check if the pool state was removed (creation failed)
+		if _, ok := pm.pools.Load(state.poolName); !ok {
+			return fmt.Errorf("managed pool %s creation failed", state.poolName)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(50 * time.Millisecond):
+		}
+	}
 }
 
 // ReleaseSession decrements the session count for a pool.
@@ -294,41 +357,136 @@ func (pm *PoolManager) createPool(ctx context.Context, state *poolState, ns stri
 	return nil
 }
 
-// ensureCapacity checks if the pool has idle pods and scales up if not.
-// Uses the current session count plus pending allocations to calculate the target,
-// so burst requests (e.g., 20 concurrent) scale up appropriately.
-func (pm *PoolManager) ensureCapacity(ctx context.Context, state *poolState, ns string) error {
-	pool := &arlv1alpha1.WarmPool{}
-	if err := pm.k8sClient.Get(ctx, types.NamespacedName{
-		Name: state.poolName, Namespace: ns,
-	}, pool); err != nil {
-		return fmt.Errorf("get pool %s: %w", state.poolName, err)
+// ensureCapacity sends a scale-up request into the per-pool coalesce channel.
+// A single goroutine per pool drains the channel, batches all pending requests
+// within a short window, and performs one K8s Update for the batch.
+// This eliminates optimistic concurrency conflicts under high concurrency.
+func (pm *PoolManager) ensureCapacity(ctx context.Context, state *poolState) error {
+	req := scaleReq{done: make(chan error, 1)}
+
+	// Lazily start the coalesce goroutine for this pool
+	state.mu.Lock()
+	if state.scaleCh == nil {
+		state.scaleCh = make(chan scaleReq, 1024)
+		pm.wg.Add(1)
+		go pm.scaleCoalesceLoop(state)
+	}
+	state.mu.Unlock()
+
+	// Send the request (non-blocking: buffered channel)
+	select {
+	case state.scaleCh <- req:
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 
-	// Calculate demand: sessionCount already includes this request (incremented before call)
-	// Add 1 spare pod for responsiveness
-	demand := state.sessionCount.Load() + 1 // +1 spare
-	desired := max(demand, pm.config.MinReplicas)
-	desired = min(desired, pm.config.MaxReplicas)
-
-	if pool.Spec.Replicas >= desired {
-		return nil // Already enough capacity
+	// Wait for the batch result
+	select {
+	case err := <-req.done:
+		return err
+	case <-ctx.Done():
+		return ctx.Err()
 	}
+}
 
-	// Also ensure at least ScaleUpStep growth for responsiveness
-	grown := pool.Spec.Replicas + pm.config.ScaleUpStep
-	newReplicas := min(max(desired, grown), pm.config.MaxReplicas)
-	if newReplicas <= pool.Spec.Replicas {
+// scaleCoalesceLoop is the single-writer goroutine for a pool.
+// It drains pending scale-up requests, waits a short window to collect more,
+// then performs one K8s read-modify-write (with RetryOnConflict) for the entire batch.
+func (pm *PoolManager) scaleCoalesceLoop(state *poolState) {
+	defer pm.wg.Done()
+
+	for {
+		// Block until at least one request arrives, or stop signal
+		var first scaleReq
+		var ok bool
+		select {
+		case first, ok = <-state.scaleCh:
+			if !ok {
+				return // channel closed
+			}
+		case <-pm.stopCh:
+			return
+		}
+
+		// Collect more requests that arrive within the coalesce window
+		batch := []scaleReq{first}
+		timer := time.NewTimer(pm.coalesceWindow)
+	drain:
+		for {
+			select {
+			case req, ok := <-state.scaleCh:
+				if !ok {
+					timer.Stop()
+					break drain
+				}
+				batch = append(batch, req)
+			case <-timer.C:
+				break drain
+			case <-pm.stopCh:
+				timer.Stop()
+				// Notify all pending requests
+				for _, r := range batch {
+					r.done <- fmt.Errorf("pool manager stopped")
+				}
+				return
+			}
+		}
+
+		// Perform a single K8s Update with RetryOnConflict for the entire batch
+		err := pm.doScaleUp(state)
+
+		// Fan-out the result to all callers in this batch
+		for _, r := range batch {
+			r.done <- err
+		}
+	}
+}
+
+// doScaleUp performs the actual K8s read-modify-write with RetryOnConflict.
+func (pm *PoolManager) doScaleUp(state *poolState) error {
+	return retry.RetryOnConflict(retry.DefaultRetry, func() error {
+		pool := &arlv1alpha1.WarmPool{}
+		if err := pm.k8sClient.Get(context.Background(), types.NamespacedName{
+			Name: state.poolName, Namespace: state.namespace,
+		}, pool); err != nil {
+			return fmt.Errorf("get pool %s: %w", state.poolName, err)
+		}
+
+		// Calculate demand: sessionCount reflects all concurrent callers
+		demand := state.sessionCount.Load() + 1 // +1 spare
+
+		// If the client specified a maxReplicas hint, scale eagerly to that value.
+		// This avoids incremental scale-ups when the client knows the final target.
+		// NOTE: maxReplicas is an eager target, NOT a hard ceiling.
+		// If actual demand exceeds maxReplicas, we still scale to meet demand.
+		clientMax := state.maxReplicas.Load()
+		if clientMax > 0 && clientMax > demand {
+			demand = clientMax
+		}
+
+		desired := max(demand, pm.config.MinReplicas)
+		desired = min(desired, pm.config.MaxReplicas)
+
+		if pool.Spec.Replicas >= desired {
+			return nil // Already enough capacity
+		}
+
+		// Also ensure at least ScaleUpStep growth for responsiveness
+		grown := pool.Spec.Replicas + pm.config.ScaleUpStep
+		newReplicas := min(max(desired, grown), pm.config.MaxReplicas)
+		if newReplicas <= pool.Spec.Replicas {
+			return nil
+		}
+
+		pool.Spec.Replicas = newReplicas
+		if err := pm.k8sClient.Update(context.Background(), pool); err != nil {
+			// RetryOnConflict will re-read and retry on IsConflict errors
+			return err
+		}
+
+		log.Printf("Scaled up managed pool %s to %d replicas (demand=%d, clientMax=%d)", state.poolName, newReplicas, demand, clientMax)
 		return nil
-	}
-
-	pool.Spec.Replicas = newReplicas
-	if err := pm.k8sClient.Update(ctx, pool); err != nil {
-		return fmt.Errorf("scale up pool %s to %d: %w", state.poolName, newReplicas, err)
-	}
-
-	log.Printf("Scaled up managed pool %s to %d replicas (demand=%d)", state.poolName, newReplicas, demand)
-	return nil
+	})
 }
 
 // sweepLoop runs periodically to scale down idle pools and garbage-collect empty pools.
@@ -400,9 +558,22 @@ func (pm *PoolManager) sweep() {
 			state.mu.Unlock()
 
 			if elapsed > pm.config.IdleCooldown {
-				pool.Spec.Replicas = desiredReplicas
-				if err := pm.k8sClient.Update(ctx, pool); err != nil {
-					log.Printf("Warning: failed to scale down managed pool %s: %v", poolName, err)
+				scaleErr := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+					fresh := &arlv1alpha1.WarmPool{}
+					if err := pm.k8sClient.Get(ctx, types.NamespacedName{
+						Name: poolName, Namespace: state.namespace,
+					}, fresh); err != nil {
+						return err
+					}
+					freshDesired := max(state.sessionCount.Load()+1, pm.config.MinReplicas)
+					if fresh.Spec.Replicas <= freshDesired {
+						return nil
+					}
+					fresh.Spec.Replicas = freshDesired
+					return pm.k8sClient.Update(ctx, fresh)
+				})
+				if scaleErr != nil {
+					log.Printf("Warning: failed to scale down managed pool %s: %v", poolName, scaleErr)
 				} else {
 					state.mu.Lock()
 					state.idleSince = time.Time{}
