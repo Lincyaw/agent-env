@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -222,7 +223,7 @@ func (r *WarmPoolReconciler) reconcile(ctx context.Context, req ctrl.Request) (c
 		}
 		_ = g.Wait()
 	} else if needed < 0 {
-		// Delete excess pods (parallel)
+		// Delete excess pods (parallel), preferring least-recently-used first.
 		toDelete := -needed
 		logger.Info("Scaling down pool", "toDelete", toDelete)
 
@@ -235,6 +236,13 @@ func (r *WarmPoolReconciler) reconcile(ctx context.Context, req ctrl.Request) (c
 			}); err != nil {
 			logger.Error(err, "Failed to list idle pods for deletion")
 		} else {
+			// Sort idle pods by LRU: use last-released annotation if present,
+			// otherwise fall back to CreationTimestamp. Oldest (least recently
+			// used) pods are sorted first and deleted first.
+			sort.Slice(idlePods.Items, func(i, j int) bool {
+				return podIdleAge(&idlePods.Items[i]).Before(podIdleAge(&idlePods.Items[j]))
+			})
+
 			g, gCtx := errgroup.WithContext(ctx)
 			g.SetLimit(20)
 			for i := range idlePods.Items {
@@ -945,6 +953,18 @@ func (r *WarmPoolReconciler) SetupWithManager(mgr ctrl.Manager) error {
 // Name returns the controller name for logging
 func (r *WarmPoolReconciler) Name() string {
 	return "WarmPool"
+}
+
+// podIdleAge returns the time a pod has been idle. If the pod has a
+// last-released annotation (set when transitioning from allocated → idle),
+// that timestamp is returned. Otherwise the pod's CreationTimestamp is used.
+func podIdleAge(pod *corev1.Pod) time.Time {
+	if ann, ok := pod.Annotations[labels.LastReleasedAnnotation]; ok {
+		if t, err := time.Parse(time.RFC3339, ann); err == nil {
+			return t
+		}
+	}
+	return pod.CreationTimestamp.Time
 }
 
 // findCondition finds a condition by type.

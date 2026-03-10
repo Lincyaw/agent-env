@@ -94,6 +94,21 @@ func main() {
 		}
 	}
 
+	// Create session store (Redis or in-memory)
+	var sessionStore gateway.SessionStore
+	if cfg.RedisEnabled {
+		rs, rsErr := gateway.NewRedisStore(gateway.RedisStoreConfig{
+			Addr:     cfg.RedisAddr,
+			Password: cfg.RedisPassword,
+			DB:       cfg.RedisDB,
+		})
+		if rsErr != nil {
+			log.Fatalf("Failed to create Redis session store: %v", rsErr)
+		}
+		sessionStore = rs
+		log.Printf("Redis session store enabled (addr=%s, db=%d)", cfg.RedisAddr, cfg.RedisDB)
+	}
+
 	gw := gateway.New(k8sClient, podAllocator, sidecarClient, metricsCollector, trajectoryWriter, &gateway.PoolManagerConfig{
 		InitialReplicas: cfg.ManagedPoolInitialReplicas,
 		MinReplicas:     cfg.ManagedPoolMinReplicas,
@@ -106,7 +121,7 @@ func main() {
 		IdleTimeout:   cfg.GatewayIdleTimeout,
 		MaxLifetime:   cfg.GatewayMaxLifetime,
 		SweepInterval: cfg.GatewaySweepInterval,
-	})
+	}, sessionStore)
 
 	// Start PodAllocator cache and event handlers
 	allocCtx, allocCancel := context.WithCancel(context.Background())
@@ -127,6 +142,19 @@ func main() {
 	feishuURL := os.Getenv("FEISHU_WEBHOOK_URL")
 	healthChecker := gateway.NewHealthChecker(gw, metricsCollector, feishuURL)
 	healthChecker.Start()
+
+	// Start SSH server if enabled
+	var sshServer *gateway.SSHServer
+	if cfg.SSHEnabled {
+		var sshErr error
+		sshServer, sshErr = gateway.NewSSHServer(gw, cfg.SSHPort, cfg.SSHHostKeyPath, cfg.SSHPassword)
+		if sshErr != nil {
+			log.Fatalf("Failed to create SSH server: %v", sshErr)
+		}
+		if sshErr = sshServer.Start(); sshErr != nil {
+			log.Fatalf("Failed to start SSH server: %v", sshErr)
+		}
+	}
 
 	mux := http.NewServeMux()
 	gateway.SetupRoutes(mux, gw, healthChecker)
@@ -156,6 +184,9 @@ func main() {
 	defer cancel()
 
 	server.Shutdown(shutdownCtx)
+	if sshServer != nil {
+		sshServer.Stop()
+	}
 	healthChecker.Stop()
 	gw.StopSessionSweep()
 	allocCancel() // Stop PodAllocator cache
@@ -164,6 +195,9 @@ func main() {
 	sidecarClient.Close()
 	if trajectoryWriter != nil {
 		trajectoryWriter.Close()
+	}
+	if sessionStore != nil {
+		sessionStore.Close()
 	}
 
 	log.Println("Gateway stopped")

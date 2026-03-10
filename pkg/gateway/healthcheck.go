@@ -102,9 +102,9 @@ func (hc *HealthChecker) collect() {
 		hc.goroutineWindow = hc.goroutineWindow[len(hc.goroutineWindow)-hc.windowSize:]
 	}
 
-	// 2. Session count from sync.Map
+	// 2. Session count from store
 	sessionCount := 0
-	hc.gw.sessions.Range(func(_, _ any) bool {
+	hc.gw.store.Range(func(_ string, _ *session) bool {
 		sessionCount++
 		return true
 	})
@@ -140,7 +140,7 @@ func (hc *HealthChecker) BuildReport() HealthReport {
 	goroutines := runtime.NumGoroutine()
 
 	sessionCount := 0
-	hc.gw.sessions.Range(func(_, _ any) bool {
+	hc.gw.store.Range(func(_ string, _ *session) bool {
 		sessionCount++
 		return true
 	})
@@ -187,11 +187,11 @@ func (hc *HealthChecker) runChecks(sessionCount int) []CheckResult {
 	checks = append(checks, check)
 
 	// Check: session count consistency
-	atomicCount := hc.gw.sessionCount.Load()
+	atomicCount := hc.gw.store.Count()
 	check = CheckResult{Name: "session_count_consistency", Status: "ok"}
 	if int64(sessionCount) != atomicCount {
 		check.Status = "warn"
-		check.Message = fmt.Sprintf("sync.Map count (%d) != atomic counter (%d)", sessionCount, atomicCount)
+		check.Message = fmt.Sprintf("range count (%d) != store counter (%d)", sessionCount, atomicCount)
 	}
 	checks = append(checks, check)
 

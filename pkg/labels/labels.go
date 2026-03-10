@@ -14,4 +14,9 @@ const (
 	// SessionAnnotation records the session ID that owns this pod.
 	// Used during gateway recovery to rebuild in-memory session state.
 	SessionAnnotation = "arl.infra.io/session"
+
+	// LastReleasedAnnotation records the last time a pod transitioned from
+	// allocated back to idle (RFC3339). Used by LRU scale-down to delete the
+	// least-recently-used idle pods first.
+	LastReleasedAnnotation = "arl.infra.io/last-released"
 )

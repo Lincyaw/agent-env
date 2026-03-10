@@ -58,21 +58,30 @@ components:
       - pkg/gateway/pod_allocator.go
       - pkg/gateway/history.go
       - pkg/gateway/ws_shell.go
+      - pkg/gateway/ssh_server.go
+      - pkg/gateway/session_store.go
+      - pkg/gateway/memory_store.go
+      - pkg/gateway/redis_store.go
     responsibilities:
       - Provide REST API for session and execution management
       - Create/delete sessions (allocate pods from warm pools)
       - Execute steps via direct gRPC to sidecar
       - Manage execution history and trajectory export
       - WebSocket proxy for interactive shell
+      - SSH server for native SSH access to sessions
+      - Pluggable session storage (in-memory or Redis)
     interfaces:
       exposes:
         - REST API (POST/GET/DELETE /v1/sessions, /v1/pools)
         - WebSocket /v1/sessions/{id}/shell
+        - SSH server (port 2222, username=sessionID)
       calls:
         - Kubernetes API (WarmPool CRDs, Pods)
         - Sidecar gRPC (AgentService)
+        - Redis (optional, for session state persistence)
     config:
       default_port: 8080
+      default_ssh_port: 2222
 
   # ============================================================================
   # Webhooks

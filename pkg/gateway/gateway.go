@@ -11,7 +11,6 @@ import (
 	"strconv"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -56,8 +55,7 @@ type Gateway struct {
 	sidecarClient    interfaces.SidecarClient
 	metrics          interfaces.MetricsCollector
 	trajectoryWriter *audit.TrajectoryWriter
-	sessions         sync.Map // sessionID → *session
-	sessionCount     atomic.Int64
+	store            SessionStore
 	poolManager      *PoolManager
 	gwConfig         GatewayConfig
 	sweepStopCh      chan struct{}
@@ -65,13 +63,18 @@ type Gateway struct {
 }
 
 // New creates a new gateway. metrics and trajectoryWriter may be nil.
-func New(k8sClient client.Client, podAllocator *PodAllocator, sidecarClient interfaces.SidecarClient, metrics interfaces.MetricsCollector, trajectoryWriter *audit.TrajectoryWriter, pmConfig *PoolManagerConfig, gwConfig GatewayConfig) *Gateway {
+// If store is nil, a default MemoryStore is used.
+func New(k8sClient client.Client, podAllocator *PodAllocator, sidecarClient interfaces.SidecarClient, metrics interfaces.MetricsCollector, trajectoryWriter *audit.TrajectoryWriter, pmConfig *PoolManagerConfig, gwConfig GatewayConfig, store SessionStore) *Gateway {
+	if store == nil {
+		store = NewMemoryStore()
+	}
 	gw := &Gateway{
 		k8sClient:        k8sClient,
 		podAllocator:     podAllocator,
 		sidecarClient:    sidecarClient,
 		metrics:          metrics,
 		trajectoryWriter: trajectoryWriter,
+		store:            store,
 		gwConfig:         gwConfig,
 		sweepStopCh:      make(chan struct{}),
 	}
@@ -145,8 +148,8 @@ func (g *Gateway) StartPoolManager(ctx context.Context) error {
 					maxLifetime:         g.gwConfig.MaxLifetime,
 				}
 
-				g.sessions.Store(sessionID, s)
-				g.sessionCount.Add(1)
+				g.store.Set(sessionID, s)
+				g.store.IncrCount(1)
 				recovered++
 
 				// Restore pool manager session count for managed sessions
@@ -178,7 +181,7 @@ func (g *Gateway) StartPoolManager(ctx context.Context) error {
 		}
 
 		if g.metrics != nil {
-			g.metrics.SetActiveSessions(g.sessionCount.Load())
+			g.metrics.SetActiveSessions(g.store.Count())
 		}
 	}
 
@@ -247,7 +250,7 @@ func (g *Gateway) CreateSession(ctx context.Context, req CreateSessionRequest) (
 		CreatedAt:   time.Now(),
 	}
 
-	g.sessions.Store(sessionID, &session{
+	g.store.Set(sessionID, &session{
 		Info:         info,
 		History:      NewStepHistory(),
 		lastTaskTime: time.Now(),
@@ -257,7 +260,7 @@ func (g *Gateway) CreateSession(ctx context.Context, req CreateSessionRequest) (
 	})
 
 	if g.metrics != nil {
-		g.metrics.SetActiveSessions(g.sessionCount.Add(1))
+		g.metrics.SetActiveSessions(g.store.IncrCount(1))
 		g.metrics.RecordSessionAllocationDuration(req.PoolRef, time.Since(allocStart))
 	}
 
@@ -266,11 +269,10 @@ func (g *Gateway) CreateSession(ctx context.Context, req CreateSessionRequest) (
 
 // GetSession returns session info.
 func (g *Gateway) GetSession(sessionID string) (*SessionInfo, error) {
-	val, ok := g.sessions.Load(sessionID)
+	s, ok := g.store.Get(sessionID)
 	if !ok {
 		return nil, fmt.Errorf("session %s not found", sessionID)
 	}
-	s := val.(*session)
 	s.mu.RLock()
 	info := s.Info
 	s.mu.RUnlock()
@@ -279,11 +281,10 @@ func (g *Gateway) GetSession(sessionID string) (*SessionInfo, error) {
 
 // DeleteSession deletes the pod directly and removes the session.
 func (g *Gateway) DeleteSession(ctx context.Context, sessionID string) error {
-	val, ok := g.sessions.Load(sessionID)
+	s, ok := g.store.Get(sessionID)
 	if !ok {
 		return fmt.Errorf("session %s not found", sessionID)
 	}
-	s := val.(*session)
 
 	s.mu.RLock()
 	podName := s.Info.PodName
@@ -297,10 +298,10 @@ func (g *Gateway) DeleteSession(ctx context.Context, sessionID string) error {
 		log.Printf("Warning: failed to delete pod %s for session %s: %v", podName, sessionID, err)
 	}
 
-	g.sessions.Delete(sessionID)
+	g.store.Delete(sessionID)
 
 	if g.metrics != nil {
-		g.metrics.SetActiveSessions(g.sessionCount.Add(-1))
+		g.metrics.SetActiveSessions(g.store.IncrCount(-1))
 	}
 
 	// Release from pool manager if managed
@@ -313,11 +314,10 @@ func (g *Gateway) DeleteSession(ctx context.Context, sessionID string) error {
 
 // ExecuteSteps executes steps directly via sidecar gRPC.
 func (g *Gateway) ExecuteSteps(ctx context.Context, sessionID string, req ExecuteRequest) (*ExecuteResponse, error) {
-	val, ok := g.sessions.Load(sessionID)
+	s, ok := g.store.Get(sessionID)
 	if !ok {
 		return nil, fmt.Errorf("session %s not found", sessionID)
 	}
-	s := val.(*session)
 
 	s.mu.RLock()
 	podIP := s.Info.PodIP
@@ -438,11 +438,10 @@ func (g *Gateway) Restore(ctx context.Context, sessionID string, snapshotID stri
 		return fmt.Errorf("invalid snapshot_id %q: must be a step index", snapshotID)
 	}
 
-	val, ok := g.sessions.Load(sessionID)
+	s, ok := g.store.Get(sessionID)
 	if !ok {
 		return fmt.Errorf("session %s not found", sessionID)
 	}
-	s := val.(*session)
 
 	// Get history records up to the target index
 	records := s.History.GetUpTo(targetIdx)
@@ -538,21 +537,19 @@ func (g *Gateway) Restore(ctx context.Context, sessionID string, snapshotID stri
 
 // GetHistory returns the execution history for a session.
 func (g *Gateway) GetHistory(sessionID string) ([]StepRecord, error) {
-	val, ok := g.sessions.Load(sessionID)
+	s, ok := g.store.Get(sessionID)
 	if !ok {
 		return nil, fmt.Errorf("session %s not found", sessionID)
 	}
-	s := val.(*session)
 	return s.History.GetAll(), nil
 }
 
 // ExportTrajectory exports the trajectory as JSONL.
 func (g *Gateway) ExportTrajectory(sessionID string) ([]byte, error) {
-	val, ok := g.sessions.Load(sessionID)
+	s, ok := g.store.Get(sessionID)
 	if !ok {
 		return nil, fmt.Errorf("session %s not found", sessionID)
 	}
-	s := val.(*session)
 	return s.History.ExportTrajectory(sessionID)
 }
 
@@ -770,11 +767,10 @@ const annotationPatchMinInterval = 30 * time.Second
 // touchLastTaskTime updates the in-memory lastTaskTime for session idle tracking
 // and asynchronously patches the pod's last-activity annotation (throttled to at most once per 30s).
 func (g *Gateway) touchLastTaskTime(sessionID string) {
-	val, ok := g.sessions.Load(sessionID)
+	s, ok := g.store.Get(sessionID)
 	if !ok {
 		return
 	}
-	s := val.(*session)
 	now := time.Now()
 
 	s.mu.Lock()
@@ -856,10 +852,7 @@ func (g *Gateway) sessionSweepLoop() {
 
 func (g *Gateway) sweepSessions() {
 	now := time.Now()
-	g.sessions.Range(func(key, value any) bool {
-		sessionID := key.(string)
-		s := value.(*session)
-
+	g.store.Range(func(sessionID string, s *session) bool {
 		s.mu.RLock()
 		lastTask := s.lastTaskTime
 		created := s.createdAt
@@ -938,9 +931,8 @@ func (g *Gateway) CreateManagedSession(ctx context.Context, req CreateManagedSes
 	}
 
 	// Mark the session as managed
-	val, ok := g.sessions.Load(info.ID)
+	s, ok := g.store.Get(info.ID)
 	if ok {
-		s := val.(*session)
 		s.mu.Lock()
 		s.managed = true
 		s.experimentID = req.ExperimentID
@@ -957,8 +949,7 @@ func (g *Gateway) CreateManagedSession(ctx context.Context, req CreateManagedSes
 // ListExperimentSessions returns all active sessions for an experiment.
 func (g *Gateway) ListExperimentSessions(experimentID string) []ManagedSessionInfo {
 	results := make([]ManagedSessionInfo, 0)
-	g.sessions.Range(func(_, value any) bool {
-		s := value.(*session)
+	g.store.Range(func(_ string, s *session) bool {
 		s.mu.RLock()
 		if s.managed && s.experimentID == experimentID {
 			results = append(results, ManagedSessionInfo{

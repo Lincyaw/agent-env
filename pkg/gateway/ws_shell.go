@@ -30,12 +30,11 @@ func handleShell(gw *Gateway) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
 
-		val, ok := gw.sessions.Load(id)
+		s, ok := gw.store.Get(id)
 		if !ok {
 			http.Error(w, "session not found", http.StatusNotFound)
 			return
 		}
-		s := val.(*session)
 		s.mu.RLock()
 		podIP := s.Info.PodIP
 		s.mu.RUnlock()
