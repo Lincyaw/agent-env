@@ -19,11 +19,6 @@ func (n *NoOpWriter) WriteSessionStep(_ context.Context, _ interfaces.SessionSte
 	return nil
 }
 
-// WriteSandboxEvent is a no-op
-func (n *NoOpWriter) WriteSandboxEvent(_ context.Context, _ interfaces.SandboxAuditRecord) error {
-	return nil
-}
-
 // Flush is a no-op
 func (n *NoOpWriter) Flush(_ context.Context) error {
 	return nil

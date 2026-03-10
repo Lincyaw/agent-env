@@ -18,9 +18,8 @@ type ClickHouseWriter struct {
 	batchSize     int
 	flushInterval time.Duration
 
-	stepRecords    []interfaces.SessionStepAuditRecord
-	sandboxRecords []interfaces.SandboxAuditRecord
-	mu             sync.Mutex
+	stepRecords []interfaces.SessionStepAuditRecord
+	mu          sync.Mutex
 
 	stopCh chan struct{}
 	doneCh chan struct{}
@@ -55,10 +54,6 @@ func NewClickHouseWriter(cfg ClickHouseConfig) (*ClickHouseWriter, error) {
 	if _, err := db.Exec(SessionStepAuditTableSQL); err != nil {
 		db.Close()
 		return nil, fmt.Errorf("failed to create session_step_audit table: %w", err)
-	}
-	if _, err := db.Exec(SandboxAuditTableSQL); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("failed to create sandbox_audit table: %w", err)
 	}
 
 	batchSize := cfg.BatchSize
@@ -98,29 +93,12 @@ func (w *ClickHouseWriter) WriteSessionStep(_ context.Context, record interfaces
 	return nil
 }
 
-// WriteSandboxEvent writes a sandbox lifecycle event audit record
-func (w *ClickHouseWriter) WriteSandboxEvent(_ context.Context, record interfaces.SandboxAuditRecord) error {
-	w.mu.Lock()
-	defer w.mu.Unlock()
-
-	w.sandboxRecords = append(w.sandboxRecords, record)
-
-	if len(w.sandboxRecords) >= w.batchSize {
-		return w.flushSandboxRecordsLocked()
-	}
-
-	return nil
-}
-
 // Flush flushes any buffered audit records
 func (w *ClickHouseWriter) Flush(_ context.Context) error {
 	w.mu.Lock()
 	defer w.mu.Unlock()
 
-	if err := w.flushStepRecordsLocked(); err != nil {
-		return err
-	}
-	return w.flushSandboxRecordsLocked()
+	return w.flushStepRecordsLocked()
 }
 
 // Close closes the audit writer
@@ -134,9 +112,6 @@ func (w *ClickHouseWriter) Close() error {
 	var errs []error
 	if err := w.flushStepRecordsLocked(); err != nil {
 		errs = append(errs, fmt.Errorf("flush step records: %w", err))
-	}
-	if err := w.flushSandboxRecordsLocked(); err != nil {
-		errs = append(errs, fmt.Errorf("flush sandbox records: %w", err))
 	}
 	if err := w.db.Close(); err != nil {
 		errs = append(errs, fmt.Errorf("close db: %w", err))
@@ -156,7 +131,6 @@ func (w *ClickHouseWriter) flushLoop() {
 		case <-ticker.C:
 			w.mu.Lock()
 			_ = w.flushStepRecordsLocked()
-			_ = w.flushSandboxRecordsLocked()
 			w.mu.Unlock()
 		}
 	}
@@ -199,43 +173,5 @@ func (w *ClickHouseWriter) flushStepRecordsLocked() error {
 	}
 
 	w.stepRecords = w.stepRecords[:0]
-	return nil
-}
-
-func (w *ClickHouseWriter) flushSandboxRecordsLocked() error {
-	if len(w.sandboxRecords) == 0 {
-		return nil
-	}
-
-	tx, err := w.db.Begin()
-	if err != nil {
-		return fmt.Errorf("failed to begin transaction: %w", err)
-	}
-
-	stmt, err := tx.Prepare(`
-		INSERT INTO sandbox_audit (
-			trace_id, namespace, name, pool_ref, phase, pod_name, event
-		) VALUES (?, ?, ?, ?, ?, ?, ?)
-	`)
-	if err != nil {
-		tx.Rollback()
-		return fmt.Errorf("failed to prepare statement: %w", err)
-	}
-	defer stmt.Close()
-
-	for _, r := range w.sandboxRecords {
-		if _, err := stmt.Exec(
-			r.TraceID, r.Namespace, r.Name, r.PoolRef, r.Phase, r.PodName, r.Event,
-		); err != nil {
-			tx.Rollback()
-			return fmt.Errorf("failed to insert sandbox audit record: %w", err)
-		}
-	}
-
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("failed to commit transaction: %w", err)
-	}
-
-	w.sandboxRecords = w.sandboxRecords[:0]
 	return nil
 }

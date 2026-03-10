@@ -8,8 +8,8 @@ ARL-Infra is a Kubernetes Operator for Agentic Reinforcement Learning environmen
 
 **Core Concepts:**
 - **WarmPool**: Maintains a pool of pre-started pods ready for immediate allocation. Supports ToolsSpec for pre-provisioning tools in executor containers.
-- **Sandbox**: An isolated workspace bound to a pod from a warm pool
-- **Gateway**: REST API service that manages sessions and forwards execution to sidecar gRPC. Replaces the old Task CRD approach.
+- **Session**: A Gateway-managed session bound to a pod allocated from a warm pool. Session state is held in-memory with pod annotations for crash recovery.
+- **Gateway**: REST API service that manages sessions and forwards execution to sidecar gRPC.
 - **Managed Sessions**: High-level API where clients specify only `image` + `experimentId`; the server automatically manages pool lifecycle (creation, scaling, GC).
 - **Sidecar**: gRPC service running in each pod, handling file operations and command execution
 - **Executor Agent**: Lightweight agent running inside the executor container, receiving commands from sidecar via Unix socket
@@ -118,17 +118,16 @@ make arch-check
 
 ```
 api/v1alpha1/              # CRD type definitions
-├── warmpool_types.go      # WarmPool CRD (includes ToolsSpec, ImageLocalitySpec)
-└── sandbox_types.go       # Sandbox CRD (with phase validation)
+└── warmpool_types.go      # WarmPool CRD (includes ToolsSpec, ImageLocalitySpec)
 
 pkg/
 ├── controller/            # Kubernetes controllers
-│   ├── warmpool_controller.go   # Maintains warm pod pools
-│   └── sandbox_controller.go    # Allocates pods from pools
+│   └── warmpool_controller.go   # Maintains warm pod pools
 ├── gateway/               # Gateway REST API server
 │   ├── gateway.go         # Session/execution logic
 │   ├── router.go          # HTTP route handlers
 │   ├── types.go           # Request/response types
+│   ├── pod_allocator.go   # Informer-backed pod allocation from warm pools
 │   ├── pool_manager.go    # Managed pool auto-scaling (PoolManager)
 │   ├── history.go         # Step history tracking
 │   └── ws_shell.go        # WebSocket shell handler
@@ -160,17 +159,17 @@ charts/arl-operator/       # Helm chart for deployment
 
 ### Resource Lifecycle
 
-**WarmPool -> Sandbox -> Gateway (execution)**
+**WarmPool -> PodAllocator -> Gateway (session + execution)**
 
 1. **WarmPool** creates and maintains N ready pods with sidecar and executor-agent containers
-2. **Sandbox** allocates a pod from the pool (phase: Pending -> Bound -> Ready -> Failed)
-3. **Gateway** receives execution requests via REST API and forwards them to the sidecar gRPC service. No Task CRD is created; execution is synchronous.
+2. **PodAllocator** (in-process, Informer-backed) allocates an idle pod from the pool via label patch
+3. **Gateway** registers the session in-memory and forwards execution requests to sidecar gRPC
 
 **Managed Sessions** provide an alternative, simplified flow:
 
 1. Client sends `POST /v1/managed/sessions` with `image` + `experimentId`
 2. **PoolManager** auto-creates a WarmPool if none exists for the image, or scales up if no idle pods
-3. A Sandbox is allocated from the managed pool (same as above)
+3. A pod is allocated from the managed pool (same as above)
 4. Client uses the session normally (execute, restore, shell, etc.)
 5. On session deletion, PoolManager decrements demand; background sweep handles scale-down and pool GC
 
@@ -253,17 +252,14 @@ The `ImageScheduler` provides image-locality-aware pod scheduling using Rendezvo
 
 **WarmPoolController**: Watches WarmPool and Pod resources, maintains desired replica count of warm pods. Integrates with ImageScheduler for node affinity. Includes rate limiting and metrics for pod lifecycle events (startup latency, scale duration, image pull errors).
 
-**SandboxController**: Watches Sandbox, WarmPool, and Pod resources, allocates pods from warm pools, tracks sandbox lifecycle. Records end-to-end sandbox allocation latency (creation → Ready).
-
-**Performance Tuning**: Both controllers support rate limiting and concurrency control via environment variables:
+**Performance Tuning**: The controller supports rate limiting and concurrency control via environment variables:
 - `WARMPOOL_MAX_CONCURRENT`: Max concurrent WarmPool reconciliations (default: 20)
-- `SANDBOX_MAX_CONCURRENT`: Max concurrent Sandbox reconciliations (default: 10)
 - `WARMPOOL_RATE_QPS`: Rate limit QPS for WarmPool controller (default: 50)
 - `WARMPOOL_RATE_BURST`: Rate limit burst for WarmPool controller (default: 100)
 - `K8S_CLIENT_QPS`: Kubernetes client QPS (default: 100)
 - `K8S_CLIENT_BURST`: Kubernetes client burst (default: 200)
 
-Note: Execution is handled by the Gateway, not by a controller. There is no TaskController or TTLController.
+Note: Execution and session lifecycle are handled by the Gateway, not by a controller.
 
 ### Managed Pool Auto-Scaling (PoolManager)
 
@@ -515,12 +511,11 @@ See `examples/frontend/interactive_shell.html` for complete example.
 - `skaffold.yaml` - Deployment profiles (k8s, prod, dev, with-samples)
 - `proto/agent.proto` - Sidecar gRPC interface definition
 - `api/v1alpha1/warmpool_types.go` - WarmPool CRD schema (ToolsSpec, ImageLocalitySpec)
-- `api/v1alpha1/sandbox_types.go` - Sandbox CRD schema
 - `pkg/controller/warmpool_controller.go` - WarmPool reconciliation logic
-- `pkg/controller/sandbox_controller.go` - Sandbox reconciliation logic
 - `pkg/gateway/gateway.go` - Gateway session/execution logic
 - `pkg/gateway/router.go` - Gateway HTTP route handlers
 - `pkg/gateway/types.go` - Gateway request/response types
+- `pkg/gateway/pod_allocator.go` - Informer-backed pod allocation
 - `pkg/gateway/pool_manager.go` - Managed pool auto-scaling (PoolManager)
 - `cmd/gateway/main.go` - Gateway entry point
 - `pkg/execagent/agent.go` - Executor agent (Unix socket server)

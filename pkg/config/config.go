@@ -17,9 +17,8 @@ type Config struct {
 	HTTPClientTimeout time.Duration
 
 	// Pool configuration
-	DefaultPoolReplicas  int32
-	DefaultRequeueDelay  time.Duration
-	SandboxCheckInterval time.Duration
+	DefaultPoolReplicas int32
+	DefaultRequeueDelay time.Duration
 
 	// Operator configuration
 	MetricsAddr          string
@@ -45,10 +44,6 @@ type Config struct {
 	TrajectoryEnabled bool
 	TrajectoryDebug   bool
 
-	// Sandbox lifecycle configuration
-	SandboxIdleTimeoutSeconds int32
-	SandboxMaxLifetimeSeconds int32
-
 	// Executor agent configuration
 	ExecutorAgentImage string
 
@@ -57,7 +52,6 @@ type Config struct {
 
 	// Control-plane tuning
 	WarmPoolMaxConcurrent  int
-	SandboxMaxConcurrent   int
 	K8sClientQPS           float32
 	K8sClientBurst         int
 	WarmPoolBaseDelayMs    int
@@ -103,42 +97,38 @@ type Config struct {
 // DefaultConfig returns the default configuration
 func DefaultConfig() *Config {
 	return &Config{
-		SidecarImage:              "arl-sidecar:latest",
-		SidecarHTTPPort:           8080,
-		SidecarGRPCPort:           9090,
-		WorkspaceDir:              "/workspace",
-		HTTPClientTimeout:         30 * time.Second,
-		DefaultPoolReplicas:       3,
-		DefaultRequeueDelay:       10 * time.Second,
-		SandboxCheckInterval:      2 * time.Second,
-		MetricsAddr:               ":8080",
-		ProbeAddr:                 ":8081",
-		EnableLeaderElection:      false,
-		EnableWebhooks:            false,
-		EnableMetrics:             true,
-		EnableMiddleware:          true,
-		EnableValidation:          true,
-		ClickHouseEnabled:         false,
-		ClickHouseAddr:            "localhost:9000",
-		ClickHouseDatabase:        "arl",
-		ClickHouseUsername:        "default",
-		ClickHousePassword:        "",
-		ClickHouseBatchSize:       100,
-		ClickHouseFlushInterval:   10 * time.Second,
-		TrajectoryEnabled:         false,
-		TrajectoryDebug:           false,
-		SandboxIdleTimeoutSeconds: 600,
-		SandboxMaxLifetimeSeconds: 3600,
-		ExecutorAgentImage:        "arl-executor-agent:latest",
-		GatewayPort:               8080,
-		WarmPoolMaxConcurrent:     50,
-		SandboxMaxConcurrent:      20,
-		K8sClientQPS:              10000,
-		K8sClientBurst:            20000,
-		WarmPoolBaseDelayMs:       200,
-		WarmPoolMaxDelayMs:        15000,
-		WarmPoolRateLimitQPS:      200,
-		WarmPoolRateLimitBurst:    500,
+		SidecarImage:            "arl-sidecar:latest",
+		SidecarHTTPPort:         8080,
+		SidecarGRPCPort:         9090,
+		WorkspaceDir:            "/workspace",
+		HTTPClientTimeout:       30 * time.Second,
+		DefaultPoolReplicas:     3,
+		DefaultRequeueDelay:     10 * time.Second,
+		MetricsAddr:             ":8080",
+		ProbeAddr:               ":8081",
+		EnableLeaderElection:    false,
+		EnableWebhooks:          false,
+		EnableMetrics:           true,
+		EnableMiddleware:        true,
+		EnableValidation:        true,
+		ClickHouseEnabled:       false,
+		ClickHouseAddr:          "localhost:9000",
+		ClickHouseDatabase:      "arl",
+		ClickHouseUsername:      "default",
+		ClickHousePassword:      "",
+		ClickHouseBatchSize:     100,
+		ClickHouseFlushInterval: 10 * time.Second,
+		TrajectoryEnabled:       false,
+		TrajectoryDebug:         false,
+		ExecutorAgentImage:      "arl-executor-agent:latest",
+		GatewayPort:             8080,
+		WarmPoolMaxConcurrent:   50,
+		K8sClientQPS:            10000,
+		K8sClientBurst:          20000,
+		WarmPoolBaseDelayMs:     200,
+		WarmPoolMaxDelayMs:      15000,
+		WarmPoolRateLimitQPS:    200,
+		WarmPoolRateLimitBurst:  500,
 
 		ImageLocalitySpreadFactor: 0.25,
 		ImageLocalityWeight:       100,
@@ -259,19 +249,6 @@ func LoadFromEnv() *Config {
 		cfg.TrajectoryDebug = true
 	}
 
-	// Sandbox lifecycle configuration
-	if timeout := os.Getenv("SANDBOX_IDLE_TIMEOUT_SECONDS"); timeout != "" {
-		if t, err := strconv.ParseInt(timeout, 10, 32); err == nil {
-			cfg.SandboxIdleTimeoutSeconds = int32(t)
-		}
-	}
-
-	if lifetime := os.Getenv("SANDBOX_MAX_LIFETIME_SECONDS"); lifetime != "" {
-		if l, err := strconv.ParseInt(lifetime, 10, 32); err == nil {
-			cfg.SandboxMaxLifetimeSeconds = int32(l)
-		}
-	}
-
 	// Executor agent configuration
 	if image := os.Getenv("EXECUTOR_AGENT_IMAGE"); image != "" {
 		cfg.ExecutorAgentImage = image
@@ -287,12 +264,6 @@ func LoadFromEnv() *Config {
 	if v := os.Getenv("WARMPOOL_MAX_CONCURRENT"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
 			cfg.WarmPoolMaxConcurrent = n
-		}
-	}
-
-	if v := os.Getenv("SANDBOX_MAX_CONCURRENT"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			cfg.SandboxMaxConcurrent = n
 		}
 	}
 
@@ -434,10 +405,6 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("default requeue delay must be positive: %v", c.DefaultRequeueDelay)
 	}
 
-	if c.SandboxCheckInterval <= 0 {
-		return fmt.Errorf("sandbox check interval must be positive: %v", c.SandboxCheckInterval)
-	}
-
 	// Validate ClickHouse configuration if enabled
 	if c.ClickHouseEnabled {
 		if c.ClickHouseAddr == "" {
@@ -461,15 +428,6 @@ func (c *Config) Validate() error {
 		}
 	}
 
-	// Validate sandbox lifecycle configuration
-	if c.SandboxIdleTimeoutSeconds < 0 {
-		return fmt.Errorf("sandbox idle timeout cannot be negative: %d", c.SandboxIdleTimeoutSeconds)
-	}
-
-	if c.SandboxMaxLifetimeSeconds < 0 {
-		return fmt.Errorf("sandbox max lifetime cannot be negative: %d", c.SandboxMaxLifetimeSeconds)
-	}
-
 	// Validate gateway configuration
 	if c.GatewayPort < 1 || c.GatewayPort > 65535 {
 		return fmt.Errorf("invalid gateway port: %d (must be 1-65535)", c.GatewayPort)
@@ -477,10 +435,6 @@ func (c *Config) Validate() error {
 
 	if c.WarmPoolMaxConcurrent < 1 {
 		return fmt.Errorf("warm pool max concurrent must be >= 1: %d", c.WarmPoolMaxConcurrent)
-	}
-
-	if c.SandboxMaxConcurrent < 1 {
-		return fmt.Errorf("sandbox max concurrent must be >= 1: %d", c.SandboxMaxConcurrent)
 	}
 
 	if c.K8sClientQPS <= 0 {

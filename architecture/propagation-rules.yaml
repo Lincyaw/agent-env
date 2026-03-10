@@ -34,34 +34,6 @@ rules:
       - make check
       - kubectl apply --dry-run=server -f config/crd/
 
-  - name: sandbox-crd-change
-    trigger:
-      component: sandbox-crd
-      patterns:
-        - api/v1alpha1/sandbox_types.go
-    impacts:
-      - config/crd/arl.infra.io_sandboxes.yaml
-      - api/v1alpha1/zz_generated.deepcopy.go
-      - pkg/controller/sandbox_controller.go
-      - pkg/webhook/sandbox_validator.go
-    actions:
-      - description: Regenerate deepcopy methods
-        command: make deepcopy
-      - description: Regenerate CRD manifests
-        command: make manifests
-      - description: Review controller for new field handling
-        manual: true
-        files:
-          - pkg/controller/sandbox_controller.go
-      - description: Review webhook for new validation rules
-        manual: true
-        files:
-          - pkg/webhook/sandbox_validator.go
-    validation:
-      - make vet
-      - make check
-      - kubectl apply --dry-run=server -f config/crd/
-
   # ============================================================================
   # Proto Changes
   # ============================================================================

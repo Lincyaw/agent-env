@@ -9,7 +9,6 @@ rules:
       - arl.infra.io
     resources:
       - warmpools
-      - sandboxes
     verbs:
       - create
       - delete
@@ -22,7 +21,6 @@ rules:
       - arl.infra.io
     resources:
       - warmpools/status
-      - sandboxes/status
     verbs:
       - get
       - patch
@@ -31,7 +29,6 @@ rules:
       - arl.infra.io
     resources:
       - warmpools/finalizers
-      - sandboxes/finalizers
     verbs:
       - update
   - apiGroups:

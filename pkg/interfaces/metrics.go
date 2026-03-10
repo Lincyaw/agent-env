@@ -14,6 +14,9 @@ type MetricsCollector interface {
 	// SetPendingPods sets the gauge of pods created but not yet ready.
 	SetPendingPods(poolName string, count int32)
 
+	// DeletePoolMetrics removes all metric series for a deleted pool.
+	DeletePoolMetrics(poolName string)
+
 	// RecordPodScheduleDuration records pod creation → PodScheduled condition.
 	RecordPodScheduleDuration(poolName string, duration time.Duration)
 
@@ -41,19 +44,11 @@ type MetricsCollector interface {
 	// (scale_down, sandbox_cleanup).
 	IncrementPodDelete(poolName, reason string)
 
-	// --- Sandbox lifecycle ---
+	// --- Session allocation ---
 
-	// RecordSandboxE2EReady records the end-to-end time from sandbox creation
-	// until the sandbox reaches Ready phase (user-visible allocation latency).
-	RecordSandboxE2EReady(poolName string, duration time.Duration)
-
-	// RecordSandboxIdleDuration records how long a sandbox stayed idle before
-	// being deleted (idle timeout or explicit delete).
-	RecordSandboxIdleDuration(poolName, namespace string, duration time.Duration)
-
-	// IncrementNoIdlePods increments counter when a sandbox cannot find an
-	// idle pod and must requeue (signals pool capacity pressure).
-	IncrementNoIdlePods(poolName string)
+	// RecordSessionAllocationDuration records the end-to-end time from session
+	// creation request to a pod being allocated and ready (user-visible latency).
+	RecordSessionAllocationDuration(poolName string, duration time.Duration)
 
 	// --- Gateway execution ---
 
@@ -118,6 +113,7 @@ type NoOpMetricsCollector struct{}
 
 func (n *NoOpMetricsCollector) RecordPoolUtilization(poolName string, ready, allocated int32) {}
 func (n *NoOpMetricsCollector) SetPendingPods(poolName string, count int32)                   {}
+func (n *NoOpMetricsCollector) DeletePoolMetrics(poolName string)                             {}
 func (n *NoOpMetricsCollector) RecordPodScheduleDuration(poolName string, duration time.Duration) {
 }
 func (n *NoOpMetricsCollector) RecordFirstPodReady(poolName string, duration time.Duration) {}
@@ -128,12 +124,9 @@ func (n *NoOpMetricsCollector) RecordContainerStartDuration(poolName, containerN
 }
 func (n *NoOpMetricsCollector) IncrementImagePullError(poolName, reason string) {}
 func (n *NoOpMetricsCollector) IncrementPodDelete(poolName, reason string)      {}
-func (n *NoOpMetricsCollector) RecordSandboxE2EReady(poolName string, duration time.Duration) {
+func (n *NoOpMetricsCollector) RecordSessionAllocationDuration(poolName string, duration time.Duration) {
 }
-func (n *NoOpMetricsCollector) RecordSandboxIdleDuration(poolName, namespace string, duration time.Duration) {
-}
-func (n *NoOpMetricsCollector) IncrementNoIdlePods(poolName string) {}
-func (n *NoOpMetricsCollector) SetActiveSessions(count int64)       {}
+func (n *NoOpMetricsCollector) SetActiveSessions(count int64) {}
 func (n *NoOpMetricsCollector) RecordGatewayStepDuration(stepType string, duration time.Duration) {
 }
 func (n *NoOpMetricsCollector) IncrementGatewayStepResult(stepType, result string) {}

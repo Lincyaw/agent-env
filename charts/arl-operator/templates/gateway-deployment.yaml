@@ -52,8 +52,6 @@ spec:
               value: "{{ .Values.gateway.maxLifetime }}"
             - name: GATEWAY_SWEEP_INTERVAL
               value: "{{ .Values.gateway.sweepInterval }}"
-            - name: SANDBOX_PROJECTION
-              value: "{{ .Values.gateway.sandboxProjection }}"
             {{- if .Values.clickhouse.enabled }}
             - name: CLICKHOUSE_ENABLED
               value: "true"

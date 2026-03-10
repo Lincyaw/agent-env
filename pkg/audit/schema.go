@@ -22,20 +22,3 @@ PARTITION BY toYYYYMMDD(created_at)
 ORDER BY (created_at, session_id, step_index)
 TTL toDateTime(created_at) + INTERVAL 30 DAY
 `
-
-// SandboxAuditTableSQL is the SQL to create the sandbox_audit table
-const SandboxAuditTableSQL = `
-CREATE TABLE IF NOT EXISTS sandbox_audit (
-    trace_id String,
-    namespace String,
-    name String,
-    pool_ref String,
-    phase String,
-    pod_name String,
-    event String,
-    timestamp DateTime64(3) DEFAULT now64(3)
-) ENGINE = MergeTree()
-PARTITION BY toYYYYMMDD(timestamp)
-ORDER BY (timestamp, namespace, name)
-TTL toDateTime(timestamp) + INTERVAL 30 DAY
-`

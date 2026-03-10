@@ -132,7 +132,7 @@ func main() {
 	// Initialize image-locality scheduler
 	imageScheduler := scheduler.NewImageScheduler(mgr.GetClient())
 
-	// Register controllers (Task, TTL, Sandbox removed — execution and sandbox lifecycle via Gateway)
+	// Register controllers
 	controllers := []interfaces.ControllerRegistrar{
 		&controller.WarmPoolReconciler{
 			Client:         mgr.GetClient(),

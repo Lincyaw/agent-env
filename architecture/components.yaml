@@ -25,30 +25,6 @@ components:
         - AllocatedReplicas count
         - Conditions
 
-  - name: sandbox-crd
-    type: crd
-    paths:
-      - api/v1alpha1/sandbox_types.go
-      - config/crd/arl.infra.io_sandboxes.yaml
-    responsibilities:
-      - Define Sandbox resource schema
-      - Agent isolated workspace bound to a pod
-      - Track pod allocation and lifecycle
-    interfaces:
-      inputs:
-        - PoolRef (reference to WarmPool)
-        - KeepAlive flag
-        - Resource requirements
-        - IdleTimeoutSeconds
-        - MaxLifetimeSeconds
-      outputs:
-        - Phase (Pending/Bound/Ready/Failed)
-        - PodName
-        - PodIP
-        - WorkDir
-        - LastTaskTime
-        - Conditions
-
   # ============================================================================
   # Controllers
   # ============================================================================
@@ -69,22 +45,6 @@ components:
       manages:
         - Pod
 
-  - name: sandbox-controller
-    type: controller
-    paths:
-      - pkg/controller/sandbox_controller.go
-    responsibilities:
-      - Reconcile Sandbox resources
-      - Allocate pods from warm pool
-      - Track sandbox lifecycle phases
-    interfaces:
-      watches:
-        - Sandbox
-        - WarmPool
-        - Pod
-      manages:
-        - Sandbox status
-
   # ============================================================================
   # Gateway
   # ============================================================================
@@ -95,11 +55,12 @@ components:
       - pkg/gateway/gateway.go
       - pkg/gateway/router.go
       - pkg/gateway/types.go
+      - pkg/gateway/pod_allocator.go
       - pkg/gateway/history.go
       - pkg/gateway/ws_shell.go
     responsibilities:
       - Provide REST API for session and execution management
-      - Create/delete sessions (sandbox lifecycle)
+      - Create/delete sessions (allocate pods from warm pools)
       - Execute steps via direct gRPC to sidecar
       - Manage execution history and trajectory export
       - WebSocket proxy for interactive shell
@@ -108,7 +69,7 @@ components:
         - REST API (POST/GET/DELETE /v1/sessions, /v1/pools)
         - WebSocket /v1/sessions/{id}/shell
       calls:
-        - Kubernetes API (Sandbox/WarmPool CRDs)
+        - Kubernetes API (WarmPool CRDs, Pods)
         - Sidecar gRPC (AgentService)
     config:
       default_port: 8080
@@ -116,14 +77,6 @@ components:
   # ============================================================================
   # Webhooks
   # ============================================================================
-  - name: sandbox-webhook
-    type: webhook
-    paths:
-      - pkg/webhook/sandbox_validator.go
-    responsibilities:
-      - Validate Sandbox resources on create/update
-      - Ensure PoolRef exists
-
   - name: warmpool-webhook
     type: webhook
     paths:
@@ -141,7 +94,7 @@ components:
       - cmd/operator/main.go
     responsibilities:
       - Bootstrap Kubernetes controller manager
-      - Register WarmPool and Sandbox controllers
+      - Register WarmPool controller
       - Register webhooks
       - Serve health and metrics endpoints
       - Initialize image-locality scheduler

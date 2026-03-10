@@ -103,6 +103,9 @@ func (r *WarmPoolReconciler) reconcile(ctx context.Context, req ctrl.Request) (c
 	pool := &arlv1alpha1.WarmPool{}
 	if err := r.Get(ctx, req.NamespacedName, pool); err != nil {
 		if errors.IsNotFound(err) {
+			if r.Metrics != nil {
+				r.Metrics.DeletePoolMetrics(req.Name)
+			}
 			return ctrl.Result{}, nil
 		}
 		return ctrl.Result{}, err
@@ -942,4 +945,36 @@ func (r *WarmPoolReconciler) SetupWithManager(mgr ctrl.Manager) error {
 // Name returns the controller name for logging
 func (r *WarmPoolReconciler) Name() string {
 	return "WarmPool"
+}
+
+// findCondition finds a condition by type.
+func findCondition(conditions []metav1.Condition, condType string) *metav1.Condition {
+	for i := range conditions {
+		if conditions[i].Type == condType {
+			return &conditions[i]
+		}
+	}
+	return nil
+}
+
+// setCondition sets or updates a condition.
+func setCondition(conditions *[]metav1.Condition, condType string, status metav1.ConditionStatus, reason, message string) {
+	now := metav1.Now()
+	cond := findCondition(*conditions, condType)
+	if cond == nil {
+		*conditions = append(*conditions, metav1.Condition{
+			Type:               condType,
+			Status:             status,
+			Reason:             reason,
+			Message:            message,
+			LastTransitionTime: now,
+		})
+	} else {
+		if cond.Status != status {
+			cond.Status = status
+			cond.LastTransitionTime = now
+		}
+		cond.Reason = reason
+		cond.Message = message
+	}
 }

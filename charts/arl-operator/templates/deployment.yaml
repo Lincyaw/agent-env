@@ -61,10 +61,6 @@ spec:
               value: "{{ .Values.operator.enableMetrics }}"
             - name: ENABLE_MIDDLEWARE
               value: "{{ .Values.operator.enableMiddleware }}"
-            - name: SANDBOX_IDLE_TIMEOUT_SECONDS
-              value: "{{ .Values.sandbox.idleTimeoutSeconds }}"
-            - name: SANDBOX_MAX_LIFETIME_SECONDS
-              value: "{{ .Values.sandbox.maxLifetimeSeconds }}"
             - name: GATEWAY_PORT
               value: "{{ .Values.gateway.port }}"
             {{- if .Values.clickhouse.enabled }}

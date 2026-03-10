@@ -49,7 +49,6 @@ gateway:
   idleTimeout: "600s"       # Max idle time before session is reaped
   maxLifetime: "3600s"      # Max total session lifetime
   sweepInterval: "30s"      # How often to check for expired sessions
-  sandboxProjection: true   # Create Sandbox CRDs for kubectl visibility
 
 # Managed pool auto-scaling configuration (for POST /v1/managed/sessions)
 managedPool:
@@ -105,12 +104,6 @@ operator:
 pool:
   defaultReplicas: 3
   defaultRequeueDelay: "10s"
-  sandboxCheckInterval: "2s"
-
-# Sandbox lifecycle configuration
-sandbox:
-  idleTimeoutSeconds: 3600
-  maxLifetimeSeconds: 0
 
 # ClickHouse configuration (for audit logging and trajectory)
 clickhouse:

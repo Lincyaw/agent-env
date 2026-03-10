@@ -15,14 +15,6 @@
 
 dependencies:
   # ============================================================================
-  # CRD Dependencies
-  # ============================================================================
-  - from: sandbox-crd
-    to: warmpool-crd
-    type: references
-    description: SandboxSpec.PoolRef references WarmPool by name
-
-  # ============================================================================
   # Controller Dependencies
   # ============================================================================
   # WarmPool Controller
@@ -41,35 +33,9 @@ dependencies:
     type: import
     description: Uses image-locality scheduler for pod placement
 
-  # Sandbox Controller
-  - from: sandbox-controller
-    to: sandbox-crd
-    type: import
-    description: Uses Sandbox types for reconciliation
-
-  - from: sandbox-controller
-    to: sandbox-crd
-    type: watch
-    description: Watches Sandbox resources for changes
-
-  - from: sandbox-controller
-    to: warmpool-crd
-    type: import
-    description: Reads WarmPool to allocate pods
-
-  - from: sandbox-controller
-    to: warmpool-crd
-    type: watch
-    description: Watches WarmPool for available pods
-
   # ============================================================================
   # Gateway Dependencies
   # ============================================================================
-  - from: gateway
-    to: sandbox-crd
-    type: import
-    description: Creates/deletes Sandbox CRDs for session management
-
   - from: gateway
     to: warmpool-crd
     type: import
@@ -88,16 +54,6 @@ dependencies:
   # ============================================================================
   # Webhook Dependencies
   # ============================================================================
-  - from: sandbox-webhook
-    to: sandbox-crd
-    type: import
-    description: Validates Sandbox resources
-
-  - from: sandbox-webhook
-    to: warmpool-crd
-    type: import
-    description: Validates PoolRef exists
-
   - from: warmpool-webhook
     to: warmpool-crd
     type: import
@@ -110,16 +66,6 @@ dependencies:
     to: warmpool-controller
     type: import
     description: Registers WarmPool controller
-
-  - from: operator
-    to: sandbox-controller
-    type: import
-    description: Registers Sandbox controller
-
-  - from: operator
-    to: sandbox-webhook
-    type: import
-    description: Registers Sandbox webhook
 
   - from: operator
     to: warmpool-webhook
@@ -167,11 +113,6 @@ dependencies:
 
   - from: crd-manifests
     to: warmpool-crd
-    type: generates
-    description: Generated from Go types via controller-gen
-
-  - from: crd-manifests
-    to: sandbox-crd
     type: generates
     description: Generated from Go types via controller-gen
 

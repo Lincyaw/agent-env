@@ -21,10 +21,8 @@ type PrometheusCollector struct {
 	imagePullErrors        *prometheus.CounterVec
 	podDeleteTotal         *prometheus.CounterVec
 
-	// Sandbox lifecycle
-	sandboxE2EReady     *prometheus.HistogramVec
-	sandboxIdleDuration *prometheus.HistogramVec
-	noIdlePodsTotal     *prometheus.CounterVec
+	// Session allocation
+	sessionAllocationDuration *prometheus.HistogramVec
 
 	// Gateway execution
 	activeSessions      prometheus.Gauge
@@ -133,30 +131,13 @@ func NewPrometheusCollector() interfaces.MetricsCollector {
 			[]string{"pool", "reason"},
 		),
 
-		// --- Sandbox lifecycle ---
+		// --- Session allocation ---
 
-		sandboxE2EReady: prometheus.NewHistogramVec(
+		sessionAllocationDuration: prometheus.NewHistogramVec(
 			prometheus.HistogramOpts{
-				Name:    "arl_sandbox_e2e_ready_seconds",
-				Help:    "End-to-end time from sandbox creation to Ready phase (user-visible latency).",
+				Name:    "arl_session_allocation_seconds",
+				Help:    "End-to-end time from session creation request to pod allocated (user-visible latency).",
 				Buckets: []float64{0.5, 1, 2, 5, 10, 15, 20, 30, 60},
-			},
-			[]string{"pool"},
-		),
-
-		sandboxIdleDuration: prometheus.NewHistogramVec(
-			prometheus.HistogramOpts{
-				Name:    "arl_sandbox_idle_seconds",
-				Help:    "How long a sandbox was idle before deletion, by pool and namespace.",
-				Buckets: []float64{10, 60, 300, 600, 1800, 3600, 7200},
-			},
-			[]string{"pool", "namespace"},
-		),
-
-		noIdlePodsTotal: prometheus.NewCounterVec(
-			prometheus.CounterOpts{
-				Name: "arl_sandbox_no_idle_pods_total",
-				Help: "Times a sandbox could not find an idle pod and had to requeue (pool capacity pressure).",
 			},
 			[]string{"pool"},
 		),
@@ -307,9 +288,7 @@ func NewPrometheusCollector() interfaces.MetricsCollector {
 		c.containerStartDuration,
 		c.imagePullErrors,
 		c.podDeleteTotal,
-		c.sandboxE2EReady,
-		c.sandboxIdleDuration,
-		c.noIdlePodsTotal,
+		c.sessionAllocationDuration,
 		c.activeSessions,
 		c.gatewayStepDuration,
 		c.gatewayStepResult,
@@ -340,6 +319,12 @@ func (c *PrometheusCollector) SetPendingPods(poolName string, count int32) {
 	c.pendingPods.WithLabelValues(poolName).Set(float64(count))
 }
 
+func (c *PrometheusCollector) DeletePoolMetrics(poolName string) {
+	c.poolUtilization.DeleteLabelValues(poolName, "ready")
+	c.poolUtilization.DeleteLabelValues(poolName, "allocated")
+	c.pendingPods.DeleteLabelValues(poolName)
+}
+
 func (c *PrometheusCollector) RecordPodScheduleDuration(poolName string, duration time.Duration) {
 	c.podScheduleDuration.WithLabelValues(poolName).Observe(duration.Seconds())
 }
@@ -368,16 +353,8 @@ func (c *PrometheusCollector) IncrementPodDelete(poolName, reason string) {
 	c.podDeleteTotal.WithLabelValues(poolName, reason).Inc()
 }
 
-func (c *PrometheusCollector) RecordSandboxE2EReady(poolName string, duration time.Duration) {
-	c.sandboxE2EReady.WithLabelValues(poolName).Observe(duration.Seconds())
-}
-
-func (c *PrometheusCollector) RecordSandboxIdleDuration(poolName, namespace string, duration time.Duration) {
-	c.sandboxIdleDuration.WithLabelValues(poolName, namespace).Observe(duration.Seconds())
-}
-
-func (c *PrometheusCollector) IncrementNoIdlePods(poolName string) {
-	c.noIdlePodsTotal.WithLabelValues(poolName).Inc()
+func (c *PrometheusCollector) RecordSessionAllocationDuration(poolName string, duration time.Duration) {
+	c.sessionAllocationDuration.WithLabelValues(poolName).Observe(duration.Seconds())
 }
 
 func (c *PrometheusCollector) SetActiveSessions(count int64) {

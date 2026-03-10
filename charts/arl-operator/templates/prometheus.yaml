@@ -81,15 +81,6 @@ data:
               summary: "Pod allocation timeout rate > 10% for pool {{ "{{" }} $labels.pool {{ "}}" }}"
               description: "More than 10% of pod allocation attempts are timing out."
 
-          - alert: NoIdlePods
-            expr: rate(arl_sandbox_no_idle_pods_total[5m]) > 0.5
-            for: 3m
-            labels:
-              severity: warning
-            annotations:
-              summary: "Pool {{ "{{" }} $labels.pool {{ "}}" }} has no idle pods"
-              description: "No idle pods rate > 0.5/s, sessions may be waiting."
-
           - alert: StepErrorRateHigh
             expr: |
               rate(arl_gateway_step_result_total{result="error"}[5m])

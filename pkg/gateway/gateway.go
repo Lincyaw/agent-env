@@ -258,7 +258,7 @@ func (g *Gateway) CreateSession(ctx context.Context, req CreateSessionRequest) (
 
 	if g.metrics != nil {
 		g.metrics.SetActiveSessions(g.sessionCount.Add(1))
-		g.metrics.RecordSandboxE2EReady(req.PoolRef, time.Since(allocStart))
+		g.metrics.RecordSessionAllocationDuration(req.PoolRef, time.Since(allocStart))
 	}
 
 	return &info, nil

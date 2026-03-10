@@ -7,7 +7,6 @@ appVersion: "0.2.0"
 keywords:
   - kubernetes
   - operator
-  - sandbox
   - agent
   - warmpool
 home: https://github.com/Lincyaw/agent-env
