@@ -50,6 +50,7 @@ After modifying components or interfaces:
 2. Run required actions (`make manifests`, `make proto-go`, etc.)
 3. Update `architecture/{components,dependencies,propagation-rules}.yaml` if needed
 4. Validate with `make arch-check`
+5. Update `docs/` if the change affects user-facing behavior, APIs, CRDs, or deployment config
 
 ## Docs
 
