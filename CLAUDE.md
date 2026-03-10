@@ -216,42 +216,11 @@ The Gateway (port 8080) provides a REST API for session and execution management
 
 ### SSH Gateway
 
-The Gateway embeds an SSH server (Go `crypto/ssh`) that bridges native SSH sessions to existing sidecar InteractiveShell gRPC streams. This allows users to connect with standard SSH clients instead of WebSocket.
-
-**Usage:**
-```bash
-# Enable SSH gateway
-SSH_ENABLED=true SSH_PORT=2222 ./gateway
-
-# Connect to a session (username = sessionID)
-ssh -p 2222 <session-id>@<gateway-host>
-```
-
-**How it works:**
-1. SSH username is the sessionID — the server validates the session exists
-2. On "shell" channel request, bridges `ssh.Channel` ↔ sidecar `InteractiveShell` gRPC stream
-3. Supports PTY resize (`window-change`), signals (`SIGINT`, `SIGTERM`), and `exit-status` reporting
-4. Auto-generates Ed25519 host key on first run, saves to configurable path
-
-**Configuration** via environment variables:
-- `SSH_ENABLED`: Enable SSH server (default: false)
-- `SSH_PORT`: SSH listen port (default: 2222)
-- `SSH_HOST_KEY_PATH`: Path to Ed25519 host key (default: `/etc/arl/ssh_host_key`)
-- `SSH_PASSWORD`: Optional static password; if empty, any password is accepted as long as session exists
+Native SSH access to sessions via `ssh -p 2222 <session-id>@<gateway-host>`. Bridges SSH channels to sidecar InteractiveShell gRPC streams. See `docs/developer-guide/ssh-gateway.md` for details.
 
 ### Session State Management
 
-The Gateway uses a `SessionStore` interface for session persistence, with two implementations:
-
-**MemoryStore** (default): In-memory `sync.Map` — suitable for single-replica deployments. Session recovery on restart relies on pod annotations (`arl.infra.io/session`, `arl.infra.io/last-activity`).
-
-**RedisStore**: Write-through cache (local `sync.Map` + Redis persistence) — suitable for multi-replica HA deployments. Sessions are serialized as JSON with configurable TTL.
-
-**Configuration** via environment variables:
-- `REDIS_ENABLED`: Enable Redis session store (default: false)
-- `REDIS_ADDR`: Redis address (default: `localhost:6379`)
-- `REDIS_PASSWORD`: Redis password (default: empty)
-- `REDIS_DB`: Redis database number (default: 0)
+Pluggable `SessionStore` interface: MemoryStore (default, single-replica) or RedisStore (write-through cache, multi-replica HA). See `docs/developer-guide/session-state.md` for details.
 
 ### Sidecar gRPC Interface
 
@@ -550,22 +519,9 @@ ws.onmessage = (e) => {
 
 See `examples/frontend/interactive_shell.html` for complete example.
 
-### SSH Access (Native SSH Client)
+### SSH Access
 
-As an alternative to WebSocket, you can connect to a session via standard SSH when the gateway has SSH enabled:
-
-```bash
-# Connect to a session's shell (username = sessionID)
-ssh -p 2222 gw-1710000000000-abcd1234@gateway.example.com
-
-# With port forwarding
-ssh -p 2222 -L 8888:localhost:8888 <session-id>@gateway.example.com
-
-# Disable host key checking for ephemeral sessions
-ssh -p 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null <session-id>@gateway.example.com
-```
-
-Works with any SSH client (OpenSSH, PuTTY, Paramiko, etc.). Authentication uses the session ID as username; password is optional (configurable via `SSH_PASSWORD`).
+Connect via standard SSH client when gateway has SSH enabled: `ssh -p 2222 <session-id>@<gateway-host>`. See `docs/developer-guide/ssh-gateway.md`.
 
 ## Key Files
 
@@ -609,3 +565,7 @@ Key sections:
 - For Developers: Deploy and manage ARL-Infra
 - For SDK Users: Use the Python SDK
 - Architecture: System design and components
+
+Developer guides (detailed):
+- `docs/developer-guide/ssh-gateway.md` - SSH gateway usage, configuration, authentication
+- `docs/developer-guide/session-state.md` - SessionStore interface, Redis setup, deployment patterns
