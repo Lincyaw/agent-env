@@ -1,404 +1,60 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+K8s Operator for Agentic RL — warm pod pools + sidecar injection for ultra-low latency code execution.
 
-## Project Overview
+## Commands
 
-ARL-Infra is a Kubernetes Operator for Agentic Reinforcement Learning environments. It provides ultra-low latency code execution through warm pod pools and sidecar injection, bypassing pod startup time.
-
-**Core Concepts:**
-- **WarmPool**: Maintains a pool of pre-started pods ready for immediate allocation. Supports ToolsSpec for pre-provisioning tools in executor containers.
-- **Session**: A Gateway-managed session bound to a pod allocated from a warm pool. Session state is stored via a pluggable `SessionStore` (in-memory default, Redis for HA).
-- **Gateway**: REST API + SSH server that manages sessions and forwards execution to sidecar gRPC.
-- **Managed Sessions**: High-level API where clients specify only `image` + `experimentId`; the server automatically manages pool lifecycle (creation, scaling, GC).
-- **Sidecar**: gRPC service running in each pod, handling file operations and command execution
-- **Executor Agent**: Lightweight agent running inside the executor container, receiving commands from sidecar via Unix socket
-
-## Development Commands
-
-### Setup & Installation
 ```bash
-# Install all development tools (protoc, Go tools, Python tools)
-make install-tools
-
-# Setup new K8s cluster (ClickHouse operator, Helm deps, CRDs)
-make k8s-setup
+make build              # Build all Go binaries
+make check              # fmt + vet + tidy + ruff + mypy
+make generate           # Proto, CRDs, deepcopy
+make arch-check         # Validate architecture docs
+skaffold run --profile=k8s  # Deploy
 ```
 
-### Code Generation
-```bash
-# Generate all code (proto, CRDs, deepcopy)
-make generate
+Python: use `uv` exclusively (`uv run`, `uv add`). SDK: `make build-sdk`.
 
-# Generate specific components
-make proto-go        # Generate Go gRPC code from proto files
-make manifests       # Generate CRD manifests
-make deepcopy        # Generate deepcopy code
-```
-
-### Build
-```bash
-# Build all Go binaries
-make build
-
-# Build individual components
-make build-gateway          # Build gateway binary
-make build-executor-agent   # Build executor agent binary
-make build-sidecar          # Build sidecar binary
-make build-operator         # Build operator binary
-```
-
-### Code Quality
-```bash
-# Run all quality checks (fmt, vet, tidy, ruff, mypy)
-make check
-
-# Individual checks
-make fmt             # Run go fmt
-make vet             # Run go vet
-make tidy            # Run go mod tidy
-```
-
-### Deployment
-```bash
-# Deploy to K8s cluster with registry
-skaffold run --profile=k8s
-
-# Deploy to production
-skaffold run --profile=prod
-
-# Development mode with auto-sync
-skaffold dev --profile=dev
-
-# Deploy with sample resources
-skaffold run --profile=with-samples
-```
-
-### Python SDK
-```bash
-# Build Python SDK package
-make build-sdk
-
-# Publish to Test PyPI (requires UV_PUBLISH_TOKEN)
-make publish-test
-
-# Publish to Production PyPI (requires UV_PUBLISH_TOKEN)
-make publish
-
-# Clean build artifacts
-make clean-sdk
-```
-
-### Testing & Debugging
-```bash
-# View operator logs
-make logs
-
-# Run Python with uv
-uv run python <script.py>
-
-# Install Python package
-uv add <package>
-
-# Batch prefetch WarmPool images (for SWE-Bench/R2E-Gym datasets)
-uv run --group prefetch python scripts/batch_prefetch.py --dry-run  # Preview
-uv run --group prefetch python scripts/batch_prefetch.py             # Execute
-uv run --group prefetch python scripts/batch_prefetch.py --dataset r2egym --concurrency 20
-```
-
-### Architecture Validation
-```bash
-# Validate architecture documentation consistency
-make arch-check
-```
-
-## Architecture
-
-### Component Structure
+## Directory Structure
 
 ```
-api/v1alpha1/              # CRD type definitions
-└── warmpool_types.go      # WarmPool CRD (includes ToolsSpec, ImageLocalitySpec)
-
-pkg/
-├── controller/            # Kubernetes controllers
-│   └── warmpool_controller.go   # Maintains warm pod pools
-├── gateway/               # Gateway REST API server
-│   ├── gateway.go         # Session/execution logic
-│   ├── router.go          # HTTP route handlers
-│   ├── types.go           # Request/response types
-│   ├── pod_allocator.go   # Informer-backed pod allocation from warm pools
-│   ├── pool_manager.go    # Managed pool auto-scaling (PoolManager)
-│   ├── history.go         # Step history tracking
-│   ├── ws_shell.go        # WebSocket shell handler
-│   ├── ssh_server.go      # SSH server (bridging to gRPC shell streams)
-│   ├── session_store.go   # SessionStore interface
-│   ├── memory_store.go    # In-memory SessionStore (default)
-│   └── redis_store.go     # Redis-backed SessionStore (HA)
-├── execagent/             # Executor agent (runs inside executor container)
-│   ├── agent.go           # Unix socket server, command execution
-│   └── protocol.go        # JSON-over-socket request/response types
-├── scheduler/             # Image-locality aware pod scheduling
-│   ├── image_scheduler.go # Node watcher with Rendezvous hashing
-│   └── rendezvous.go      # HRW hashing implementation
-├── webhook/               # Admission webhooks for validation
-├── sidecar/               # Sidecar gRPC server implementation
-├── pb/                    # Generated protobuf code
-├── client/                # gRPC client for sidecar communication
-├── interfaces/            # Shared interfaces (SidecarClient, AuditWriter, etc.)
-├── metrics/               # Prometheus metrics
-├── audit/                 # Audit logging (ClickHouse)
-└── middleware/            # Middleware components
-
-cmd/
-├── operator/main.go       # Operator entry point
-├── gateway/main.go        # Gateway entry point
-├── sidecar/main.go        # Sidecar entry point
-└── executor-agent/main.go # Executor agent entry point
-
-proto/agent.proto          # gRPC service definition
-sdk/python/arl/            # Python SDK (Gateway-based, not auto-generated)
-charts/arl-operator/       # Helm chart for deployment
+api/v1alpha1/           # WarmPool CRD types
+pkg/controller/         # WarmPoolController (LRU scale-down)
+pkg/gateway/            # REST API + SSH server + SessionStore + PoolManager
+pkg/execagent/          # Executor agent (Unix socket inside container)
+pkg/sidecar/            # Sidecar gRPC server
+pkg/scheduler/          # Image-locality scheduling (Rendezvous hashing)
+pkg/client/             # gRPC client for sidecar
+pkg/interfaces/         # Shared interfaces (SidecarClient, AuditWriter)
+pkg/metrics/            # Prometheus metrics
+pkg/audit/              # ClickHouse audit logging
+cmd/{operator,gateway,sidecar,executor-agent}/  # Entry points
+proto/agent.proto       # gRPC service definition
+sdk/python/arl/         # Python SDK (ManagedSession, SandboxSession, GatewayClient)
+charts/arl-operator/    # Helm chart
 ```
 
-### Resource Lifecycle
+## Lifecycle
 
-**WarmPool -> PodAllocator -> Gateway (session + execution)**
+WarmPool creates N warm pods -> PodAllocator assigns pod to session -> Gateway forwards execution to sidecar gRPC. Managed sessions (`POST /v1/managed/sessions`) auto-create/scale pools.
 
-1. **WarmPool** creates and maintains N ready pods with sidecar and executor-agent containers
-2. **PodAllocator** (in-process, Informer-backed) allocates an idle pod from the pool via label patch
-3. **Gateway** registers the session in-memory and forwards execution requests to sidecar gRPC
+## Code Style
 
-**Managed Sessions** provide an alternative, simplified flow:
+- **Go 1.25.0**: English only. `make check` before commit. No test files unless requested.
+- **Python 3.10+**: Modern type hints, Pydantic models, no `Any`. `make check` before commit.
+- Comments only where logic isn't self-evident. Chinese OK in docs.
 
-1. Client sends `POST /v1/managed/sessions` with `image` + `experimentId`
-2. **PoolManager** auto-creates a WarmPool if none exists for the image, or scales up if no idle pods
-3. A pod is allocated from the managed pool (same as above)
-4. Client uses the session normally (execute, restore, shell, etc.)
-5. On session deletion, PoolManager decrements demand; background sweep handles scale-down and pool GC
+## Architecture Change Rules
 
-### Gateway
+After modifying components or interfaces:
+1. Check `architecture/propagation-rules.yaml` for affected components
+2. Run required actions (`make manifests`, `make proto-go`, etc.)
+3. Update `architecture/{components,dependencies,propagation-rules}.yaml` if needed
+4. Validate with `make arch-check`
 
-The Gateway (port 8080) provides a REST API for session and execution management. It replaces the old Task controller by directly calling sidecar gRPC.
+## Docs
 
-**REST API Endpoints:**
-
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/v1/sessions` | Create a session (allocates a sandbox from a pool) |
-| GET | `/v1/sessions/{id}` | Get session info |
-| DELETE | `/v1/sessions/{id}` | Delete session and its sandbox |
-| POST | `/v1/sessions/{id}/execute` | Execute steps synchronously via sidecar gRPC |
-| POST | `/v1/sessions/{id}/restore` | Restore workspace to a previous snapshot |
-| WS | `/v1/sessions/{id}/shell` | Interactive shell via WebSocket |
-| GET | `/v1/sessions/{id}/history` | Get execution history |
-| GET | `/v1/sessions/{id}/trajectory` | Export trajectory as JSONL (for RL/SFT) |
-| POST | `/v1/pools` | Create a WarmPool (with optional ToolsSpec) |
-| GET | `/v1/pools/{name}` | Get pool status |
-| PATCH | `/v1/pools/{name}` | Scale a pool (update replicas and resources) |
-| DELETE | `/v1/pools/{name}` | Delete a pool |
-| POST | `/v1/managed/sessions` | Create a managed session (image + experimentId, auto pool) |
-| GET | `/v1/managed/experiments/{id}/sessions` | List all sessions for an experiment |
-| DELETE | `/v1/managed/experiments/{id}` | Batch-delete all sessions for an experiment |
-| GET | `/healthz` | Health check |
-| GET | `/metrics` | Prometheus metrics endpoint |
-
-**Key features:**
-- Synchronous execution (no polling needed)
-- Per-step snapshot IDs for restore/rollback
-- Step history tracking for trajectory export
-- Pool health checks before session creation
-- **Managed sessions**: server-side pool auto-scaling with demand-based scale-up, cooldown scale-down, and empty pool GC
-- **SSH gateway**: native SSH access to sessions via `ssh -p 2222 <session-id>@<gateway-host>`
-- **Pluggable session store**: in-memory (default) or Redis for multi-replica HA
-- HTTP proxy support (respects `http_proxy`/`HTTP_PROXY` env vars)
-- Prometheus metrics for monitoring (sessions, steps, pool utilization, pod lifecycle)
-
-### SSH Gateway
-
-Native SSH access to sessions via `ssh -p 2222 <session-id>@<gateway-host>`. Bridges SSH channels to sidecar InteractiveShell gRPC streams. See `docs/developer-guide/ssh-gateway.md` for details.
-
-### Session State Management
-
-Pluggable `SessionStore` interface: MemoryStore (default, single-replica) or RedisStore (write-through cache, multi-replica HA). See `docs/developer-guide/session-state.md` for details.
-
-### Sidecar gRPC Interface
-
-The sidecar (port 50051) exposes `AgentService` with methods:
-- `UpdateFiles`: Apply file patches or overwrites
-- `Execute`: Run commands (job mode) or start background services
-- `SignalProcess`: Send signals (SIGTERM/SIGKILL) to processes
-- `Reset`: Clean workspace
-- `InteractiveShell`: Bidirectional streaming for shell sessions
-
-### Executor Agent
-
-The executor agent runs inside the executor container and communicates with the sidecar via a Unix socket at a shared volume mount. It replaces the old `kubectl exec` approach for executor container execution.
-
-**Protocol**: JSON-over-Unix-socket (newline-delimited JSON). Request types:
-- `exec`: Execute a command with optional timeout, env, and working directory. Streams stdout/stderr back.
-- `shell`: Start an interactive shell session with stdin/stdout/stderr streaming.
-- `signal`: Send a signal (SIGTERM/SIGKILL/SIGINT) to a running process by PID.
-- `ping`: Health check.
-
-**Advantages over kubectl exec**:
-- Lower latency (Unix socket vs API server round-trip)
-- Streaming stdout/stderr
-- Process tracking and signal delivery
-- No dependency on kubectl or API server availability
-
-### Scheduler
-
-The `ImageScheduler` provides image-locality-aware pod scheduling using Rendezvous (Highest Random Weight) hashing. It watches Node resources and maintains a cache of schedulable nodes.
-
-**How it works:**
-1. Watches Node create/update/delete events
-2. Maintains a list of schedulable (Ready, not cordoned) nodes
-3. `SelectNodes(image, k)` returns top-k preferred nodes for a given image using HRW hashing
-4. WarmPool controller uses this to set preferred NodeAffinity, minimizing redundant image pulls
-
-**Configuration** via `WarmPoolSpec.ImageLocality`:
-- `enabled`: Activate image-locality scheduling (default: true)
-- `spreadFactor`: Controls preferred node count: k = ceil(replicas * spreadFactor) (default: 1.0)
-- `weight`: NodeAffinity weight 1-100 (default: 80)
-
-### Controllers
-
-**WarmPoolController**: Watches WarmPool and Pod resources, maintains desired replica count of warm pods. Integrates with ImageScheduler for node affinity. Includes rate limiting and metrics for pod lifecycle events (startup latency, scale duration, image pull errors). Uses **LRU scale-down**: when scaling down, deletes least-recently-used idle pods first (sorted by `last-released` annotation or `CreationTimestamp`).
-
-**Performance Tuning**: The controller supports rate limiting and concurrency control via environment variables:
-- `WARMPOOL_MAX_CONCURRENT`: Max concurrent WarmPool reconciliations (default: 20)
-- `WARMPOOL_RATE_QPS`: Rate limit QPS for WarmPool controller (default: 50)
-- `WARMPOOL_RATE_BURST`: Rate limit burst for WarmPool controller (default: 100)
-- `K8S_CLIENT_QPS`: Kubernetes client QPS (default: 100)
-- `K8S_CLIENT_BURST`: Kubernetes client burst (default: 200)
-
-Note: Execution and session lifecycle are handled by the Gateway, not by a controller.
-
-### Managed Pool Auto-Scaling (PoolManager)
-
-The PoolManager runs inside the Gateway process and automatically manages WarmPools for the managed sessions API.
-
-**Behavior:**
-- **Auto-create**: First `POST /v1/managed/sessions` for an image creates a WarmPool (named `managed-<sha256(namespace/image)[:12]>`)
-- **Scale-up**: When no idle pods available, scales replicas based on active session count + 1 spare
-- **Scale-down**: Background sweep (every `MANAGED_POOL_SWEEP_INTERVAL`) reduces replicas after `MANAGED_POOL_IDLE_COOLDOWN`
-- **GC**: Deletes empty pools (0 sessions) after `MANAGED_POOL_EMPTY_TTL`
-- **Recovery**: On gateway restart, rebuilds state from K8s CRDs with `arl.infra.io/managed=true` label
-
-**Configuration** via environment variables:
-- `MANAGED_POOL_INITIAL_REPLICAS`: Starting replicas for new pools (default: 2)
-- `MANAGED_POOL_MIN_REPLICAS`: Scale-down floor (default: 0)
-- `MANAGED_POOL_MAX_REPLICAS`: Scale-up ceiling (default: 50)
-- `MANAGED_POOL_SCALE_UP_STEP`: Minimum replicas added per scale-up (default: 2)
-- `MANAGED_POOL_IDLE_COOLDOWN`: Duration before scale-down (default: 5m)
-- `MANAGED_POOL_EMPTY_TTL`: Duration to keep empty pools (default: 10m)
-- `MANAGED_POOL_SWEEP_INTERVAL`: Background sweep interval (default: 30s)
-
-## Monitoring & Observability
-
-The system includes comprehensive Prometheus metrics and Grafana dashboards:
-
-**Metrics Categories:**
-- **Gateway metrics**: Active sessions, step execution duration, step results (success/error)
-- **Pool metrics**: Pool utilization (ready/allocated), pending pods, pod lifecycle events
-- **Pod metrics**: Startup latency (creation to ready), scale-out duration, image pull errors
-- **Sidecar metrics**: gRPC call duration and results
-
-**Deployment:**
-- Prometheus and Grafana can be enabled via Helm values (`prometheus.enabled`, `grafana.enabled`)
-- Metrics exposed at `/metrics` endpoint on gateway and operator
-- VictoriaMetrics ServiceScrape and Prometheus ServiceMonitor supported
-- Pre-configured Grafana dashboard for ARL-Infra monitoring
-
-## Critical Workflow: Architecture Change Management
-
-**ALWAYS perform impact analysis after code changes:**
-
-1. **Check propagation rules** in `architecture/propagation-rules.yaml` to identify affected components
-2. **Execute required actions** (e.g., `make manifests`, `make proto-go`)
-3. **Update architecture files** when adding/removing components or changing interfaces:
-   - `architecture/components.yaml` - Component catalog
-   - `architecture/dependencies.yaml` - Component relationships
-   - `architecture/propagation-rules.yaml` - Impact rules
-4. **Validate** with `make arch-check`
-
-## Code Style & Conventions
-
-### Go
-- Go 1.25.0 - use latest best practices
-- English only for code, comments, variable names
-- Run `make check` before committing (fmt, vet, tidy)
-- Do not create test files unless explicitly requested
-
-### Python
-- Python 3.10+ with modern type hints (`dict[str, int]`, `list[str] | None`)
-- Use `uv` exclusively for package management (not pip/poetry/conda)
-- Pydantic models for business data (never raw dictionaries)
-- Raise exceptions instead of returning error codes
-- Run `make check` before committing (ruff, mypy)
-- Avoid `Any` type, use extensive type hints
-- Refactor aggressively - no backward compatibility needed
-
-### General
-- Documentation in markdown can use Chinese if appropriate
-- Do not write documentation unless specifically requested
-- Comments only where necessary for clarity/design rationale
-
-## Python SDK
-
-The SDK (`sdk/python/arl/`) communicates with the Gateway REST API via `GatewayClient`. Key entry points:
-- `ManagedSession` — recommended, auto pool management: `ManagedSession(image=..., experiment_id=...)`
-- `SandboxSession` — manual pool management: `SandboxSession(pool_ref=..., gateway_url=...)`
-- `GatewayClient` — low-level: pool CRUD, experiment management, session lifecycle
-
-Features: execute steps, restore snapshots, trajectory export (JSONL), tool invocation, WebSocket shell, SSH access.
-
-See `sdk/python/arl/arl/session.py`, `sdk/python/arl/arl/gateway_client.py`, and `examples/python/` for usage.
-
-## Key Files
-
-- `Makefile` - All development commands
-- `skaffold.yaml` - Deployment profiles (k8s, prod, dev, with-samples)
-- `proto/agent.proto` - Sidecar gRPC interface definition
-- `api/v1alpha1/warmpool_types.go` - WarmPool CRD schema (ToolsSpec, ImageLocalitySpec)
-- `pkg/controller/warmpool_controller.go` - WarmPool reconciliation logic
-- `pkg/gateway/gateway.go` - Gateway session/execution logic
-- `pkg/gateway/router.go` - Gateway HTTP route handlers
-- `pkg/gateway/types.go` - Gateway request/response types
-- `pkg/gateway/pod_allocator.go` - Informer-backed pod allocation
-- `pkg/gateway/pool_manager.go` - Managed pool auto-scaling (PoolManager)
-- `pkg/gateway/ssh_server.go` - SSH server (Go crypto/ssh → gRPC bridge)
-- `pkg/gateway/session_store.go` - SessionStore interface
-- `pkg/gateway/memory_store.go` - In-memory SessionStore (default)
-- `pkg/gateway/redis_store.go` - Redis-backed SessionStore (HA)
-- `cmd/gateway/main.go` - Gateway entry point
-- `pkg/execagent/agent.go` - Executor agent (Unix socket server)
-- `pkg/execagent/protocol.go` - Executor agent JSON protocol
-- `cmd/executor-agent/main.go` - Executor agent entry point
-- `pkg/scheduler/image_scheduler.go` - Image-locality aware scheduler
-- `pkg/scheduler/rendezvous.go` - Rendezvous (HRW) hashing
-- `sdk/python/arl/arl/gateway_client.py` - Python SDK Gateway HTTP client
-- `sdk/python/arl/arl/session.py` - Python SDK SandboxSession and ManagedSession
-- `sdk/python/arl/arl/types.py` - Python SDK Pydantic models
-- `architecture/*.yaml` - Component catalog, dependencies, propagation rules
-- `pyproject.toml` - Python workspace configuration
-- `sdk/python/arl/pyproject.toml` - Python SDK package configuration
-- `examples/python/test_arl_sdk.py` - SDK usage example
-- `examples/python/bench_gateway.py` - Gateway benchmark
-- `examples/python/test_interactive_shell.py` - Interactive shell example
-- `scripts/batch_prefetch.py` - Batch WarmPool image prefetch for SWE-Bench/R2E-Gym datasets
-
-## Documentation
-
-Full documentation available at: https://lincyaw.github.io/agent-env/
-
-Key sections:
-- Overview: Introduction to ARL-Infra concepts
-- For Developers: Deploy and manage ARL-Infra
-- For SDK Users: Use the Python SDK
-- Architecture: System design and components
-
-Developer guides (detailed):
-- `docs/developer-guide/ssh-gateway.md` - SSH gateway usage, configuration, authentication
-- `docs/developer-guide/session-state.md` - SessionStore interface, Redis setup, deployment patterns
+- `docs/developer-guide/ssh-gateway.md` — SSH config, auth, usage
+- `docs/developer-guide/session-state.md` — SessionStore, Redis setup, deployment patterns
+- `pkg/gateway/router.go` — all REST API endpoints
+- `pkg/config/config.go` — all environment variables
+- Site: https://lincyaw.github.io/agent-env/
