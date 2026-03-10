@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"log"
@@ -47,8 +48,11 @@ func handleShell(gw *Gateway) http.HandlerFunc {
 		}
 		defer ws.Close()
 
-		// Open gRPC bidi stream to sidecar
-		shellStream, err := gw.sidecarClient.InteractiveShell(r.Context(), podIP)
+		// Open gRPC bidi stream to sidecar with cancellable context
+		ctx, cancel := context.WithCancel(r.Context())
+		defer cancel()
+
+		shellStream, err := gw.sidecarClient.InteractiveShell(ctx, podIP)
 		if err != nil {
 			writeWSError(ws, "failed to open shell: "+err.Error())
 			return

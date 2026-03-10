@@ -133,6 +133,11 @@ func (hc *HealthChecker) collect() {
 			}
 		}
 	}
+
+	// 5. Cleanup stale gRPC connections (Shutdown/TransientFailure)
+	if cleaned := hc.gw.CleanupStaleConnections(); cleaned > 0 {
+		log.Printf("Cleaned up %d stale sidecar connections", cleaned)
+	}
 }
 
 // BuildReport constructs a full health report.

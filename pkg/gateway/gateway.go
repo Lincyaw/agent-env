@@ -60,6 +60,8 @@ type Gateway struct {
 	gwConfig         GatewayConfig
 	sweepStopCh      chan struct{}
 	sweepWg          sync.WaitGroup
+	trajCh           chan audit.TrajectoryEntry
+	trajWg           sync.WaitGroup
 }
 
 // New creates a new gateway. metrics and trajectoryWriter may be nil.
@@ -196,6 +198,34 @@ func (g *Gateway) StopPoolManager() {
 	}
 }
 
+// StartTrajectoryWorker starts a single background goroutine to drain the
+// trajectory write channel. Must be called after New() if trajectoryWriter is set.
+func (g *Gateway) StartTrajectoryWorker() {
+	if g.trajectoryWriter == nil {
+		return
+	}
+	g.trajCh = make(chan audit.TrajectoryEntry, 4096)
+	g.trajWg.Add(1)
+	go func() {
+		defer g.trajWg.Done()
+		for entry := range g.trajCh {
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			if err := g.trajectoryWriter.WriteEntry(ctx, entry); err != nil {
+				log.Printf("Warning: failed to write trajectory entry: %v", err)
+			}
+			cancel()
+		}
+	}()
+}
+
+// StopTrajectoryWorker closes the trajectory channel and waits for the worker to drain.
+func (g *Gateway) StopTrajectoryWorker() {
+	if g.trajCh != nil {
+		close(g.trajCh)
+		g.trajWg.Wait()
+	}
+}
+
 // CreateSession allocates a pod from the pool via PodAllocator and registers a session.
 func (g *Gateway) CreateSession(ctx context.Context, req CreateSessionRequest) (*SessionInfo, error) {
 	ns := req.Namespace
@@ -288,6 +318,7 @@ func (g *Gateway) DeleteSession(ctx context.Context, sessionID string) error {
 
 	s.mu.RLock()
 	podName := s.Info.PodName
+	podIP := s.Info.PodIP
 	namespace := s.Info.Namespace
 	poolRef := s.Info.PoolRef
 	managed := s.managed
@@ -296,6 +327,13 @@ func (g *Gateway) DeleteSession(ctx context.Context, sessionID string) error {
 	// Delete pod directly via PodAllocator (WarmPoolController will create replacement)
 	if err := g.podAllocator.Release(ctx, podName, namespace); err != nil && !errors.IsNotFound(err) {
 		log.Printf("Warning: failed to delete pod %s for session %s: %v", podName, sessionID, err)
+	}
+
+	// Close the gRPC connection to the deleted pod
+	if podIP != "" {
+		if err := g.sidecarClient.CloseConnection(podIP); err != nil {
+			log.Printf("Warning: failed to close sidecar connection for pod %s: %v", podName, err)
+		}
 	}
 
 	g.store.Delete(sessionID)
@@ -389,7 +427,7 @@ func (g *Gateway) ExecuteSteps(ctx context.Context, sessionID string, req Execut
 		resp.Results = append(resp.Results, result)
 
 		// Write to ClickHouse trajectory if configured
-		if g.trajectoryWriter != nil {
+		if g.trajCh != nil {
 			obsJSON, _ := json.Marshal(result.Output)
 			entry := audit.TrajectoryEntry{
 				SessionID:   sessionID,
@@ -401,13 +439,11 @@ func (g *Gateway) ExecuteSteps(ctx context.Context, sessionID string, req Execut
 				DurationMs:  result.DurationMs,
 				Timestamp:   result.Timestamp,
 			}
-			// Write asynchronously to avoid blocking execution
-			go func(e audit.TrajectoryEntry) {
-				bgCtx := context.Background()
-				if err := g.trajectoryWriter.WriteEntry(bgCtx, e); err != nil {
-					log.Printf("Warning: failed to write trajectory entry: %v", err)
-				}
-			}(entry)
+			select {
+			case g.trajCh <- entry:
+			default:
+				log.Printf("Warning: trajectory channel full, dropping entry for session %s step %d", sessionID, globalIdx)
+			}
 		}
 	}
 
@@ -455,6 +491,7 @@ func (g *Gateway) Restore(ctx context.Context, sessionID string, snapshotID stri
 	// Read current session info under read lock
 	s.mu.RLock()
 	oldPodName := s.Info.PodName
+	oldPodIP := s.Info.PodIP
 	oldNamespace := s.Info.Namespace
 	poolRef := s.Info.PoolRef
 	s.mu.RUnlock()
@@ -523,12 +560,17 @@ func (g *Gateway) Restore(ctx context.Context, sessionID string, snapshotID stri
 	// Truncate history to records 0..targetIdx
 	s.History.TruncateTo(targetIdx)
 
-	// Delete old pod directly (async, best-effort)
+	// Delete old pod directly (async, best-effort) and close its gRPC connection
 	go func() {
 		bgCtx, bgCancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer bgCancel()
 		if err := g.podAllocator.Release(bgCtx, oldPodName, oldNamespace); err != nil {
 			log.Printf("Warning: failed to delete old pod %s: %v", oldPodName, err)
+		}
+		if oldPodIP != "" {
+			if err := g.sidecarClient.CloseConnection(oldPodIP); err != nil {
+				log.Printf("Warning: failed to close sidecar connection for old pod %s: %v", oldPodName, err)
+			}
 		}
 	}()
 
@@ -833,6 +875,11 @@ func (g *Gateway) StartSessionSweep() {
 func (g *Gateway) StopSessionSweep() {
 	close(g.sweepStopCh)
 	g.sweepWg.Wait()
+}
+
+// CleanupStaleConnections removes gRPC connections in Shutdown or TransientFailure state.
+func (g *Gateway) CleanupStaleConnections() int {
+	return g.sidecarClient.CleanupStale()
 }
 
 func (g *Gateway) sessionSweepLoop() {

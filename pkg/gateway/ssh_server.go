@@ -148,8 +148,11 @@ func (s *SSHServer) handleChannel(sessionID string, channel ssh.Channel, request
 		return
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	shellStream, err := s.gw.sidecarClient.InteractiveShell(
-		context.Background(),
+		ctx,
 		info.PodIP,
 	)
 	if err != nil {

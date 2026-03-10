@@ -135,6 +135,9 @@ func main() {
 		log.Printf("Warning: pool manager recovery failed: %v (managed sessions disabled until first request)", err)
 	}
 
+	// Start trajectory worker (bounded channel for ClickHouse writes)
+	gw.StartTrajectoryWorker()
+
 	// Start session sweep (idle timeout / max lifetime reaper)
 	gw.StartSessionSweep()
 
@@ -192,6 +195,7 @@ func main() {
 	allocCancel() // Stop PodAllocator cache
 	podAllocator.Stop()
 	gw.StopPoolManager()
+	gw.StopTrajectoryWorker()
 	sidecarClient.Close()
 	if trajectoryWriter != nil {
 		trajectoryWriter.Close()

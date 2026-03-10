@@ -38,6 +38,16 @@ func (m *MockSidecarClient) HealthCheck(ctx context.Context, podIP string) error
 	return nil
 }
 
+// CloseConnection is a no-op for mock
+func (m *MockSidecarClient) CloseConnection(_ string) error {
+	return nil
+}
+
+// CleanupStale is a no-op for mock
+func (m *MockSidecarClient) CleanupStale() int {
+	return 0
+}
+
 // Close mocks cleanup
 func (m *MockSidecarClient) Close() error {
 	return nil

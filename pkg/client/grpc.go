@@ -206,6 +206,34 @@ func (c *GRPCSidecarClient) HealthCheck(ctx context.Context, podIP string) error
 	}
 }
 
+// CloseConnection closes and removes a single gRPC connection by pod IP.
+func (c *GRPCSidecarClient) CloseConnection(podIP string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	conn, ok := c.conns[podIP]
+	if !ok {
+		return nil
+	}
+	delete(c.conns, podIP)
+	return conn.Close()
+}
+
+// CleanupStale removes connections in Shutdown or TransientFailure state.
+func (c *GRPCSidecarClient) CleanupStale() int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	cleaned := 0
+	for podIP, conn := range c.conns {
+		state := conn.GetState()
+		if state == connectivity.Shutdown || state == connectivity.TransientFailure {
+			conn.Close()
+			delete(c.conns, podIP)
+			cleaned++
+		}
+	}
+	return cleaned
+}
+
 // Close cleans up all gRPC connections
 func (c *GRPCSidecarClient) Close() error {
 	c.mu.Lock()

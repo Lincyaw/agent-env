@@ -18,6 +18,12 @@ type SidecarClient interface {
 	// HealthCheck checks if sidecar is healthy
 	HealthCheck(ctx context.Context, podIP string) error
 
+	// CloseConnection closes and removes a single gRPC connection by pod IP
+	CloseConnection(podIP string) error
+
+	// CleanupStale removes connections in Shutdown or TransientFailure state
+	CleanupStale() int
+
 	// Close cleans up any resources (e.g., gRPC connections)
 	Close() error
 }
