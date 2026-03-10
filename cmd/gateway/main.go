@@ -94,19 +94,30 @@ func main() {
 		}
 	}
 
-	// Create session store (Redis or in-memory)
+	// Create session store (Redis or in-memory, with retry for startup ordering)
 	var sessionStore gateway.SessionStore
 	if cfg.RedisEnabled {
-		rs, rsErr := gateway.NewRedisStore(gateway.RedisStoreConfig{
+		rsCfg := gateway.RedisStoreConfig{
 			Addr:     cfg.RedisAddr,
 			Password: cfg.RedisPassword,
 			DB:       cfg.RedisDB,
-		})
-		if rsErr != nil {
-			log.Fatalf("Failed to create Redis session store: %v", rsErr)
 		}
-		sessionStore = rs
-		log.Printf("Redis session store enabled (addr=%s, db=%d)", cfg.RedisAddr, cfg.RedisDB)
+		const maxRetries = 5
+		for i := range maxRetries {
+			rs, rsErr := gateway.NewRedisStore(rsCfg)
+			if rsErr == nil {
+				sessionStore = rs
+				log.Printf("Redis session store enabled (addr=%s, db=%d)", cfg.RedisAddr, cfg.RedisDB)
+				break
+			}
+			if i < maxRetries-1 {
+				wait := time.Duration(i+1) * 3 * time.Second
+				log.Printf("Warning: Redis store init failed (attempt %d/%d): %v; retrying in %v", i+1, maxRetries, rsErr, wait)
+				time.Sleep(wait)
+			} else {
+				log.Fatalf("Failed to create Redis session store after %d attempts: %v", maxRetries, rsErr)
+			}
+		}
 	}
 
 	gw := gateway.New(k8sClient, podAllocator, sidecarClient, metricsCollector, trajectoryWriter, &gateway.PoolManagerConfig{
@@ -146,19 +157,6 @@ func main() {
 	healthChecker := gateway.NewHealthChecker(gw, metricsCollector, feishuURL)
 	healthChecker.Start()
 
-	// Start SSH server if enabled
-	var sshServer *gateway.SSHServer
-	if cfg.SSHEnabled {
-		var sshErr error
-		sshServer, sshErr = gateway.NewSSHServer(gw, cfg.SSHPort, cfg.SSHHostKeyPath, cfg.SSHPassword)
-		if sshErr != nil {
-			log.Fatalf("Failed to create SSH server: %v", sshErr)
-		}
-		if sshErr = sshServer.Start(); sshErr != nil {
-			log.Fatalf("Failed to start SSH server: %v", sshErr)
-		}
-	}
-
 	mux := http.NewServeMux()
 	gateway.SetupRoutes(mux, gw, healthChecker)
 
@@ -187,9 +185,6 @@ func main() {
 	defer cancel()
 
 	server.Shutdown(shutdownCtx)
-	if sshServer != nil {
-		sshServer.Stop()
-	}
 	healthChecker.Stop()
 	gw.StopSessionSweep()
 	allocCancel() // Stop PodAllocator cache

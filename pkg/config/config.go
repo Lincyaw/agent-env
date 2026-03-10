@@ -93,12 +93,6 @@ type Config struct {
 	GatewayMaxLifetime   time.Duration
 	GatewaySweepInterval time.Duration
 
-	// SSH gateway configuration
-	SSHEnabled     bool
-	SSHPort        int
-	SSHHostKeyPath string
-	SSHPassword    string
-
 	// Redis session store configuration
 	RedisEnabled  bool
 	RedisAddr     string
@@ -156,11 +150,6 @@ func DefaultConfig() *Config {
 		GatewayIdleTimeout:   600 * time.Second,
 		GatewayMaxLifetime:   3600 * time.Second,
 		GatewaySweepInterval: 30 * time.Second,
-
-		SSHEnabled:     false,
-		SSHPort:        2222,
-		SSHHostKeyPath: "/etc/arl/ssh_host_key",
-		SSHPassword:    "",
 
 		RedisEnabled:  false,
 		RedisAddr:     "localhost:6379",
@@ -399,25 +388,6 @@ func LoadFromEnv() *Config {
 		}
 	}
 
-	// SSH gateway configuration
-	if enable := os.Getenv("SSH_ENABLED"); enable == "true" {
-		cfg.SSHEnabled = true
-	}
-
-	if v := os.Getenv("SSH_PORT"); v != "" {
-		if p, err := strconv.Atoi(v); err == nil {
-			cfg.SSHPort = p
-		}
-	}
-
-	if v := os.Getenv("SSH_HOST_KEY_PATH"); v != "" {
-		cfg.SSHHostKeyPath = v
-	}
-
-	if v := os.Getenv("SSH_PASSWORD"); v != "" {
-		cfg.SSHPassword = v
-	}
-
 	// Redis session store configuration
 	if enable := os.Getenv("REDIS_ENABLED"); enable == "true" {
 		cfg.RedisEnabled = true
@@ -566,16 +536,6 @@ func (c *Config) Validate() error {
 
 	if c.GatewaySweepInterval <= 0 {
 		return fmt.Errorf("gateway sweep interval must be positive: %v", c.GatewaySweepInterval)
-	}
-
-	// Validate SSH configuration
-	if c.SSHEnabled {
-		if c.SSHPort < 1 || c.SSHPort > 65535 {
-			return fmt.Errorf("invalid SSH port: %d (must be 1-65535)", c.SSHPort)
-		}
-		if c.SSHHostKeyPath == "" {
-			return fmt.Errorf("SSH host key path is required when SSH is enabled")
-		}
 	}
 
 	return nil

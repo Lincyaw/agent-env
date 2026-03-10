@@ -27,7 +27,7 @@ manifests:
     releases:
     - name: arl-operator
       chartPath: charts/arl-operator
-      namespace: arl-system
+      namespace: arl
       createNamespace: true
       skipBuildDependencies: true
       setValues:
@@ -73,7 +73,7 @@ profiles:
       releases:
       - name: arl-operator
         chartPath: charts/arl-operator
-        namespace: arl-system
+        namespace: arl
         createNamespace: true
         setValues:
           image.repository: 10.10.10.240/library/arl-operator
@@ -83,11 +83,11 @@ profiles:
           metrics.serviceMonitor.enabled: "false"
           gateway.service.type: NodePort
           gateway.service.nodePort: "30076"
+          # Redis
+          redis.enabled: "true"
           # Monitoring
           prometheus.enabled: "true"
-          prometheus.image: prom/prometheus:v3.10.0
           grafana.enabled: "true"
-          grafana.image: grafana/grafana:12.3.1
         setValueTemplates:
           image.tag: "{{.IMAGE_TAG}}"
           sidecar.image.tag: "{{.IMAGE_TAG2}}"
@@ -131,6 +131,7 @@ profiles:
           sidecar.image.repository: pair-diag-cn-guangzhou.cr.volces.com/pair/arl-sidecar
           gateway.image.repository: pair-diag-cn-guangzhou.cr.volces.com/pair/arl-gateway
           executorAgent.image.repository: pair-diag-cn-guangzhou.cr.volces.com/pair/arl-executor-agent
+          redis.enabled: true
           clickhouse.enabled: true
           clickhouse.storageClassName: ebs-ssd
           # Prometheus
@@ -184,7 +185,7 @@ profiles:
       releases:
       - name: arl-operator
         chartPath: charts/arl-operator
-        namespace: arl-system
+        namespace: arl
         createNamespace: true
         setValues:
           crds.install: true
@@ -207,7 +208,7 @@ profiles:
       releases:
       - name: arl-operator
         chartPath: charts/arl-operator
-        namespace: arl-system
+        namespace: arl
         createNamespace: true
         setValues:
           crds.install: true
@@ -242,7 +243,7 @@ profiles:
       releases:
       - name: arl-operator
         chartPath: charts/arl-operator
-        namespace: arl-system
+        namespace: arl
         createNamespace: true
         setValues:
           crds.install: true

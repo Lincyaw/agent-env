@@ -19,7 +19,7 @@ Python: use `uv` exclusively (`uv run`, `uv add`). SDK: `make build-sdk`.
 ```
 api/v1alpha1/           # WarmPool CRD types
 pkg/controller/         # WarmPoolController (LRU scale-down)
-pkg/gateway/            # REST API + SSH server + SessionStore + PoolManager
+pkg/gateway/            # REST API + SessionStore + PoolManager
 pkg/execagent/          # Executor agent (Unix socket inside container)
 pkg/sidecar/            # Sidecar gRPC server
 pkg/scheduler/          # Image-locality scheduling (Rendezvous hashing)
@@ -54,7 +54,6 @@ After modifying components or interfaces:
 
 ## Docs
 
-- `docs/developer-guide/ssh-gateway.md` — SSH config, auth, usage
 - `docs/developer-guide/session-state.md` — SessionStore, Redis setup, deployment patterns
 - `pkg/gateway/router.go` — all REST API endpoints
 - `pkg/config/config.go` — all environment variables

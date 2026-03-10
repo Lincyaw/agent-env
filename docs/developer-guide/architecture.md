@@ -66,12 +66,12 @@ graph TB
 
 ### ARL Operator
 
-The operator is the central control component running in the `arl-system` namespace.
+The operator is the central control component running in the `arl` namespace.
 
 | Component | Responsibility |
 |-----------|----------------|
 | **WarmPool Controller** | Maintains pod pools, ensures desired replica count |
-| **Gateway** | REST API + SSH server for session management and command execution via gRPC |
+| **Gateway** | REST API for session management and command execution via gRPC |
 | **PodAllocator** | In-process Informer-backed pod allocation from warm pools |
 | **Webhooks** | Validates CRD resources before creation |
 
