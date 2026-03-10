@@ -8,8 +8,8 @@ ARL-Infra is a Kubernetes Operator for Agentic Reinforcement Learning environmen
 
 **Core Concepts:**
 - **WarmPool**: Maintains a pool of pre-started pods ready for immediate allocation. Supports ToolsSpec for pre-provisioning tools in executor containers.
-- **Session**: A Gateway-managed session bound to a pod allocated from a warm pool. Session state is held in-memory with pod annotations for crash recovery.
-- **Gateway**: REST API service that manages sessions and forwards execution to sidecar gRPC.
+- **Session**: A Gateway-managed session bound to a pod allocated from a warm pool. Session state is stored via a pluggable `SessionStore` (in-memory default, Redis for HA).
+- **Gateway**: REST API + SSH server that manages sessions and forwards execution to sidecar gRPC.
 - **Managed Sessions**: High-level API where clients specify only `image` + `experimentId`; the server automatically manages pool lifecycle (creation, scaling, GC).
 - **Sidecar**: gRPC service running in each pod, handling file operations and command execution
 - **Executor Agent**: Lightweight agent running inside the executor container, receiving commands from sidecar via Unix socket
@@ -130,7 +130,11 @@ pkg/
 │   ├── pod_allocator.go   # Informer-backed pod allocation from warm pools
 │   ├── pool_manager.go    # Managed pool auto-scaling (PoolManager)
 │   ├── history.go         # Step history tracking
-│   └── ws_shell.go        # WebSocket shell handler
+│   ├── ws_shell.go        # WebSocket shell handler
+│   ├── ssh_server.go      # SSH server (bridging to gRPC shell streams)
+│   ├── session_store.go   # SessionStore interface
+│   ├── memory_store.go    # In-memory SessionStore (default)
+│   └── redis_store.go     # Redis-backed SessionStore (HA)
 ├── execagent/             # Executor agent (runs inside executor container)
 │   ├── agent.go           # Unix socket server, command execution
 │   └── protocol.go        # JSON-over-socket request/response types
@@ -205,8 +209,49 @@ The Gateway (port 8080) provides a REST API for session and execution management
 - Step history tracking for trajectory export
 - Pool health checks before session creation
 - **Managed sessions**: server-side pool auto-scaling with demand-based scale-up, cooldown scale-down, and empty pool GC
+- **SSH gateway**: native SSH access to sessions via `ssh -p 2222 <session-id>@<gateway-host>`
+- **Pluggable session store**: in-memory (default) or Redis for multi-replica HA
 - HTTP proxy support (respects `http_proxy`/`HTTP_PROXY` env vars)
 - Prometheus metrics for monitoring (sessions, steps, pool utilization, pod lifecycle)
+
+### SSH Gateway
+
+The Gateway embeds an SSH server (Go `crypto/ssh`) that bridges native SSH sessions to existing sidecar InteractiveShell gRPC streams. This allows users to connect with standard SSH clients instead of WebSocket.
+
+**Usage:**
+```bash
+# Enable SSH gateway
+SSH_ENABLED=true SSH_PORT=2222 ./gateway
+
+# Connect to a session (username = sessionID)
+ssh -p 2222 <session-id>@<gateway-host>
+```
+
+**How it works:**
+1. SSH username is the sessionID — the server validates the session exists
+2. On "shell" channel request, bridges `ssh.Channel` ↔ sidecar `InteractiveShell` gRPC stream
+3. Supports PTY resize (`window-change`), signals (`SIGINT`, `SIGTERM`), and `exit-status` reporting
+4. Auto-generates Ed25519 host key on first run, saves to configurable path
+
+**Configuration** via environment variables:
+- `SSH_ENABLED`: Enable SSH server (default: false)
+- `SSH_PORT`: SSH listen port (default: 2222)
+- `SSH_HOST_KEY_PATH`: Path to Ed25519 host key (default: `/etc/arl/ssh_host_key`)
+- `SSH_PASSWORD`: Optional static password; if empty, any password is accepted as long as session exists
+
+### Session State Management
+
+The Gateway uses a `SessionStore` interface for session persistence, with two implementations:
+
+**MemoryStore** (default): In-memory `sync.Map` — suitable for single-replica deployments. Session recovery on restart relies on pod annotations (`arl.infra.io/session`, `arl.infra.io/last-activity`).
+
+**RedisStore**: Write-through cache (local `sync.Map` + Redis persistence) — suitable for multi-replica HA deployments. Sessions are serialized as JSON with configurable TTL.
+
+**Configuration** via environment variables:
+- `REDIS_ENABLED`: Enable Redis session store (default: false)
+- `REDIS_ADDR`: Redis address (default: `localhost:6379`)
+- `REDIS_PASSWORD`: Redis password (default: empty)
+- `REDIS_DB`: Redis database number (default: 0)
 
 ### Sidecar gRPC Interface
 
@@ -250,7 +295,7 @@ The `ImageScheduler` provides image-locality-aware pod scheduling using Rendezvo
 
 ### Controllers
 
-**WarmPoolController**: Watches WarmPool and Pod resources, maintains desired replica count of warm pods. Integrates with ImageScheduler for node affinity. Includes rate limiting and metrics for pod lifecycle events (startup latency, scale duration, image pull errors).
+**WarmPoolController**: Watches WarmPool and Pod resources, maintains desired replica count of warm pods. Integrates with ImageScheduler for node affinity. Includes rate limiting and metrics for pod lifecycle events (startup latency, scale duration, image pull errors). Uses **LRU scale-down**: when scaling down, deletes least-recently-used idle pods first (sorted by `last-released` annotation or `CreationTimestamp`).
 
 **Performance Tuning**: The controller supports rate limiting and concurrency control via environment variables:
 - `WARMPOOL_MAX_CONCURRENT`: Max concurrent WarmPool reconciliations (default: 20)
@@ -505,6 +550,23 @@ ws.onmessage = (e) => {
 
 See `examples/frontend/interactive_shell.html` for complete example.
 
+### SSH Access (Native SSH Client)
+
+As an alternative to WebSocket, you can connect to a session via standard SSH when the gateway has SSH enabled:
+
+```bash
+# Connect to a session's shell (username = sessionID)
+ssh -p 2222 gw-1710000000000-abcd1234@gateway.example.com
+
+# With port forwarding
+ssh -p 2222 -L 8888:localhost:8888 <session-id>@gateway.example.com
+
+# Disable host key checking for ephemeral sessions
+ssh -p 2222 -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null <session-id>@gateway.example.com
+```
+
+Works with any SSH client (OpenSSH, PuTTY, Paramiko, etc.). Authentication uses the session ID as username; password is optional (configurable via `SSH_PASSWORD`).
+
 ## Key Files
 
 - `Makefile` - All development commands
@@ -517,6 +579,10 @@ See `examples/frontend/interactive_shell.html` for complete example.
 - `pkg/gateway/types.go` - Gateway request/response types
 - `pkg/gateway/pod_allocator.go` - Informer-backed pod allocation
 - `pkg/gateway/pool_manager.go` - Managed pool auto-scaling (PoolManager)
+- `pkg/gateway/ssh_server.go` - SSH server (Go crypto/ssh → gRPC bridge)
+- `pkg/gateway/session_store.go` - SessionStore interface
+- `pkg/gateway/memory_store.go` - In-memory SessionStore (default)
+- `pkg/gateway/redis_store.go` - Redis-backed SessionStore (HA)
 - `cmd/gateway/main.go` - Gateway entry point
 - `pkg/execagent/agent.go` - Executor agent (Unix socket server)
 - `pkg/execagent/protocol.go` - Executor agent JSON protocol

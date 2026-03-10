@@ -70,10 +70,47 @@ spec:
                   key: password
                   optional: false
             {{- end }}
+            {{- if .Values.ssh.enabled }}
+            - name: SSH_ENABLED
+              value: "true"
+            - name: SSH_PORT
+              value: "{{ .Values.ssh.port }}"
+            - name: SSH_HOST_KEY_PATH
+              value: "{{ .Values.ssh.hostKeyPath }}"
+            {{- if .Values.ssh.password }}
+            - name: SSH_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "arl-operator.fullname" . }}-ssh
+                  key: password
+                  optional: false
+            {{- end }}
+            {{- end }}
+            {{- if .Values.redis.enabled }}
+            - name: REDIS_ENABLED
+              value: "true"
+            - name: REDIS_ADDR
+              value: "{{ .Values.redis.addr }}"
+            - name: REDIS_DB
+              value: "{{ .Values.redis.db }}"
+            {{- if .Values.redis.password }}
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "arl-operator.fullname" . }}-redis
+                  key: password
+                  optional: false
+            {{- end }}
+            {{- end }}
           ports:
             - name: http
               containerPort: {{ .Values.gateway.port }}
               protocol: TCP
+            {{- if .Values.ssh.enabled }}
+            - name: ssh
+              containerPort: {{ .Values.ssh.port }}
+              protocol: TCP
+            {{- end }}
           livenessProbe:
             httpGet:
               path: /healthz
@@ -107,6 +144,12 @@ spec:
       {{- if and (eq .Values.gateway.service.type "NodePort") .Values.gateway.service.nodePort }}
       nodePort: {{ .Values.gateway.service.nodePort }}
       {{- end }}
+    {{- if .Values.ssh.enabled }}
+    - port: {{ .Values.ssh.port }}
+      targetPort: ssh
+      protocol: TCP
+      name: ssh
+    {{- end }}
   selector:
     {{- include "arl-operator.selectorLabels" . | nindent 4 }}
     app.kubernetes.io/component: gateway

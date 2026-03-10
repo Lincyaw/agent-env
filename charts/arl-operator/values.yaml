@@ -60,6 +60,22 @@ managedPool:
   emptyTTL: "10m"          # How long to keep a pool with 0 sessions before deletion
   sweepInterval: "30s"     # Background sweep interval for scale-down and GC
 
+# SSH gateway configuration
+# Enables native SSH access to sessions: ssh -p <port> <session-id>@<gateway-host>
+ssh:
+  enabled: false
+  port: 2222
+  hostKeyPath: "/etc/arl/ssh_host_key"
+  # Optional static password. If empty, any password is accepted as long as the session exists.
+  password: ""
+
+# Redis configuration (for HA session state persistence across gateway replicas)
+redis:
+  enabled: false
+  addr: "redis:6379"       # Redis server address
+  password: ""             # Redis password (stored in Secret)
+  db: 0                    # Redis database number
+
 imagePullSecrets: []
 nameOverride: ""
 fullnameOverride: ""
