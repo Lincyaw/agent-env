@@ -438,7 +438,6 @@ Returned by `create_sandbox()` and `attach()`.
 ```python
 class SessionInfo:
     id: str               # Session ID
-    sandbox_name: str     # Sandbox CRD name
     namespace: str        # Kubernetes namespace
     pool_ref: str         # WarmPool name
     pod_ip: str           # Pod IP address

@@ -108,7 +108,7 @@ skaffold run --profile=with-samples
 make logs
 
 # Check resource status
-kubectl get warmpools,sandboxes
+kubectl get warmpools
 ```
 
 ## Code Generation Details
@@ -164,10 +164,9 @@ This checks:
 1. Edit the type definition in `api/v1alpha1/`:
 
     ```go
-    type SandboxSpec struct {
-        PoolRef   string `json:"poolRef"`
-        KeepAlive bool   `json:"keepAlive,omitempty"`
-        NewField  string `json:"newField,omitempty"` // Add new field
+    type WarmPoolSpec struct {
+        Replicas int32 `json:"replicas"`
+        NewField string `json:"newField,omitempty"` // Add new field
     }
     ```
 

@@ -28,30 +28,23 @@ graph TB
 
             subgraph "Controllers"
                 WPCtrl[WarmPool Controller]
-                SBCtrl[Sandbox Controller]
             end
 
             subgraph "Webhooks"
                 WPWebhook[WarmPool Validator]
-                SBWebhook[Sandbox Validator]
             end
 
             Operator --> WPCtrl
-            Operator --> SBCtrl
             Operator --> WPWebhook
-            Operator --> SBWebhook
         end
 
         K8sAPI --> |validate| WPWebhook
-        K8sAPI --> |validate| SBWebhook
         K8sAPI --> |watch/update| WPCtrl
-        K8sAPI --> |watch/update| SBCtrl
     end
 
     subgraph "Kubernetes Data Plane"
         subgraph "Custom Resources"
             WP[WarmPool CRD]
-            SB[Sandbox CRD]
         end
 
         subgraph "Warm Pool Pods"
@@ -65,13 +58,8 @@ graph TB
     WPCtrl --> |create/manage| Pod2
     WPCtrl --> |create/manage| Pod3
 
-    SBCtrl --> |allocate| Pod2
-    SBCtrl --> |read| WP
-
+    Gateway --> |allocate via PodAllocator| Pod2
     Gateway --> |gRPC| Pod2
-    Gateway --> |read| SB
-
-    SB --> |references| WP
 ```
 
 ## Core Components
@@ -83,8 +71,8 @@ The operator is the central control component running in the `arl-system` namesp
 | Component | Responsibility |
 |-----------|----------------|
 | **WarmPool Controller** | Maintains pod pools, ensures desired replica count |
-| **Sandbox Controller** | Allocates pods from pools, manages sandbox lifecycle |
-| **Gateway** | REST API for session management and command execution via gRPC |
+| **Gateway** | REST API + SSH server for session management and command execution via gRPC |
+| **PodAllocator** | In-process Informer-backed pod allocation from warm pools |
 | **Webhooks** | Validates CRD resources before creation |
 
 ### Sidecar Agent
@@ -131,20 +119,6 @@ spec:
           image: python:3.9-slim
 ```
 
-#### Sandbox
-
-Represents an allocated workspace.
-
-```yaml
-apiVersion: arl.infra.io/v1alpha1
-kind: Sandbox
-metadata:
-  name: my-sandbox
-spec:
-  poolRef: python-pool  # Which pool to allocate from
-  keepAlive: true       # Keep for multiple executions
-```
-
 ## Interaction Flow
 
 ### Execution Flow
@@ -156,7 +130,6 @@ sequenceDiagram
     participant GW as Gateway API
     participant API as Kubernetes API
     participant WPC as WarmPool Controller
-    participant SBC as Sandbox Controller
     participant Pod as Pod (Sidecar)
 
     Note over User,Pod: Phase 1: Create Pod Pool
@@ -165,20 +138,15 @@ sequenceDiagram
     WPC->>API: Create Pods
     Note over Pod: Pods Ready
 
-    Note over User,Pod: Phase 2: Allocate Sandbox
+    Note over User,Pod: Phase 2: Create Session
     User->>SDK: Create SandboxSession
-    SDK->>GW: Create Sandbox
-    GW->>API: Create Sandbox CRD
-    API->>SBC: Watch Sandbox
-    SBC->>API: Query WarmPool
-    SBC->>API: Allocate Pod (update labels)
+    SDK->>GW: POST /v1/sessions
+    GW->>GW: PodAllocator assigns idle pod
     Note over Pod: Pod Allocated
-    SBC->>API: Update Sandbox Status (Ready)
 
     Note over User,Pod: Phase 3: Execute Commands
     User->>SDK: session.execute(steps)
-    SDK->>GW: POST /execute
-    GW->>API: Get Sandbox (pod IP)
+    SDK->>GW: POST /v1/sessions/{id}/execute
     GW->>Pod: gRPC: Execute
     Pod-->>GW: stdout, stderr, exitCode
     GW-->>SDK: ExecuteResponse
@@ -199,7 +167,6 @@ flowchart LR
 
     subgraph "Kubernetes Resources"
         WP[WarmPool]
-        SB[Sandbox]
     end
 
     subgraph "Pod Execution"
@@ -211,9 +178,8 @@ flowchart LR
     end
 
     SDK --> GW
-    GW --> SB
-    WP --> |provides| SB
-    SB --> |binds Pod| Cmd
+    GW --> |allocate pod from| WP
+    WP --> |pod assigned| Cmd
     Cmd --> Status
     Status --> GW
     GW --> SDK
@@ -247,7 +213,7 @@ Warm pools provide the best balance of low latency and strong isolation.
 
 ### Why CRD-based Resource Management?
 
-- **Kubernetes-native**: Uses familiar kubectl commands for WarmPool and Sandbox management
+- **Kubernetes-native**: Uses familiar kubectl commands for WarmPool management
 - **Declarative**: Desired state is explicitly defined
 - **Extensible**: Easy to add new resource types
 - **Auditable**: All changes tracked by Kubernetes

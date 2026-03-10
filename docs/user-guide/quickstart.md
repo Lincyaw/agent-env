@@ -135,7 +135,7 @@ print(f"Running in {mode} mode")
     print(result.results[0].output.stdout)
 ```
 
-## Step 6: Persistent Sandbox
+## Step 6: Persistent Session
 
 For multiple related executions, reuse the same sandbox:
 

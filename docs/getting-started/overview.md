@@ -51,18 +51,9 @@ spec:
   replicas: 3  # Keep 3 pods ready
 ```
 
-### 2. Sandbox
+### 2. Session
 
-A **Sandbox** is your workspace - a pod allocated from the warm pool. It's your "reserved parking spot."
-
-```yaml
-apiVersion: arl.infra.io/v1alpha1
-kind: Sandbox
-metadata:
-  name: my-workspace
-spec:
-  poolRef: python-pool
-```
+A **Session** is a Gateway-managed workspace bound to a pod from the warm pool. Created via REST API or Python SDK.
 
 ## Workflow
 
@@ -84,7 +75,6 @@ sequenceDiagram
     Note over User,Pod: Execution Phase (fast!)
     User->>SDK: Execute command
     SDK->>Gateway: REST API call
-    Gateway->>K8s: Look up Sandbox pod
     Gateway->>Pod: gRPC execute
     Pod-->>Gateway: stdout, stderr, exitCode
     Gateway-->>SDK: ExecuteResponse

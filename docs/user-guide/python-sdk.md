@@ -97,7 +97,7 @@ finally:
 
 ### SandboxSession
 
-The main class for interacting with sandboxes.
+The main class for interacting with sessions.
 
 ```python
 from arl import SandboxSession

@@ -300,9 +300,6 @@ skaffold delete --profile=k8s
 ### Manual Cleanup
 
 ```bash
-# Delete all sandboxes
-kubectl delete sandboxes --all
-
 # Delete all warmpools
 kubectl delete warmpools --all
 
@@ -349,9 +346,6 @@ kubectl get pods -n arl-system -l app=arl-gateway
 
 # Check Gateway logs
 kubectl logs -n arl-system -l app=arl-gateway
-
-# Check sandbox status
-kubectl describe sandbox <sandbox-name>
 
 # Check sidecar logs in the pod
 kubectl logs <pod-name> -c sidecar

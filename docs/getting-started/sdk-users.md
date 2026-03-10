@@ -83,8 +83,8 @@ Continue learning with these resources:
 | Concept | Description |
 |---------|-------------|
 | **WarmPool** | Pre-created pods managed by admin |
-| **Sandbox** | Your allocated workspace |
-| **Gateway** | REST API that routes execution requests to sandbox pods via gRPC |
+| **Session** | Your allocated workspace (pod from a WarmPool) |
+| **Gateway** | REST API that routes execution requests to pods via gRPC |
 | **SandboxSession** | High-level Python API |
 
 ## Common Use Cases

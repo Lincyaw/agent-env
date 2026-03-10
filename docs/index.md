@@ -69,13 +69,10 @@ graph TB
 
     subgraph "Data Plane"
         WP[WarmPool]
-        SB[Sandbox]
         Pods[Pod Pool]
 
         Operator --> WP
-        Operator --> SB
         WP --> Pods
-        SB --> Pods
         Gateway --> |gRPC| Pods
     end
 ```

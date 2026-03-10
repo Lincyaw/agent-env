@@ -166,7 +166,6 @@ kubectl get crds | grep arl.infra.io
 Expected output:
 
 ```
-sandboxes.arl.infra.io           2024-01-01T00:00:00Z
 warmpools.arl.infra.io           2024-01-01T00:00:00Z
 ```
 

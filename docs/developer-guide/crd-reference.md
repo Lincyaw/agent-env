@@ -62,54 +62,7 @@ Pods created by WarmPool have these labels:
 |-------|-------|-------------|
 | `arl.infra.io/warmpool` | Pool name | Identifies the owning pool |
 | `arl.infra.io/pod-state` | `ready` or `allocated` | Current pod state |
-| `arl.infra.io/sandbox` | Sandbox name | Set when allocated |
-
----
-
-## Sandbox
-
-A Sandbox represents an allocated workspace - a pod bound from a WarmPool.
-
-### Spec
-
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| `poolRef` | string | Yes | Name of the WarmPool to allocate from |
-| `keepAlive` | boolean | No | Keep sandbox after execution (default: false) |
-| `ttlSecondsAfterFinished` | integer | No | Auto-delete after this many seconds of idle time |
-
-### Status
-
-| Field | Type | Description |
-|-------|------|-------------|
-| `phase` | string | Current phase (Pending, Ready, Bound, Released) |
-| `podName` | string | Name of the allocated pod |
-| `podIP` | string | IP address of the allocated pod |
-| `allocatedAt` | timestamp | When the pod was allocated |
-| `conditions` | []Condition | Detailed status conditions |
-
-### Phases
-
-| Phase | Description |
-|-------|-------------|
-| `Pending` | Waiting for pod allocation |
-| `Ready` | Pod allocated and ready for execution |
-| `Bound` | Currently in use |
-| `Released` | Sandbox released (pod returned to pool or deleted) |
-
-### Example
-
-```yaml
-apiVersion: arl.infra.io/v1alpha1
-kind: Sandbox
-metadata:
-  name: my-workspace
-  namespace: default
-spec:
-  poolRef: python-pool
-  keepAlive: true
-  ttlSecondsAfterFinished: 3600  # Auto-delete after 1 hour idle
-```
+| `arl.infra.io/sandbox` | Session name | Set when allocated |
 
 ---
 
