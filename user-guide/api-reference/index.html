@@ -25,7 +25,7 @@
       
       
       <link rel="icon" href="../../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.1">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.4">
     
     
       
@@ -2292,12 +2292,11 @@
 <p>Returned by <code>create_sandbox()</code> and <code>attach()</code>.</p>
 <div class="highlight"><pre><span></span><code><a id="__codelineno-32-1" name="__codelineno-32-1" href="#__codelineno-32-1"></a><span class="k">class</span><span class="w"> </span><span class="nc">SessionInfo</span><span class="p">:</span>
 <a id="__codelineno-32-2" name="__codelineno-32-2" href="#__codelineno-32-2"></a>    <span class="nb">id</span><span class="p">:</span> <span class="nb">str</span>               <span class="c1"># Session ID</span>
-<a id="__codelineno-32-3" name="__codelineno-32-3" href="#__codelineno-32-3"></a>    <span class="n">sandbox_name</span><span class="p">:</span> <span class="nb">str</span>     <span class="c1"># Sandbox CRD name</span>
-<a id="__codelineno-32-4" name="__codelineno-32-4" href="#__codelineno-32-4"></a>    <span class="n">namespace</span><span class="p">:</span> <span class="nb">str</span>        <span class="c1"># Kubernetes namespace</span>
-<a id="__codelineno-32-5" name="__codelineno-32-5" href="#__codelineno-32-5"></a>    <span class="n">pool_ref</span><span class="p">:</span> <span class="nb">str</span>         <span class="c1"># WarmPool name</span>
-<a id="__codelineno-32-6" name="__codelineno-32-6" href="#__codelineno-32-6"></a>    <span class="n">pod_ip</span><span class="p">:</span> <span class="nb">str</span>           <span class="c1"># Pod IP address</span>
-<a id="__codelineno-32-7" name="__codelineno-32-7" href="#__codelineno-32-7"></a>    <span class="n">pod_name</span><span class="p">:</span> <span class="nb">str</span>         <span class="c1"># Pod name</span>
-<a id="__codelineno-32-8" name="__codelineno-32-8" href="#__codelineno-32-8"></a>    <span class="n">created_at</span><span class="p">:</span> <span class="n">datetime</span>  <span class="c1"># Creation timestamp</span>
+<a id="__codelineno-32-3" name="__codelineno-32-3" href="#__codelineno-32-3"></a>    <span class="n">namespace</span><span class="p">:</span> <span class="nb">str</span>        <span class="c1"># Kubernetes namespace</span>
+<a id="__codelineno-32-4" name="__codelineno-32-4" href="#__codelineno-32-4"></a>    <span class="n">pool_ref</span><span class="p">:</span> <span class="nb">str</span>         <span class="c1"># WarmPool name</span>
+<a id="__codelineno-32-5" name="__codelineno-32-5" href="#__codelineno-32-5"></a>    <span class="n">pod_ip</span><span class="p">:</span> <span class="nb">str</span>           <span class="c1"># Pod IP address</span>
+<a id="__codelineno-32-6" name="__codelineno-32-6" href="#__codelineno-32-6"></a>    <span class="n">pod_name</span><span class="p">:</span> <span class="nb">str</span>         <span class="c1"># Pod name</span>
+<a id="__codelineno-32-7" name="__codelineno-32-7" href="#__codelineno-32-7"></a>    <span class="n">created_at</span><span class="p">:</span> <span class="n">datetime</span>  <span class="c1"># Creation timestamp</span>
 </code></pre></div>
 <h3 id="poolinfo">PoolInfo<a class="headerlink" href="#poolinfo" title="Permanent link">&para;</a></h3>
 <p>Returned by <code>GatewayClient.get_pool()</code>.</p>

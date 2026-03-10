@@ -23,7 +23,7 @@
       
       
       <link rel="icon" href="assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.1">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.4">
     
     
       
@@ -1218,13 +1218,10 @@
 
     subgraph "Data Plane"
         WP[WarmPool]
-        SB[Sandbox]
         Pods[Pod Pool]
 
         Operator --&gt; WP
-        Operator --&gt; SB
         WP --&gt; Pods
-        SB --&gt; Pods
         Gateway --&gt; |gRPC| Pods
     end</code></pre>
 <h2 id="getting-started">Getting Started<a class="headerlink" href="#getting-started" title="Permanent link">&para;</a></h2>

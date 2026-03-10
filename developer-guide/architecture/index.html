@@ -25,7 +25,7 @@
       
       
       <link rel="icon" href="../../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.1">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.4">
     
     
       
@@ -710,17 +710,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#sandbox" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Sandbox
-      
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -1237,17 +1226,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#sandbox" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Sandbox
-      
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -1415,30 +1393,23 @@
 
             subgraph "Controllers"
                 WPCtrl[WarmPool Controller]
-                SBCtrl[Sandbox Controller]
             end
 
             subgraph "Webhooks"
                 WPWebhook[WarmPool Validator]
-                SBWebhook[Sandbox Validator]
             end
 
             Operator --&gt; WPCtrl
-            Operator --&gt; SBCtrl
             Operator --&gt; WPWebhook
-            Operator --&gt; SBWebhook
         end
 
         K8sAPI --&gt; |validate| WPWebhook
-        K8sAPI --&gt; |validate| SBWebhook
         K8sAPI --&gt; |watch/update| WPCtrl
-        K8sAPI --&gt; |watch/update| SBCtrl
     end
 
     subgraph "Kubernetes Data Plane"
         subgraph "Custom Resources"
             WP[WarmPool CRD]
-            SB[Sandbox CRD]
         end
 
         subgraph "Warm Pool Pods"
@@ -1452,13 +1423,8 @@
     WPCtrl --&gt; |create/manage| Pod2
     WPCtrl --&gt; |create/manage| Pod3
 
-    SBCtrl --&gt; |allocate| Pod2
-    SBCtrl --&gt; |read| WP
-
-    Gateway --&gt; |gRPC| Pod2
-    Gateway --&gt; |read| SB
-
-    SB --&gt; |references| WP</code></pre>
+    Gateway --&gt; |allocate via PodAllocator| Pod2
+    Gateway --&gt; |gRPC| Pod2</code></pre>
 <h2 id="core-components">Core Components<a class="headerlink" href="#core-components" title="Permanent link">&para;</a></h2>
 <h3 id="arl-operator">ARL Operator<a class="headerlink" href="#arl-operator" title="Permanent link">&para;</a></h3>
 <p>The operator is the central control component running in the <code>arl-system</code> namespace.</p>
@@ -1475,12 +1441,12 @@
 <td>Maintains pod pools, ensures desired replica count</td>
 </tr>
 <tr>
-<td><strong>Sandbox Controller</strong></td>
-<td>Allocates pods from pools, manages sandbox lifecycle</td>
+<td><strong>Gateway</strong></td>
+<td>REST API + SSH server for session management and command execution via gRPC</td>
 </tr>
 <tr>
-<td><strong>Gateway</strong></td>
-<td>REST API for session management and command execution via gRPC</td>
+<td><strong>PodAllocator</strong></td>
+<td>In-process Informer-backed pod allocation from warm pools</td>
 </tr>
 <tr>
 <td><strong>Webhooks</strong></td>
@@ -1523,16 +1489,6 @@
 <a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a><span class="w">        </span><span class="p p-Indicator">-</span><span class="w"> </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">executor</span>
 <a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="w">          </span><span class="nt">image</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">python:3.9-slim</span>
 </code></pre></div>
-<h4 id="sandbox">Sandbox<a class="headerlink" href="#sandbox" title="Permanent link">&para;</a></h4>
-<p>Represents an allocated workspace.</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="nt">apiVersion</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">arl.infra.io/v1alpha1</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a><span class="nt">kind</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">Sandbox</span>
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a><span class="nt">metadata</span><span class="p">:</span>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="w">  </span><span class="nt">name</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">my-sandbox</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a><span class="nt">spec</span><span class="p">:</span>
-<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a><span class="w">  </span><span class="nt">poolRef</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">python-pool</span><span class="w">  </span><span class="c1"># Which pool to allocate from</span>
-<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a><span class="w">  </span><span class="nt">keepAlive</span><span class="p">:</span><span class="w"> </span><span class="l l-Scalar l-Scalar-Plain">true</span><span class="w">       </span><span class="c1"># Keep for multiple executions</span>
-</code></pre></div>
 <h2 id="interaction-flow">Interaction Flow<a class="headerlink" href="#interaction-flow" title="Permanent link">&para;</a></h2>
 <h3 id="execution-flow">Execution Flow<a class="headerlink" href="#execution-flow" title="Permanent link">&para;</a></h3>
 <pre class="mermaid"><code>sequenceDiagram
@@ -1541,7 +1497,6 @@
     participant GW as Gateway API
     participant API as Kubernetes API
     participant WPC as WarmPool Controller
-    participant SBC as Sandbox Controller
     participant Pod as Pod (Sidecar)
 
     Note over User,Pod: Phase 1: Create Pod Pool
@@ -1550,20 +1505,15 @@
     WPC-&gt;&gt;API: Create Pods
     Note over Pod: Pods Ready
 
-    Note over User,Pod: Phase 2: Allocate Sandbox
+    Note over User,Pod: Phase 2: Create Session
     User-&gt;&gt;SDK: Create SandboxSession
-    SDK-&gt;&gt;GW: Create Sandbox
-    GW-&gt;&gt;API: Create Sandbox CRD
-    API-&gt;&gt;SBC: Watch Sandbox
-    SBC-&gt;&gt;API: Query WarmPool
-    SBC-&gt;&gt;API: Allocate Pod (update labels)
+    SDK-&gt;&gt;GW: POST /v1/sessions
+    GW-&gt;&gt;GW: PodAllocator assigns idle pod
     Note over Pod: Pod Allocated
-    SBC-&gt;&gt;API: Update Sandbox Status (Ready)
 
     Note over User,Pod: Phase 3: Execute Commands
     User-&gt;&gt;SDK: session.execute(steps)
-    SDK-&gt;&gt;GW: POST /execute
-    GW-&gt;&gt;API: Get Sandbox (pod IP)
+    SDK-&gt;&gt;GW: POST /v1/sessions/{id}/execute
     GW-&gt;&gt;Pod: gRPC: Execute
     Pod--&gt;&gt;GW: stdout, stderr, exitCode
     GW--&gt;&gt;SDK: ExecuteResponse
@@ -1580,7 +1530,6 @@
 
     subgraph "Kubernetes Resources"
         WP[WarmPool]
-        SB[Sandbox]
     end
 
     subgraph "Pod Execution"
@@ -1592,9 +1541,8 @@
     end
 
     SDK --&gt; GW
-    GW --&gt; SB
-    WP --&gt; |provides| SB
-    SB --&gt; |binds Pod| Cmd
+    GW --&gt; |allocate pod from| WP
+    WP --&gt; |pod assigned| Cmd
     Cmd --&gt; Status
     Status --&gt; GW
     GW --&gt; SDK</code></pre>
@@ -1647,32 +1595,32 @@
 </ul>
 <h3 id="why-crd-based-resource-management">Why CRD-based Resource Management?<a class="headerlink" href="#why-crd-based-resource-management" title="Permanent link">&para;</a></h3>
 <ul>
-<li><strong>Kubernetes-native</strong>: Uses familiar kubectl commands for WarmPool and Sandbox management</li>
+<li><strong>Kubernetes-native</strong>: Uses familiar kubectl commands for WarmPool management</li>
 <li><strong>Declarative</strong>: Desired state is explicitly defined</li>
 <li><strong>Extensible</strong>: Easy to add new resource types</li>
 <li><strong>Auditable</strong>: All changes tracked by Kubernetes</li>
 </ul>
 <h2 id="directory-structure">Directory Structure<a class="headerlink" href="#directory-structure" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a>agent-env/
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>├── api/                    # CRD type definitions
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>│   └── v1alpha1/
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>├── cmd/
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>│   ├── operator/          # Operator entrypoint
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>│   ├── sidecar/           # Sidecar entrypoint
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>│   ├── gateway/           # Gateway entrypoint
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>│   └── executor-agent/    # Executor agent entrypoint
-<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>├── config/
-<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a>│   └── crd/               # Generated CRD manifests
-<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>├── pkg/
-<a id="__codelineno-2-12" name="__codelineno-2-12" href="#__codelineno-2-12"></a>│   ├── controller/        # Reconciliation logic
-<a id="__codelineno-2-13" name="__codelineno-2-13" href="#__codelineno-2-13"></a>│   ├── gateway/           # Gateway REST API
-<a id="__codelineno-2-14" name="__codelineno-2-14" href="#__codelineno-2-14"></a>│   ├── execagent/         # Executor agent logic
-<a id="__codelineno-2-15" name="__codelineno-2-15" href="#__codelineno-2-15"></a>│   ├── scheduler/         # Pod scheduling logic
-<a id="__codelineno-2-16" name="__codelineno-2-16" href="#__codelineno-2-16"></a>│   ├── pb/                # Generated protobuf code
-<a id="__codelineno-2-17" name="__codelineno-2-17" href="#__codelineno-2-17"></a>│   └── webhook/           # Validation webhooks
-<a id="__codelineno-2-18" name="__codelineno-2-18" href="#__codelineno-2-18"></a>├── proto/                 # Protocol buffer definitions
-<a id="__codelineno-2-19" name="__codelineno-2-19" href="#__codelineno-2-19"></a>├── sdk/python/            # Python SDK
-<a id="__codelineno-2-20" name="__codelineno-2-20" href="#__codelineno-2-20"></a>└── charts/                # Helm charts
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>agent-env/
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>├── api/                    # CRD type definitions
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>│   └── v1alpha1/
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>├── cmd/
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>│   ├── operator/          # Operator entrypoint
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>│   ├── sidecar/           # Sidecar entrypoint
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>│   ├── gateway/           # Gateway entrypoint
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>│   └── executor-agent/    # Executor agent entrypoint
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>├── config/
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>│   └── crd/               # Generated CRD manifests
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>├── pkg/
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>│   ├── controller/        # Reconciliation logic
+<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>│   ├── gateway/           # Gateway REST API
+<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a>│   ├── execagent/         # Executor agent logic
+<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a>│   ├── scheduler/         # Pod scheduling logic
+<a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a>│   ├── pb/                # Generated protobuf code
+<a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a>│   └── webhook/           # Validation webhooks
+<a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a>├── proto/                 # Protocol buffer definitions
+<a id="__codelineno-1-19" name="__codelineno-1-19" href="#__codelineno-1-19"></a>├── sdk/python/            # Python SDK
+<a id="__codelineno-1-20" name="__codelineno-1-20" href="#__codelineno-1-20"></a>└── charts/                # Helm charts
 </code></pre></div>
 
 
