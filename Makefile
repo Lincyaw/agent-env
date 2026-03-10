@@ -150,5 +150,5 @@ arch-check: ## Validate architecture documentation
 
 .PHONY: logs
 logs: ## Show operator logs
-	kubectl logs -n arl-system -l app=arl-operator --tail=100 -f
+	kubectl logs -n arl -l app=arl-operator --tail=100 -f
 

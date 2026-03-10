@@ -22,7 +22,7 @@ fi
 
 echo -e "${YELLOW}Step 1: Deploying ARL Operator with Helm...${NC}"
 helm upgrade --install arl-operator "$PROJECT_ROOT/charts/arl-operator" \
-  --namespace arl-system --create-namespace \
+  --namespace arl --create-namespace \
   --set crds.install=true \
   --wait --timeout=2m
 echo -e "${GREEN}✓ Operator deployed via Helm${NC}"
@@ -60,7 +60,7 @@ fi
 echo -e "\n${GREEN}=== Deployment Status ===${NC}"
 
 echo -e "\n${YELLOW}Operator:${NC}"
-minikube kubectl -- get pods -n arl-system -l app=arl-operator
+minikube kubectl -- get pods -n arl -l app=arl-operator
 
 echo -e "\n${YELLOW}WarmPool:${NC}"
 minikube kubectl -- get warmpools
@@ -75,6 +75,6 @@ echo "  2. Or manually run examples:"
 echo "     cd ../python"
 echo "     uv run python 01_basic_execution.py"
 echo -e "\nTo check operator logs:"
-echo "  minikube kubectl -- logs -n arl-system -l app=arl-operator --tail=50 -f"
+echo "  minikube kubectl -- logs -n arl -l app=arl-operator --tail=50 -f"
 echo -e "\nTo describe WarmPool:"
 echo "  minikube kubectl -- describe warmpool python-39-std"

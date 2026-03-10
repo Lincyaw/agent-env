@@ -51,7 +51,7 @@ skaffold run --profile=prod
 
 ```bash
 # Check operator pods
-kubectl get pods -n arl-system
+kubectl get pods -n arl
 
 # Check CRDs are installed
 kubectl get crds | grep arl.infra.io

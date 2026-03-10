@@ -134,7 +134,7 @@ ARL does not include Redis in its Helm chart. Use an external Redis instance or 
 # Using Bitnami Redis chart
 helm repo add bitnami https://charts.bitnami.com/bitnami
 helm install redis bitnami/redis \
-  -n arl-system \
+  -n arl \
   --set auth.password=your-redis-password \
   --set architecture=standalone
 ```

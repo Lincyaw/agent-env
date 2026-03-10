@@ -47,12 +47,12 @@ minikube kubectl -- wait --for=delete pod -l arl.infra.io/pool=python-39-std --t
 echo -e "${GREEN}✓ Warm pool pods terminated${NC}"
 
 echo -e "\n${YELLOW}Step 5: Uninstalling Helm release...${NC}"
-helm uninstall arl-operator -n arl-system --wait --timeout=60s || echo "Helm release already deleted or timeout"
+helm uninstall arl-operator -n arl --wait --timeout=60s || echo "Helm release already deleted or timeout"
 echo -e "${GREEN}✓ Helm release uninstalled${NC}"
 
 echo -e "\n${GREEN}=== Cleanup Complete ===${NC}"
 echo -e "\nRemaining resources:"
-minikube kubectl -- get all -n arl-system 2>/dev/null || echo "  (namespace deleted)"
+minikube kubectl -- get all -n arl 2>/dev/null || echo "  (namespace deleted)"
 minikube kubectl -- get warmpools,sandboxes,tasks 2>/dev/null || echo "  (no ARL resources found)"
 
 echo -e "\n${YELLOW}Note:${NC} The minikube cluster is still running."

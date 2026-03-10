@@ -215,7 +215,7 @@ This checks:
 make logs
 
 # Or manually
-kubectl logs -n arl-system -l app=arl-operator -f
+kubectl logs -n arl -l app=arl-operator -f
 ```
 
 ### View Sidecar Logs

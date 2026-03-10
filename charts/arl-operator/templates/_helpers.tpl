@@ -72,3 +72,14 @@ ClickHouse address (host:port)
 {{- define "arl-operator.clickhouseAddr" -}}
 {{- printf "%s:%d" (include "arl-operator.clickhouseHost" .) (int .Values.clickhouse.port | default 9000) }}
 {{- end }}
+
+{{/*
+Redis address (host:port) — auto-resolves to the in-cluster Service when deploy is true.
+*/}}
+{{- define "arl-operator.redisAddr" -}}
+{{- if .Values.redis.deploy }}
+{{- printf "%s-redis:6379" (include "arl-operator.fullname" .) }}
+{{- else }}
+{{- .Values.redis.addr }}
+{{- end }}
+{{- end }}

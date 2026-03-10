@@ -22,19 +22,19 @@ This skill provides comprehensive Kubernetes operations and testing capabilities
 ```bash
 # Minikube: Build and deploy operator with CRDs using Helm
 make docker-build && helm upgrade --install arl-operator charts/arl-operator \
-  --namespace arl-system --create-namespace --set crds.install=true --wait
+  --namespace arl --create-namespace --set crds.install=true --wait
 
 # Standard K8s: Build, push and deploy
 REGISTRY=your-registry.com make k8s-build-push && \
   helm upgrade --install arl-operator charts/arl-operator \
-  --namespace arl-system --create-namespace \
+  --namespace arl --create-namespace \
   --set crds.install=true \
   --set image.repository=your-registry.com/arl-operator \
   --set sidecar.image.repository=your-registry.com/arl-sidecar \
   --wait
 
 # Verify operator is running
-kubectl get pods -n arl-system
+kubectl get pods -n arl
 
 # Check CRDs are installed
 kubectl get crds | grep arl.infra.io
@@ -71,7 +71,7 @@ scripts/wait_for_pod.sh <namespace> <pod-pattern> 300
 scripts/debug_pod.sh <namespace> <pod-name>
 
 # Check operator logs
-kubectl logs -n arl-system -l app=arl-operator --tail=100 -f
+kubectl logs -n arl -l app=arl-operator --tail=100 -f
 
 # Check sidecar logs in warmpool pods
 kubectl logs <pod-name> -c sidecar
@@ -103,7 +103,7 @@ uv add <package-name>
 ```bash
 # Install CRDs via Helm
 helm upgrade --install arl-operator charts/arl-operator \
-  --namespace arl-system --create-namespace \
+  --namespace arl --create-namespace \
   --set crds.install=true --wait
 
 # Or manually apply CRDs only
@@ -116,7 +116,7 @@ kubectl get crds | grep arl.infra.io
 kubectl get crd warmpools.arl.infra.io -o yaml
 
 # Uninstall operator and CRDs
-helm uninstall arl-operator -n arl-system --wait
+helm uninstall arl-operator -n arl --wait
 ```
 
 #### Working with Custom Resources
@@ -180,16 +180,16 @@ make deploy
 make k8s-deploy
 
 # Check operator status
-kubectl get deployment -n arl-system
-kubectl get pods -n arl-system
+kubectl get deployment -n arl
+kubectl get pods -n arl
 
 # View operator logs
 make logs
 # Or:
-kubectl logs -n arl-system -l app=arl-operator --tail=100 -f
+kubectl logs -n arl -l app=arl-operator --tail=100 -f
 
 # Restart operator
-kubectl rollout restart deployment -n arl-system
+kubectl rollout restart deployment -n arl
 
 # Remove operator
 make undeploy  # minikube
@@ -205,7 +205,7 @@ Use `scripts/verify_deployment.py` to automatically verify deployment health:
 uv run python scripts/verify_deployment.py <deployment-name> [namespace] [timeout]
 
 # Example
-uv run python scripts/verify_deployment.py arl-operator arl-system 300
+uv run python scripts/verify_deployment.py arl-operator arl 300
 ```
 
 The script:
@@ -277,7 +277,7 @@ make docker-build
 make deploy
 
 # 4. Verify operator deployment
-uv run python scripts/verify_deployment.py arl-operator arl-system 300
+uv run python scripts/verify_deployment.py arl-operator arl 300
 
 # 5. Deploy sample resources
 make deploy-samples
@@ -310,7 +310,7 @@ REGISTRY=your-registry.com make k8s-build-push
 make k8s-deploy
 
 # 3. Verify operator deployment
-uv run python scripts/verify_deployment.py arl-operator arl-system 300
+uv run python scripts/verify_deployment.py arl-operator arl 300
 
 # 4. Deploy sample resources (ensure image registry matches)
 kubectl apply -f config/samples/
@@ -319,7 +319,7 @@ kubectl apply -f config/samples/
 kubectl get warmpools,sandboxes,tasks
 
 # 6. Check operator logs
-kubectl logs -n arl-system -l app=arl-operator --tail=100
+kubectl logs -n arl -l app=arl-operator --tail=100
 
 # 7. Cleanup
 make k8s-undeploy
@@ -334,7 +334,7 @@ kubectl apply --dry-run=server -f charts/arl-operator/crds/arl.infra.io_warmpool
 
 # 2. Install operator with CRDs via Helm
 helm upgrade --install arl-operator charts/arl-operator \
-  --namespace arl-system --create-namespace --set crds.install=true --wait
+  --namespace arl --create-namespace --set crds.install=true --wait
 
 # 3. Verify CRD registration
 kubectl get crds | grep arl.infra.io
@@ -349,7 +349,7 @@ kubectl apply -f config/samples/warmpool.yaml
 kubectl get warmpool python-3.9-std -o yaml -w
 
 # 7. Check operator reconciliation
-kubectl logs -n arl-system -l app=arl-operator | grep "Reconciling WarmPool"
+kubectl logs -n arl -l app=arl-operator | grep "Reconciling WarmPool"
 
 # 8. Delete resource and check cleanup
 kubectl delete warmpool python-3.9-std
@@ -548,7 +548,7 @@ kubectl get sandbox my-sandbox
 kubectl get warmpool <pool-name> -o jsonpath='{.status.readyReplicas}'
 
 # Check operator logs for allocation errors
-kubectl logs -n arl-system -l app=arl-operator | grep "Sandbox.*my-sandbox"
+kubectl logs -n arl -l app=arl-operator | grep "Sandbox.*my-sandbox"
 
 # Describe sandbox for events
 kubectl describe sandbox my-sandbox
@@ -573,7 +573,7 @@ POD_NAME=$(kubectl get sandbox $SANDBOX_NAME -o jsonpath='{.status.podName}')
 kubectl logs $POD_NAME -c sidecar
 
 # Check operator logs
-kubectl logs -n arl-system -l app=arl-operator | grep "Task.*my-task"
+kubectl logs -n arl -l app=arl-operator | grep "Task.*my-task"
 ```
 
 ### Verify HTTP Service
@@ -629,11 +629,11 @@ When deployments fail:
 
 **Operator-specific troubleshooting:**
 
-1. Check operator is running: `kubectl get pods -n arl-system`
-2. Review operator logs: `make logs` or `kubectl logs -n arl-system -l app=arl-operator`
+1. Check operator is running: `kubectl get pods -n arl`
+2. Review operator logs: `make logs` or `kubectl logs -n arl -l app=arl-operator`
 3. Verify CRDs are installed: `kubectl get crds | grep arl.infra.io`
 4. Check custom resource status: `kubectl get <resource-type> <name> -o yaml`
-5. Check operator reconciliation: `kubectl logs -n arl-system -l app=arl-operator | grep "Reconciling"`
+5. Check operator reconciliation: `kubectl logs -n arl -l app=arl-operator | grep "Reconciling"`
 6. Verify RBAC for operator: `kubectl get clusterrole,clusterrolebinding | grep arl`
 7. Check sidecar logs in pods: `kubectl logs <pod-name> -c sidecar`
 8. Test sidecar API: Port-forward and curl endpoints
@@ -750,7 +750,7 @@ make fmt && make vet
 make docker-build docker-push
 
 # 3. Restart operator to use new image
-kubectl rollout restart deployment -n arl-system arl-operator
+kubectl rollout restart deployment -n arl arl-operator
 
 # 4. Delete old warmpool pods to get new sidecar
 kubectl delete pods -l app=arl-sandbox
@@ -799,12 +799,12 @@ kubectl get warmpool <name> -o jsonpath='{.status.phase}' -w
    ```
 
 3. **Use namespace for operator isolation:**
-   - Operator runs in `arl-system` namespace
+   - Operator runs in `arl` namespace
    - Resources can be in any namespace
    
 4. **Monitor operator reconciliation loops:**
    ```bash
-   kubectl logs -n arl-system -l app=arl-operator -f | grep "Reconciling"
+   kubectl logs -n arl -l app=arl-operator -f | grep "Reconciling"
    ```
 
 5. **Version CRDs properly:**
@@ -844,7 +844,7 @@ scripts/debug_pod.sh <namespace> <pod-name> > debug.log
 
 # For operator issues, capture CRD state
 kubectl get warmpools,sandboxes,tasks -A -o yaml > custom-resources.yaml
-kubectl logs -n arl-system -l app=arl-operator > operator.log
+kubectl logs -n arl -l app=arl-operator > operator.log
 ```
 
 ## Project-Specific Workflows
@@ -873,14 +873,14 @@ kubectl logs -n arl-system -l app=arl-operator > operator.log
 - `make minikube-delete` - Delete minikube cluster
 
 **Deployment (Minikube):**
-- `helm upgrade --install arl-operator charts/arl-operator --namespace arl-system --create-namespace --set crds.install=true --wait` - Deploy operator with CRDs
+- `helm upgrade --install arl-operator charts/arl-operator --namespace arl --create-namespace --set crds.install=true --wait` - Deploy operator with CRDs
 - `kubectl apply -f config/samples/` - Deploy sample resources
-- `helm uninstall arl-operator -n arl-system --wait` - Remove operator and CRDs
+- `helm uninstall arl-operator -n arl --wait` - Remove operator and CRDs
 - `kubectl apply -f charts/arl-operator/crds/` - Install CRDs only
 
 **Deployment (Standard K8s):**
-- `helm upgrade --install arl-operator charts/arl-operator --namespace arl-system --create-namespace --set crds.install=true --set image.repository=<registry>/arl-operator --set sidecar.image.repository=<registry>/arl-sidecar --wait` - Deploy to K8s cluster
-- `helm uninstall arl-operator -n arl-system --wait` - Remove from K8s cluster
+- `helm upgrade --install arl-operator charts/arl-operator --namespace arl --create-namespace --set crds.install=true --set image.repository=<registry>/arl-operator --set sidecar.image.repository=<registry>/arl-sidecar --wait` - Deploy to K8s cluster
+- `helm uninstall arl-operator -n arl --wait` - Remove from K8s cluster
 
 **Testing:**
 - `make test-integration` - Run integration tests

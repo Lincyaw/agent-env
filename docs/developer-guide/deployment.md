@@ -91,11 +91,11 @@ helm dependency update
 
 ```bash
 # Install with default values
-helm install arl-operator charts/arl-operator -n arl-system --create-namespace
+helm install arl-operator charts/arl-operator -n arl --create-namespace
 
 # Install with custom values
 helm install arl-operator charts/arl-operator \
-  -n arl-system \
+  -n arl \
   --create-namespace \
   -f my-values.yaml
 ```
@@ -127,13 +127,13 @@ sidecar:
 ### Upgrade
 
 ```bash
-helm upgrade arl-operator charts/arl-operator -n arl-system -f my-values.yaml
+helm upgrade arl-operator charts/arl-operator -n arl -f my-values.yaml
 ```
 
 ### Uninstall
 
 ```bash
-helm uninstall arl-operator -n arl-system
+helm uninstall arl-operator -n arl
 ```
 
 ## Manual Deployment
@@ -147,7 +147,7 @@ kubectl apply -f config/crd/
 ### 2. Create Namespace
 
 ```bash
-kubectl create namespace arl-system
+kubectl create namespace arl
 ```
 
 ### 3. Deploy Operator
@@ -158,14 +158,14 @@ docker build -f Dockerfile.operator -t your-registry/arl-operator:latest .
 docker push your-registry/arl-operator:latest
 
 # Deploy
-kubectl apply -f config/deployment/operator.yaml -n arl-system
+kubectl apply -f config/deployment/operator.yaml -n arl
 ```
 
 ### 4. Verify Deployment
 
 ```bash
-kubectl get pods -n arl-system
-kubectl logs -n arl-system -l app=arl-operator
+kubectl get pods -n arl
+kubectl logs -n arl -l app=arl-operator
 ```
 
 ## Post-Deployment Setup
@@ -238,7 +238,7 @@ apiVersion: v1
 kind: ResourceQuota
 metadata:
   name: arl-quota
-  namespace: arl-system
+  namespace: arl
 spec:
   hard:
     pods: "100"
@@ -269,7 +269,7 @@ apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:
   name: arl-operator-policy
-  namespace: arl-system
+  namespace: arl
 spec:
   podSelector:
     matchLabels:
@@ -304,13 +304,13 @@ skaffold delete --profile=k8s
 kubectl delete warmpools --all
 
 # Delete Helm release
-helm uninstall arl-operator -n arl-system
+helm uninstall arl-operator -n arl
 
 # Delete CRDs
 kubectl delete -f config/crd/
 
 # Delete namespace
-kubectl delete namespace arl-system
+kubectl delete namespace arl
 ```
 
 ## Troubleshooting
@@ -319,13 +319,13 @@ kubectl delete namespace arl-system
 
 ```bash
 # Check pod status
-kubectl get pods -n arl-system
+kubectl get pods -n arl
 
 # Check logs using make target
 make logs
 
 # Describe pod for events
-kubectl describe pod -n arl-system -l app=arl-operator
+kubectl describe pod -n arl -l app=arl-operator
 ```
 
 ### WarmPool Pods Not Creating
@@ -342,10 +342,10 @@ make logs
 
 ```bash
 # Check Gateway is running
-kubectl get pods -n arl-system -l app=arl-gateway
+kubectl get pods -n arl -l app=arl-gateway
 
 # Check Gateway logs
-kubectl logs -n arl-system -l app=arl-gateway
+kubectl logs -n arl -l app=arl-gateway
 
 # Check sidecar logs in the pod
 kubectl logs <pod-name> -c sidecar

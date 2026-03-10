@@ -66,7 +66,7 @@ docker images | grep arl
 ```bash
 # Install ARL operator using Helm
 helm upgrade --install arl-operator ../../charts/arl-operator \
-  --namespace arl-system --create-namespace \
+  --namespace arl --create-namespace \
   --set crds.install=true \
   --wait --timeout=2m
 
@@ -81,7 +81,7 @@ minikube kubectl -- wait --for=condition=ready pod -l arl.infra.io/pool=python-3
 
 ```bash
 # Check operator logs
-minikube kubectl -- logs -n arl-system -l app=arl-operator --tail=50
+minikube kubectl -- logs -n arl -l app=arl-operator --tail=50
 
 # Check WarmPool status
 minikube kubectl -- get warmpools
@@ -128,10 +128,10 @@ uv run python run_all_examples.py
 
 ```bash
 # Check operator logs
-minikube kubectl -- logs -n arl-system -l app=arl-operator
+minikube kubectl -- logs -n arl -l app=arl-operator
 
 # Check events
-minikube kubectl -- get events -n arl-system --sort-by='.lastTimestamp'
+minikube kubectl -- get events -n arl --sort-by='.lastTimestamp'
 ```
 
 ### Pods Not Creating
@@ -141,7 +141,7 @@ minikube kubectl -- get events -n arl-system --sort-by='.lastTimestamp'
 minikube kubectl -- describe warmpool python-39-std
 
 # Check operator has proper RBAC permissions
-minikube kubectl -- auth can-i create pods --as=system:serviceaccount:arl-system:arl-operator
+minikube kubectl -- auth can-i create pods --as=system:serviceaccount:arl:arl-operator
 
 # Check resource quotas
 minikube kubectl -- describe resourcequota -n default
@@ -194,7 +194,7 @@ minikube kubectl -- delete sandboxes --all
 minikube kubectl -- delete warmpools --all
 
 # Uninstall Helm release
-helm uninstall arl-operator -n arl-system --wait
+helm uninstall arl-operator -n arl --wait
 
 # Stop minikube (optional)
 minikube stop
