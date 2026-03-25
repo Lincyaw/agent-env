@@ -153,7 +153,7 @@ spec:
           args:
             - --config.file=/etc/prometheus/prometheus.yml
             - --storage.tsdb.path=/prometheus
-            - --storage.tsdb.retention.time=15d
+            - --storage.tsdb.retention.time={{ .Values.prometheus.retentionTime | default "3d" }}
             - --web.enable-lifecycle
           ports:
             - name: http

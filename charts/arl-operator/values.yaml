@@ -66,7 +66,7 @@ redis:
   # Deploy a single-instance Redis in-cluster. Set to false to use an external Redis.
   deploy: true
   image:
-    repository: redis
+    repository: pair-diag-cn-guangzhou.cr.volces.com/pair/redis
     tag: "8-alpine"
     pullPolicy: IfNotPresent
   addr: "redis:6379"       # Only used when deploy=false (external Redis)
@@ -196,6 +196,7 @@ alerting:
 prometheus:
   enabled: true
   image: pair-diag-cn-guangzhou.cr.volces.com/pair/prometheus:v3.10.0
+  retentionTime: "3d"
   service:
     type: ClusterIP
   resources:
@@ -208,7 +209,7 @@ prometheus:
   persistence:
     enabled: false
     storageClass: ebs-ssd
-    size: 20Gi
+    size: 50Gi
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Grafana
