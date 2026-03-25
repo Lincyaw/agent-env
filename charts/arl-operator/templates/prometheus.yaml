@@ -83,8 +83,8 @@ data:
 
           - alert: StepErrorRateHigh
             expr: |
-              rate(arl_gateway_step_result_total{result="error"}[5m])
-              / on(step_type) rate(arl_gateway_step_result_total[5m]) > 0.3
+              sum by (step_type) (rate(arl_gateway_step_result_total{result="error"}[5m]))
+              / sum by (step_type) (rate(arl_gateway_step_result_total[5m])) > 0.3
             for: 5m
             labels:
               severity: warning
