@@ -25,7 +25,7 @@
       
       
       <link rel="icon" href="../../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.4">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.6">
     
     
       
@@ -778,6 +778,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#local-toolchain" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Local Toolchain
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#project-structure" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1209,6 +1220,34 @@
   
   
     <li class="md-nav__item">
+      <a href="../../user-guide/config-env/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ConfigEnv
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
       <a href="../../user-guide/api-reference/" class="md-nav__link">
         
   
@@ -1308,6 +1347,17 @@
     <span class="md-ellipsis">
       
         Prerequisites
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#local-toolchain" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Local Toolchain
       
     </span>
   </a>
@@ -1638,42 +1688,58 @@
 <h2 id="development-environment">Development Environment<a class="headerlink" href="#development-environment" title="Permanent link">&para;</a></h2>
 <h3 id="prerequisites">Prerequisites<a class="headerlink" href="#prerequisites" title="Permanent link">&para;</a></h3>
 <p>Ensure you have completed the <a href="../installation/">Installation</a> steps.</p>
+<h3 id="local-toolchain">Local Toolchain<a class="headerlink" href="#local-toolchain" title="Permanent link">&para;</a></h3>
+<p>This repository includes a <code>devbox.json</code> that pins the local development
+toolchain, including Go and Protobuf tooling. Prefer using Devbox so commands
+work even when <code>go</code>, <code>gofmt</code>, or related binaries are not installed in your
+global <code>PATH</code>.</p>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># Enter a shell with the repo toolchain</span>
+<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>devbox<span class="w"> </span>shell
+<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>
+<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a><span class="c1"># Or run a single command through the pinned toolchain</span>
+<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>devbox<span class="w"> </span>run<span class="w"> </span>--<span class="w"> </span>go<span class="w"> </span>version
+<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>devbox<span class="w"> </span>run<span class="w"> </span>--<span class="w"> </span>go<span class="w"> </span><span class="nb">test</span><span class="w"> </span>./pkg/...
+<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>devbox<span class="w"> </span>run<span class="w"> </span>--<span class="w"> </span>gofmt<span class="w"> </span>-w<span class="w"> </span>./pkg/...
+</code></pre></div>
+<p>If your shell already has the right tools on <code>PATH</code>, the regular commands below
+still work, but <code>devbox run -- ...</code> is the preferred fallback for reproducible
+local setup.</p>
 <h3 id="project-structure">Project Structure<a class="headerlink" href="#project-structure" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a>agent-env/
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>├── api/                    # CRD type definitions (Go)
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a>│   └── v1alpha1/
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>├── cmd/
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a>│   ├── operator/          # Operator entrypoint
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>│   ├── sidecar/           # Sidecar entrypoint
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>│   ├── gateway/           # Gateway entrypoint
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a>│   └── executor-agent/    # Executor agent entrypoint
-<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>├── config/
-<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>│   ├── crd/               # Generated CRD manifests
-<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a>│   └── samples/           # Sample resources
-<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>├── pkg/
-<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>│   ├── controller/        # Reconciliation logic
-<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a>│   ├── gateway/           # Gateway REST API
-<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>│   ├── execagent/         # Executor agent logic
-<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>│   ├── scheduler/         # Image-locality pod scheduling
-<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a>│   ├── sidecar/           # Sidecar gRPC server
-<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a>│   ├── pb/                # Generated protobuf code
-<a id="__codelineno-0-19" name="__codelineno-0-19" href="#__codelineno-0-19"></a>│   └── webhook/           # Validation webhooks
-<a id="__codelineno-0-20" name="__codelineno-0-20" href="#__codelineno-0-20"></a>├── proto/                 # Protocol buffer definitions
-<a id="__codelineno-0-21" name="__codelineno-0-21" href="#__codelineno-0-21"></a>├── sdk/python/            # Python SDK
-<a id="__codelineno-0-22" name="__codelineno-0-22" href="#__codelineno-0-22"></a>│   └── arl/
-<a id="__codelineno-0-23" name="__codelineno-0-23" href="#__codelineno-0-23"></a>├── charts/                # Helm charts
-<a id="__codelineno-0-24" name="__codelineno-0-24" href="#__codelineno-0-24"></a>│   └── arl-operator/
-<a id="__codelineno-0-25" name="__codelineno-0-25" href="#__codelineno-0-25"></a>├── examples/              # Example code
-<a id="__codelineno-0-26" name="__codelineno-0-26" href="#__codelineno-0-26"></a>│   └── python/
-<a id="__codelineno-0-27" name="__codelineno-0-27" href="#__codelineno-0-27"></a>└── docs/                  # Documentation
+<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a>agent-env/
+<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>├── api/                    # CRD type definitions (Go)
+<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>│   └── v1alpha1/
+<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a>├── cmd/
+<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>│   ├── operator/          # Operator entrypoint
+<a id="__codelineno-1-6" name="__codelineno-1-6" href="#__codelineno-1-6"></a>│   ├── sidecar/           # Sidecar entrypoint
+<a id="__codelineno-1-7" name="__codelineno-1-7" href="#__codelineno-1-7"></a>│   ├── gateway/           # Gateway entrypoint
+<a id="__codelineno-1-8" name="__codelineno-1-8" href="#__codelineno-1-8"></a>│   └── executor-agent/    # Executor agent entrypoint
+<a id="__codelineno-1-9" name="__codelineno-1-9" href="#__codelineno-1-9"></a>├── config/
+<a id="__codelineno-1-10" name="__codelineno-1-10" href="#__codelineno-1-10"></a>│   ├── crd/               # Generated CRD manifests
+<a id="__codelineno-1-11" name="__codelineno-1-11" href="#__codelineno-1-11"></a>│   └── samples/           # Sample resources
+<a id="__codelineno-1-12" name="__codelineno-1-12" href="#__codelineno-1-12"></a>├── pkg/
+<a id="__codelineno-1-13" name="__codelineno-1-13" href="#__codelineno-1-13"></a>│   ├── controller/        # Reconciliation logic
+<a id="__codelineno-1-14" name="__codelineno-1-14" href="#__codelineno-1-14"></a>│   ├── gateway/           # Gateway REST API
+<a id="__codelineno-1-15" name="__codelineno-1-15" href="#__codelineno-1-15"></a>│   ├── execagent/         # Executor agent logic
+<a id="__codelineno-1-16" name="__codelineno-1-16" href="#__codelineno-1-16"></a>│   ├── scheduler/         # Image-locality pod scheduling
+<a id="__codelineno-1-17" name="__codelineno-1-17" href="#__codelineno-1-17"></a>│   ├── sidecar/           # Sidecar gRPC server
+<a id="__codelineno-1-18" name="__codelineno-1-18" href="#__codelineno-1-18"></a>│   ├── pb/                # Generated protobuf code
+<a id="__codelineno-1-19" name="__codelineno-1-19" href="#__codelineno-1-19"></a>│   └── webhook/           # Validation webhooks
+<a id="__codelineno-1-20" name="__codelineno-1-20" href="#__codelineno-1-20"></a>├── proto/                 # Protocol buffer definitions
+<a id="__codelineno-1-21" name="__codelineno-1-21" href="#__codelineno-1-21"></a>├── sdk/python/            # Python SDK
+<a id="__codelineno-1-22" name="__codelineno-1-22" href="#__codelineno-1-22"></a>│   └── arl/
+<a id="__codelineno-1-23" name="__codelineno-1-23" href="#__codelineno-1-23"></a>├── charts/                # Helm charts
+<a id="__codelineno-1-24" name="__codelineno-1-24" href="#__codelineno-1-24"></a>│   └── arl-operator/
+<a id="__codelineno-1-25" name="__codelineno-1-25" href="#__codelineno-1-25"></a>├── examples/              # Example code
+<a id="__codelineno-1-26" name="__codelineno-1-26" href="#__codelineno-1-26"></a>│   └── python/
+<a id="__codelineno-1-27" name="__codelineno-1-27" href="#__codelineno-1-27"></a>└── docs/                  # Documentation
 </code></pre></div>
 <h2 id="development-workflow">Development Workflow<a class="headerlink" href="#development-workflow" title="Permanent link">&para;</a></h2>
 <h3 id="1-start-development-environment">1. Start Development Environment<a class="headerlink" href="#1-start-development-environment" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># Setup K8s prerequisites (first time only)</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>make<span class="w"> </span>k8s-setup
-<a id="__codelineno-1-3" name="__codelineno-1-3" href="#__codelineno-1-3"></a>
-<a id="__codelineno-1-4" name="__codelineno-1-4" href="#__codelineno-1-4"></a><span class="c1"># Start development with auto-rebuild</span>
-<a id="__codelineno-1-5" name="__codelineno-1-5" href="#__codelineno-1-5"></a>skaffold<span class="w"> </span>dev<span class="w"> </span>--profile<span class="o">=</span>dev
+<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># Setup K8s prerequisites (first time only)</span>
+<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>make<span class="w"> </span>k8s-setup
+<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
+<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="c1"># Start development with auto-rebuild</span>
+<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>skaffold<span class="w"> </span>dev<span class="w"> </span>--profile<span class="o">=</span>dev
 </code></pre></div>
 <p>This watches for file changes and automatically rebuilds/redeploys.</p>
 <h3 id="2-make-changes">2. Make Changes<a class="headerlink" href="#2-make-changes" title="Permanent link">&para;</a></h3>
@@ -1718,19 +1784,19 @@
 </table>
 <h3 id="3-regenerate-code">3. Regenerate Code<a class="headerlink" href="#3-regenerate-code" title="Permanent link">&para;</a></h3>
 <p>After modifying certain files, regenerate derived code:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># After changing api/v1alpha1/*.go</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>make<span class="w"> </span>manifests<span class="w">    </span><span class="c1"># Regenerate CRD manifests</span>
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>make<span class="w"> </span>deepcopy<span class="w">     </span><span class="c1"># Regenerate deepcopy methods</span>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a><span class="c1"># After changing proto/*.proto</span>
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>make<span class="w"> </span>proto-go<span class="w">     </span><span class="c1"># Regenerate Go gRPC code</span>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a>
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a><span class="c1"># Or regenerate everything</span>
-<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>make<span class="w"> </span>generate
+<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># After changing api/v1alpha1/*.go</span>
+<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>devbox<span class="w"> </span>run<span class="w"> </span>--<span class="w"> </span>make<span class="w"> </span>manifests<span class="w">    </span><span class="c1"># Regenerate CRD manifests</span>
+<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a>devbox<span class="w"> </span>run<span class="w"> </span>--<span class="w"> </span>make<span class="w"> </span>deepcopy<span class="w">     </span><span class="c1"># Regenerate deepcopy methods</span>
+<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a>
+<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="c1"># After changing proto/*.proto</span>
+<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a>devbox<span class="w"> </span>run<span class="w"> </span>--<span class="w"> </span>make<span class="w"> </span>proto-go<span class="w">     </span><span class="c1"># Regenerate Go gRPC code</span>
+<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a>
+<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="c1"># Or regenerate everything</span>
+<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a>devbox<span class="w"> </span>run<span class="w"> </span>--<span class="w"> </span>make<span class="w"> </span>generate
 </code></pre></div>
 <h3 id="4-run-quality-checks">4. Run Quality Checks<a class="headerlink" href="#4-run-quality-checks" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># Run all checks (Go + Python)</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>make<span class="w"> </span>check
+<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="c1"># Run all checks (Go + Python)</span>
+<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>devbox<span class="w"> </span>run<span class="w"> </span>--<span class="w"> </span>make<span class="w"> </span>check
 </code></pre></div>
 <p>This runs:
 - <code>go fmt ./...</code>
@@ -1739,35 +1805,35 @@
 - <code>ruff check</code> and <code>ruff format</code> for Python
 - <code>mypy</code> for Python type checking</p>
 <h3 id="5-test-changes">5. Test Changes<a class="headerlink" href="#5-test-changes" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-4-1" name="__codelineno-4-1" href="#__codelineno-4-1"></a><span class="c1"># Deploy with samples for testing</span>
-<a id="__codelineno-4-2" name="__codelineno-4-2" href="#__codelineno-4-2"></a>skaffold<span class="w"> </span>run<span class="w"> </span>--profile<span class="o">=</span>with-samples
-<a id="__codelineno-4-3" name="__codelineno-4-3" href="#__codelineno-4-3"></a>
-<a id="__codelineno-4-4" name="__codelineno-4-4" href="#__codelineno-4-4"></a><span class="c1"># View operator logs</span>
-<a id="__codelineno-4-5" name="__codelineno-4-5" href="#__codelineno-4-5"></a>make<span class="w"> </span>logs
-<a id="__codelineno-4-6" name="__codelineno-4-6" href="#__codelineno-4-6"></a>
-<a id="__codelineno-4-7" name="__codelineno-4-7" href="#__codelineno-4-7"></a><span class="c1"># Check resource status</span>
-<a id="__codelineno-4-8" name="__codelineno-4-8" href="#__codelineno-4-8"></a>kubectl<span class="w"> </span>get<span class="w"> </span>warmpools
+<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a><span class="c1"># Deploy with samples for testing</span>
+<a id="__codelineno-5-2" name="__codelineno-5-2" href="#__codelineno-5-2"></a>skaffold<span class="w"> </span>run<span class="w"> </span>--profile<span class="o">=</span>with-samples
+<a id="__codelineno-5-3" name="__codelineno-5-3" href="#__codelineno-5-3"></a>
+<a id="__codelineno-5-4" name="__codelineno-5-4" href="#__codelineno-5-4"></a><span class="c1"># View operator logs</span>
+<a id="__codelineno-5-5" name="__codelineno-5-5" href="#__codelineno-5-5"></a>make<span class="w"> </span>logs
+<a id="__codelineno-5-6" name="__codelineno-5-6" href="#__codelineno-5-6"></a>
+<a id="__codelineno-5-7" name="__codelineno-5-7" href="#__codelineno-5-7"></a><span class="c1"># Check resource status</span>
+<a id="__codelineno-5-8" name="__codelineno-5-8" href="#__codelineno-5-8"></a>kubectl<span class="w"> </span>get<span class="w"> </span>warmpools
 </code></pre></div>
 <h2 id="code-generation-details">Code Generation Details<a class="headerlink" href="#code-generation-details" title="Permanent link">&para;</a></h2>
 <h3 id="crd-manifests">CRD Manifests<a class="headerlink" href="#crd-manifests" title="Permanent link">&para;</a></h3>
 <p>Generated from Go types using controller-gen:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-5-1" name="__codelineno-5-1" href="#__codelineno-5-1"></a>make<span class="w"> </span>manifests
+<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>devbox<span class="w"> </span>run<span class="w"> </span>--<span class="w"> </span>make<span class="w"> </span>manifests
 </code></pre></div>
 <p>Output: <code>config/crd/*.yaml</code></p>
 <h3 id="deepcopy-methods">DeepCopy Methods<a class="headerlink" href="#deepcopy-methods" title="Permanent link">&para;</a></h3>
 <p>Generated for Kubernetes objects:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-6-1" name="__codelineno-6-1" href="#__codelineno-6-1"></a>make<span class="w"> </span>deepcopy
+<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>devbox<span class="w"> </span>run<span class="w"> </span>--<span class="w"> </span>make<span class="w"> </span>deepcopy
 </code></pre></div>
 <p>Output: <code>api/v1alpha1/zz_generated.deepcopy.go</code></p>
 <h3 id="grpc-code">gRPC Code<a class="headerlink" href="#grpc-code" title="Permanent link">&para;</a></h3>
 <p>Generated from Protocol Buffer definitions:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-7-1" name="__codelineno-7-1" href="#__codelineno-7-1"></a>make<span class="w"> </span>proto-go
+<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>devbox<span class="w"> </span>run<span class="w"> </span>--<span class="w"> </span>make<span class="w"> </span>proto-go
 </code></pre></div>
 <p>Input: <code>proto/agent.proto</code>
 Output: <code>pkg/pb/*.pb.go</code></p>
 <h2 id="architecture-validation">Architecture Validation<a class="headerlink" href="#architecture-validation" title="Permanent link">&para;</a></h2>
 <p>Validate architecture documentation:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-8-1" name="__codelineno-8-1" href="#__codelineno-8-1"></a>make<span class="w"> </span>arch-check
+<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a>devbox<span class="w"> </span>run<span class="w"> </span>--<span class="w"> </span>make<span class="w"> </span>arch-check
 </code></pre></div>
 <p>This checks:
 - Component definitions in <code>architecture/components.yaml</code>
@@ -1778,15 +1844,15 @@ Output: <code>pkg/pb/*.pb.go</code></p>
 <ol>
 <li>
 <p>Edit the type definition in <code>api/v1alpha1/</code>:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-9-1" name="__codelineno-9-1" href="#__codelineno-9-1"></a><span class="kd">type</span><span class="w"> </span><span class="nx">WarmPoolSpec</span><span class="w"> </span><span class="kd">struct</span><span class="w"> </span><span class="p">{</span>
-<a id="__codelineno-9-2" name="__codelineno-9-2" href="#__codelineno-9-2"></a><span class="w">    </span><span class="nx">Replicas</span><span class="w"> </span><span class="kt">int32</span><span class="w"> </span><span class="s">`json:&quot;replicas&quot;`</span>
-<a id="__codelineno-9-3" name="__codelineno-9-3" href="#__codelineno-9-3"></a><span class="w">    </span><span class="nx">NewField</span><span class="w"> </span><span class="kt">string</span><span class="w"> </span><span class="s">`json:&quot;newField,omitempty&quot;`</span><span class="w"> </span><span class="c1">// Add new field</span>
-<a id="__codelineno-9-4" name="__codelineno-9-4" href="#__codelineno-9-4"></a><span class="p">}</span>
+<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a><span class="kd">type</span><span class="w"> </span><span class="nx">WarmPoolSpec</span><span class="w"> </span><span class="kd">struct</span><span class="w"> </span><span class="p">{</span>
+<a id="__codelineno-10-2" name="__codelineno-10-2" href="#__codelineno-10-2"></a><span class="w">    </span><span class="nx">Replicas</span><span class="w"> </span><span class="kt">int32</span><span class="w"> </span><span class="s">`json:&quot;replicas&quot;`</span>
+<a id="__codelineno-10-3" name="__codelineno-10-3" href="#__codelineno-10-3"></a><span class="w">    </span><span class="nx">NewField</span><span class="w"> </span><span class="kt">string</span><span class="w"> </span><span class="s">`json:&quot;newField,omitempty&quot;`</span><span class="w"> </span><span class="c1">// Add new field</span>
+<a id="__codelineno-10-4" name="__codelineno-10-4" href="#__codelineno-10-4"></a><span class="p">}</span>
 </code></pre></div>
 </li>
 <li>
 <p>Regenerate code:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-10-1" name="__codelineno-10-1" href="#__codelineno-10-1"></a>make<span class="w"> </span>manifests<span class="w"> </span>deepcopy
+<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>devbox<span class="w"> </span>run<span class="w"> </span>--<span class="w"> </span>make<span class="w"> </span>manifests<span class="w"> </span>deepcopy
 </code></pre></div>
 </li>
 <li>
@@ -1794,7 +1860,7 @@ Output: <code>pkg/pb/*.pb.go</code></p>
 </li>
 <li>
 <p>Run checks:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-11-1" name="__codelineno-11-1" href="#__codelineno-11-1"></a>make<span class="w"> </span>check
+<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>devbox<span class="w"> </span>run<span class="w"> </span>--<span class="w"> </span>make<span class="w"> </span>check
 </code></pre></div>
 </li>
 </ol>
@@ -1805,7 +1871,7 @@ Output: <code>pkg/pb/*.pb.go</code></p>
 <li>Add necessary RBAC markers</li>
 <li>
 <p>Regenerate manifests:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-12-1" name="__codelineno-12-1" href="#__codelineno-12-1"></a>make<span class="w"> </span>manifests
+<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>devbox<span class="w"> </span>run<span class="w"> </span>--<span class="w"> </span>make<span class="w"> </span>manifests
 </code></pre></div>
 </li>
 </ol>
@@ -1814,7 +1880,7 @@ Output: <code>pkg/pb/*.pb.go</code></p>
 <li>Edit <code>proto/agent.proto</code></li>
 <li>
 <p>Regenerate Go code:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-13-1" name="__codelineno-13-1" href="#__codelineno-13-1"></a>make<span class="w"> </span>proto-go
+<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a>devbox<span class="w"> </span>run<span class="w"> </span>--<span class="w"> </span>make<span class="w"> </span>proto-go
 </code></pre></div>
 </li>
 <li>
@@ -1823,41 +1889,41 @@ Output: <code>pkg/pb/*.pb.go</code></p>
 </ol>
 <h2 id="debugging">Debugging<a class="headerlink" href="#debugging" title="Permanent link">&para;</a></h2>
 <h3 id="view-operator-logs">View Operator Logs<a class="headerlink" href="#view-operator-logs" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-14-1" name="__codelineno-14-1" href="#__codelineno-14-1"></a><span class="c1"># Stream logs</span>
-<a id="__codelineno-14-2" name="__codelineno-14-2" href="#__codelineno-14-2"></a>make<span class="w"> </span>logs
-<a id="__codelineno-14-3" name="__codelineno-14-3" href="#__codelineno-14-3"></a>
-<a id="__codelineno-14-4" name="__codelineno-14-4" href="#__codelineno-14-4"></a><span class="c1"># Or manually</span>
-<a id="__codelineno-14-5" name="__codelineno-14-5" href="#__codelineno-14-5"></a>kubectl<span class="w"> </span>logs<span class="w"> </span>-n<span class="w"> </span>arl<span class="w"> </span>-l<span class="w"> </span><span class="nv">app</span><span class="o">=</span>arl-operator<span class="w"> </span>-f
+<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="c1"># Stream logs</span>
+<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a>make<span class="w"> </span>logs
+<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a>
+<a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a><span class="c1"># Or manually</span>
+<a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a>kubectl<span class="w"> </span>logs<span class="w"> </span>-n<span class="w"> </span>arl<span class="w"> </span>-l<span class="w"> </span><span class="nv">app</span><span class="o">=</span>arl-operator<span class="w"> </span>-f
 </code></pre></div>
 <h3 id="view-sidecar-logs">View Sidecar Logs<a class="headerlink" href="#view-sidecar-logs" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-15-1" name="__codelineno-15-1" href="#__codelineno-15-1"></a><span class="c1"># Get pod name</span>
-<a id="__codelineno-15-2" name="__codelineno-15-2" href="#__codelineno-15-2"></a>kubectl<span class="w"> </span>get<span class="w"> </span>pods<span class="w"> </span>-l<span class="w"> </span>arl.infra.io/warmpool
-<a id="__codelineno-15-3" name="__codelineno-15-3" href="#__codelineno-15-3"></a>
-<a id="__codelineno-15-4" name="__codelineno-15-4" href="#__codelineno-15-4"></a><span class="c1"># View sidecar logs</span>
-<a id="__codelineno-15-5" name="__codelineno-15-5" href="#__codelineno-15-5"></a>kubectl<span class="w"> </span>logs<span class="w"> </span>&lt;pod-name&gt;<span class="w"> </span>-c<span class="w"> </span>sidecar
+<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="c1"># Get pod name</span>
+<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a>kubectl<span class="w"> </span>get<span class="w"> </span>pods<span class="w"> </span>-l<span class="w"> </span>arl.infra.io/warmpool
+<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a>
+<a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a><span class="c1"># View sidecar logs</span>
+<a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a>kubectl<span class="w"> </span>logs<span class="w"> </span>&lt;pod-name&gt;<span class="w"> </span>-c<span class="w"> </span>sidecar
 </code></pre></div>
 <h3 id="debug-with-delve">Debug with Delve<a class="headerlink" href="#debug-with-delve" title="Permanent link">&para;</a></h3>
 <p>For local debugging:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-16-1" name="__codelineno-16-1" href="#__codelineno-16-1"></a><span class="c1"># Run operator locally</span>
-<a id="__codelineno-16-2" name="__codelineno-16-2" href="#__codelineno-16-2"></a>go<span class="w"> </span>run<span class="w"> </span>cmd/operator/main.go
-<a id="__codelineno-16-3" name="__codelineno-16-3" href="#__codelineno-16-3"></a>
-<a id="__codelineno-16-4" name="__codelineno-16-4" href="#__codelineno-16-4"></a><span class="c1"># Or with delve</span>
-<a id="__codelineno-16-5" name="__codelineno-16-5" href="#__codelineno-16-5"></a>dlv<span class="w"> </span>debug<span class="w"> </span>cmd/operator/main.go
+<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="c1"># Run operator locally</span>
+<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a>devbox<span class="w"> </span>run<span class="w"> </span>--<span class="w"> </span>go<span class="w"> </span>run<span class="w"> </span>cmd/operator/main.go
+<a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a>
+<a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a><span class="c1"># Or with delve (if installed locally)</span>
+<a id="__codelineno-17-5" name="__codelineno-17-5" href="#__codelineno-17-5"></a>dlv<span class="w"> </span>debug<span class="w"> </span>cmd/operator/main.go
 </code></pre></div>
 <h2 id="release-process">Release Process<a class="headerlink" href="#release-process" title="Permanent link">&para;</a></h2>
 <h3 id="build-and-publish-sdk">Build and Publish SDK<a class="headerlink" href="#build-and-publish-sdk" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-17-1" name="__codelineno-17-1" href="#__codelineno-17-1"></a><span class="c1"># Build SDK package</span>
-<a id="__codelineno-17-2" name="__codelineno-17-2" href="#__codelineno-17-2"></a>make<span class="w"> </span>build-sdk
-<a id="__codelineno-17-3" name="__codelineno-17-3" href="#__codelineno-17-3"></a>
-<a id="__codelineno-17-4" name="__codelineno-17-4" href="#__codelineno-17-4"></a><span class="c1"># Publish to Test PyPI (for testing)</span>
-<a id="__codelineno-17-5" name="__codelineno-17-5" href="#__codelineno-17-5"></a>make<span class="w"> </span>publish-test
-<a id="__codelineno-17-6" name="__codelineno-17-6" href="#__codelineno-17-6"></a>
-<a id="__codelineno-17-7" name="__codelineno-17-7" href="#__codelineno-17-7"></a><span class="c1"># Publish to Production PyPI</span>
-<a id="__codelineno-17-8" name="__codelineno-17-8" href="#__codelineno-17-8"></a>make<span class="w"> </span>publish
+<div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="c1"># Build SDK package</span>
+<a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a>devbox<span class="w"> </span>run<span class="w"> </span>--<span class="w"> </span>make<span class="w"> </span>build-sdk
+<a id="__codelineno-18-3" name="__codelineno-18-3" href="#__codelineno-18-3"></a>
+<a id="__codelineno-18-4" name="__codelineno-18-4" href="#__codelineno-18-4"></a><span class="c1"># Publish to Test PyPI (for testing)</span>
+<a id="__codelineno-18-5" name="__codelineno-18-5" href="#__codelineno-18-5"></a>devbox<span class="w"> </span>run<span class="w"> </span>--<span class="w"> </span>make<span class="w"> </span>publish-test
+<a id="__codelineno-18-6" name="__codelineno-18-6" href="#__codelineno-18-6"></a>
+<a id="__codelineno-18-7" name="__codelineno-18-7" href="#__codelineno-18-7"></a><span class="c1"># Publish to Production PyPI</span>
+<a id="__codelineno-18-8" name="__codelineno-18-8" href="#__codelineno-18-8"></a>devbox<span class="w"> </span>run<span class="w"> </span>--<span class="w"> </span>make<span class="w"> </span>publish
 </code></pre></div>
 <h3 id="clean-build-artifacts">Clean Build Artifacts<a class="headerlink" href="#clean-build-artifacts" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-18-1" name="__codelineno-18-1" href="#__codelineno-18-1"></a><span class="c1"># Clean Python SDK artifacts</span>
-<a id="__codelineno-18-2" name="__codelineno-18-2" href="#__codelineno-18-2"></a>make<span class="w"> </span>clean-sdk
+<div class="highlight"><pre><span></span><code><a id="__codelineno-19-1" name="__codelineno-19-1" href="#__codelineno-19-1"></a><span class="c1"># Clean Python SDK artifacts</span>
+<a id="__codelineno-19-2" name="__codelineno-19-2" href="#__codelineno-19-2"></a>make<span class="w"> </span>clean-sdk
 </code></pre></div>
 <h2 id="useful-commands-reference">Useful Commands Reference<a class="headerlink" href="#useful-commands-reference" title="Permanent link">&para;</a></h2>
 <table>

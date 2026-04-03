@@ -12,13 +12,13 @@
         <meta name="author" content="ARL-Infra Team">
       
       
-        <link rel="canonical" href="https://lincyaw.github.io/agent-env/getting-started/developers/">
+        <link rel="canonical" href="https://lincyaw.github.io/agent-env/user-guide/config-env/">
       
       
-        <link rel="prev" href="../overview/">
+        <link rel="prev" href="../quickstart/">
       
       
-        <link rel="next" href="../sdk-users/">
+        <link rel="next" href="../api-reference/">
       
       
         
@@ -29,7 +29,7 @@
     
     
       
-        <title>For Developers - ARL-Infra Documentation</title>
+        <title>ConfigEnv - ARL-Infra Documentation</title>
       
     
     
@@ -80,7 +80,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#getting-started-for-developers" class="md-skip">
+        <a href="#configenv" class="md-skip">
           Skip to content
         </a>
       
@@ -114,7 +114,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              For Developers
+              ConfigEnv
             
           </span>
         </div>
@@ -244,13 +244,11 @@
   
   
   
-    
-  
   
     
     
-      <li class="md-tabs__item md-tabs__item--active">
-        <a href="../overview/" class="md-tabs__link">
+      <li class="md-tabs__item">
+        <a href="../../getting-started/overview/" class="md-tabs__link">
           
   
   
@@ -286,11 +284,13 @@
   
   
   
+    
+  
   
     
     
-      <li class="md-tabs__item">
-        <a href="../../user-guide/python-sdk/" class="md-tabs__link">
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../python-sdk/" class="md-tabs__link">
           
   
   
@@ -378,31 +378,28 @@
       
   
   
-    
   
   
-  
     
     
     
     
-      
-        
-        
       
       
         
       
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--nested">
       
         
-        
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" checked>
         
           
-          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
             
   
   
@@ -420,7 +417,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_2">
             <span class="md-nav__icon md-icon"></span>
             
@@ -438,7 +435,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../overview/" class="md-nav__link">
+      <a href="../../getting-started/overview/" class="md-nav__link">
         
   
   
@@ -463,37 +460,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    For Developers
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../../getting-started/developers/" class="md-nav__link">
         
   
   
@@ -509,120 +479,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#prerequisites" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Prerequisites
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#quick-start" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Quick Start
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Quick Start">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#option-1-using-skaffold-recommended" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Option 1: Using Skaffold (Recommended)
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#option-2-deploy-to-production" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Option 2: Deploy to Production
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#verify-deployment" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Verify Deployment
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#whats-next" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        What's Next?
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#quick-test" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Quick Test
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#troubleshooting" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Troubleshooting
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -635,7 +491,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../sdk-users/" class="md-nav__link">
+      <a href="../../getting-started/sdk-users/" class="md-nav__link">
         
   
   
@@ -868,28 +724,31 @@
       
   
   
+    
   
   
+  
     
     
     
     
+      
+        
+        
       
       
         
       
     
     
-    <li class="md-nav__item md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
       
         
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
         
           
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
-        
-          
-          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
             
   
   
@@ -907,7 +766,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_4">
             <span class="md-nav__icon md-icon"></span>
             
@@ -925,7 +784,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../user-guide/python-sdk/" class="md-nav__link">
+      <a href="../python-sdk/" class="md-nav__link">
         
   
   
@@ -953,7 +812,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../user-guide/quickstart/" class="md-nav__link">
+      <a href="../quickstart/" class="md-nav__link">
         
   
   
@@ -978,10 +837,37 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../../user-guide/config-env/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    ConfigEnv
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -997,6 +883,131 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#_1" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        背景
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_2" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        需求目标
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        使用方式
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        核心诉求
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        典型场景
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="典型场景">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#mysql" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        MySQL 场景
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#_6" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        通用依赖环境场景
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_7" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        校验要求
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_8" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        预期结果
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -1009,7 +1020,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../user-guide/api-reference/" class="md-nav__link">
+      <a href="../api-reference/" class="md-nav__link">
         
   
   
@@ -1037,7 +1048,7 @@
   
   
     <li class="md-nav__item">
-      <a href="../../user-guide/examples/" class="md-nav__link">
+      <a href="../examples/" class="md-nav__link">
         
   
   
@@ -1092,10 +1103,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#prerequisites" class="md-nav__link">
+  <a href="#_1" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Prerequisites
+        背景
       
     </span>
   </a>
@@ -1103,22 +1114,55 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#quick-start" class="md-nav__link">
+  <a href="#_2" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Quick Start
+        需求目标
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Quick Start">
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        使用方式
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_4" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        核心诉求
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#_5" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        典型场景
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="典型场景">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
-  <a href="#option-1-using-skaffold-recommended" class="md-nav__link">
+  <a href="#mysql" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Option 1: Using Skaffold (Recommended)
+        MySQL 场景
       
     </span>
   </a>
@@ -1126,21 +1170,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#option-2-deploy-to-production" class="md-nav__link">
+  <a href="#_6" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Option 2: Deploy to Production
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#verify-deployment" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Verify Deployment
+        通用依赖环境场景
       
     </span>
   </a>
@@ -1153,10 +1186,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#whats-next" class="md-nav__link">
+  <a href="#_7" class="md-nav__link">
     <span class="md-ellipsis">
       
-        What's Next?
+        校验要求
       
     </span>
   </a>
@@ -1164,21 +1197,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#quick-test" class="md-nav__link">
+  <a href="#_8" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Quick Test
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#troubleshooting" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Troubleshooting
+        预期结果
       
     </span>
   </a>
@@ -1205,149 +1227,60 @@
   
 
 
-<h1 id="getting-started-for-developers">Getting Started for Developers<a class="headerlink" href="#getting-started-for-developers" title="Permanent link">&para;</a></h1>
-<p>This guide is for developers and operators who need to deploy and manage ARL-Infra on a Kubernetes cluster.</p>
-<h2 id="prerequisites">Prerequisites<a class="headerlink" href="#prerequisites" title="Permanent link">&para;</a></h2>
-<p>Before deploying ARL-Infra, ensure you have:</p>
-<table>
-<thead>
-<tr>
-<th>Requirement</th>
-<th>Version</th>
-<th>Purpose</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Kubernetes</td>
-<td>1.25+</td>
-<td>Container orchestration</td>
-</tr>
-<tr>
-<td>kubectl</td>
-<td>Latest</td>
-<td>Kubernetes CLI</td>
-</tr>
-<tr>
-<td>Helm</td>
-<td>3.x</td>
-<td>Package manager</td>
-</tr>
-<tr>
-<td>Docker</td>
-<td>20.x+</td>
-<td>Container runtime</td>
-</tr>
-<tr>
-<td>Go</td>
-<td>1.25+</td>
-<td>Building from source</td>
-</tr>
-<tr>
-<td>Skaffold</td>
-<td>Latest</td>
-<td>Development workflow</td>
-</tr>
-</tbody>
-</table>
-<h2 id="quick-start">Quick Start<a class="headerlink" href="#quick-start" title="Permanent link">&para;</a></h2>
-<h3 id="option-1-using-skaffold-recommended">Option 1: Using Skaffold (Recommended)<a class="headerlink" href="#option-1-using-skaffold-recommended" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-0-1" name="__codelineno-0-1" href="#__codelineno-0-1"></a><span class="c1"># Clone the repository</span>
-<a id="__codelineno-0-2" name="__codelineno-0-2" href="#__codelineno-0-2"></a>git<span class="w"> </span>clone<span class="w"> </span>https://github.com/Lincyaw/agent-env.git
-<a id="__codelineno-0-3" name="__codelineno-0-3" href="#__codelineno-0-3"></a><span class="nb">cd</span><span class="w"> </span>agent-env
-<a id="__codelineno-0-4" name="__codelineno-0-4" href="#__codelineno-0-4"></a>
-<a id="__codelineno-0-5" name="__codelineno-0-5" href="#__codelineno-0-5"></a><span class="c1"># Setup K8s prerequisites (ClickHouse operator, Helm dependencies)</span>
-<a id="__codelineno-0-6" name="__codelineno-0-6" href="#__codelineno-0-6"></a>make<span class="w"> </span>k8s-setup
-<a id="__codelineno-0-7" name="__codelineno-0-7" href="#__codelineno-0-7"></a>
-<a id="__codelineno-0-8" name="__codelineno-0-8" href="#__codelineno-0-8"></a><span class="c1"># Deploy using Skaffold (default profile for minikube)</span>
-<a id="__codelineno-0-9" name="__codelineno-0-9" href="#__codelineno-0-9"></a>skaffold<span class="w"> </span>run
-<a id="__codelineno-0-10" name="__codelineno-0-10" href="#__codelineno-0-10"></a>
-<a id="__codelineno-0-11" name="__codelineno-0-11" href="#__codelineno-0-11"></a><span class="c1"># Or for development with auto-rebuild</span>
-<a id="__codelineno-0-12" name="__codelineno-0-12" href="#__codelineno-0-12"></a>skaffold<span class="w"> </span>dev<span class="w"> </span>--profile<span class="o">=</span>dev
-<a id="__codelineno-0-13" name="__codelineno-0-13" href="#__codelineno-0-13"></a>
-<a id="__codelineno-0-14" name="__codelineno-0-14" href="#__codelineno-0-14"></a><span class="c1"># Deploy to K8s cluster with registry</span>
-<a id="__codelineno-0-15" name="__codelineno-0-15" href="#__codelineno-0-15"></a>skaffold<span class="w"> </span>run<span class="w"> </span>--profile<span class="o">=</span>k8s
-<a id="__codelineno-0-16" name="__codelineno-0-16" href="#__codelineno-0-16"></a>
-<a id="__codelineno-0-17" name="__codelineno-0-17" href="#__codelineno-0-17"></a><span class="c1"># Deploy with sample resources</span>
-<a id="__codelineno-0-18" name="__codelineno-0-18" href="#__codelineno-0-18"></a>skaffold<span class="w"> </span>run<span class="w"> </span>--profile<span class="o">=</span>with-samples
-</code></pre></div>
-<h3 id="option-2-deploy-to-production">Option 2: Deploy to Production<a class="headerlink" href="#option-2-deploy-to-production" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-1-1" name="__codelineno-1-1" href="#__codelineno-1-1"></a><span class="c1"># Deploy to production environment</span>
-<a id="__codelineno-1-2" name="__codelineno-1-2" href="#__codelineno-1-2"></a>skaffold<span class="w"> </span>run<span class="w"> </span>--profile<span class="o">=</span>prod
-</code></pre></div>
-<h3 id="verify-deployment">Verify Deployment<a class="headerlink" href="#verify-deployment" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-2-1" name="__codelineno-2-1" href="#__codelineno-2-1"></a><span class="c1"># Check operator pods</span>
-<a id="__codelineno-2-2" name="__codelineno-2-2" href="#__codelineno-2-2"></a>kubectl<span class="w"> </span>get<span class="w"> </span>pods<span class="w"> </span>-n<span class="w"> </span>arl
-<a id="__codelineno-2-3" name="__codelineno-2-3" href="#__codelineno-2-3"></a>
-<a id="__codelineno-2-4" name="__codelineno-2-4" href="#__codelineno-2-4"></a><span class="c1"># Check CRDs are installed</span>
-<a id="__codelineno-2-5" name="__codelineno-2-5" href="#__codelineno-2-5"></a>kubectl<span class="w"> </span>get<span class="w"> </span>crds<span class="w"> </span><span class="p">|</span><span class="w"> </span>grep<span class="w"> </span>arl.infra.io
-<a id="__codelineno-2-6" name="__codelineno-2-6" href="#__codelineno-2-6"></a>
-<a id="__codelineno-2-7" name="__codelineno-2-7" href="#__codelineno-2-7"></a><span class="c1"># Check custom resources</span>
-<a id="__codelineno-2-8" name="__codelineno-2-8" href="#__codelineno-2-8"></a>kubectl<span class="w"> </span>get<span class="w"> </span>warmpools
-<a id="__codelineno-2-9" name="__codelineno-2-9" href="#__codelineno-2-9"></a>
-<a id="__codelineno-2-10" name="__codelineno-2-10" href="#__codelineno-2-10"></a><span class="c1"># View operator logs</span>
-<a id="__codelineno-2-11" name="__codelineno-2-11" href="#__codelineno-2-11"></a>make<span class="w"> </span>logs
-</code></pre></div>
-<h2 id="whats-next">What's Next?<a class="headerlink" href="#whats-next" title="Permanent link">&para;</a></h2>
-<p>After deploying ARL-Infra, proceed to:</p>
-<ol>
-<li><strong><a href="../../developer-guide/architecture/">Architecture</a></strong> - Understand the system design</li>
-<li><strong><a href="../../developer-guide/installation/">Installation</a></strong> - Detailed installation options</li>
-<li><strong><a href="../../developer-guide/deployment/">Deployment</a></strong> - Production deployment guide</li>
-<li><strong><a href="../../developer-guide/crd-reference/">CRD Reference</a></strong> - Custom Resource definitions</li>
-</ol>
-<h2 id="quick-test">Quick Test<a class="headerlink" href="#quick-test" title="Permanent link">&para;</a></h2>
-<p>Create a simple warm pool and test with the SDK:</p>
-<div class="highlight"><pre><span></span><code><a id="__codelineno-3-1" name="__codelineno-3-1" href="#__codelineno-3-1"></a><span class="c1"># Create a warm pool</span>
-<a id="__codelineno-3-2" name="__codelineno-3-2" href="#__codelineno-3-2"></a>cat<span class="w"> </span><span class="s">&lt;&lt;EOF | kubectl apply -f -</span>
-<a id="__codelineno-3-3" name="__codelineno-3-3" href="#__codelineno-3-3"></a><span class="s">apiVersion: arl.infra.io/v1alpha1</span>
-<a id="__codelineno-3-4" name="__codelineno-3-4" href="#__codelineno-3-4"></a><span class="s">kind: WarmPool</span>
-<a id="__codelineno-3-5" name="__codelineno-3-5" href="#__codelineno-3-5"></a><span class="s">metadata:</span>
-<a id="__codelineno-3-6" name="__codelineno-3-6" href="#__codelineno-3-6"></a><span class="s">  name: test-pool</span>
-<a id="__codelineno-3-7" name="__codelineno-3-7" href="#__codelineno-3-7"></a><span class="s">spec:</span>
-<a id="__codelineno-3-8" name="__codelineno-3-8" href="#__codelineno-3-8"></a><span class="s">  replicas: 1</span>
-<a id="__codelineno-3-9" name="__codelineno-3-9" href="#__codelineno-3-9"></a><span class="s">  template:</span>
-<a id="__codelineno-3-10" name="__codelineno-3-10" href="#__codelineno-3-10"></a><span class="s">    spec:</span>
-<a id="__codelineno-3-11" name="__codelineno-3-11" href="#__codelineno-3-11"></a><span class="s">      containers:</span>
-<a id="__codelineno-3-12" name="__codelineno-3-12" href="#__codelineno-3-12"></a><span class="s">        - name: executor</span>
-<a id="__codelineno-3-13" name="__codelineno-3-13" href="#__codelineno-3-13"></a><span class="s">          image: python:3.9-slim</span>
-<a id="__codelineno-3-14" name="__codelineno-3-14" href="#__codelineno-3-14"></a><span class="s">          command: [&quot;sleep&quot;, &quot;infinity&quot;]</span>
-<a id="__codelineno-3-15" name="__codelineno-3-15" href="#__codelineno-3-15"></a><span class="s">EOF</span>
-<a id="__codelineno-3-16" name="__codelineno-3-16" href="#__codelineno-3-16"></a>
-<a id="__codelineno-3-17" name="__codelineno-3-17" href="#__codelineno-3-17"></a><span class="c1"># Wait for pods to be ready</span>
-<a id="__codelineno-3-18" name="__codelineno-3-18" href="#__codelineno-3-18"></a>kubectl<span class="w"> </span>get<span class="w"> </span>pods<span class="w"> </span>-w
-</code></pre></div>
-<div class="admonition note">
-<p class="admonition-title">Execution via Gateway API</p>
-<p>Task execution is handled through the Gateway REST API or the Python SDK, not via kubectl. See the <a href="../sdk-users/">SDK User Guide</a> or the <a href="../../user-guide/python-sdk/">Python SDK documentation</a> for details.</p>
-</div>
-<h2 id="troubleshooting">Troubleshooting<a class="headerlink" href="#troubleshooting" title="Permanent link">&para;</a></h2>
-<table>
-<thead>
-<tr>
-<th>Issue</th>
-<th>Solution</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td>Pods not starting</td>
-<td>Check <code>kubectl describe pod</code> for events</td>
-</tr>
-<tr>
-<td>CRDs not found</td>
-<td>Run <code>make manifests</code> and apply CRDs</td>
-</tr>
-<tr>
-<td>Operator not running</td>
-<td>Check <code>make logs</code> for operator logs</td>
-</tr>
-<tr>
-<td>Helm dependency issues</td>
-<td>Run <code>make k8s-setup</code> to update dependencies</td>
-</tr>
-</tbody>
-</table>
+<h1 id="configenv">ConfigEnv<a class="headerlink" href="#configenv" title="Permanent link">&para;</a></h1>
+<h2 id="_1">背景<a class="headerlink" href="#_1" title="Permanent link">&para;</a></h2>
+<p>当前 WarmPool 主要用于提供可快速复用的运行环境，但在实际使用中，很多 Agent 任务并不只依赖基础镜像本身，还依赖额外的环境配置。例如数据库配置文件、连接凭证、缓存参数、应用运行时配置等。这类配置如果无法在 WarmPool 创建时一并提供，用户就需要在环境启动后再手动补充，既增加使用成本，也会影响环境的一致性和可复用性。</p>
+<p>对于需要依赖数据库或其他基础服务的场景，这一问题尤为明显。以 MySQL 为例，用户在启动对应的 WarmPool 时，通常不仅需要拉起服务本身，还需要同时提供数据库配置文件，并将其挂载到容器指定目录。只有这样，数据库才能在启动时加载正确配置，并在 WarmPool 就绪后立即被 Agent 使用。</p>
+<h2 id="_2">需求目标<a class="headerlink" href="#_2" title="Permanent link">&para;</a></h2>
+<p>为了解决上述问题，WarmPool 需要具备环境配置能力，使用户可以在创建 WarmPool 时，同时声明运行所需的配置资源以及对应的注入方式。系统应在 WarmPool 启动阶段自动完成这些配置资源的准备，并将其挂载或注入到容器中，确保相关服务或 Agent 在启动完成后即可直接使用所需环境。</p>
+<p>该能力的目标包括：</p>
+<ul>
+<li>支持在创建 WarmPool 时统一声明所需环境配置。</li>
+<li>支持系统自动准备并注入相关配置资源。</li>
+<li>确保配置在容器启动前已经生效。</li>
+<li>确保 Agent 或依赖服务在环境启动后即可直接使用，无需额外初始化操作。</li>
+</ul>
+<h2 id="_3">使用方式<a class="headerlink" href="#_3" title="Permanent link">&para;</a></h2>
+<p>用户在创建 WarmPool 时，只需要同时描述两件事：</p>
+<ul>
+<li>运行所需的配置资源。</li>
+<li>这些资源应该如何注入到容器中。</li>
+</ul>
+<p>配置资源通常有两种使用方式：</p>
+<ul>
+<li>以文件形式挂载到指定目录，例如数据库配置文件、应用配置文件、证书文件。</li>
+<li>以环境变量形式注入到容器中，例如数据库密码、访问凭证、连接参数。</li>
+</ul>
+<p>对于 MySQL 这类服务，常见做法是把数据库配置文件挂载到服务启动目录，同时将敏感信息注入为环境变量。这样 WarmPool 启动完成后，服务就已经具备完整的运行条件。</p>
+<h2 id="_4">核心诉求<a class="headerlink" href="#_4" title="Permanent link">&para;</a></h2>
+<p>用户希望将运行环境本身与其依赖配置统一描述，而不是将配置准备、资源创建、挂载注入等操作拆散到 WarmPool 创建之外的其他手工流程中。</p>
+<p>换言之，用户创建的不是一个“只有基础镜像”的 WarmPool，而是一个“带有完整运行环境约束”的 WarmPool。对于需要特定配置才能正常工作的服务，系统应保证其在 WarmPool 创建完成时已经处于可用状态。</p>
+<h2 id="_5">典型场景<a class="headerlink" href="#_5" title="Permanent link">&para;</a></h2>
+<h3 id="mysql">MySQL 场景<a class="headerlink" href="#mysql" title="Permanent link">&para;</a></h3>
+<p>当用户创建一个带有 MySQL 环境的 WarmPool 时，需要同时提供 MySQL 所需的配置内容，例如连接数、字符集、数据库初始化参数等。系统应自动准备这些配置，并将其挂载到 MySQL 容器所需目录中，使数据库在启动时即可加载正确配置。</p>
+<p>在这种情况下，WarmPool 就绪后应具备以下特征：</p>
+<ul>
+<li>MySQL 服务已经启动并加载完成预期配置。</li>
+<li>Agent 可以直接访问数据库，无需额外配置步骤。</li>
+<li>用户不需要手动预创建配置资源，也不需要在容器启动后再次处理挂载问题。</li>
+</ul>
+<h3 id="_6">通用依赖环境场景<a class="headerlink" href="#_6" title="Permanent link">&para;</a></h3>
+<p>除 MySQL 外，该能力也适用于其他依赖配置资源的环境，例如 Redis、Postgres、带凭证的外部服务接入场景，或需要通过配置文件驱动启动行为的应用组件。无论具体服务类型如何，用户的核心诉求都是一致的：在创建 WarmPool 时一次性描述依赖环境，并由系统自动完成环境准备。</p>
+<h2 id="_7">校验要求<a class="headerlink" href="#_7" title="Permanent link">&para;</a></h2>
+<p>为了保证环境在启动时可用，系统需要在创建和更新 WarmPool 时对 ConfigEnv 做校验。校验重点包括：</p>
+<ul>
+<li>配置资源名称必须唯一，不能在同一个 WarmPool 内重复。</li>
+<li>注入目标必须明确，且目标容器必须真实存在。</li>
+<li>挂载目录、环境变量名和资源键名必须合法，不能为空。</li>
+<li>模板中引用的变量必须已定义，不能引用未知变量。</li>
+<li>不能出现同一个容器内的挂载路径冲突或环境变量冲突。</li>
+<li>敏感信息必须按安全方式处理，不能以明文方式暴露在状态或日志中。</li>
+<li>配置资源必须能在 WarmPool 启动前准备完成，否则该 WarmPool 不应被视为就绪。</li>
+</ul>
+<p>如果任一项校验失败，系统应直接拒绝生效，并返回明确的错误原因，避免生成一个半配置状态的运行环境。</p>
+<h2 id="_8">预期结果<a class="headerlink" href="#_8" title="Permanent link">&para;</a></h2>
+<p>引入 ConfigEnv 能力后，WarmPool 应从“提供基础运行容器”扩展为“提供可直接使用的完整运行环境”。用户在创建 WarmPool 时即可同时定义运行镜像和所需配置，系统负责将这些配置准备到位，使依赖环境在 WarmPool 启动完成后即处于可用状态。</p>
+<p>这一能力将显著降低带依赖环境任务的使用门槛，提升 WarmPool 的环境一致性、可复用性和开箱即用程度。</p>
 
 
 
