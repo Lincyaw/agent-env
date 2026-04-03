@@ -6,6 +6,7 @@ const (
 	StatusLabelKey  = "arl.infra.io/status"
 	StatusIdle      = "idle"
 	StatusAllocated = "allocated"
+	StatusRecycling = "recycling"
 
 	// LastActivityAnnotation records the last time a pod was actively used (RFC3339).
 	// Used during gateway recovery to distinguish orphaned pods from recently active ones.

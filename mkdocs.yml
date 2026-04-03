@@ -84,6 +84,7 @@ nav:
   - User Guide:
       - Python SDK: user-guide/python-sdk.md
       - Quick Start: user-guide/quickstart.md
+      - ConfigEnv: user-guide/config-env.md
       - API Reference: user-guide/api-reference.md
       - Examples: user-guide/examples.md
 

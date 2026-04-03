@@ -53,8 +53,11 @@ with SandboxSession(pool_ref="my-python-pool", gateway_url="http://localhost:808
 git clone https://github.com/Lincyaw/agent-env.git
 cd agent-env
 
+# Enter the pinned local toolchain (recommended)
+devbox shell
+
 # Setup and deploy
-make k8s-setup
+devbox run -- make k8s-setup
 skaffold run --profile=k8s
 ```
 
@@ -76,14 +79,14 @@ skaffold run --profile=k8s
 ## Development
 
 ```bash
-# Install tools
-make install-tools
+# Use the pinned local toolchain from devbox.json
+devbox run -- go version
 
 # Generate code
-make generate
+devbox run -- make generate
 
 # Run quality checks
-make check
+devbox run -- make check
 
 # View operator logs
 make logs

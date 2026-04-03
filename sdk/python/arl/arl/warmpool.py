@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import logging
 import time
+from typing import Any
 
 import httpx
 
+from arl.configenv import ConfigEnvSpec
 from arl.gateway_client import GatewayClient, PoolNotReadyError
 from arl.types import PoolInfo, ResourceRequirements, ToolsSpec
 
@@ -44,6 +46,7 @@ class WarmPoolManager:
         tools: ToolsSpec | None = None,
         resources: ResourceRequirements | None = None,
         workspace_dir: str = "/workspace",
+        config_env: ConfigEnvSpec | dict[str, Any] | None = None,
     ) -> None:
         """Create a new WarmPool.
 
@@ -62,6 +65,7 @@ class WarmPoolManager:
             namespace=self.namespace,
             image=image,
             replicas=replicas,
+            config_env=config_env,
             tools=tools,
             resources=resources,
             workspace_dir=workspace_dir,

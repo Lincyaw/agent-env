@@ -1,7 +1,9 @@
 package gateway
 
 import (
+	"bytes"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
@@ -28,11 +30,29 @@ type CreateSessionRequest struct {
 	ExtraLabels        map[string]string `json:"-"` // internal use only, not exposed via JSON
 }
 
+// configEnvAnnotationKey stores the raw ConfigEnv payload on WarmPool annotations
+// for backward compatibility with older WarmPools.
+const configEnvAnnotationKey = "arl.infra.io/config-env"
+
+func decodeConfigEnv(configEnv json.RawMessage) (*arlv1alpha1.ConfigEnvSpec, error) {
+	trimmed := bytes.TrimSpace(configEnv)
+	if len(trimmed) == 0 || bytes.Equal(trimmed, []byte("null")) {
+		return nil, nil
+	}
+
+	var spec arlv1alpha1.ConfigEnvSpec
+	if err := json.Unmarshal(trimmed, &spec); err != nil {
+		return nil, fmt.Errorf("decode configEnv: %w", err)
+	}
+	return &spec, nil
+}
+
 // CreateManagedSessionRequest is the body for POST /v1/managed/sessions
 type CreateManagedSessionRequest struct {
 	Image        string                       `json:"image"`
 	ExperimentID string                       `json:"experimentId"`
 	Namespace    string                       `json:"namespace,omitempty"`
+	ConfigEnv    json.RawMessage              `json:"configEnv,omitempty"`
 	Resources    *corev1.ResourceRequirements `json:"resources,omitempty"`
 	Tools        *arlv1alpha1.ToolsSpec       `json:"tools,omitempty"`
 	WorkspaceDir string                       `json:"workspaceDir,omitempty"`
@@ -64,6 +84,7 @@ type CreatePoolRequest struct {
 	Image         string                         `json:"image"`
 	Replicas      int32                          `json:"replicas,omitempty"`
 	Namespace     string                         `json:"namespace,omitempty"`
+	ConfigEnv     json.RawMessage                `json:"configEnv,omitempty"`
 	Tools         *arlv1alpha1.ToolsSpec         `json:"tools,omitempty"`
 	Resources     *corev1.ResourceRequirements   `json:"resources,omitempty"`
 	WorkspaceDir  string                         `json:"workspaceDir,omitempty"`

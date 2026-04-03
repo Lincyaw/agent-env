@@ -7,6 +7,7 @@ from typing import Any
 
 import httpx
 
+from arl.configenv import ConfigEnvSpec
 from arl.types import (
     ErrorResponse,
     ExecuteResponse,
@@ -18,6 +19,16 @@ from arl.types import (
     StepResult,
     ToolsSpec,
 )
+
+
+def _serialize_config_env(
+    config_env: ConfigEnvSpec | dict[str, Any] | None,
+) -> dict[str, Any] | None:
+    if config_env is None:
+        return None
+    if isinstance(config_env, ConfigEnvSpec):
+        return config_env.to_request_payload()
+    return config_env
 
 
 class GatewayError(Exception):
@@ -158,6 +169,7 @@ class GatewayClient:
         tools: ToolsSpec | None = None,
         resources: ResourceRequirements | None = None,
         workspace_dir: str = "/workspace",
+        config_env: ConfigEnvSpec | dict[str, Any] | None = None,
     ) -> None:
         body: dict[str, Any] = {
             "name": name,
@@ -166,6 +178,9 @@ class GatewayClient:
             "replicas": replicas,
             "workspaceDir": workspace_dir,
         }
+        config_env_payload = _serialize_config_env(config_env)
+        if config_env_payload is not None:
+            body["configEnv"] = config_env_payload
         if tools is not None:
             body["tools"] = tools.model_dump(by_alias=True, exclude_none=True)
         if resources is not None:
@@ -226,6 +241,7 @@ class GatewayClient:
         tools: ToolsSpec | None = None,
         workspace_dir: str = "/workspace",
         max_replicas: int | None = None,
+        config_env: ConfigEnvSpec | dict[str, Any] | None = None,
     ) -> ManagedSessionInfo:
         """Create a managed session with automatic pool management.
 
@@ -253,6 +269,9 @@ class GatewayClient:
             "namespace": namespace,
             "workspaceDir": workspace_dir,
         }
+        config_env_payload = _serialize_config_env(config_env)
+        if config_env_payload is not None:
+            body["configEnv"] = config_env_payload
         if resources is not None:
             body["resources"] = resources.model_dump(exclude_none=True)
         if tools is not None:

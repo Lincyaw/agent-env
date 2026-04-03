@@ -1,5 +1,13 @@
 """ARL - High-level API for Agent Runtime Layer."""
 
+from arl.configenv import (
+    ConfigEnvSpec,
+    ConfigMapTemplate,
+    SecretEnvVarRef,
+    SecretInjection,
+    SecretTemplate,
+    VolumeInjection,
+)
 from arl.gateway_client import GatewayClient, GatewayError, PoolNotReadyError
 from arl.interactive_shell_client import InteractiveShellClient, create_websocket_proxy
 from arl.session import ManagedSession, SandboxSession
@@ -28,6 +36,8 @@ from arl.warmpool import WarmPoolManager
 
 __version__ = "0.2.0"
 __all__ = [
+    "ConfigEnvSpec",
+    "ConfigMapTemplate",
     "ErrorResponse",
     "ExecuteResponse",
     "GatewayClient",
@@ -42,6 +52,9 @@ __all__ = [
     "ResourceRequirements",
     "SandboxSession",
     "SessionInfo",
+    "SecretEnvVarRef",
+    "SecretInjection",
+    "SecretTemplate",
     "ShellMessage",
     "StepOutput",
     "StepRequest",
@@ -53,6 +66,7 @@ __all__ = [
     "ToolsRegistry",
     "ToolsSpec",
     "TrajectoryEntry",
+    "VolumeInjection",
     "WarmPoolManager",
     "create_websocket_proxy",
 ]

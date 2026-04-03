@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -74,6 +75,7 @@ type poolState struct {
 	resources      *corev1.ResourceRequirements
 	tools          *arlv1alpha1.ToolsSpec
 	workspaceDir   string
+	configEnv      json.RawMessage
 	scaleCh        chan scaleReq // per-pool coalesce channel for scale-up requests
 	maxReplicas    atomic.Int32  // per-pool max replicas hint from clients (0 = use global config)
 	poolCreated    bool          // true once the WarmPool CRD has been successfully created
@@ -146,6 +148,13 @@ func (pm *PoolManager) Recover(ctx context.Context) ([]*corev1.Pod, error) {
 			}
 		}
 		state.tools = pool.Spec.Tools
+		if pool.Spec.ConfigEnv != nil {
+			if raw, err := json.Marshal(pool.Spec.ConfigEnv); err == nil {
+				state.configEnv = raw
+			}
+		} else if annotation := pool.Annotations[configEnvAnnotationKey]; annotation != "" {
+			state.configEnv = json.RawMessage(annotation)
+		}
 
 		// Count active sessions using pod labels as primary source.
 		// Pod labels (StatusAllocated) are always present (written by PodAllocator).
@@ -204,7 +213,10 @@ func (pm *PoolManager) AcquireSession(ctx context.Context, req CreateManagedSess
 	}
 
 	image := normalizeImage(req.Image)
-	poolName := managedPoolName(image, ns)
+	poolName, err := managedPoolName(image, ns, req.ConfigEnv)
+	if err != nil {
+		return "", err
+	}
 
 	newState := &poolState{
 		image:        image,
@@ -214,6 +226,7 @@ func (pm *PoolManager) AcquireSession(ctx context.Context, req CreateManagedSess
 		resources:    req.Resources,
 		tools:        req.Tools,
 		workspaceDir: req.WorkspaceDir,
+		configEnv:    req.ConfigEnv,
 	}
 
 	actual, loaded := pm.pools.LoadOrStore(poolName, newState)
@@ -343,6 +356,11 @@ func (pm *PoolManager) createPool(ctx context.Context, state *poolState, ns stri
 		workspaceDir = "/workspace"
 	}
 
+	configEnv, err := decodeConfigEnv(state.configEnv)
+	if err != nil {
+		return err
+	}
+
 	pool := &arlv1alpha1.WarmPool{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      state.poolName,
@@ -372,7 +390,8 @@ func (pm *PoolManager) createPool(ctx context.Context, state *poolState, ns stri
 					},
 				},
 			},
-			Tools: state.tools,
+			Tools:     state.tools,
+			ConfigEnv: configEnv,
 		},
 	}
 
@@ -650,9 +669,21 @@ func (pm *PoolManager) DiagnosticStats() (poolCount int, perPool map[string]int3
 }
 
 // managedPoolName generates a deterministic pool name from image and namespace.
-func managedPoolName(image, namespace string) string {
-	h := sha256.Sum256([]byte(namespace + "/" + image))
-	return "managed-" + hex.EncodeToString(h[:6])
+func managedPoolName(image, namespace string, configEnv json.RawMessage) (string, error) {
+	identity := namespace + "/" + image
+	cfg, err := decodeConfigEnv(configEnv)
+	if err != nil {
+		return "", err
+	}
+	if cfg != nil {
+		raw, err := json.Marshal(cfg)
+		if err != nil {
+			return "", fmt.Errorf("marshal configEnv identity: %w", err)
+		}
+		identity += "/" + string(raw)
+	}
+	h := sha256.Sum256([]byte(identity))
+	return "managed-" + hex.EncodeToString(h[:6]), nil
 }
 
 // normalizeImage performs basic Docker image normalization.

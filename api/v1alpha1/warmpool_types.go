@@ -23,6 +23,92 @@ type WarmPoolSpec struct {
 	// redundant image pulls by preferring nodes that should cache the same image.
 	// +optional
 	ImageLocality *ImageLocalitySpec `json:"imageLocality,omitempty"`
+
+	// ConfigEnv declares additional configuration resources and injection rules
+	// that must be prepared before the WarmPool pod becomes ready.
+	// +optional
+	ConfigEnv *ConfigEnvSpec `json:"configEnv,omitempty"`
+}
+
+// ConfigEnvSpec declares configuration resources and injection rules for a WarmPool.
+type ConfigEnvSpec struct {
+	// Vars are template variables available to ConfigEnv resource templates.
+	// +optional
+	Vars map[string]string `json:"vars,omitempty"`
+
+	// EnvVars are additional environment variables applied to the pod template.
+	// +optional
+	EnvVars []corev1.EnvVar `json:"envVars,omitempty"`
+
+	// ConfigMaps are ConfigMap resources created and injected for the WarmPool.
+	// +optional
+	ConfigMaps []ConfigMapTemplate `json:"configMaps,omitempty"`
+
+	// Secrets are Secret resources created and injected for the WarmPool.
+	// +optional
+	Secrets []SecretTemplate `json:"secrets,omitempty"`
+}
+
+// ConfigMapTemplate defines a ConfigMap to create for the WarmPool.
+type ConfigMapTemplate struct {
+	// +kubebuilder:validation:Optional
+	corev1.ConfigMap `json:",inline"`
+
+	// Inject describes how the ConfigMap should be mounted into the pod.
+	// +optional
+	Inject *VolumeInjection `json:"inject,omitempty"`
+}
+
+// SecretTemplate defines a Secret to create for the WarmPool.
+type SecretTemplate struct {
+	// +kubebuilder:validation:Optional
+	corev1.Secret `json:",inline"`
+
+	// Inject describes how the Secret should be mounted or exposed to the pod.
+	// +optional
+	Inject *SecretInjection `json:"inject,omitempty"`
+}
+
+// VolumeInjection describes a file-based mount for a ConfigMap or Secret.
+type VolumeInjection struct {
+	// Container is the target container name. If omitted, the controller may
+	// choose the executor container by default.
+	// +optional
+	Container string `json:"container,omitempty"`
+
+	// MountPath is the container path where the resource should be mounted.
+	// +kubebuilder:validation:MinLength=1
+	MountPath string `json:"mountPath"`
+
+	// ReadOnly controls whether the mount should be read-only.
+	// +optional
+	ReadOnly *bool `json:"readOnly,omitempty"`
+
+	// SubPath optionally mounts a single file or directory path.
+	// +optional
+	SubPath string `json:"subPath,omitempty"`
+}
+
+// SecretInjection describes how a Secret should be exposed to the pod.
+type SecretInjection struct {
+	// Volume describes file-based mounting for the Secret.
+	// +optional
+	Volume *VolumeInjection `json:"volume,omitempty"`
+
+	// AsEnv exposes selected secret keys as environment variables.
+	// +optional
+	AsEnv []SecretEnvVar `json:"asEnv,omitempty"`
+}
+
+// SecretEnvVar maps a Secret key to an environment variable name.
+type SecretEnvVar struct {
+	// Name is the environment variable name.
+	// +kubebuilder:validation:MinLength=1
+	Name string `json:"name"`
+
+	// Key is the Secret key to read.
+	// +kubebuilder:validation:MinLength=1
+	Key string `json:"key"`
 }
 
 // ImageLocalitySpec configures image-locality-aware scheduling to minimize
@@ -121,6 +207,56 @@ type WarmPoolStatus struct {
 
 	// Conditions represent the latest available observations of the pool's state
 	Conditions []metav1.Condition `json:"conditions,omitempty"`
+
+	// ConfigEnv reports the observed state of environment configuration resources.
+	// +optional
+	ConfigEnv *ConfigEnvStatus `json:"configEnv,omitempty"`
+}
+
+// ConfigEnvPhase describes the high-level state of ConfigEnv reconciliation.
+type ConfigEnvPhase string
+
+const (
+	// ConfigEnvPhasePending indicates that ConfigEnv has not yet been reconciled.
+	ConfigEnvPhasePending ConfigEnvPhase = "Pending"
+	// ConfigEnvPhaseReady indicates that ConfigEnv resources are ready.
+	ConfigEnvPhaseReady ConfigEnvPhase = "Ready"
+	// ConfigEnvPhaseFailed indicates that ConfigEnv reconciliation failed.
+	ConfigEnvPhaseFailed ConfigEnvPhase = "Failed"
+)
+
+// ConfigEnvStatus captures the observed state of ConfigEnv reconciliation.
+type ConfigEnvStatus struct {
+	// Phase is the current reconciliation phase.
+	// +kubebuilder:validation:Enum=Pending;Ready;Failed
+	Phase ConfigEnvPhase `json:"phase"`
+
+	// ConfigMapRefs lists created ConfigMaps.
+	// +optional
+	ConfigMapRefs []ConfigEnvResourceRef `json:"configMapRefs,omitempty"`
+
+	// SecretRefs lists created Secrets.
+	// +optional
+	SecretRefs []ConfigEnvResourceRef `json:"secretRefs,omitempty"`
+
+	// Conditions provide additional diagnostic detail.
+	// +optional
+	Conditions []metav1.Condition `json:"conditions,omitempty"`
+}
+
+// ConfigEnvResourceRef identifies a generated ConfigMap or Secret.
+type ConfigEnvResourceRef struct {
+	// Name is the resource name.
+	// +kubebuilder:validation:MinLength=1
+	Name string `json:"name"`
+
+	// Namespace is the resource namespace.
+	// +optional
+	Namespace string `json:"namespace,omitempty"`
+
+	// Kind is the resource kind.
+	// +kubebuilder:validation:Enum=ConfigMap;Secret
+	Kind string `json:"kind"`
 }
 
 // +kubebuilder:object:root=true

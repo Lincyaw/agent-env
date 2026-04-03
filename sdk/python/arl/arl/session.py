@@ -7,6 +7,7 @@ import json
 import re
 from typing import Any
 
+from arl.configenv import ConfigEnvSpec
 from arl.gateway_client import GatewayClient
 from arl.types import (
     ExecuteResponse,
@@ -366,6 +367,7 @@ class ManagedSession(SandboxSession):
         tools: ToolsSpec | None = None,
         workspace_dir: str = "/workspace",
         max_replicas: int | None = None,
+        config_env: ConfigEnvSpec | dict[str, Any] | None = None,
     ) -> None:
         super().__init__(
             pool_ref="",  # will be set by server
@@ -377,6 +379,7 @@ class ManagedSession(SandboxSession):
         self._image = image
         self._experiment_id = experiment_id
         self._resources = resources
+        self._config_env = config_env
         self._tools = tools
         self._workspace_dir = workspace_dir
         self._max_replicas = max_replicas
@@ -397,6 +400,7 @@ class ManagedSession(SandboxSession):
             image=self._image,
             experiment_id=self._experiment_id,
             namespace=self.namespace,
+            config_env=self._config_env,
             resources=self._resources,
             tools=self._tools,
             workspace_dir=self._workspace_dir,

@@ -8,6 +8,27 @@ This guide covers the development workflow for contributing to ARL-Infra.
 
 Ensure you have completed the [Installation](installation.md) steps.
 
+### Local Toolchain
+
+This repository includes a `devbox.json` that pins the local development
+toolchain, including Go and Protobuf tooling. Prefer using Devbox so commands
+work even when `go`, `gofmt`, or related binaries are not installed in your
+global `PATH`.
+
+```bash
+# Enter a shell with the repo toolchain
+devbox shell
+
+# Or run a single command through the pinned toolchain
+devbox run -- go version
+devbox run -- go test ./pkg/...
+devbox run -- gofmt -w ./pkg/...
+```
+
+If your shell already has the right tools on `PATH`, the regular commands below
+still work, but `devbox run -- ...` is the preferred fallback for reproducible
+local setup.
+
 ### Project Structure
 
 ```
@@ -74,21 +95,21 @@ After modifying certain files, regenerate derived code:
 
 ```bash
 # After changing api/v1alpha1/*.go
-make manifests    # Regenerate CRD manifests
-make deepcopy     # Regenerate deepcopy methods
+devbox run -- make manifests    # Regenerate CRD manifests
+devbox run -- make deepcopy     # Regenerate deepcopy methods
 
 # After changing proto/*.proto
-make proto-go     # Regenerate Go gRPC code
+devbox run -- make proto-go     # Regenerate Go gRPC code
 
 # Or regenerate everything
-make generate
+devbox run -- make generate
 ```
 
 ### 4. Run Quality Checks
 
 ```bash
 # Run all checks (Go + Python)
-make check
+devbox run -- make check
 ```
 
 This runs:
@@ -118,7 +139,7 @@ kubectl get warmpools
 Generated from Go types using controller-gen:
 
 ```bash
-make manifests
+devbox run -- make manifests
 ```
 
 Output: `config/crd/*.yaml`
@@ -128,7 +149,7 @@ Output: `config/crd/*.yaml`
 Generated for Kubernetes objects:
 
 ```bash
-make deepcopy
+devbox run -- make deepcopy
 ```
 
 Output: `api/v1alpha1/zz_generated.deepcopy.go`
@@ -138,7 +159,7 @@ Output: `api/v1alpha1/zz_generated.deepcopy.go`
 Generated from Protocol Buffer definitions:
 
 ```bash
-make proto-go
+devbox run -- make proto-go
 ```
 
 Input: `proto/agent.proto`
@@ -149,7 +170,7 @@ Output: `pkg/pb/*.pb.go`
 Validate architecture documentation:
 
 ```bash
-make arch-check
+devbox run -- make arch-check
 ```
 
 This checks:
@@ -173,7 +194,7 @@ This checks:
 2. Regenerate code:
 
     ```bash
-    make manifests deepcopy
+    devbox run -- make manifests deepcopy
     ```
 
 3. Update controller logic in `pkg/controller/`
@@ -181,7 +202,7 @@ This checks:
 4. Run checks:
 
     ```bash
-    make check
+    devbox run -- make check
     ```
 
 ### Adding a New Controller
@@ -192,7 +213,7 @@ This checks:
 4. Regenerate manifests:
 
     ```bash
-    make manifests
+    devbox run -- make manifests
     ```
 
 ### Modifying gRPC API
@@ -201,7 +222,7 @@ This checks:
 2. Regenerate Go code:
 
     ```bash
-    make proto-go
+    devbox run -- make proto-go
     ```
 
 3. Update sidecar implementation in `pkg/sidecar/`
@@ -234,9 +255,9 @@ For local debugging:
 
 ```bash
 # Run operator locally
-go run cmd/operator/main.go
+devbox run -- go run cmd/operator/main.go
 
-# Or with delve
+# Or with delve (if installed locally)
 dlv debug cmd/operator/main.go
 ```
 
@@ -246,13 +267,13 @@ dlv debug cmd/operator/main.go
 
 ```bash
 # Build SDK package
-make build-sdk
+devbox run -- make build-sdk
 
 # Publish to Test PyPI (for testing)
-make publish-test
+devbox run -- make publish-test
 
 # Publish to Production PyPI
-make publish
+devbox run -- make publish
 ```
 
 ### Clean Build Artifacts

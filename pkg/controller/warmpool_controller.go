@@ -43,6 +43,7 @@ const (
 	StatusLabelKey  = labels.StatusLabelKey
 	StatusIdle      = labels.StatusIdle
 	StatusAllocated = labels.StatusAllocated
+	StatusRecycling = labels.StatusRecycling
 )
 
 // WarmPoolReconciler reconciles a WarmPool object
@@ -66,6 +67,7 @@ type WarmPoolReconciler struct {
 // +kubebuilder:rbac:groups=arl.infra.io,resources=warmpools/status,verbs=get;update;patch
 // +kubebuilder:rbac:groups=arl.infra.io,resources=warmpools/finalizers,verbs=update
 // +kubebuilder:rbac:groups="",resources=pods,verbs=get;list;watch;create;update;patch;delete
+// +kubebuilder:rbac:groups="",resources=configmaps;secrets,verbs=get;list;watch;create;update;patch;delete
 // +kubebuilder:rbac:groups="",resources=nodes,verbs=get;list;watch
 
 // Reconcile manages the WarmPool lifecycle
@@ -119,6 +121,22 @@ func (r *WarmPoolReconciler) reconcile(ctx context.Context, req ctrl.Request) (c
 	// Detect scale-out events before processing pod state
 	r.detectAndTrackScale(pool)
 
+	cfg, err := r.resolveConfigEnvSpec(pool)
+	if err != nil {
+		r.setConfigEnvFailureStatus(pool, err.Error())
+		_ = r.Status().Update(ctx, pool)
+		return ctrl.Result{}, err
+	}
+
+	renderedConfig, err := r.reconcileConfigEnv(ctx, pool, cfg)
+	if err != nil {
+		r.setConfigEnvFailureStatus(pool, err.Error())
+		if statusErr := r.Status().Update(ctx, pool); statusErr != nil {
+			return ctrl.Result{}, statusErr
+		}
+		return ctrl.Result{}, err
+	}
+
 	// List all pods belonging to this pool
 	podList := &corev1.PodList{}
 	if err := r.List(ctx, podList,
@@ -130,10 +148,22 @@ func (r *WarmPoolReconciler) reconcile(ctx context.Context, req ctrl.Request) (c
 	// Count idle and allocated pods, detect failures
 	var readyIdle, totalIdle, allocated, totalPods, failedPods int32
 	var failureMessage string
+	var staleConfigPods []*corev1.Pod
 	for _, pod := range podList.Items {
 		if pod.DeletionTimestamp != nil {
 			continue
 		}
+
+		currentConfigHash := ""
+		if renderedConfig != nil {
+			currentConfigHash = renderedConfig.hash
+		}
+		staleConfig := pod.Annotations[configEnvHashAnnotation] != currentConfigHash
+		if staleConfig && pod.Labels[StatusLabelKey] != StatusAllocated {
+			staleConfigPods = append(staleConfigPods, pod.DeepCopy())
+			continue
+		}
+
 		totalPods++ // Count all non-deleted pods
 		status := pod.Labels[StatusLabelKey]
 		if status == StatusIdle {
@@ -181,6 +211,26 @@ func (r *WarmPoolReconciler) reconcile(ctx context.Context, req ctrl.Request) (c
 		r.observeImagePullErrors(pool.Name, pod)
 	}
 
+	if len(staleConfigPods) > 0 {
+		currentConfigHash := ""
+		if renderedConfig != nil {
+			currentConfigHash = renderedConfig.hash
+		}
+
+		g, gCtx := errgroup.WithContext(ctx)
+		g.SetLimit(20)
+		for _, stalePod := range staleConfigPods {
+			pod := stalePod
+			g.Go(func() error {
+				if err := r.deleteStaleConfigPod(gCtx, pod, currentConfigHash); err != nil {
+					logger.Error(err, "Failed to recycle stale config pod", "pod", pod.Name)
+				}
+				return nil
+			})
+		}
+		_ = g.Wait()
+	}
+
 	// Calculate how many pods to create - only create if total pods < desired
 	needed := pool.Spec.Replicas - totalPods
 
@@ -211,7 +261,7 @@ func (r *WarmPoolReconciler) reconcile(ctx context.Context, req ctrl.Request) (c
 		g, gCtx := errgroup.WithContext(ctx)
 		g.SetLimit(20) // cap concurrent API calls to avoid overwhelming API server
 		for i := int32(0); i < needed; i++ {
-			pod := r.constructPod(pool)
+			pod := r.constructPod(pool, renderedConfig)
 			g.Go(func() error {
 				if err := r.Create(gCtx, pod); err != nil {
 					logger.Error(err, "Failed to create pod")
@@ -463,7 +513,7 @@ func (r *WarmPoolReconciler) pruneStaleEntries(currentPods []corev1.Pod) {
 }
 
 // constructPod creates a Pod from the WarmPool template
-func (r *WarmPoolReconciler) constructPod(pool *arlv1alpha1.WarmPool) *corev1.Pod {
+func (r *WarmPoolReconciler) constructPod(pool *arlv1alpha1.WarmPool, renderedConfig *renderedConfigEnv) *corev1.Pod {
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			GenerateName: pool.Name + "-",
@@ -553,6 +603,9 @@ func (r *WarmPoolReconciler) constructPod(pool *arlv1alpha1.WarmPool) *corev1.Po
 
 	// Add shared volumes for executor agent
 	r.ensureExecutorVolumes(pod)
+
+	// Inject managed config resources and env vars.
+	r.injectConfigEnv(pod, renderedConfig)
 
 	// Set owner reference
 	ctrl.SetControllerReference(pool, pod, r.Scheme)
@@ -943,6 +996,8 @@ func (r *WarmPoolReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&arlv1alpha1.WarmPool{}).
 		Owns(&corev1.Pod{}).
+		Owns(&corev1.ConfigMap{}).
+		Owns(&corev1.Secret{}).
 		WithOptions(controller.Options{
 			MaxConcurrentReconciles: r.Config.WarmPoolMaxConcurrent,
 			RateLimiter:             rl,

@@ -22,6 +22,7 @@ import (
 
 	arlv1alpha1 "github.com/Lincyaw/agent-env/api/v1alpha1"
 	"github.com/Lincyaw/agent-env/pkg/audit"
+	configenvutil "github.com/Lincyaw/agent-env/pkg/configenv"
 	"github.com/Lincyaw/agent-env/pkg/interfaces"
 	"github.com/Lincyaw/agent-env/pkg/labels"
 	"github.com/Lincyaw/agent-env/pkg/sidecar"
@@ -628,6 +629,11 @@ func (g *Gateway) CreatePool(ctx context.Context, req CreatePoolRequest) error {
 		workspaceDir = "/workspace"
 	}
 
+	configEnv, err := decodeConfigEnv(req.ConfigEnv)
+	if err != nil {
+		return err
+	}
+
 	pool := &arlv1alpha1.WarmPool{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      req.Name,
@@ -653,6 +659,7 @@ func (g *Gateway) CreatePool(ctx context.Context, req CreatePoolRequest) error {
 			},
 			Tools:         req.Tools,
 			ImageLocality: req.ImageLocality,
+			ConfigEnv:     configEnv,
 		},
 	}
 
@@ -746,6 +753,12 @@ func (g *Gateway) checkPoolHealth(ctx context.Context, poolRef, namespace string
 		return fmt.Errorf("get pool: %w", err)
 	}
 
+	for _, cond := range pool.Status.Conditions {
+		if cond.Type == configenvutil.ReadyConditionType && cond.Status == metav1.ConditionFalse {
+			return fmt.Errorf("pool %q has invalid configEnv: %s", poolRef, cond.Message)
+		}
+	}
+
 	// Check for PodsFailing condition
 	for _, cond := range pool.Status.Conditions {
 		if cond.Type == "PodsFailing" && cond.Status == "True" {
@@ -794,7 +807,9 @@ func (g *Gateway) diagnosePoolHealth(ctx context.Context, poolRef, namespace str
 		poolRef, pool.Spec.Replicas, pool.Status.ReadyReplicas, pool.Status.AllocatedReplicas)
 
 	for _, cond := range pool.Status.Conditions {
-		if cond.Status == "True" || (cond.Type == "Ready" && cond.Status == "False") {
+		if cond.Status == "True" ||
+			(cond.Type == "Ready" && cond.Status == "False") ||
+			(cond.Type == configenvutil.ReadyConditionType && cond.Status == "False") {
 			diag += fmt.Sprintf(" [%s: %s]", cond.Type, cond.Message)
 		}
 	}

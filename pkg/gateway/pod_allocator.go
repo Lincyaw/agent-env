@@ -9,12 +9,15 @@ import (
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/client-go/rest"
 	toolscache "k8s.io/client-go/tools/cache"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	arlv1alpha1 "github.com/Lincyaw/agent-env/api/v1alpha1"
+	configenvutil "github.com/Lincyaw/agent-env/pkg/configenv"
 	"github.com/Lincyaw/agent-env/pkg/interfaces"
 	"github.com/Lincyaw/agent-env/pkg/labels"
 )
@@ -277,7 +280,8 @@ func (pa *PodAllocator) Release(ctx context.Context, podName, namespace string) 
 	return nil
 }
 
-// claimPod patches the pod's status label from idle to allocated using optimistic concurrency.
+// claimPod patches the pod's status label from idle to allocated using optimistic concurrency,
+// but only if the pod still matches the pool's current rendered ConfigEnv hash.
 func (pa *PodAllocator) claimPod(ctx context.Context, pod *corev1.Pod) (bool, error) {
 	// Re-read the pod to get current resource version
 	current := &corev1.Pod{}
@@ -290,6 +294,13 @@ func (pa *PodAllocator) claimPod(ctx context.Context, pod *corev1.Pod) (bool, er
 		return false, nil
 	}
 	if current.DeletionTimestamp != nil {
+		return false, nil
+	}
+	matchesConfig, err := pa.podMatchesCurrentConfig(ctx, current)
+	if err != nil {
+		return false, err
+	}
+	if !matchesConfig {
 		return false, nil
 	}
 
@@ -310,6 +321,27 @@ func (pa *PodAllocator) claimPod(ctx context.Context, pod *corev1.Pod) (bool, er
 	// Update the returned pod with the latest state
 	*pod = *current
 	return true, nil
+}
+
+func (pa *PodAllocator) podMatchesCurrentConfig(ctx context.Context, pod *corev1.Pod) (bool, error) {
+	poolName := pod.Labels[labels.PoolLabelKey]
+	if poolName == "" {
+		return true, nil
+	}
+
+	pool := &arlv1alpha1.WarmPool{}
+	if err := pa.k8sClient.Get(ctx, client.ObjectKey{Name: poolName, Namespace: pod.Namespace}, pool); err != nil {
+		if errors.IsNotFound(err) {
+			return false, nil
+		}
+		return false, err
+	}
+
+	desiredHash, err := configenvutil.DesiredHashForPool(pool)
+	if err != nil {
+		return false, err
+	}
+	return pod.Annotations[configenvutil.HashAnnotation] == desiredHash, nil
 }
 
 // handlePodEvent processes a pod add/update event.
