@@ -20,16 +20,17 @@ const (
 // stored in Redis. Fields that cannot be serialized (sync.RWMutex, StepHistory)
 // are managed separately or reconstructed on load.
 type redisSessionData struct {
-	Info                SessionInfo   `json:"info"`
-	Managed             bool          `json:"managed"`
-	ExperimentID        string        `json:"experimentId"`
-	LastTaskTime        time.Time     `json:"lastTaskTime"`
-	LastAnnotationPatch time.Time     `json:"lastAnnotationPatch"`
-	IdleTimeout         time.Duration `json:"idleTimeout"`
-	MaxLifetime         time.Duration `json:"maxLifetime"`
-	CreatedAt           time.Time     `json:"createdAt"`
-	HistoryRecords      []StepRecord  `json:"historyRecords"`
-	HistoryNextIndex    int           `json:"historyNextIndex"`
+	Info                SessionInfo            `json:"info"`
+	Managed             bool                   `json:"managed"`
+	ExperimentID        string                 `json:"experimentId"`
+	LastTaskTime        time.Time              `json:"lastTaskTime"`
+	LastAnnotationPatch time.Time              `json:"lastAnnotationPatch"`
+	IdleTimeout         time.Duration          `json:"idleTimeout"`
+	MaxLifetime         time.Duration          `json:"maxLifetime"`
+	CreatedAt           time.Time              `json:"createdAt"`
+	HistoryRecords      []StepRecord           `json:"historyRecords"`
+	HistoryReplayInputs map[int]json.RawMessage `json:"historyReplayInputs,omitempty"`
+	HistoryNextIndex    int                    `json:"historyNextIndex"`
 }
 
 func sessionToRedisData(s *session) redisSessionData {
@@ -49,6 +50,15 @@ func sessionToRedisData(s *session) redisSessionData {
 
 	if s.History != nil {
 		data.HistoryRecords = s.History.GetAll()
+		data.HistoryReplayInputs = make(map[int]json.RawMessage)
+		for _, record := range data.HistoryRecords {
+			if len(record.ReplayInput) > 0 {
+				data.HistoryReplayInputs[record.Index] = append(json.RawMessage(nil), record.ReplayInput...)
+			}
+		}
+		if len(data.HistoryReplayInputs) == 0 {
+			data.HistoryReplayInputs = nil
+		}
 		s.History.mu.RLock()
 		data.HistoryNextIndex = s.History.nextIndex
 		s.History.mu.RUnlock()
@@ -60,6 +70,11 @@ func sessionToRedisData(s *session) redisSessionData {
 func redisDataToSession(data redisSessionData) *session {
 	h := NewStepHistory()
 	h.records = data.HistoryRecords
+	for i := range h.records {
+		if replayInput, ok := data.HistoryReplayInputs[h.records[i].Index]; ok {
+			h.records[i].ReplayInput = append(json.RawMessage(nil), replayInput...)
+		}
+	}
 	h.nextIndex = data.HistoryNextIndex
 
 	return &session{

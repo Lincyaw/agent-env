@@ -197,3 +197,11 @@ func (s *AgentService) ExecuteSync(ctx context.Context, req *ExecRequest) (*Exec
 
 	return &result, nil
 }
+
+// WriteFile writes one file into the executor container workspace.
+func (s *AgentService) WriteFile(ctx context.Context, path string, content []byte) (int64, error) {
+	if s.executorClient == nil {
+		return 0, fmt.Errorf("executor agent not configured: sidecar started without --executor-socket")
+	}
+	return s.executorClient.WriteFile(ctx, path, content)
+}

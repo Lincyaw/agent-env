@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -527,6 +528,40 @@ func (g *Gateway) Restore(ctx context.Context, sessionID string, snapshotID stri
 
 	// Replay each step from history on the new pod
 	for _, record := range records {
+		if record.Name == uploadFileStepName {
+			var uploadReq UploadFileRequest
+			replayInput := record.ReplayInput
+			if len(replayInput) == 0 && bytes.Contains(record.Input, []byte(`"content"`)) {
+				replayInput = record.Input
+			}
+			if len(replayInput) == 0 {
+				if err := g.releaseRestorePod(newPodName, oldNamespace); err != nil {
+					log.Printf("Warning: failed to release pod %s after restore failure: %v", newPodName, err)
+				}
+				return fmt.Errorf("replay upload step %d failed: missing replay payload", record.Index)
+			}
+			if err := json.Unmarshal(replayInput, &uploadReq); err != nil {
+				if err := g.releaseRestorePod(newPodName, oldNamespace); err != nil {
+					log.Printf("Warning: failed to release pod %s after restore failure: %v", newPodName, err)
+				}
+				return fmt.Errorf("replay upload step %d failed: decode replay payload: %w", record.Index, err)
+			}
+			relPath, payload, err := normalizeUploadFileRequest(uploadReq)
+			if err != nil {
+				if err := g.releaseRestorePod(newPodName, oldNamespace); err != nil {
+					log.Printf("Warning: failed to release pod %s after restore failure: %v", newPodName, err)
+				}
+				return fmt.Errorf("replay upload step %d failed: invalid replay payload: %w", record.Index, err)
+			}
+			if _, err := g.sidecarClient.WriteFile(ctx, newPodIP, relPath, payload); err != nil {
+				if err := g.releaseRestorePod(newPodName, oldNamespace); err != nil {
+					log.Printf("Warning: failed to release pod %s after restore failure: %v", newPodName, err)
+				}
+				return fmt.Errorf("replay upload step %d failed: %w", record.Index, err)
+			}
+			continue
+		}
+
 		var step StepRequest
 		if err := json.Unmarshal(record.Input, &step); err != nil {
 			log.Printf("Warning: failed to unmarshal step %d for replay: %v", record.Index, err)
@@ -539,14 +574,9 @@ func (g *Gateway) Restore(ctx context.Context, sessionID string, snapshotID stri
 			WorkingDir: step.WorkDir,
 		}
 		if _, err := g.sidecarClient.Execute(ctx, newPodIP, execReq); err != nil {
-			// Release the newly allocated pod since restore failed
-			go func() {
-				bgCtx, bgCancel := context.WithTimeout(context.Background(), 10*time.Second)
-				defer bgCancel()
-				if relErr := g.podAllocator.Release(bgCtx, newPodName, oldNamespace); relErr != nil {
-					log.Printf("Warning: failed to release pod %s after restore failure: %v", newPodName, relErr)
-				}
-			}()
+			if err := g.releaseRestorePod(newPodName, oldNamespace); err != nil {
+				log.Printf("Warning: failed to release pod %s after restore failure: %v", newPodName, err)
+			}
 			return fmt.Errorf("replay step %d failed: %w", record.Index, err)
 		}
 	}
@@ -576,6 +606,12 @@ func (g *Gateway) Restore(ctx context.Context, sessionID string, snapshotID stri
 	}()
 
 	return nil
+}
+
+func (g *Gateway) releaseRestorePod(podName, namespace string) error {
+	bgCtx, bgCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer bgCancel()
+	return g.podAllocator.Release(bgCtx, podName, namespace)
 }
 
 // GetHistory returns the execution history for a session.

@@ -9,13 +9,14 @@ import (
 
 // StepRecord records one step execution for history and trajectory export.
 type StepRecord struct {
-	Index      int             `json:"index"`
-	Name       string          `json:"name"`
-	Input      json.RawMessage `json:"input"`
-	Output     StepOutput      `json:"output"`
-	SnapshotID string          `json:"snapshot_id"`
-	DurationMs int64           `json:"duration_ms"`
-	Timestamp  time.Time       `json:"timestamp"`
+	Index       int             `json:"index"`
+	Name        string          `json:"name"`
+	Input       json.RawMessage `json:"input"`
+	ReplayInput json.RawMessage `json:"-"`
+	Output      StepOutput      `json:"output"`
+	SnapshotID  string          `json:"snapshot_id"`
+	DurationMs  int64           `json:"duration_ms"`
+	Timestamp   time.Time       `json:"timestamp"`
 }
 
 // StepHistory is a thread-safe history of step executions.

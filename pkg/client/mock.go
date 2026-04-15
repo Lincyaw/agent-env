@@ -9,9 +9,11 @@ import (
 
 // MockSidecarClient is a mock implementation for testing
 type MockSidecarClient struct {
-	ExecuteFunc       func(ctx context.Context, podIP string, req interfaces.ExecRequest) (interfaces.ExecResponse, error)
-	ExecuteStreamFunc func(ctx context.Context, podIP string, req interfaces.ExecRequest) (<-chan interfaces.ExecResponse, error)
-	HealthCheckFunc   func(ctx context.Context, podIP string) error
+	ExecuteFunc          func(ctx context.Context, podIP string, req interfaces.ExecRequest) (interfaces.ExecResponse, error)
+	ExecuteStreamFunc    func(ctx context.Context, podIP string, req interfaces.ExecRequest) (<-chan interfaces.ExecResponse, error)
+	WriteFileFunc        func(ctx context.Context, podIP string, path string, content []byte) (int64, error)
+	InteractiveShellFunc func(ctx context.Context, podIP string) (interfaces.ShellStream, error)
+	HealthCheckFunc      func(ctx context.Context, podIP string) error
 }
 
 // Execute mocks command execution
@@ -28,6 +30,14 @@ func (m *MockSidecarClient) ExecuteStream(ctx context.Context, podIP string, req
 		return m.ExecuteStreamFunc(ctx, podIP, req)
 	}
 	return nil, fmt.Errorf("not implemented")
+}
+
+// WriteFile mocks native file upload
+func (m *MockSidecarClient) WriteFile(ctx context.Context, podIP string, path string, content []byte) (int64, error) {
+	if m.WriteFileFunc != nil {
+		return m.WriteFileFunc(ctx, podIP, path, content)
+	}
+	return 0, fmt.Errorf("not implemented")
 }
 
 // HealthCheck mocks health check
@@ -54,6 +64,9 @@ func (m *MockSidecarClient) Close() error {
 }
 
 // InteractiveShell mocks interactive shell (returns error by default)
-func (m *MockSidecarClient) InteractiveShell(_ context.Context, _ string) (interfaces.ShellStream, error) {
+func (m *MockSidecarClient) InteractiveShell(ctx context.Context, podIP string) (interfaces.ShellStream, error) {
+	if m.InteractiveShellFunc != nil {
+		return m.InteractiveShellFunc(ctx, podIP)
+	}
 	return nil, fmt.Errorf("interactive shell not supported in mock")
 }

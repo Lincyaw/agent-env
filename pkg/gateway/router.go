@@ -18,6 +18,7 @@ func SetupRoutes(mux *http.ServeMux, gw *Gateway, hc *HealthChecker) {
 
 	// Execution
 	mux.HandleFunc("POST /v1/sessions/{id}/execute", handleExecute(gw))
+	mux.HandleFunc("POST /v1/sessions/{id}/files", handleUploadFile(gw))
 	mux.HandleFunc("POST /v1/sessions/{id}/restore", handleRestore(gw))
 
 	// Interactive shell (WebSocket)
@@ -116,6 +117,35 @@ func handleExecute(gw *Gateway) http.HandlerFunc {
 		}
 
 		resp, err := gw.ExecuteSteps(r.Context(), id, req)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		writeJSON(w, http.StatusOK, resp)
+	}
+}
+
+func handleUploadFile(gw *Gateway) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+
+		var req UploadFileRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		if req.Path == "" {
+			writeError(w, http.StatusBadRequest, "path is required")
+			return
+		}
+		if _, _, err := normalizeUploadFileRequest(req); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		resp, err := gw.UploadFile(r.Context(), id, req)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return

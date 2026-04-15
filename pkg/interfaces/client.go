@@ -12,6 +12,9 @@ type SidecarClient interface {
 	// ExecuteStream sends command execution request and streams output via channel
 	ExecuteStream(ctx context.Context, podIP string, req ExecRequest) (<-chan ExecResponse, error)
 
+	// WriteFile writes one file into the session workspace.
+	WriteFile(ctx context.Context, podIP string, path string, content []byte) (int64, error)
+
 	// InteractiveShell opens a bidirectional shell session
 	InteractiveShell(ctx context.Context, podIP string) (ShellStream, error)
 

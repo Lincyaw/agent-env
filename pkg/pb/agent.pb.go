@@ -167,6 +167,112 @@ func (x *ExecLog) GetDone() bool {
 	return false
 }
 
+// WriteFileRequest writes raw bytes to a relative path inside the workspace.
+type WriteFileRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Path          string                 `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
+	Content       []byte                 `protobuf:"bytes,2,opt,name=content,proto3" json:"content,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WriteFileRequest) Reset() {
+	*x = WriteFileRequest{}
+	mi := &file_proto_agent_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WriteFileRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WriteFileRequest) ProtoMessage() {}
+
+func (x *WriteFileRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_agent_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WriteFileRequest.ProtoReflect.Descriptor instead.
+func (*WriteFileRequest) Descriptor() ([]byte, []int) {
+	return file_proto_agent_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *WriteFileRequest) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
+}
+
+func (x *WriteFileRequest) GetContent() []byte {
+	if x != nil {
+		return x.Content
+	}
+	return nil
+}
+
+// WriteFileResponse reports how many bytes were written.
+type WriteFileResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Path          string                 `protobuf:"bytes,1,opt,name=path,proto3" json:"path,omitempty"`
+	BytesWritten  int64                  `protobuf:"varint,2,opt,name=bytes_written,json=bytesWritten,proto3" json:"bytes_written,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *WriteFileResponse) Reset() {
+	*x = WriteFileResponse{}
+	mi := &file_proto_agent_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *WriteFileResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*WriteFileResponse) ProtoMessage() {}
+
+func (x *WriteFileResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_agent_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use WriteFileResponse.ProtoReflect.Descriptor instead.
+func (*WriteFileResponse) Descriptor() ([]byte, []int) {
+	return file_proto_agent_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *WriteFileResponse) GetPath() string {
+	if x != nil {
+		return x.Path
+	}
+	return ""
+}
+
+func (x *WriteFileResponse) GetBytesWritten() int64 {
+	if x != nil {
+		return x.BytesWritten
+	}
+	return 0
+}
+
 // ShellInput represents input to an interactive shell session
 type ShellInput struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -184,7 +290,7 @@ type ShellInput struct {
 
 func (x *ShellInput) Reset() {
 	*x = ShellInput{}
-	mi := &file_proto_agent_proto_msgTypes[2]
+	mi := &file_proto_agent_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -196,7 +302,7 @@ func (x *ShellInput) String() string {
 func (*ShellInput) ProtoMessage() {}
 
 func (x *ShellInput) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_agent_proto_msgTypes[2]
+	mi := &file_proto_agent_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -209,7 +315,7 @@ func (x *ShellInput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ShellInput.ProtoReflect.Descriptor instead.
 func (*ShellInput) Descriptor() ([]byte, []int) {
-	return file_proto_agent_proto_rawDescGZIP(), []int{2}
+	return file_proto_agent_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *ShellInput) GetInput() isShellInput_Input {
@@ -286,7 +392,7 @@ type ShellOutput struct {
 
 func (x *ShellOutput) Reset() {
 	*x = ShellOutput{}
-	mi := &file_proto_agent_proto_msgTypes[3]
+	mi := &file_proto_agent_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -298,7 +404,7 @@ func (x *ShellOutput) String() string {
 func (*ShellOutput) ProtoMessage() {}
 
 func (x *ShellOutput) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_agent_proto_msgTypes[3]
+	mi := &file_proto_agent_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -311,7 +417,7 @@ func (x *ShellOutput) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ShellOutput.ProtoReflect.Descriptor instead.
 func (*ShellOutput) Descriptor() ([]byte, []int) {
-	return file_proto_agent_proto_rawDescGZIP(), []int{3}
+	return file_proto_agent_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *ShellOutput) GetData() string {
@@ -356,7 +462,13 @@ const file_proto_agent_proto_rawDesc = "" +
 	"\x06stdout\x18\x01 \x01(\tR\x06stdout\x12\x16\n" +
 	"\x06stderr\x18\x02 \x01(\tR\x06stderr\x12\x1b\n" +
 	"\texit_code\x18\x03 \x01(\x05R\bexitCode\x12\x12\n" +
-	"\x04done\x18\x04 \x01(\bR\x04done\"\x85\x01\n" +
+	"\x04done\x18\x04 \x01(\bR\x04done\"@\n" +
+	"\x10WriteFileRequest\x12\x12\n" +
+	"\x04path\x18\x01 \x01(\tR\x04path\x12\x18\n" +
+	"\acontent\x18\x02 \x01(\fR\acontent\"L\n" +
+	"\x11WriteFileResponse\x12\x12\n" +
+	"\x04path\x18\x01 \x01(\tR\x04path\x12#\n" +
+	"\rbytes_written\x18\x02 \x01(\x03R\fbytesWritten\"\x85\x01\n" +
 	"\n" +
 	"ShellInput\x12\x14\n" +
 	"\x04data\x18\x01 \x01(\tH\x00R\x04data\x12\x18\n" +
@@ -368,9 +480,10 @@ const file_proto_agent_proto_rawDesc = "" +
 	"\vShellOutput\x12\x12\n" +
 	"\x04data\x18\x01 \x01(\tR\x04data\x12\x1b\n" +
 	"\texit_code\x18\x02 \x01(\x05R\bexitCode\x12\x16\n" +
-	"\x06closed\x18\x03 \x01(\bR\x06closed2\x96\x01\n" +
+	"\x06closed\x18\x03 \x01(\bR\x06closed2\xe2\x01\n" +
 	"\fAgentService\x12;\n" +
-	"\aExecute\x12\x18.arl.sidecar.ExecRequest\x1a\x14.arl.sidecar.ExecLog0\x01\x12I\n" +
+	"\aExecute\x12\x18.arl.sidecar.ExecRequest\x1a\x14.arl.sidecar.ExecLog0\x01\x12J\n" +
+	"\tWriteFile\x12\x1d.arl.sidecar.WriteFileRequest\x1a\x1e.arl.sidecar.WriteFileResponse\x12I\n" +
 	"\x10InteractiveShell\x12\x17.arl.sidecar.ShellInput\x1a\x18.arl.sidecar.ShellOutput(\x010\x01B%Z#github.com/Lincyaw/agent-env/pkg/pbb\x06proto3"
 
 var (
@@ -385,22 +498,26 @@ func file_proto_agent_proto_rawDescGZIP() []byte {
 	return file_proto_agent_proto_rawDescData
 }
 
-var file_proto_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 5)
+var file_proto_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
 var file_proto_agent_proto_goTypes = []any{
-	(*ExecRequest)(nil), // 0: arl.sidecar.ExecRequest
-	(*ExecLog)(nil),     // 1: arl.sidecar.ExecLog
-	(*ShellInput)(nil),  // 2: arl.sidecar.ShellInput
-	(*ShellOutput)(nil), // 3: arl.sidecar.ShellOutput
-	nil,                 // 4: arl.sidecar.ExecRequest.EnvEntry
+	(*ExecRequest)(nil),       // 0: arl.sidecar.ExecRequest
+	(*ExecLog)(nil),           // 1: arl.sidecar.ExecLog
+	(*WriteFileRequest)(nil),  // 2: arl.sidecar.WriteFileRequest
+	(*WriteFileResponse)(nil), // 3: arl.sidecar.WriteFileResponse
+	(*ShellInput)(nil),        // 4: arl.sidecar.ShellInput
+	(*ShellOutput)(nil),       // 5: arl.sidecar.ShellOutput
+	nil,                       // 6: arl.sidecar.ExecRequest.EnvEntry
 }
 var file_proto_agent_proto_depIdxs = []int32{
-	4, // 0: arl.sidecar.ExecRequest.env:type_name -> arl.sidecar.ExecRequest.EnvEntry
+	6, // 0: arl.sidecar.ExecRequest.env:type_name -> arl.sidecar.ExecRequest.EnvEntry
 	0, // 1: arl.sidecar.AgentService.Execute:input_type -> arl.sidecar.ExecRequest
-	2, // 2: arl.sidecar.AgentService.InteractiveShell:input_type -> arl.sidecar.ShellInput
-	1, // 3: arl.sidecar.AgentService.Execute:output_type -> arl.sidecar.ExecLog
-	3, // 4: arl.sidecar.AgentService.InteractiveShell:output_type -> arl.sidecar.ShellOutput
-	3, // [3:5] is the sub-list for method output_type
-	1, // [1:3] is the sub-list for method input_type
+	2, // 2: arl.sidecar.AgentService.WriteFile:input_type -> arl.sidecar.WriteFileRequest
+	4, // 3: arl.sidecar.AgentService.InteractiveShell:input_type -> arl.sidecar.ShellInput
+	1, // 4: arl.sidecar.AgentService.Execute:output_type -> arl.sidecar.ExecLog
+	3, // 5: arl.sidecar.AgentService.WriteFile:output_type -> arl.sidecar.WriteFileResponse
+	5, // 6: arl.sidecar.AgentService.InteractiveShell:output_type -> arl.sidecar.ShellOutput
+	4, // [4:7] is the sub-list for method output_type
+	1, // [1:4] is the sub-list for method input_type
 	1, // [1:1] is the sub-list for extension type_name
 	1, // [1:1] is the sub-list for extension extendee
 	0, // [0:1] is the sub-list for field type_name
@@ -411,7 +528,7 @@ func file_proto_agent_proto_init() {
 	if File_proto_agent_proto != nil {
 		return
 	}
-	file_proto_agent_proto_msgTypes[2].OneofWrappers = []any{
+	file_proto_agent_proto_msgTypes[4].OneofWrappers = []any{
 		(*ShellInput_Data)(nil),
 		(*ShellInput_Signal)(nil),
 	}
@@ -421,7 +538,7 @@ func file_proto_agent_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_agent_proto_rawDesc), len(file_proto_agent_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   5,
+			NumMessages:   7,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

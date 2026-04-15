@@ -65,12 +65,25 @@ type ExecuteRequest struct {
 	TraceID string        `json:"traceID,omitempty"`
 }
 
+// UploadFileRequest is the body for POST /v1/sessions/{id}/files
+type UploadFileRequest struct {
+	Path     string `json:"path"`
+	Content  string `json:"content"`
+	Encoding string `json:"encoding,omitempty"` // "text" (default) or "base64"
+}
+
 // StepRequest describes a single execution step
 type StepRequest struct {
 	Name    string            `json:"name"`
 	Command []string          `json:"command,omitempty"`
 	Env     map[string]string `json:"env,omitempty"`
 	WorkDir string            `json:"workDir,omitempty"`
+}
+
+// UploadFileResponse is the response for POST /v1/sessions/{id}/files
+type UploadFileResponse struct {
+	Path         string `json:"path"`
+	BytesWritten int    `json:"bytesWritten"`
 }
 
 // RestoreRequest is the body for POST /v1/sessions/{id}/restore

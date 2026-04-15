@@ -4,12 +4,14 @@ import (
 	"bufio"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
 	"net"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -77,26 +79,30 @@ func (a *Agent) Run(ctx context.Context) error {
 func (a *Agent) handleConn(ctx context.Context, conn net.Conn) {
 	defer conn.Close()
 
-	scanner := bufio.NewScanner(conn)
-	scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024) // 10MB max line
-
+	decoder := json.NewDecoder(conn)
 	encoder := json.NewEncoder(conn)
 
-	for scanner.Scan() {
+	for {
 		var req Request
-		if err := json.Unmarshal(scanner.Bytes(), &req); err != nil {
+		if err := decoder.Decode(&req); err != nil {
+			if errors.Is(err, io.EOF) {
+				return
+			}
 			resp := Response{Error: fmt.Sprintf("invalid request: %v", err), Done: true}
 			encoder.Encode(resp)
-			continue
+			return
 		}
 
 		switch req.Type {
 		case "exec":
 			log.Printf("[exec] id=%s cmd=%v workdir=%s", req.ID, req.Cmd, req.WorkDir)
 			a.handleExec(ctx, req, encoder)
+		case "write_file":
+			log.Printf("[write_file] id=%s path=%s bytes=%d", req.ID, req.Path, len(req.Content))
+			a.handleWriteFile(req, encoder)
 		case "shell":
 			log.Printf("[shell] id=%s workdir=%s", req.ID, req.WorkDir)
-			a.handleShell(ctx, req, scanner, encoder)
+			a.handleShell(ctx, req, decoder, encoder)
 			return // shell owns this connection until exit
 		case "signal":
 			log.Printf("[signal] id=%s pid=%d signal=%s", req.ID, req.PID, req.Signal)
@@ -215,6 +221,65 @@ func (a *Agent) handleExec(ctx context.Context, req Request, encoder *json.Encod
 	send(Response{ID: req.ID, ExitCode: &exitCode, Done: true})
 }
 
+func (a *Agent) handleWriteFile(req Request, encoder *json.Encoder) {
+	if req.Path == "" {
+		encoder.Encode(Response{ID: req.ID, Error: "path is required", Done: true})
+		return
+	}
+
+	targetPath, err := a.resolveWorkspacePath(req.Path)
+	if err != nil {
+		encoder.Encode(Response{ID: req.ID, Error: err.Error(), Done: true})
+		return
+	}
+
+	if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
+		encoder.Encode(Response{ID: req.ID, Error: fmt.Sprintf("mkdir parent: %v", err), Done: true})
+		return
+	}
+
+	if err := os.WriteFile(targetPath, req.Content, 0644); err != nil {
+		encoder.Encode(Response{ID: req.ID, Error: fmt.Sprintf("write file: %v", err), Done: true})
+		return
+	}
+
+	written := int64(len(req.Content))
+	encoder.Encode(Response{ID: req.ID, BytesWritten: &written, Done: true})
+}
+
+func (a *Agent) resolveWorkspacePath(relPath string) (string, error) {
+	if strings.ContainsRune(relPath, 0) {
+		return "", fmt.Errorf("path must not contain NUL bytes")
+	}
+	clean := filepath.Clean(relPath)
+	if clean == "." || clean == "" {
+		return "", fmt.Errorf("path is required")
+	}
+	if filepath.IsAbs(clean) {
+		return "", fmt.Errorf("path must be relative to the workspace")
+	}
+
+	workspaceRoot, err := filepath.Abs(a.workspaceDir)
+	if err != nil {
+		return "", fmt.Errorf("resolve workspace: %w", err)
+	}
+	targetPath := filepath.Join(workspaceRoot, clean)
+	targetAbs, err := filepath.Abs(targetPath)
+	if err != nil {
+		return "", fmt.Errorf("resolve target path: %w", err)
+	}
+
+	relToRoot, err := filepath.Rel(workspaceRoot, targetAbs)
+	if err != nil {
+		return "", fmt.Errorf("validate target path: %w", err)
+	}
+	if relToRoot == ".." || strings.HasPrefix(relToRoot, ".."+string(filepath.Separator)) {
+		return "", errors.New("path must stay within the workspace")
+	}
+
+	return targetAbs, nil
+}
+
 func (a *Agent) handleSignal(req Request, encoder *json.Encoder) {
 	// Only allow signaling PIDs that we are tracking
 	a.mu.Lock()
@@ -247,7 +312,7 @@ func (a *Agent) handleSignal(req Request, encoder *json.Encoder) {
 	encoder.Encode(Response{ID: req.ID, Done: true})
 }
 
-func (a *Agent) handleShell(ctx context.Context, req Request, scanner *bufio.Scanner, encoder *json.Encoder) {
+func (a *Agent) handleShell(ctx context.Context, req Request, decoder *json.Decoder, encoder *json.Encoder) {
 	// Prefer bash, fall back to /bin/sh
 	shellPath := "/bin/bash"
 	if _, err := exec.LookPath("bash"); err != nil {
@@ -335,10 +400,11 @@ func (a *Agent) handleShell(ctx context.Context, req Request, scanner *bufio.Sca
 
 	// Goroutine 3: read subsequent requests (stdin data, signals)
 	go func() {
-		for scanner.Scan() {
+		for {
 			var sub Request
-			if err := json.Unmarshal(scanner.Bytes(), &sub); err != nil {
-				continue
+			if err := decoder.Decode(&sub); err != nil {
+				stdin.Close()
+				return
 			}
 			switch sub.Type {
 			case "stdin":
@@ -362,8 +428,6 @@ func (a *Agent) handleShell(ctx context.Context, req Request, scanner *bufio.Sca
 				}
 			}
 		}
-		// Scanner stopped (connection closed) -> close stdin to let shell exit
-		stdin.Close()
 	}()
 
 	exitCode := 0

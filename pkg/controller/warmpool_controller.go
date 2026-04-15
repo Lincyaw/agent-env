@@ -514,6 +514,9 @@ func (r *WarmPoolReconciler) pruneStaleEntries(currentPods []corev1.Pod) {
 
 // constructPod creates a Pod from the WarmPool template
 func (r *WarmPoolReconciler) constructPod(pool *arlv1alpha1.WarmPool, renderedConfig *renderedConfigEnv) *corev1.Pod {
+	// Deep-copy the template spec so that injection helpers don't mutate the WarmPool CR.
+	templateSpec := pool.Spec.Template.Spec.DeepCopy()
+
 	pod := &corev1.Pod{
 		ObjectMeta: metav1.ObjectMeta{
 			GenerateName: pool.Name + "-",
@@ -523,7 +526,7 @@ func (r *WarmPoolReconciler) constructPod(pool *arlv1alpha1.WarmPool, renderedCo
 				StatusLabelKey: StatusIdle,
 			},
 		},
-		Spec: pool.Spec.Template.Spec,
+		Spec: *templateSpec,
 	}
 
 	// Inject executor agent into pod
@@ -564,7 +567,7 @@ func (r *WarmPoolReconciler) constructPod(pool *arlv1alpha1.WarmPool, renderedCo
 		sidecarContainer := corev1.Container{
 			Name:            "sidecar",
 			Image:           r.Config.SidecarImage,
-			ImagePullPolicy: corev1.PullIfNotPresent,
+			ImagePullPolicy: corev1.PullAlways,
 			Args:            sidecarArgs,
 			Ports: []corev1.ContainerPort{
 				{
@@ -807,7 +810,7 @@ func (r *WarmPoolReconciler) injectExecutorAgent(pod *corev1.Pod) {
 	initContainer := corev1.Container{
 		Name:            "copy-executor-agent",
 		Image:           r.Config.ExecutorAgentImage,
-		ImagePullPolicy: corev1.PullIfNotPresent,
+		ImagePullPolicy: corev1.PullAlways,
 		Command:         []string{"cp", "/executor-agent", "/arl-bin/executor-agent"},
 		VolumeMounts: []corev1.VolumeMount{
 			{Name: "arl-bin", MountPath: "/arl-bin"},

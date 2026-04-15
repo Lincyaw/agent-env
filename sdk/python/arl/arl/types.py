@@ -92,6 +92,15 @@ class ExecuteResponse(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+class UploadFileResponse(BaseModel):
+    """Response from uploading a file into a session workspace."""
+
+    path: str
+    bytes_written: int = Field(alias="bytesWritten")
+
+    model_config = {"populate_by_name": True}
+
+
 class PoolCondition(BaseModel):
     """A condition on a warm pool (from Kubernetes status).
 

@@ -20,6 +20,7 @@ const _ = grpc.SupportPackageIsVersion9
 
 const (
 	AgentService_Execute_FullMethodName          = "/arl.sidecar.AgentService/Execute"
+	AgentService_WriteFile_FullMethodName        = "/arl.sidecar.AgentService/WriteFile"
 	AgentService_InteractiveShell_FullMethodName = "/arl.sidecar.AgentService/InteractiveShell"
 )
 
@@ -31,6 +32,8 @@ const (
 type AgentServiceClient interface {
 	// Execute runs a command (Job mode) or starts a background service (Service mode)
 	Execute(ctx context.Context, in *ExecRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ExecLog], error)
+	// WriteFile writes one file into the executor workspace.
+	WriteFile(ctx context.Context, in *WriteFileRequest, opts ...grpc.CallOption) (*WriteFileResponse, error)
 	// InteractiveShell provides bidirectional streaming for interactive shell sessions
 	InteractiveShell(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[ShellInput, ShellOutput], error)
 }
@@ -62,6 +65,16 @@ func (c *agentServiceClient) Execute(ctx context.Context, in *ExecRequest, opts 
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type AgentService_ExecuteClient = grpc.ServerStreamingClient[ExecLog]
 
+func (c *agentServiceClient) WriteFile(ctx context.Context, in *WriteFileRequest, opts ...grpc.CallOption) (*WriteFileResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(WriteFileResponse)
+	err := c.cc.Invoke(ctx, AgentService_WriteFile_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *agentServiceClient) InteractiveShell(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[ShellInput, ShellOutput], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	stream, err := c.cc.NewStream(ctx, &AgentService_ServiceDesc.Streams[1], AgentService_InteractiveShell_FullMethodName, cOpts...)
@@ -83,6 +96,8 @@ type AgentService_InteractiveShellClient = grpc.BidiStreamingClient[ShellInput, 
 type AgentServiceServer interface {
 	// Execute runs a command (Job mode) or starts a background service (Service mode)
 	Execute(*ExecRequest, grpc.ServerStreamingServer[ExecLog]) error
+	// WriteFile writes one file into the executor workspace.
+	WriteFile(context.Context, *WriteFileRequest) (*WriteFileResponse, error)
 	// InteractiveShell provides bidirectional streaming for interactive shell sessions
 	InteractiveShell(grpc.BidiStreamingServer[ShellInput, ShellOutput]) error
 	mustEmbedUnimplementedAgentServiceServer()
@@ -97,6 +112,9 @@ type UnimplementedAgentServiceServer struct{}
 
 func (UnimplementedAgentServiceServer) Execute(*ExecRequest, grpc.ServerStreamingServer[ExecLog]) error {
 	return status.Error(codes.Unimplemented, "method Execute not implemented")
+}
+func (UnimplementedAgentServiceServer) WriteFile(context.Context, *WriteFileRequest) (*WriteFileResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method WriteFile not implemented")
 }
 func (UnimplementedAgentServiceServer) InteractiveShell(grpc.BidiStreamingServer[ShellInput, ShellOutput]) error {
 	return status.Error(codes.Unimplemented, "method InteractiveShell not implemented")
@@ -133,6 +151,24 @@ func _AgentService_Execute_Handler(srv interface{}, stream grpc.ServerStream) er
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type AgentService_ExecuteServer = grpc.ServerStreamingServer[ExecLog]
 
+func _AgentService_WriteFile_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(WriteFileRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentServiceServer).WriteFile(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AgentService_WriteFile_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentServiceServer).WriteFile(ctx, req.(*WriteFileRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _AgentService_InteractiveShell_Handler(srv interface{}, stream grpc.ServerStream) error {
 	return srv.(AgentServiceServer).InteractiveShell(&grpc.GenericServerStream[ShellInput, ShellOutput]{ServerStream: stream})
 }
@@ -146,7 +182,12 @@ type AgentService_InteractiveShellServer = grpc.BidiStreamingServer[ShellInput, 
 var AgentService_ServiceDesc = grpc.ServiceDesc{
 	ServiceName: "arl.sidecar.AgentService",
 	HandlerType: (*AgentServiceServer)(nil),
-	Methods:     []grpc.MethodDesc{},
+	Methods: []grpc.MethodDesc{
+		{
+			MethodName: "WriteFile",
+			Handler:    _AgentService_WriteFile_Handler,
+		},
+	},
 	Streams: []grpc.StreamDesc{
 		{
 			StreamName:    "Execute",

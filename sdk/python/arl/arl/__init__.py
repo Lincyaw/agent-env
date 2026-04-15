@@ -31,6 +31,7 @@ from arl.types import (
     ToolsRegistry,
     ToolsSpec,
     TrajectoryEntry,
+    UploadFileResponse,
 )
 from arl.warmpool import WarmPoolManager
 
@@ -66,6 +67,7 @@ __all__ = [
     "ToolsRegistry",
     "ToolsSpec",
     "TrajectoryEntry",
+    "UploadFileResponse",
     "VolumeInjection",
     "WarmPoolManager",
     "create_websocket_proxy",

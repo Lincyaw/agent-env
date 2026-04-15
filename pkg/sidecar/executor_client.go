@@ -1,7 +1,6 @@
 package sidecar
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -32,22 +31,17 @@ func (c *ExecutorClient) Ping() error {
 	defer conn.Close()
 
 	encoder := json.NewEncoder(conn)
-	scanner := bufio.NewScanner(conn)
+	decoder := json.NewDecoder(conn)
 
 	req := execagent.Request{ID: "ping-0", Type: "ping"}
 	if err := encoder.Encode(req); err != nil {
 		return fmt.Errorf("send ping: %w", err)
 	}
 
-	if !scanner.Scan() {
-		return fmt.Errorf("no response to ping")
-	}
-
 	var resp execagent.Response
-	if err := json.Unmarshal(scanner.Bytes(), &resp); err != nil {
+	if err := decoder.Decode(&resp); err != nil {
 		return fmt.Errorf("decode ping response: %w", err)
 	}
-
 	if resp.Error != "" {
 		return fmt.Errorf("ping error: %s", resp.Error)
 	}
@@ -74,12 +68,11 @@ func (c *ExecutorClient) Execute(ctx context.Context, req execagent.Request) (<-
 		defer close(ch)
 		defer conn.Close()
 
-		scanner := bufio.NewScanner(conn)
-		scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
+		decoder := json.NewDecoder(conn)
 
-		for scanner.Scan() {
+		for {
 			var resp execagent.Response
-			if err := json.Unmarshal(scanner.Bytes(), &resp); err != nil {
+			if err := decoder.Decode(&resp); err != nil {
 				ch <- execagent.Response{ID: req.ID, Error: fmt.Sprintf("decode: %v", err), Done: true}
 				return
 			}
@@ -108,19 +101,15 @@ func (c *ExecutorClient) Signal(pid int, signal string) error {
 	defer conn.Close()
 
 	encoder := json.NewEncoder(conn)
-	scanner := bufio.NewScanner(conn)
+	decoder := json.NewDecoder(conn)
 
 	req := execagent.Request{ID: "sig-0", Type: "signal", PID: pid, Signal: signal}
 	if err := encoder.Encode(req); err != nil {
 		return fmt.Errorf("send signal request: %w", err)
 	}
 
-	if !scanner.Scan() {
-		return fmt.Errorf("no response to signal")
-	}
-
 	var resp execagent.Response
-	if err := json.Unmarshal(scanner.Bytes(), &resp); err != nil {
+	if err := decoder.Decode(&resp); err != nil {
 		return fmt.Errorf("decode signal response: %w", err)
 	}
 
@@ -129,6 +118,49 @@ func (c *ExecutorClient) Signal(pid int, signal string) error {
 	}
 
 	return nil
+}
+
+// WriteFile writes one file into the executor workspace.
+func (c *ExecutorClient) WriteFile(ctx context.Context, path string, content []byte) (int64, error) {
+	conn, err := c.dial()
+	if err != nil {
+		return 0, err
+	}
+	defer conn.Close()
+
+	encoder := json.NewEncoder(conn)
+	decoder := json.NewDecoder(conn)
+
+	req := execagent.Request{
+		ID:      fmt.Sprintf("write-%d", time.Now().UnixNano()),
+		Type:    "write_file",
+		Path:    path,
+		Content: content,
+	}
+	if err := encoder.Encode(req); err != nil {
+		return 0, fmt.Errorf("send write_file request: %w", err)
+	}
+
+	for {
+		var resp execagent.Response
+		if err := decoder.Decode(&resp); err != nil {
+			return 0, fmt.Errorf("read write_file response: %w", err)
+		}
+		if resp.Error != "" {
+			return 0, fmt.Errorf("write_file error: %s", resp.Error)
+		}
+		if resp.Done {
+			if resp.BytesWritten == nil {
+				return 0, fmt.Errorf("write_file response missing bytes_written")
+			}
+			return *resp.BytesWritten, nil
+		}
+		select {
+		case <-ctx.Done():
+			return 0, ctx.Err()
+		default:
+		}
+	}
 }
 
 func (c *ExecutorClient) dial() (net.Conn, error) {
@@ -200,12 +232,11 @@ func (c *ExecutorClient) StartShell(ctx context.Context, workDir string, env map
 	go func() {
 		defer close(session.Output)
 
-		scanner := bufio.NewScanner(conn)
-		scanner.Buffer(make([]byte, 0, 1024*1024), 10*1024*1024)
+		decoder := json.NewDecoder(conn)
 
-		for scanner.Scan() {
+		for {
 			var resp execagent.Response
-			if err := json.Unmarshal(scanner.Bytes(), &resp); err != nil {
+			if err := decoder.Decode(&resp); err != nil {
 				session.Output <- execagent.Response{ID: id, Error: fmt.Sprintf("decode: %v", err), Done: true}
 				return
 			}

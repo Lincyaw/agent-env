@@ -1,6 +1,7 @@
 package sidecar
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log"
@@ -95,6 +96,23 @@ func (s *GRPCServer) Execute(req *pb.ExecRequest, stream grpc.ServerStreamingSer
 	}
 
 	return nil
+}
+
+// WriteFile writes one file into the executor workspace.
+func (s *GRPCServer) WriteFile(ctx context.Context, req *pb.WriteFileRequest) (*pb.WriteFileResponse, error) {
+	if req.GetPath() == "" {
+		return nil, status.Error(codes.InvalidArgument, "path is required")
+	}
+
+	written, err := s.service.WriteFile(ctx, req.GetPath(), req.GetContent())
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "write file: %v", err)
+	}
+
+	return &pb.WriteFileResponse{
+		Path:         req.GetPath(),
+		BytesWritten: written,
+	}, nil
 }
 
 // InteractiveShell implements bidirectional streaming for interactive shell sessions

@@ -17,6 +17,7 @@ from arl.types import (
     ToolResult,
     ToolsRegistry,
     ToolsSpec,
+    UploadFileResponse,
 )
 
 _SAFE_TOOL_NAME = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]*$")
@@ -183,6 +184,33 @@ class SandboxSession:
         if self._session_id is None:
             raise RuntimeError("No session created. Call create_sandbox() first.")
         self._client.restore(self._session_id, snapshot_id)
+
+    def upload_file(self, path: str, content: str | bytes) -> UploadFileResponse:
+        """Upload one file into the session workspace.
+
+        Args:
+            path: Relative path within the workspace.
+            content: Text content (sent as UTF-8) or raw bytes (sent as base64).
+
+        Returns:
+            UploadFileResponse with the normalized path and byte count.
+        """
+        if self._session_id is None:
+            raise RuntimeError("No session created. Call create_sandbox() first.")
+        if isinstance(content, bytes):
+            encoded = base64.b64encode(content).decode()
+            return self._client.upload_file(
+                self._session_id,
+                path=path,
+                content=encoded,
+                encoding="base64",
+            )
+        return self._client.upload_file(
+            self._session_id,
+            path=path,
+            content=content,
+            encoding="text",
+        )
 
     def get_history(self) -> list[StepResult]:
         """Get complete execution history for this session.

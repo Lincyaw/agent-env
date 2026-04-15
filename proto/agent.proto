@@ -9,6 +9,9 @@ service AgentService {
   // Execute runs a command (Job mode) or starts a background service (Service mode)
   rpc Execute(ExecRequest) returns (stream ExecLog);
 
+  // WriteFile writes one file into the executor workspace.
+  rpc WriteFile(WriteFileRequest) returns (WriteFileResponse);
+
   // InteractiveShell provides bidirectional streaming for interactive shell sessions
   rpc InteractiveShell(stream ShellInput) returns (stream ShellOutput);
 }
@@ -28,6 +31,18 @@ message ExecLog {
   string stderr = 2;
   int32 exit_code = 3;
   bool done = 4;
+}
+
+// WriteFileRequest writes raw bytes to a relative path inside the workspace.
+message WriteFileRequest {
+  string path = 1;
+  bytes content = 2;
+}
+
+// WriteFileResponse reports how many bytes were written.
+message WriteFileResponse {
+  string path = 1;
+  int64 bytes_written = 2;
 }
 
 // ShellInput represents input to an interactive shell session

@@ -284,6 +284,24 @@ func (s *grpcShellStream) Close() error {
 	return s.stream.CloseSend()
 }
 
+// WriteFile writes one file into the workspace via sidecar gRPC.
+func (c *GRPCSidecarClient) WriteFile(ctx context.Context, podIP string, path string, content []byte) (int64, error) {
+	conn, err := c.getOrCreateConn(podIP)
+	if err != nil {
+		return 0, err
+	}
+
+	client := pb.NewAgentServiceClient(conn)
+	resp, err := client.WriteFile(ctx, &pb.WriteFileRequest{
+		Path:    path,
+		Content: content,
+	})
+	if err != nil {
+		return 0, fmt.Errorf("gRPC WriteFile failed: %w", err)
+	}
+	return resp.GetBytesWritten(), nil
+}
+
 // InteractiveShell opens a bidirectional shell session via sidecar gRPC
 func (c *GRPCSidecarClient) InteractiveShell(ctx context.Context, podIP string) (interfaces.ShellStream, error) {
 	conn, err := c.getOrCreateConn(podIP)

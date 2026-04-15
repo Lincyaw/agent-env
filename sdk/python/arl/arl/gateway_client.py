@@ -18,6 +18,7 @@ from arl.types import (
     SessionInfo,
     StepResult,
     ToolsSpec,
+    UploadFileResponse,
 )
 
 
@@ -137,6 +138,18 @@ class GatewayClient:
         resp = self._client.post(f"/v1/sessions/{session_id}/execute", json=body)
         self._handle_error(resp)
         return ExecuteResponse.model_validate(resp.json())
+
+    def upload_file(
+        self,
+        session_id: str,
+        path: str,
+        content: str,
+        encoding: str = "text",
+    ) -> UploadFileResponse:
+        body = {"path": path, "content": content, "encoding": encoding}
+        resp = self._client.post(f"/v1/sessions/{session_id}/files", json=body)
+        self._handle_error(resp)
+        return UploadFileResponse.model_validate(resp.json())
 
     def restore(self, session_id: str, snapshot_id: str) -> None:
         resp = self._client.post(
