@@ -23,6 +23,9 @@ import (
 	"github.com/Lincyaw/agent-env/pkg/config"
 	"github.com/Lincyaw/agent-env/pkg/gateway"
 	"github.com/Lincyaw/agent-env/pkg/metrics"
+	"github.com/Lincyaw/agent-env/pkg/tracing"
+
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 var scheme = runtime.NewScheme()
@@ -46,6 +49,18 @@ func main() {
 	if err := cfg.Validate(); err != nil {
 		log.Fatalf("invalid configuration: %v", err)
 	}
+
+	tracingShutdown, err := tracing.Setup(context.Background(), "arl-gateway")
+	if err != nil {
+		log.Fatalf("failed to initialise tracing: %v", err)
+	}
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := tracingShutdown(shutdownCtx); err != nil {
+			log.Printf("tracing shutdown: %v", err)
+		}
+	}()
 
 	// Create K8s client
 	k8sConfig := ctrl.GetConfigOrDie()
@@ -161,8 +176,15 @@ func main() {
 	gateway.SetupRoutes(mux, gw, healthChecker)
 
 	server := &http.Server{
-		Addr:         fmt.Sprintf(":%d", port),
-		Handler:      mux,
+		Addr: fmt.Sprintf(":%d", port),
+		Handler: otelhttp.NewHandler(mux, "gateway",
+			otelhttp.WithSpanNameFormatter(func(_ string, r *http.Request) string {
+				if route := r.Pattern; route != "" {
+					return r.Method + " " + route
+				}
+				return r.Method + " " + r.URL.Path
+			}),
+		),
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 600 * time.Second,
 		IdleTimeout:  60 * time.Second,

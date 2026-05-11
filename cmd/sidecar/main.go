@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/Lincyaw/agent-env/pkg/sidecar"
+	"github.com/Lincyaw/agent-env/pkg/tracing"
 )
 
 func main() {
@@ -31,6 +32,18 @@ func main() {
 	if err := os.MkdirAll(workspaceDir, 0755); err != nil {
 		log.Fatalf("Failed to create workspace directory: %v", err)
 	}
+
+	tracingShutdown, err := tracing.Setup(context.Background(), "arl-sidecar")
+	if err != nil {
+		log.Fatalf("failed to initialise tracing: %v", err)
+	}
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := tracingShutdown(shutdownCtx); err != nil {
+			log.Printf("tracing shutdown: %v", err)
+		}
+	}()
 
 	httpServer := sidecar.NewServer(httpPort)
 

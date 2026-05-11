@@ -86,6 +86,7 @@ spec:
                   optional: false
             {{- end }}
             {{- end }}
+            {{- include "arl-operator.otelEnv" . | nindent 12 }}
           ports:
             - name: http
               containerPort: {{ .Values.gateway.port }}

@@ -8,6 +8,7 @@ import (
 	"net"
 	"strings"
 
+	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -51,7 +52,9 @@ func (s *GRPCServer) Start() error {
 		return fmt.Errorf("failed to listen: %w", err)
 	}
 
-	s.grpcServer = grpc.NewServer()
+	s.grpcServer = grpc.NewServer(
+		grpc.StatsHandler(otelgrpc.NewServerHandler()),
+	)
 	pb.RegisterAgentServiceServer(s.grpcServer, s)
 
 	log.Printf("gRPC server starting on :%d", s.port)

@@ -74,6 +74,31 @@ ClickHouse address (host:port)
 {{- end }}
 
 {{/*
+OpenTelemetry environment block. Emits OTEL_ENABLED + OTLP/gRPC exporter
+config when otel.enabled is true. Intended to be included verbatim inside a
+container env: list — pass the top-level context, e.g.
+    {{- include "arl-operator.otelEnv" . | nindent 12 }}
+*/}}
+{{- define "arl-operator.otelEnv" -}}
+{{- if .Values.otel.enabled }}
+- name: OTEL_ENABLED
+  value: "true"
+- name: OTEL_EXPORTER_OTLP_ENDPOINT
+  value: {{ .Values.otel.endpoint | quote }}
+- name: OTEL_EXPORTER_OTLP_INSECURE
+  value: "{{ .Values.otel.insecure }}"
+{{- if .Values.otel.sampleRatio }}
+- name: OTEL_TRACES_SAMPLER_ARG
+  value: "{{ .Values.otel.sampleRatio }}"
+{{- end }}
+{{- if .Values.otel.resourceAttributes }}
+- name: OTEL_RESOURCE_ATTRIBUTES
+  value: {{ .Values.otel.resourceAttributes | quote }}
+{{- end }}
+{{- end }}
+{{- end }}
+
+{{/*
 Redis address (host:port) — auto-resolves to the in-cluster Service when deploy is true.
 */}}
 {{- define "arl-operator.redisAddr" -}}

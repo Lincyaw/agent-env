@@ -8,6 +8,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -210,6 +212,11 @@ func (pa *PodAllocator) Stop() {
 // Allocate dequeues an idle pod from the given pool or blocks until one is available.
 // On success, it patches the pod's labels to mark it as allocated (optimistic concurrency).
 func (pa *PodAllocator) Allocate(ctx context.Context, poolName, namespace string) (*corev1.Pod, error) {
+	ctx, span := otel.Tracer("gateway").Start(ctx, "PodAllocator.Allocate",
+		traceStartAttrs("pool", poolName, "namespace", namespace),
+	)
+	defer span.End()
+
 	start := time.Now()
 	key := namespace + "/" + poolName
 
@@ -233,6 +240,10 @@ func (pa *PodAllocator) Allocate(ctx context.Context, poolName, namespace string
 					pa.metrics.RecordPodAllocationDuration(poolName, time.Since(start))
 					pa.metrics.IncrementPodAllocationResult(poolName, "success")
 				}
+				span.SetAttributes(
+					attribute.String("pod.name", pod.Name),
+					attribute.String("allocate.path", "queue"),
+				)
 				return pod, nil
 			}
 			// Another allocator won the race; try the next pod
@@ -255,6 +266,10 @@ func (pa *PodAllocator) Allocate(ctx context.Context, poolName, namespace string
 					pa.metrics.RecordPodAllocationDuration(poolName, time.Since(start))
 					pa.metrics.IncrementPodAllocationResult(poolName, "success")
 				}
+				span.SetAttributes(
+					attribute.String("pod.name", pod.Name),
+					attribute.String("allocate.path", "waiter"),
+				)
 				return pod, nil
 			}
 			// Lost the race; loop again
@@ -264,7 +279,9 @@ func (pa *PodAllocator) Allocate(ctx context.Context, poolName, namespace string
 				pa.metrics.RecordPodAllocationDuration(poolName, time.Since(start))
 				pa.metrics.IncrementPodAllocationResult(poolName, "timeout")
 			}
-			return nil, fmt.Errorf("allocate pod from pool %s: %w", poolName, ctx.Err())
+			err := fmt.Errorf("allocate pod from pool %s: %w", poolName, ctx.Err())
+			recordSpanErr(span, err)
+			return nil, err
 		}
 	}
 }

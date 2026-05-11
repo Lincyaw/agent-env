@@ -14,6 +14,8 @@ import (
 	"sync"
 	"time"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -230,6 +232,11 @@ func (g *Gateway) StopTrajectoryWorker() {
 
 // CreateSession allocates a pod from the pool via PodAllocator and registers a session.
 func (g *Gateway) CreateSession(ctx context.Context, req CreateSessionRequest) (*SessionInfo, error) {
+	ctx, span := otel.Tracer("gateway").Start(ctx, "Gateway.CreateSession",
+		traceStartAttrs("pool", req.PoolRef, "namespace", req.Namespace),
+	)
+	defer span.End()
+
 	ns := req.Namespace
 	if ns == "" {
 		ns = "default"
@@ -237,11 +244,13 @@ func (g *Gateway) CreateSession(ctx context.Context, req CreateSessionRequest) (
 
 	// Pre-flight: check pool health before allocating
 	if err := g.checkPoolHealth(ctx, req.PoolRef, ns); err != nil {
+		recordSpanErr(span, err)
 		return nil, fmt.Errorf("pool not ready: %w", err)
 	}
 
 	sessionID := fmt.Sprintf("gw-%d-%s", time.Now().UnixMilli(), randomSuffix(4))
 	sandboxName := sessionID
+	span.SetAttributes(attribute.String("session.id", sessionID))
 
 	// Allocate pod from warm pool via Informer-backed queue (5-minute timeout)
 	allocCtx, allocCancel := context.WithTimeout(ctx, 5*time.Minute)
@@ -250,9 +259,14 @@ func (g *Gateway) CreateSession(ctx context.Context, req CreateSessionRequest) (
 	allocStart := time.Now()
 	pod, err := g.podAllocator.Allocate(allocCtx, req.PoolRef, ns)
 	if err != nil {
+		recordSpanErr(span, err)
 		diag := g.diagnosePoolHealth(ctx, req.PoolRef, ns)
 		return nil, fmt.Errorf("allocate pod from pool %s: %w (%s)", req.PoolRef, err, diag)
 	}
+	span.SetAttributes(
+		attribute.String("pod.name", pod.Name),
+		attribute.String("pod.ip", pod.Status.PodIP),
+	)
 
 	podIP := pod.Status.PodIP
 	podName := pod.Name
@@ -354,14 +368,23 @@ func (g *Gateway) DeleteSession(ctx context.Context, sessionID string) error {
 
 // ExecuteSteps executes steps directly via sidecar gRPC.
 func (g *Gateway) ExecuteSteps(ctx context.Context, sessionID string, req ExecuteRequest) (*ExecuteResponse, error) {
+	ctx, span := otel.Tracer("gateway").Start(ctx, "Gateway.ExecuteSteps",
+		traceStartAttrs("session.id", sessionID),
+	)
+	span.SetAttributes(attribute.Int("steps.count", len(req.Steps)))
+	defer span.End()
+
 	s, ok := g.store.Get(sessionID)
 	if !ok {
-		return nil, fmt.Errorf("session %s not found", sessionID)
+		err := fmt.Errorf("session %s not found", sessionID)
+		recordSpanErr(span, err)
+		return nil, err
 	}
 
 	s.mu.RLock()
 	podIP := s.Info.PodIP
 	s.mu.RUnlock()
+	span.SetAttributes(attribute.String("pod.ip", podIP))
 
 	resp := &ExecuteResponse{
 		SessionID: sessionID,
@@ -995,12 +1018,25 @@ var validLabelValue = regexp.MustCompile(`^[a-zA-Z0-9]([a-zA-Z0-9._-]{0,61}[a-zA
 
 // CreateManagedSession creates a session with automatic pool management.
 func (g *Gateway) CreateManagedSession(ctx context.Context, req CreateManagedSessionRequest) (*ManagedSessionInfo, error) {
+	ctx, span := otel.Tracer("gateway").Start(ctx, "Gateway.CreateManagedSession",
+		traceStartAttrs(
+			"experiment.id", req.ExperimentID,
+			"image", req.Image,
+			"namespace", req.Namespace,
+		),
+	)
+	defer span.End()
+
 	if g.poolManager == nil {
-		return nil, fmt.Errorf("pool manager not configured")
+		err := fmt.Errorf("pool manager not configured")
+		recordSpanErr(span, err)
+		return nil, err
 	}
 
 	if !validLabelValue.MatchString(req.ExperimentID) {
-		return nil, fmt.Errorf("experimentId must be a valid Kubernetes label value (max 63 chars, alphanumeric/dash/underscore/dot, must start and end with alphanumeric)")
+		err := fmt.Errorf("experimentId must be a valid Kubernetes label value (max 63 chars, alphanumeric/dash/underscore/dot, must start and end with alphanumeric)")
+		recordSpanErr(span, err)
+		return nil, err
 	}
 
 	ns := req.Namespace
@@ -1010,8 +1046,10 @@ func (g *Gateway) CreateManagedSession(ctx context.Context, req CreateManagedSes
 
 	poolName, err := g.poolManager.AcquireSession(ctx, req)
 	if err != nil {
+		recordSpanErr(span, err)
 		return nil, fmt.Errorf("acquire pool: %w", err)
 	}
+	span.SetAttributes(attribute.String("pool.name", poolName))
 
 	// Create session using existing logic, with experiment labels pre-applied
 	info, err := g.CreateSession(ctx, CreateSessionRequest{

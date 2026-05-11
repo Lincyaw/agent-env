@@ -569,6 +569,7 @@ func (r *WarmPoolReconciler) constructPod(pool *arlv1alpha1.WarmPool, renderedCo
 			Image:           r.Config.SidecarImage,
 			ImagePullPolicy: corev1.PullAlways,
 			Args:            sidecarArgs,
+			Env:             otelEnvFromOperator(),
 			Ports: []corev1.ContainerPort{
 				{
 					Name:          "http",

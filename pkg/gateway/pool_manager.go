@@ -13,6 +13,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -207,6 +209,11 @@ var ErrPoolAtCapacity = errors.New("pool at maximum capacity")
 // AcquireSession ensures a pool exists for the given image, scales up if needed,
 // and returns the pool name for session creation.
 func (pm *PoolManager) AcquireSession(ctx context.Context, req CreateManagedSessionRequest) (string, error) {
+	ctx, span := otel.Tracer("gateway").Start(ctx, "PoolManager.AcquireSession",
+		traceStartAttrs("image", req.Image, "namespace", req.Namespace),
+	)
+	defer span.End()
+
 	ns := req.Namespace
 	if ns == "" {
 		ns = "default"
@@ -215,8 +222,10 @@ func (pm *PoolManager) AcquireSession(ctx context.Context, req CreateManagedSess
 	image := normalizeImage(req.Image)
 	poolName, err := managedPoolName(image, ns, req.ConfigEnv)
 	if err != nil {
+		recordSpanErr(span, err)
 		return "", err
 	}
+	span.SetAttributes(attribute.String("pool.name", poolName))
 
 	newState := &poolState{
 		image:        image,

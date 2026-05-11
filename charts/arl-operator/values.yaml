@@ -257,3 +257,22 @@ metrics:
     # Labels to match your Prometheus operator's serviceMonitorSelector
     # e.g. release: kube-prometheus-stack
     additionalLabels: {}
+
+# OpenTelemetry tracing. When enabled, the operator, gateway, and every
+# injected sidecar export OTLP/gRPC spans to the configured collector.
+# Disabled by default so traces only flow when explicitly opted in.
+otel:
+  enabled: false
+  # OTLP/gRPC endpoint, host:port form (no scheme).
+  # Common defaults:
+  #   in-cluster collector:  otel-collector.observability.svc:4317
+  #   sidecar collector:     localhost:4317
+  endpoint: "otel-collector.observability.svc:4317"
+  # Set to false when the collector terminates TLS in front of the workload.
+  insecure: true
+  # Parent-based head sampling ratio in [0,1]. Empty string keeps the default
+  # AlwaysSample. Use "0.1" to sample 10% of root traces.
+  sampleRatio: ""
+  # Extra OTEL resource attributes attached to every span, in OTEL spec format
+  # ("key=value,key=value"). The component-level service.name is set automatically.
+  resourceAttributes: ""

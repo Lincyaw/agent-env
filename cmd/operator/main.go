@@ -1,8 +1,10 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"os"
+	"time"
 
 	_ "github.com/ClickHouse/clickhouse-go/v2"
 	"k8s.io/apimachinery/pkg/runtime"
@@ -21,6 +23,7 @@ import (
 	"github.com/Lincyaw/agent-env/pkg/metrics"
 	"github.com/Lincyaw/agent-env/pkg/middleware"
 	"github.com/Lincyaw/agent-env/pkg/scheduler"
+	"github.com/Lincyaw/agent-env/pkg/tracing"
 )
 
 var (
@@ -66,6 +69,19 @@ func main() {
 		setupLog.Error(err, "invalid configuration")
 		os.Exit(1)
 	}
+
+	tracingShutdown, err := tracing.Setup(context.Background(), "arl-operator")
+	if err != nil {
+		setupLog.Error(err, "failed to initialise tracing")
+		os.Exit(1)
+	}
+	defer func() {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := tracingShutdown(shutdownCtx); err != nil {
+			setupLog.Error(err, "tracing shutdown")
+		}
+	}()
 
 	// Create manager with configured Kubernetes client QPS/Burst
 	restConfig := ctrl.GetConfigOrDie()
