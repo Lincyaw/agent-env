@@ -70,7 +70,7 @@ class ConfigEnvSpec(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     @classmethod
-    def from_k8s_resources(cls, **kwargs: Any) -> "ConfigEnvSpec":
+    def from_k8s_resources(cls, **kwargs: Any) -> ConfigEnvSpec:
         """Build a ConfigEnv payload from raw Kubernetes-style objects."""
         return cls(**kwargs)
 

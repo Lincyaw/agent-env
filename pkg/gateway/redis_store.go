@@ -20,17 +20,17 @@ const (
 // stored in Redis. Fields that cannot be serialized (sync.RWMutex, StepHistory)
 // are managed separately or reconstructed on load.
 type redisSessionData struct {
-	Info                SessionInfo            `json:"info"`
-	Managed             bool                   `json:"managed"`
-	ExperimentID        string                 `json:"experimentId"`
-	LastTaskTime        time.Time              `json:"lastTaskTime"`
-	LastAnnotationPatch time.Time              `json:"lastAnnotationPatch"`
-	IdleTimeout         time.Duration          `json:"idleTimeout"`
-	MaxLifetime         time.Duration          `json:"maxLifetime"`
-	CreatedAt           time.Time              `json:"createdAt"`
-	HistoryRecords      []StepRecord           `json:"historyRecords"`
+	Info                SessionInfo             `json:"info"`
+	Managed             bool                    `json:"managed"`
+	ExperimentID        string                  `json:"experimentId"`
+	LastTaskTime        time.Time               `json:"lastTaskTime"`
+	LastAnnotationPatch time.Time               `json:"lastAnnotationPatch"`
+	IdleTimeout         time.Duration           `json:"idleTimeout"`
+	MaxLifetime         time.Duration           `json:"maxLifetime"`
+	CreatedAt           time.Time               `json:"createdAt"`
+	HistoryRecords      []StepRecord            `json:"historyRecords"`
 	HistoryReplayInputs map[int]json.RawMessage `json:"historyReplayInputs,omitempty"`
-	HistoryNextIndex    int                    `json:"historyNextIndex"`
+	HistoryNextIndex    int                     `json:"historyNextIndex"`
 }
 
 func sessionToRedisData(s *session) redisSessionData {
