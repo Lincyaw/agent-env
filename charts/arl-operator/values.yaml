@@ -7,6 +7,13 @@ image:
   repository: arl-operator
   pullPolicy: IfNotPresent
   tag: "latest"
+  # ImagePullPolicy applied to operator-INJECTED containers (the sidecar and
+  # the copy-executor-agent init container) in every warm/managed pod.
+  # "Always" (default) keeps production pulling the latest pushed images.
+  # Set "IfNotPresent" on local kind/minikube where images are side-loaded and
+  # never pushed to a registry, else kubelet ignores the local image and the
+  # pod gets ImagePullBackOff. Surfaced to the operator as IMAGE_PULL_POLICY.
+  injectedPullPolicy: Always
 
 sidecar:
   image:

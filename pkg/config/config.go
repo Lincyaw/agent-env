@@ -47,6 +47,14 @@ type Config struct {
 	// Executor agent configuration
 	ExecutorAgentImage string
 
+	// ImagePullPolicy is applied to the operator-injected sidecar and
+	// executor-agent init containers. Defaults to "Always" (production:
+	// always fetch the latest pushed sidecar). Set to "IfNotPresent" for
+	// local clusters (kind/minikube) where images are side-loaded and never
+	// pushed to a registry — otherwise kubelet ignores the local image and
+	// fails with ImagePullBackOff. Env: IMAGE_PULL_POLICY.
+	ImagePullPolicy string
+
 	// Gateway configuration
 	GatewayPort int
 
@@ -127,6 +135,7 @@ func DefaultConfig() *Config {
 		TrajectoryEnabled:       false,
 		TrajectoryDebug:         false,
 		ExecutorAgentImage:      "arl-executor-agent:latest",
+		ImagePullPolicy:         "Always",
 		GatewayPort:             8080,
 		WarmPoolMaxConcurrent:   50,
 		K8sClientQPS:            10000,
@@ -263,6 +272,10 @@ func LoadFromEnv() *Config {
 	// Executor agent configuration
 	if image := os.Getenv("EXECUTOR_AGENT_IMAGE"); image != "" {
 		cfg.ExecutorAgentImage = image
+	}
+
+	if v := os.Getenv("IMAGE_PULL_POLICY"); v != "" {
+		cfg.ImagePullPolicy = v
 	}
 
 	// Gateway configuration

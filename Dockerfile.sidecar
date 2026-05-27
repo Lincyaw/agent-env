@@ -15,6 +15,7 @@ COPY api/ api/
 COPY pkg/sidecar/ pkg/sidecar/
 COPY pkg/execagent/ pkg/execagent/
 COPY pkg/pb/ pkg/pb/
+COPY pkg/tracing/ pkg/tracing/
 COPY cmd/sidecar/ cmd/sidecar/
 
 # Build

@@ -567,7 +567,7 @@ func (r *WarmPoolReconciler) constructPod(pool *arlv1alpha1.WarmPool, renderedCo
 		sidecarContainer := corev1.Container{
 			Name:            "sidecar",
 			Image:           r.Config.SidecarImage,
-			ImagePullPolicy: corev1.PullAlways,
+			ImagePullPolicy: r.injectedPullPolicy(),
 			Args:            sidecarArgs,
 			Env:             otelEnvFromOperator(),
 			Ports: []corev1.ContainerPort{
@@ -804,6 +804,22 @@ printf ']}' >> "$REGISTRY"
 `, basePath, basePath)
 }
 
+// injectedPullPolicy returns the ImagePullPolicy for operator-injected
+// containers (sidecar + executor-agent init), honoring Config.ImagePullPolicy.
+// Defaults to Always when unset/invalid so production behavior is unchanged;
+// set IMAGE_PULL_POLICY=IfNotPresent on local kind/minikube clusters where
+// images are side-loaded rather than pushed to a registry.
+func (r *WarmPoolReconciler) injectedPullPolicy() corev1.PullPolicy {
+	switch corev1.PullPolicy(r.Config.ImagePullPolicy) {
+	case corev1.PullIfNotPresent:
+		return corev1.PullIfNotPresent
+	case corev1.PullNever:
+		return corev1.PullNever
+	default:
+		return corev1.PullAlways
+	}
+}
+
 // injectExecutorAgent adds the init container and modifies the executor container
 // to run the executor agent alongside the user process.
 func (r *WarmPoolReconciler) injectExecutorAgent(pod *corev1.Pod) {
@@ -811,7 +827,7 @@ func (r *WarmPoolReconciler) injectExecutorAgent(pod *corev1.Pod) {
 	initContainer := corev1.Container{
 		Name:            "copy-executor-agent",
 		Image:           r.Config.ExecutorAgentImage,
-		ImagePullPolicy: corev1.PullAlways,
+		ImagePullPolicy: r.injectedPullPolicy(),
 		Command:         []string{"cp", "/executor-agent", "/arl-bin/executor-agent"},
 		VolumeMounts: []corev1.VolumeMount{
 			{Name: "arl-bin", MountPath: "/arl-bin"},

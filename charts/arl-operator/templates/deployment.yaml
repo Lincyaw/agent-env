@@ -49,6 +49,8 @@ spec:
               value: "{{ .Values.sidecar.grpcPort }}"
             - name: EXECUTOR_AGENT_IMAGE
               value: "{{ .Values.executorAgent.image.repository }}:{{ .Values.executorAgent.image.tag }}"
+            - name: IMAGE_PULL_POLICY
+              value: "{{ .Values.image.injectedPullPolicy | default "Always" }}"
             - name: WORKSPACE_DIR
               value: "{{ .Values.operator.workspaceDir }}"
             - name: HTTP_CLIENT_TIMEOUT

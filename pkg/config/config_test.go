@@ -191,3 +191,19 @@ func TestDefaultConfig(t *testing.T) {
 		t.Error("Expected EnableMetrics = true")
 	}
 }
+
+func TestLoadFromEnv_ImagePullPolicy(t *testing.T) {
+	if got := DefaultConfig().ImagePullPolicy; got != "Always" {
+		t.Fatalf("default ImagePullPolicy = %q, want Always", got)
+	}
+	// Unset env keeps the default.
+	t.Setenv("IMAGE_PULL_POLICY", "")
+	if got := LoadFromEnv().ImagePullPolicy; got != "Always" {
+		t.Fatalf("empty IMAGE_PULL_POLICY = %q, want Always", got)
+	}
+	// Set env overrides (used on local kind to consume side-loaded images).
+	t.Setenv("IMAGE_PULL_POLICY", "IfNotPresent")
+	if got := LoadFromEnv().ImagePullPolicy; got != "IfNotPresent" {
+		t.Fatalf("IMAGE_PULL_POLICY override = %q, want IfNotPresent", got)
+	}
+}
