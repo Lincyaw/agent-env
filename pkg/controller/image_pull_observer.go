@@ -82,9 +82,42 @@ func (o *ImagePullObserver) Reconcile(ctx context.Context, req ctrl.Request) (ct
 		return ctrl.Result{}, nil
 	}
 
+	// Only record the pool's primary (user) container image. The event's
+	// fieldPath names the container; skip the injected sidecar and the init
+	// containers (executor-agent copy, tools) so cache-hit rate and pull
+	// duration reflect the user image rather than the small infra images.
+	container := containerFromFieldPath(ev.InvolvedObject.FieldPath)
+	if container == "" || container != primaryContainerName(pod) {
+		return ctrl.Result{}, nil
+	}
+
 	result, dur := parsePulledMessage(ev.Message)
 	o.Metrics.RecordImagePull(poolName, result, dur)
 	return ctrl.Result{}, nil
+}
+
+// primaryContainerName returns the pool's user container: the first container
+// that is not the operator-injected sidecar. Mirrors the WarmPool controller's
+// "first non-sidecar container" convention.
+func primaryContainerName(pod *corev1.Pod) string {
+	for i := range pod.Spec.Containers {
+		if pod.Spec.Containers[i].Name != "sidecar" {
+			return pod.Spec.Containers[i].Name
+		}
+	}
+	return ""
+}
+
+// containerFromFieldPath extracts the container name from a kubelet event
+// fieldPath such as "spec.containers{executor}". It returns "" for init
+// containers ("spec.initContainers{...}") and any other shape, so only the
+// pod's regular containers are considered.
+func containerFromFieldPath(fp string) string {
+	const prefix = "spec.containers{"
+	if !strings.HasPrefix(fp, prefix) || !strings.HasSuffix(fp, "}") {
+		return ""
+	}
+	return fp[len(prefix) : len(fp)-1]
 }
 
 // parsePulledMessage classifies a kubelet "Pulled" event message.
