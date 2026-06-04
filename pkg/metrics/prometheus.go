@@ -19,6 +19,7 @@ type PrometheusCollector struct {
 	allPodsReadyDuration   *prometheus.HistogramVec
 	containerStartDuration *prometheus.HistogramVec
 	imagePullErrors        *prometheus.CounterVec
+	imagePullDuration      *prometheus.HistogramVec
 	podDeleteTotal         *prometheus.CounterVec
 
 	// Session allocation
@@ -121,6 +122,18 @@ func NewPrometheusCollector() interfaces.MetricsCollector {
 				Help: "Image pull failures by pool and reason (ImagePullBackOff, ErrImagePull, PullQPSExceeded).",
 			},
 			[]string{"pool", "reason"},
+		),
+
+		imagePullDuration: prometheus.NewHistogramVec(
+			prometheus.HistogramOpts{
+				Name: "arl_warmpool_image_pull_seconds",
+				Help: "Container image pull time from kubelet Pulled events, by pool and result " +
+					"(hit=already present on node, miss=pulled from registry). " +
+					"Per-result _count gives cache hit rate; filter result=\"miss\" for large-image pull speed.",
+				// Wide buckets: large SWE-bench-style images can take minutes on a cold node.
+				Buckets: []float64{0.1, 0.5, 1, 2, 5, 10, 20, 30, 60, 120, 300, 600},
+			},
+			[]string{"pool", "result"},
 		),
 
 		podDeleteTotal: prometheus.NewCounterVec(
@@ -287,6 +300,7 @@ func NewPrometheusCollector() interfaces.MetricsCollector {
 		c.allPodsReadyDuration,
 		c.containerStartDuration,
 		c.imagePullErrors,
+		c.imagePullDuration,
 		c.podDeleteTotal,
 		c.sessionAllocationDuration,
 		c.activeSessions,
@@ -323,6 +337,8 @@ func (c *PrometheusCollector) DeletePoolMetrics(poolName string) {
 	c.poolUtilization.DeleteLabelValues(poolName, "ready")
 	c.poolUtilization.DeleteLabelValues(poolName, "allocated")
 	c.pendingPods.DeleteLabelValues(poolName)
+	c.imagePullDuration.DeleteLabelValues(poolName, "hit")
+	c.imagePullDuration.DeleteLabelValues(poolName, "miss")
 }
 
 func (c *PrometheusCollector) RecordPodScheduleDuration(poolName string, duration time.Duration) {
@@ -347,6 +363,10 @@ func (c *PrometheusCollector) RecordContainerStartDuration(poolName, containerNa
 
 func (c *PrometheusCollector) IncrementImagePullError(poolName, reason string) {
 	c.imagePullErrors.WithLabelValues(poolName, reason).Inc()
+}
+
+func (c *PrometheusCollector) RecordImagePull(poolName, result string, duration time.Duration) {
+	c.imagePullDuration.WithLabelValues(poolName, result).Observe(duration.Seconds())
 }
 
 func (c *PrometheusCollector) IncrementPodDelete(poolName, reason string) {

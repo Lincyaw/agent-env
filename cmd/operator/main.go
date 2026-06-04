@@ -7,10 +7,14 @@ import (
 	"time"
 
 	_ "github.com/ClickHouse/clickhouse-go/v2"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/fields"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
 	ctrl "sigs.k8s.io/controller-runtime"
+	"sigs.k8s.io/controller-runtime/pkg/cache"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/healthz"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
@@ -94,6 +98,15 @@ func main() {
 		HealthProbeBindAddress: cfg.ProbeAddr,
 		LeaderElection:         cfg.EnableLeaderElection,
 		LeaderElectionID:       "arl-operator.infra.io",
+		// Restrict the Event cache to image-pull events so the ImagePullObserver
+		// can watch them without caching every cluster Event in memory.
+		Cache: cache.Options{
+			ByObject: map[client.Object]cache.ByObject{
+				&corev1.Event{}: {
+					Field: fields.SelectorFromSet(fields.Set{"reason": "Pulled"}),
+				},
+			},
+		},
 	})
 	if err != nil {
 		setupLog.Error(err, "unable to start manager")
@@ -157,6 +170,10 @@ func main() {
 			Metrics:        metricsCollector,
 			Middleware:     warmPoolMiddleware,
 			ImageScheduler: imageScheduler,
+		},
+		&controller.ImagePullObserver{
+			Client:  mgr.GetClient(),
+			Metrics: metricsCollector,
 		},
 	}
 
