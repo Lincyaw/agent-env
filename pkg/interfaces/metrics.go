@@ -40,6 +40,13 @@ type MetricsCollector interface {
 	// (ImagePullBackOff, ErrImagePull, PullQPSExceeded).
 	IncrementImagePullError(poolName, reason string)
 
+	// RecordImagePull records a container image pull observed from a kubelet
+	// "Pulled" event. result is "hit" (image already present on the node) or
+	// "miss" (image pulled from the registry); duration is the pull time
+	// (0 for hits). Use the per-result _count for cache-hit rate and the
+	// result="miss" histogram for the pull speed of large images.
+	RecordImagePull(poolName, result string, duration time.Duration)
+
 	// IncrementPodDelete increments pod deletion counter by pool and reason
 	// (scale_down, sandbox_cleanup).
 	IncrementPodDelete(poolName, reason string)
@@ -123,7 +130,9 @@ func (n *NoOpMetricsCollector) RecordAllPodsReady(poolName string, duration time
 func (n *NoOpMetricsCollector) RecordContainerStartDuration(poolName, containerName string, duration time.Duration) {
 }
 func (n *NoOpMetricsCollector) IncrementImagePullError(poolName, reason string) {}
-func (n *NoOpMetricsCollector) IncrementPodDelete(poolName, reason string)      {}
+func (n *NoOpMetricsCollector) RecordImagePull(poolName, result string, duration time.Duration) {
+}
+func (n *NoOpMetricsCollector) IncrementPodDelete(poolName, reason string) {}
 func (n *NoOpMetricsCollector) RecordSessionAllocationDuration(poolName string, duration time.Duration) {
 }
 func (n *NoOpMetricsCollector) SetActiveSessions(count int64) {}
