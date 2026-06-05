@@ -102,16 +102,16 @@ profiles:
 - name: prod
   build:
     artifacts:
-    - image: pair-diag-cn-guangzhou.cr.volces.com/pair/arl-operator
+    - image: opspai/arl-operator
       docker:
         dockerfile: Dockerfile.operator
-    - image: pair-diag-cn-guangzhou.cr.volces.com/pair/arl-sidecar
+    - image: opspai/arl-sidecar
       docker:
         dockerfile: Dockerfile.sidecar
-    - image: pair-diag-cn-guangzhou.cr.volces.com/pair/arl-gateway
+    - image: opspai/arl-gateway
       docker:
         dockerfile: Dockerfile.gateway
-    - image: pair-diag-cn-guangzhou.cr.volces.com/pair/arl-executor-agent
+    - image: opspai/arl-executor-agent
       docker:
         dockerfile: Dockerfile.executor-agent
     tagPolicy:
@@ -127,10 +127,10 @@ profiles:
         createNamespace: true
         skipBuildDependencies: true
         setValues:
-          image.repository: pair-diag-cn-guangzhou.cr.volces.com/pair/arl-operator
-          sidecar.image.repository: pair-diag-cn-guangzhou.cr.volces.com/pair/arl-sidecar
-          gateway.image.repository: pair-diag-cn-guangzhou.cr.volces.com/pair/arl-gateway
-          executorAgent.image.repository: pair-diag-cn-guangzhou.cr.volces.com/pair/arl-executor-agent
+          image.repository: pair-cn-shanghai.cr.volces.com/opspai/arl-operator
+          sidecar.image.repository: pair-cn-shanghai.cr.volces.com/opspai/arl-sidecar
+          gateway.image.repository: pair-cn-shanghai.cr.volces.com/opspai/arl-gateway
+          executorAgent.image.repository: pair-cn-shanghai.cr.volces.com/opspai/arl-executor-agent
           redis.enabled: true
           clickhouse.enabled: true
           clickhouse.storageClassName: ebs-ssd
