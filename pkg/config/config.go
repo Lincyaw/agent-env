@@ -605,10 +605,8 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("gateway sweep interval must be positive: %v", c.GatewaySweepInterval)
 	}
 
-	// Validate auth configuration
-	if c.AuthEnabled && c.AuthAPIKeys == "" {
-		return fmt.Errorf("AUTH_API_KEYS is required when AUTH_ENABLED=true")
-	}
+	// Auth key validation is deferred to cmd/gateway/main.go which checks
+	// both AUTH_API_KEYS and AUTH_KEY_FILE before starting.
 
 	if c.InternalPort < 1 || c.InternalPort > 65535 {
 		return fmt.Errorf("invalid internal port: %d (must be 1-65535)", c.InternalPort)
