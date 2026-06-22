@@ -44,6 +44,9 @@ type Config struct {
 	TrajectoryEnabled bool
 	TrajectoryDebug   bool
 
+	// gRPC authentication token (shared between gateway and sidecar)
+	GRPCAuthToken string
+
 	// Executor agent configuration
 	ExecutorAgentImage string
 
@@ -106,6 +109,14 @@ type Config struct {
 	RedisAddr     string
 	RedisPassword string
 	RedisDB       int
+
+	// Authentication configuration
+	AuthEnabled    bool
+	AuthAPIKeys    string
+	InternalPort   int
+	RateLimitRPS   float64
+	RateLimitBurst int
+	AllowedOrigins string
 }
 
 // DefaultConfig returns the default configuration
@@ -132,6 +143,7 @@ func DefaultConfig() *Config {
 		ClickHousePassword:      "",
 		ClickHouseBatchSize:     100,
 		ClickHouseFlushInterval: 10 * time.Second,
+		GRPCAuthToken:           "",
 		TrajectoryEnabled:       false,
 		TrajectoryDebug:         false,
 		ExecutorAgentImage:      "arl-executor-agent:latest",
@@ -164,6 +176,13 @@ func DefaultConfig() *Config {
 		RedisAddr:     "localhost:6379",
 		RedisPassword: "",
 		RedisDB:       0,
+
+		AuthEnabled:    false,
+		AuthAPIKeys:    "",
+		InternalPort:   9091,
+		RateLimitRPS:   100,
+		RateLimitBurst: 200,
+		AllowedOrigins: "",
 	}
 }
 
@@ -267,6 +286,10 @@ func LoadFromEnv() *Config {
 
 	if debug := os.Getenv("TRAJECTORY_DEBUG"); debug == "true" {
 		cfg.TrajectoryDebug = true
+	}
+
+	if v := os.Getenv("GRPC_AUTH_TOKEN"); v != "" {
+		cfg.GRPCAuthToken = v
 	}
 
 	// Executor agent configuration
@@ -420,6 +443,37 @@ func LoadFromEnv() *Config {
 		}
 	}
 
+	// Authentication configuration
+	if enable := os.Getenv("AUTH_ENABLED"); enable == "true" {
+		cfg.AuthEnabled = true
+	}
+
+	if v := os.Getenv("AUTH_API_KEYS"); v != "" {
+		cfg.AuthAPIKeys = v
+	}
+
+	if v := os.Getenv("INTERNAL_PORT"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.InternalPort = n
+		}
+	}
+
+	if v := os.Getenv("RATE_LIMIT_RPS"); v != "" {
+		if f, err := strconv.ParseFloat(v, 64); err == nil {
+			cfg.RateLimitRPS = f
+		}
+	}
+
+	if v := os.Getenv("RATE_LIMIT_BURST"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.RateLimitBurst = n
+		}
+	}
+
+	if v := os.Getenv("ALLOWED_ORIGINS"); v != "" {
+		cfg.AllowedOrigins = v
+	}
+
 	return cfg
 }
 
@@ -549,6 +603,27 @@ func (c *Config) Validate() error {
 
 	if c.GatewaySweepInterval <= 0 {
 		return fmt.Errorf("gateway sweep interval must be positive: %v", c.GatewaySweepInterval)
+	}
+
+	// Validate auth configuration
+	if c.AuthEnabled && c.AuthAPIKeys == "" {
+		return fmt.Errorf("AUTH_API_KEYS is required when AUTH_ENABLED=true")
+	}
+
+	if c.InternalPort < 1 || c.InternalPort > 65535 {
+		return fmt.Errorf("invalid internal port: %d (must be 1-65535)", c.InternalPort)
+	}
+
+	if c.InternalPort == c.GatewayPort {
+		return fmt.Errorf("internal port (%d) must differ from gateway port (%d)", c.InternalPort, c.GatewayPort)
+	}
+
+	if c.RateLimitRPS <= 0 {
+		return fmt.Errorf("rate limit RPS must be > 0: %v", c.RateLimitRPS)
+	}
+
+	if c.RateLimitBurst < 1 {
+		return fmt.Errorf("rate limit burst must be >= 1: %d", c.RateLimitBurst)
 	}
 
 	return nil

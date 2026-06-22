@@ -35,6 +35,7 @@ def __init__(
 | `keep_alive` | `bool` | `False` | Keep sandbox after context manager exit |
 | `timeout` | `float` | `300.0` | HTTP request timeout in seconds |
 | `idle_timeout_seconds` | `int \| None` | `None` | Auto-delete sandbox after idle time (defaults to 1800s when keep_alive=True) |
+| `api_key` | `str \| None` | `None` | API key for gateway authentication. Falls back to `ARL_API_KEY` env var |
 
 **Example:**
 

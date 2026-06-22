@@ -32,8 +32,8 @@ spec:
   type: ClusterIP
   ports:
     - name: metrics
-      port: {{ .Values.gateway.port }}
-      targetPort: http
+      port: {{ .Values.gateway.internalPort }}
+      targetPort: internal
       protocol: TCP
   selector:
     {{- include "arl-operator.selectorLabels" . | nindent 4 }}

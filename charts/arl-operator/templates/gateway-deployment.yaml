@@ -32,6 +32,29 @@ spec:
             - --port={{ .Values.gateway.port }}
             - --sidecar-grpc-port={{ .Values.gateway.sidecarGrpcPort }}
           env:
+            - name: INTERNAL_PORT
+              value: "{{ .Values.gateway.internalPort }}"
+            {{- if .Values.auth.enabled }}
+            - name: AUTH_ENABLED
+              value: "true"
+            - name: AUTH_KEY_FILE
+              value: "/etc/arl/keys/api-keys"
+            - name: RATE_LIMIT_RPS
+              value: "{{ .Values.auth.rateLimitRPS }}"
+            - name: RATE_LIMIT_BURST
+              value: "{{ .Values.auth.rateLimitBurst }}"
+            {{- if .Values.auth.allowedOrigins }}
+            - name: ALLOWED_ORIGINS
+              value: "{{ .Values.auth.allowedOrigins }}"
+            {{- end }}
+            {{- end }}
+            {{- if .Values.auth.grpcToken }}
+            - name: GRPC_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: arl-grpc-token
+                  key: token
+            {{- end }}
             - name: MANAGED_POOL_INITIAL_REPLICAS
               value: "{{ .Values.managedPool.initialReplicas }}"
             - name: MANAGED_POOL_MIN_REPLICAS
@@ -91,6 +114,15 @@ spec:
             - name: http
               containerPort: {{ .Values.gateway.port }}
               protocol: TCP
+            - name: internal
+              containerPort: {{ .Values.gateway.internalPort }}
+              protocol: TCP
+          {{- if .Values.auth.enabled }}
+          volumeMounts:
+            - name: auth-keys
+              mountPath: /etc/arl/keys
+              readOnly: true
+          {{- end }}
           livenessProbe:
             httpGet:
               path: /healthz
@@ -105,6 +137,12 @@ spec:
             periodSeconds: 5
           resources:
             {{- toYaml .Values.gateway.resources | nindent 12 }}
+      {{- if .Values.auth.enabled }}
+      volumes:
+        - name: auth-keys
+          secret:
+            secretName: {{ include "arl-operator.fullname" . }}-auth
+      {{- end }}
 ---
 apiVersion: v1
 kind: Service

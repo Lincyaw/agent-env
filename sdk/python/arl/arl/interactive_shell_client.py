@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 from collections.abc import Callable
 
 from arl.types import ShellMessage
@@ -12,17 +13,22 @@ class InteractiveShellClient:
     """Client for interactive shell sessions via the Gateway WebSocket API.
 
     Examples:
-        >>> client = InteractiveShellClient(gateway_url="http://localhost:8080")
+        >>> client = InteractiveShellClient(gateway_url="http://localhost:8080", api_key="my-key")
         >>> client.connect("session-123")
         >>> client.send_input("ls -la\\n")
         >>> output = client.read_output()
         >>> client.close()
     """
 
-    def __init__(self, gateway_url: str = "http://localhost:8080") -> None:
+    def __init__(
+        self,
+        gateway_url: str = "http://localhost:8080",
+        api_key: str | None = None,
+    ) -> None:
         self._gateway_url = gateway_url.rstrip("/")
         ws_url = self._gateway_url.replace("http://", "ws://").replace("https://", "wss://")
         self._ws_base_url = ws_url
+        self._api_key = api_key or os.environ.get("ARL_API_KEY", "")
         self._ws: object | None = None
         self._session_id: str | None = None
 
@@ -42,7 +48,10 @@ class InteractiveShellClient:
 
         self._session_id = session_id
         url = f"{self._ws_base_url}/v1/sessions/{session_id}/shell"
-        self._ws = ws_client.connect(url)
+        headers: dict[str, str] = {}
+        if self._api_key:
+            headers["Authorization"] = f"Bearer {self._api_key}"
+        self._ws = ws_client.connect(url, additional_headers=headers)
 
     def send_input(self, data: str) -> None:
         """Send input to the shell.
@@ -143,20 +152,20 @@ def create_websocket_proxy(
     gateway_url: str,
     session_id: str,
     on_error: Callable[[str], None],
+    api_key: str | None = None,
 ) -> InteractiveShellClient:
     """Create a WebSocket proxy for interactive shell.
 
     Args:
         gateway_url: Gateway base URL.
         session_id: Session ID to connect to.
-        on_output: Callback for output data.
         on_error: Callback for errors.
-        on_close: Callback when connection closes.
+        api_key: API key for authentication.
 
     Returns:
         InteractiveShellClient instance.
     """
-    shell_client = InteractiveShellClient(gateway_url=gateway_url)
+    shell_client = InteractiveShellClient(gateway_url=gateway_url, api_key=api_key)
     try:
         shell_client.connect(session_id)
     except Exception as e:

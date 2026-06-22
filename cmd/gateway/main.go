@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -72,7 +73,7 @@ func main() {
 	}
 
 	// Create sidecar gRPC client
-	sidecarClient := client.NewGRPCSidecarClient(grpcPort, cfg.HTTPClientTimeout)
+	sidecarClient := client.NewGRPCSidecarClient(grpcPort, cfg.HTTPClientTimeout, cfg.GRPCAuthToken)
 
 	// Create PodAllocator with Informer-backed pod cache
 	metricsCollector := metrics.NewPrometheusCollector()
@@ -172,12 +173,60 @@ func main() {
 	healthChecker := gateway.NewHealthChecker(gw, metricsCollector, feishuURL)
 	healthChecker.Start()
 
-	mux := http.NewServeMux()
-	gateway.SetupRoutes(mux, gw, healthChecker)
+	// --- Authentication & rate limiting ---
+	var authCfg *gateway.AuthConfig
+	var stopKeyWatcher func()
+	if cfg.AuthEnabled {
+		keys := gateway.ParseAPIKeys(cfg.AuthAPIKeys)
+
+		// Also load keys from file if configured
+		keyFile := os.Getenv("AUTH_KEY_FILE")
+		if keyFile != "" {
+			fileKeys, err := gateway.ParseAPIKeysFile(keyFile)
+			if err != nil {
+				log.Fatalf("Failed to read key file %s: %v", keyFile, err)
+			}
+			for k, v := range fileKeys {
+				keys[k] = v
+			}
+		}
+
+		if len(keys) == 0 {
+			log.Fatalf("AUTH_ENABLED=true but no valid keys from AUTH_API_KEYS or AUTH_KEY_FILE")
+		}
+		var origins []string
+		if cfg.AllowedOrigins != "" {
+			for _, o := range strings.Split(cfg.AllowedOrigins, ",") {
+				o = strings.TrimSpace(o)
+				if o != "" {
+					origins = append(origins, o)
+				}
+			}
+		}
+		authCfg = &gateway.AuthConfig{
+			Enabled:        true,
+			Keys:           keys,
+			AllowedOrigins: origins,
+			KeyFile:        keyFile,
+		}
+		log.Printf("Authentication enabled: %d API key(s) registered", len(keys))
+
+		stopKeyWatcher = gateway.StartKeyFileWatcher(authCfg)
+	} else {
+		log.Println("WARNING: Authentication is disabled (AUTH_ENABLED=false). All endpoints are publicly accessible.")
+	}
+
+	rateLimiter := gateway.NewRateLimiter(cfg.RateLimitRPS, cfg.RateLimitBurst)
+
+	// --- Public server (authenticated, rate-limited) ---
+	publicMux := http.NewServeMux()
+	gateway.SetupRoutes(publicMux, gw, authCfg)
+
+	publicHandler := rateLimiter.Middleware(publicMux)
 
 	server := &http.Server{
 		Addr: fmt.Sprintf(":%d", port),
-		Handler: otelhttp.NewHandler(mux, "gateway",
+		Handler: otelhttp.NewHandler(publicHandler, "gateway",
 			otelhttp.WithSpanNameFormatter(func(_ string, r *http.Request) string {
 				if route := r.Pattern; route != "" {
 					return r.Method + " " + route
@@ -190,13 +239,32 @@ func main() {
 		IdleTimeout:  60 * time.Second,
 	}
 
+	// --- Internal server (metrics, debug, alertmanager — no auth) ---
+	internalMux := http.NewServeMux()
+	gateway.SetupInternalRoutes(internalMux, healthChecker)
+
+	internalServer := &http.Server{
+		Addr:         fmt.Sprintf(":%d", cfg.InternalPort),
+		Handler:      internalMux,
+		ReadTimeout:  10 * time.Second,
+		WriteTimeout: 30 * time.Second,
+		IdleTimeout:  60 * time.Second,
+	}
+
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	go func() {
-		log.Printf("Gateway listening on :%d", port)
+		log.Printf("Gateway listening on :%d (public)", port)
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("Server error: %v", err)
+		}
+	}()
+
+	go func() {
+		log.Printf("Internal server listening on :%d (metrics, debug)", cfg.InternalPort)
+		if err := internalServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatalf("Internal server error: %v", err)
 		}
 	}()
 
@@ -207,6 +275,10 @@ func main() {
 	defer cancel()
 
 	server.Shutdown(shutdownCtx)
+	internalServer.Shutdown(shutdownCtx)
+	if stopKeyWatcher != nil {
+		stopKeyWatcher()
+	}
 	healthChecker.Stop()
 	gw.StopSessionSweep()
 	allocCancel() // Stop PodAllocator cache

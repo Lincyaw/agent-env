@@ -39,6 +39,7 @@ gateway:
     pullPolicy: IfNotPresent
     tag: "latest"
   port: 8080
+  internalPort: 9091        # Metrics, debug, AlertManager webhook (no auth)
   sidecarGrpcPort: 9090
   service:
     type: ClusterIP
@@ -56,6 +57,27 @@ gateway:
   idleTimeout: "600s"       # Max idle time before session is reaped
   maxLifetime: "3600s"      # Max total session lifetime
   sweepInterval: "30s"      # How often to check for expired sessions
+
+# Authentication & security
+auth:
+  enabled: false
+  # API keys in "key:role" format, one per line. Stored in a K8s Secret.
+  # Roles: "admin" (pool/experiment management) or "user" (session/exec only).
+  # Example:
+  #   apiKeys: |
+  #     my-admin-key-here:admin
+  #     my-user-key-here:user
+  apiKeys: ""
+  # Rate limiting (per IP)
+  rateLimitRPS: 100
+  rateLimitBurst: 200
+  # Allowed WebSocket origins (comma-separated host:port). Empty = reject
+  # browser origins when auth is enabled.
+  allowedOrigins: ""
+  # gRPC shared token for gateway ↔ sidecar authentication. When set, both
+  # the gateway and every injected sidecar validate this token on each call.
+  # Leave empty to disable gRPC auth (not recommended for production).
+  grpcToken: ""
 
 # Managed pool auto-scaling configuration (for POST /v1/managed/sessions)
 managedPool:

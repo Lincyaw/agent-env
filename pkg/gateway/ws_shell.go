@@ -6,14 +6,46 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
+	"strings"
 
 	"github.com/gorilla/websocket"
 
 	"github.com/Lincyaw/agent-env/pkg/interfaces"
 )
 
-var upgrader = websocket.Upgrader{
-	CheckOrigin: func(_ *http.Request) bool { return true },
+// newUpgrader returns a WebSocket Upgrader with origin validation.
+// When allowedOrigins is non-empty, only those origins are accepted.
+// When it is empty and auth is enabled, all origins are rejected (no
+// unauthenticated browser access). When auth is disabled, all origins
+// are allowed for backward compatibility.
+func newUpgrader(authCfg *AuthConfig) websocket.Upgrader {
+	return websocket.Upgrader{
+		CheckOrigin: func(r *http.Request) bool {
+			if authCfg == nil || !authCfg.Enabled {
+				return true
+			}
+			if len(authCfg.AllowedOrigins) == 0 {
+				return false
+			}
+			origin := r.Header.Get("Origin")
+			if origin == "" {
+				// Non-browser clients (curl, SDKs) typically don't send Origin.
+				return true
+			}
+			parsed, err := url.Parse(origin)
+			if err != nil {
+				return false
+			}
+			host := strings.ToLower(parsed.Host)
+			for _, allowed := range authCfg.AllowedOrigins {
+				if strings.ToLower(allowed) == host {
+					return true
+				}
+			}
+			return false
+		},
+	}
 }
 
 // wsMessage is the JSON envelope for WebSocket messages.
@@ -27,7 +59,9 @@ type wsMessage struct {
 }
 
 // handleShell upgrades to WebSocket and proxies to sidecar InteractiveShell gRPC stream.
-func handleShell(gw *Gateway) http.HandlerFunc {
+func handleShell(gw *Gateway, authCfg *AuthConfig) http.HandlerFunc {
+	upgrader := newUpgrader(authCfg)
+
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
 
@@ -38,7 +72,13 @@ func handleShell(gw *Gateway) http.HandlerFunc {
 		}
 		s.mu.RLock()
 		podIP := s.Info.PodIP
+		ownerHash := s.ownerKeyHash
 		s.mu.RUnlock()
+
+		if err := CheckSessionOwnership(r.Context(), ownerHash); err != nil {
+			http.Error(w, err.Error(), http.StatusForbidden)
+			return
+		}
 
 		// Upgrade HTTP to WebSocket
 		ws, err := upgrader.Upgrade(w, r, nil)
@@ -61,7 +101,7 @@ func handleShell(gw *Gateway) http.HandlerFunc {
 
 		done := make(chan struct{})
 
-		// gRPC → WebSocket: read from sidecar, send to client
+		// gRPC -> WebSocket: read from sidecar, send to client
 		go func() {
 			defer close(done)
 			for {
@@ -91,7 +131,7 @@ func handleShell(gw *Gateway) http.HandlerFunc {
 			}
 		}()
 
-		// WebSocket → gRPC: read from client, send to sidecar
+		// WebSocket -> gRPC: read from client, send to sidecar
 		go func() {
 			for {
 				_, rawMsg, readErr := ws.ReadMessage()

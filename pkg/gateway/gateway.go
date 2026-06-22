@@ -45,6 +45,7 @@ type session struct {
 	History             *StepHistory
 	managed             bool
 	experimentID        string
+	ownerKeyHash        string
 	lastTaskTime        time.Time
 	lastAnnotationPatch time.Time
 	idleTimeout         time.Duration
@@ -248,7 +249,7 @@ func (g *Gateway) CreateSession(ctx context.Context, req CreateSessionRequest) (
 		return nil, fmt.Errorf("pool not ready: %w", err)
 	}
 
-	sessionID := fmt.Sprintf("gw-%d-%s", time.Now().UnixMilli(), randomSuffix(4))
+	sessionID := fmt.Sprintf("gw-%d-%s", time.Now().UnixMilli(), randomSuffix(8))
 	sandboxName := sessionID
 	span.SetAttributes(attribute.String("session.id", sessionID))
 
@@ -296,9 +297,11 @@ func (g *Gateway) CreateSession(ctx context.Context, req CreateSessionRequest) (
 		CreatedAt:   time.Now(),
 	}
 
+	ownerHash, _ := KeyHashFromContext(ctx)
 	g.store.Set(sessionID, &session{
 		Info:         info,
 		History:      NewStepHistory(),
+		ownerKeyHash: ownerHash,
 		lastTaskTime: time.Now(),
 		createdAt:    time.Now(),
 		idleTimeout:  g.resolveIdleTimeout(req),

@@ -13,6 +13,7 @@ import (
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 
+	"github.com/Lincyaw/agent-env/pkg/grpcauth"
 	"github.com/Lincyaw/agent-env/pkg/pb"
 )
 
@@ -21,6 +22,7 @@ type GRPCServer struct {
 	pb.UnimplementedAgentServiceServer
 	service    *AgentService
 	port       int
+	grpcToken  string
 	grpcServer *grpc.Server
 }
 
@@ -40,6 +42,12 @@ func NewGRPCServerWithExecutor(workspaceDir string, port int, executorSocket str
 	}
 }
 
+// SetGRPCToken configures the shared authentication token. When set, every
+// incoming gRPC call must include this token in metadata.
+func (s *GRPCServer) SetGRPCToken(token string) {
+	s.grpcToken = token
+}
+
 // Service returns the underlying agent service (for init operations).
 func (s *GRPCServer) Service() *AgentService {
 	return s.service
@@ -52,9 +60,17 @@ func (s *GRPCServer) Start() error {
 		return fmt.Errorf("failed to listen: %w", err)
 	}
 
-	s.grpcServer = grpc.NewServer(
+	opts := []grpc.ServerOption{
 		grpc.StatsHandler(otelgrpc.NewServerHandler()),
-	)
+	}
+	if s.grpcToken != "" {
+		opts = append(opts,
+			grpc.UnaryInterceptor(grpcauth.UnaryServerInterceptor(s.grpcToken)),
+			grpc.StreamInterceptor(grpcauth.StreamServerInterceptor(s.grpcToken)),
+		)
+		log.Printf("gRPC token authentication enabled")
+	}
+	s.grpcServer = grpc.NewServer(opts...)
 	pb.RegisterAgentServiceServer(s.grpcServer, s)
 
 	log.Printf("gRPC server starting on :%d", s.port)

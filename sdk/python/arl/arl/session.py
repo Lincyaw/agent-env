@@ -72,13 +72,15 @@ class SandboxSession:
         keep_alive: bool = False,
         timeout: float = 300.0,
         idle_timeout_seconds: int | None = None,
+        api_key: str | None = None,
     ) -> None:
         self.pool_ref = pool_ref
         self.namespace = namespace
         self.keep_alive = keep_alive
         self.idle_timeout_seconds = idle_timeout_seconds
 
-        self._client = GatewayClient(base_url=gateway_url, timeout=timeout)
+        self._client = GatewayClient(base_url=gateway_url, timeout=timeout, api_key=api_key)
+        self._api_key = api_key
         self._session_id: str | None = None
         self._session_info: SessionInfo | None = None
 
@@ -89,6 +91,7 @@ class SandboxSession:
         gateway_url: str = "http://localhost:8080",
         timeout: float = 300.0,
         keep_alive: bool = True,
+        api_key: str | None = None,
     ) -> SandboxSession:
         """Attach to an existing session by session ID.
 
@@ -103,6 +106,7 @@ class SandboxSession:
             keep_alive: If False, exiting a context manager will
                 delete the session.  Defaults to True to avoid
                 accidentally destroying a session you attached to.
+            api_key: API key for authentication.
 
         Returns:
             SandboxSession bound to the existing session.
@@ -110,7 +114,7 @@ class SandboxSession:
         Raises:
             GatewayError: If the session does not exist.
         """
-        client = GatewayClient(base_url=gateway_url, timeout=timeout)
+        client = GatewayClient(base_url=gateway_url, timeout=timeout, api_key=api_key)
         try:
             info = client.get_session(session_id)
         finally:
@@ -122,6 +126,7 @@ class SandboxSession:
             gateway_url=gateway_url,
             keep_alive=keep_alive,
             timeout=timeout,
+            api_key=api_key,
         )
         instance._session_id = info.id
         instance._session_info = info
@@ -396,6 +401,7 @@ class ManagedSession(SandboxSession):
         workspace_dir: str = "/workspace",
         max_replicas: int | None = None,
         config_env: ConfigEnvSpec | dict[str, Any] | None = None,
+        api_key: str | None = None,
     ) -> None:
         super().__init__(
             pool_ref="",  # will be set by server
@@ -403,6 +409,7 @@ class ManagedSession(SandboxSession):
             gateway_url=gateway_url,
             keep_alive=False,
             timeout=timeout,
+            api_key=api_key,
         )
         self._image = image
         self._experiment_id = experiment_id

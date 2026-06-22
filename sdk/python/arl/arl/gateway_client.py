@@ -64,8 +64,14 @@ class PoolNotReadyError(Exception):
 class GatewayClient:
     """HTTP client for the ARL Gateway API."""
 
-    def __init__(self, base_url: str = "http://localhost:8080", timeout: float = 300.0) -> None:
+    def __init__(
+        self,
+        base_url: str = "http://localhost:8080",
+        timeout: float = 300.0,
+        api_key: str | None = None,
+    ) -> None:
         self._base_url = base_url.rstrip("/")
+        self._api_key = api_key or os.environ.get("ARL_API_KEY", "")
         # Use explicit timeout configuration with longer connect timeout
         timeout_config = httpx.Timeout(
             connect=30.0,  # 30s for TCP connection (fail fast, rely on retries)
@@ -88,10 +94,14 @@ class GatewayClient:
                 keepalive_expiry=30.0,  # Close idle connections before LB/NAT timeout
             ),
         )
+        headers: dict[str, str] = {}
+        if self._api_key:
+            headers["Authorization"] = f"Bearer {self._api_key}"
         self._client = httpx.Client(
             base_url=self._base_url,
             timeout=timeout_config,
             transport=transport,
+            headers=headers,
         )
 
     def _handle_error(self, response: httpx.Response) -> None:

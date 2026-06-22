@@ -9,50 +9,90 @@ import (
 	ctrlmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 )
 
-// SetupRoutes registers all gateway routes.
-func SetupRoutes(mux *http.ServeMux, gw *Gateway, hc *HealthChecker) {
-	// Session management
-	mux.HandleFunc("POST /v1/sessions", handleCreateSession(gw))
-	mux.HandleFunc("GET /v1/sessions/{id}", handleGetSession(gw))
-	mux.HandleFunc("DELETE /v1/sessions/{id}", handleDeleteSession(gw))
+// SetupRoutes registers all public gateway routes on mux.
+// When authCfg is non-nil and Enabled, every route requires a valid Bearer
+// token. Pool management endpoints require the admin role; session and
+// execution endpoints require at least the user role.
+func SetupRoutes(mux *http.ServeMux, gw *Gateway, authCfg *AuthConfig) {
+	user := func(h http.HandlerFunc) http.HandlerFunc { return h }
+	admin := func(h http.HandlerFunc) http.HandlerFunc { return h }
 
-	// Execution
-	mux.HandleFunc("POST /v1/sessions/{id}/execute", handleExecute(gw))
-	mux.HandleFunc("POST /v1/sessions/{id}/files", handleUploadFile(gw))
-	mux.HandleFunc("POST /v1/sessions/{id}/restore", handleRestore(gw))
+	if authCfg != nil && authCfg.Enabled {
+		user = func(h http.HandlerFunc) http.HandlerFunc {
+			return requireAuth(authCfg, RoleUser, h)
+		}
+		admin = func(h http.HandlerFunc) http.HandlerFunc {
+			return requireAuth(authCfg, RoleAdmin, h)
+		}
+	}
 
-	// Interactive shell (WebSocket)
-	mux.HandleFunc("/v1/sessions/{id}/shell", handleShell(gw))
+	// Session management (user role)
+	mux.HandleFunc("POST /v1/sessions", user(handleCreateSession(gw)))
+	mux.HandleFunc("GET /v1/sessions/{id}", user(handleGetSession(gw)))
+	mux.HandleFunc("DELETE /v1/sessions/{id}", user(handleDeleteSession(gw)))
 
-	// History and trajectory
-	mux.HandleFunc("GET /v1/sessions/{id}/history", handleGetHistory(gw))
-	mux.HandleFunc("GET /v1/sessions/{id}/trajectory", handleGetTrajectory(gw))
+	// Execution (user role)
+	mux.HandleFunc("POST /v1/sessions/{id}/execute", user(handleExecute(gw)))
+	mux.HandleFunc("POST /v1/sessions/{id}/files", user(handleUploadFile(gw)))
+	mux.HandleFunc("POST /v1/sessions/{id}/restore", user(handleRestore(gw)))
 
-	// Pool management
-	mux.HandleFunc("POST /v1/pools", handleCreatePool(gw))
-	mux.HandleFunc("GET /v1/pools/{name}", handleGetPool(gw))
-	mux.HandleFunc("PATCH /v1/pools/{name}", handleScalePool(gw))
-	mux.HandleFunc("DELETE /v1/pools/{name}", handleDeletePool(gw))
+	// Interactive shell — WebSocket (user role; token may come via query param)
+	mux.HandleFunc("/v1/sessions/{id}/shell", user(handleShell(gw, authCfg)))
 
-	// Managed sessions (high-level API)
-	mux.HandleFunc("POST /v1/managed/sessions", handleCreateManagedSession(gw))
-	mux.HandleFunc("GET /v1/managed/experiments/{id}/sessions", handleListExperimentSessions(gw))
-	mux.HandleFunc("DELETE /v1/managed/experiments/{id}", handleDeleteExperiment(gw))
+	// History and trajectory (user role)
+	mux.HandleFunc("GET /v1/sessions/{id}/history", user(handleGetHistory(gw)))
+	mux.HandleFunc("GET /v1/sessions/{id}/trajectory", user(handleGetTrajectory(gw)))
 
-	// Debug and internal endpoints
+	// Pool management (admin role)
+	mux.HandleFunc("POST /v1/pools", admin(handleCreatePool(gw)))
+	mux.HandleFunc("GET /v1/pools/{name}", admin(handleGetPool(gw)))
+	mux.HandleFunc("PATCH /v1/pools/{name}", admin(handleScalePool(gw)))
+	mux.HandleFunc("DELETE /v1/pools/{name}", admin(handleDeletePool(gw)))
+
+	// Managed sessions (admin role — creates infrastructure)
+	mux.HandleFunc("POST /v1/managed/sessions", admin(handleCreateManagedSession(gw)))
+	mux.HandleFunc("GET /v1/managed/experiments/{id}/sessions", user(handleListExperimentSessions(gw)))
+	mux.HandleFunc("DELETE /v1/managed/experiments/{id}", admin(handleDeleteExperiment(gw)))
+
+	// Health probe (unauthenticated — needed by K8s liveness/readiness probes)
+	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("ok"))
+	})
+}
+
+// SetupInternalRoutes registers debug, metrics, and webhook routes on a
+// separate mux intended to be served on an internal-only port.
+func SetupInternalRoutes(mux *http.ServeMux, hc *HealthChecker) {
 	if hc != nil {
 		mux.HandleFunc("GET /debug/health", hc.HandleDebugHealth())
 		mux.HandleFunc("POST /internal/alertmanager-webhook", hc.HandleAlertManagerWebhook())
 	}
 
-	// Health
+	mux.Handle("GET /metrics", promhttp.HandlerFor(ctrlmetrics.Registry, promhttp.HandlerOpts{}))
+
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("ok"))
 	})
+}
 
-	// Prometheus metrics
-	mux.Handle("GET /metrics", promhttp.HandlerFor(ctrlmetrics.Registry, promhttp.HandlerOpts{}))
+// checkOwnership is a helper that looks up the session and verifies ownership.
+// Returns the session on success, or writes an HTTP error and returns nil.
+func checkOwnership(gw *Gateway, w http.ResponseWriter, r *http.Request, sessionID string) *session {
+	s, ok := gw.store.Get(sessionID)
+	if !ok {
+		writeError(w, http.StatusNotFound, "session "+sessionID+" not found")
+		return nil
+	}
+	s.mu.RLock()
+	ownerHash := s.ownerKeyHash
+	s.mu.RUnlock()
+	if err := CheckSessionOwnership(r.Context(), ownerHash); err != nil {
+		writeError(w, http.StatusForbidden, err.Error())
+		return nil
+	}
+	return s
 }
 
 func handleCreateSession(gw *Gateway) http.HandlerFunc {
@@ -81,6 +121,9 @@ func handleCreateSession(gw *Gateway) http.HandlerFunc {
 func handleGetSession(gw *Gateway) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
+		if checkOwnership(gw, w, r, id) == nil {
+			return
+		}
 		info, err := gw.GetSession(id)
 		if err != nil {
 			writeError(w, http.StatusNotFound, err.Error())
@@ -93,6 +136,9 @@ func handleGetSession(gw *Gateway) http.HandlerFunc {
 func handleDeleteSession(gw *Gateway) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
+		if checkOwnership(gw, w, r, id) == nil {
+			return
+		}
 		if err := gw.DeleteSession(r.Context(), id); err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
@@ -104,6 +150,9 @@ func handleDeleteSession(gw *Gateway) http.HandlerFunc {
 func handleExecute(gw *Gateway) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
+		if checkOwnership(gw, w, r, id) == nil {
+			return
+		}
 
 		var req ExecuteRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -129,6 +178,9 @@ func handleExecute(gw *Gateway) http.HandlerFunc {
 func handleUploadFile(gw *Gateway) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
+		if checkOwnership(gw, w, r, id) == nil {
+			return
+		}
 
 		var req UploadFileRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -158,6 +210,9 @@ func handleUploadFile(gw *Gateway) http.HandlerFunc {
 func handleRestore(gw *Gateway) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
+		if checkOwnership(gw, w, r, id) == nil {
+			return
+		}
 
 		var req RestoreRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -182,6 +237,9 @@ func handleRestore(gw *Gateway) http.HandlerFunc {
 func handleGetHistory(gw *Gateway) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
+		if checkOwnership(gw, w, r, id) == nil {
+			return
+		}
 		records, err := gw.GetHistory(id)
 		if err != nil {
 			writeError(w, http.StatusNotFound, err.Error())
@@ -194,6 +252,9 @@ func handleGetHistory(gw *Gateway) http.HandlerFunc {
 func handleGetTrajectory(gw *Gateway) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
+		if checkOwnership(gw, w, r, id) == nil {
+			return
+		}
 		data, err := gw.ExportTrajectory(id)
 		if err != nil {
 			writeError(w, http.StatusNotFound, err.Error())

@@ -564,12 +564,26 @@ func (r *WarmPoolReconciler) constructPod(pool *arlv1alpha1.WarmPool, renderedCo
 			{Name: "arl-socket", MountPath: "/var/run/arl"},
 		}
 
+		sidecarEnv := otelEnvFromOperator()
+		if r.Config.GRPCAuthToken != "" {
+			sidecarEnv = append(sidecarEnv, corev1.EnvVar{
+				Name: "GRPC_AUTH_TOKEN",
+				ValueFrom: &corev1.EnvVarSource{
+					SecretKeyRef: &corev1.SecretKeySelector{
+						LocalObjectReference: corev1.LocalObjectReference{Name: "arl-grpc-token"},
+						Key:                  "token",
+						Optional:             boolPtr(true),
+					},
+				},
+			})
+		}
+
 		sidecarContainer := corev1.Container{
 			Name:            "sidecar",
 			Image:           r.Config.SidecarImage,
 			ImagePullPolicy: r.injectedPullPolicy(),
 			Args:            sidecarArgs,
-			Env:             otelEnvFromOperator(),
+			Env:             sidecarEnv,
 			Ports: []corev1.ContainerPort{
 				{
 					Name:          "http",
@@ -1053,6 +1067,8 @@ func findCondition(conditions []metav1.Condition, condType string) *metav1.Condi
 }
 
 // setCondition sets or updates a condition.
+func boolPtr(b bool) *bool { return &b }
+
 func setCondition(conditions *[]metav1.Condition, condType string, status metav1.ConditionStatus, reason, message string) {
 	now := metav1.Now()
 	cond := findCondition(*conditions, condType)

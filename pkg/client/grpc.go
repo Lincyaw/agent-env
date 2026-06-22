@@ -13,6 +13,7 @@ import (
 	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials/insecure"
 
+	"github.com/Lincyaw/agent-env/pkg/grpcauth"
 	"github.com/Lincyaw/agent-env/pkg/interfaces"
 	"github.com/Lincyaw/agent-env/pkg/pb"
 	"github.com/Lincyaw/agent-env/pkg/sidecar"
@@ -20,19 +21,27 @@ import (
 
 // GRPCSidecarClient is a gRPC-based implementation of SidecarClient
 type GRPCSidecarClient struct {
-	port    int
-	timeout time.Duration
+	port      int
+	timeout   time.Duration
+	grpcToken string
 
 	mu    sync.RWMutex
 	conns map[string]*grpc.ClientConn
 }
 
-// NewGRPCSidecarClient creates a new gRPC sidecar client
-func NewGRPCSidecarClient(port int, timeout time.Duration) interfaces.SidecarClient {
+// NewGRPCSidecarClient creates a new gRPC sidecar client.
+// grpcToken is optional; when non-empty, every call includes the token in
+// gRPC metadata for sidecar-side validation.
+func NewGRPCSidecarClient(port int, timeout time.Duration, grpcToken ...string) interfaces.SidecarClient {
+	token := ""
+	if len(grpcToken) > 0 {
+		token = grpcToken[0]
+	}
 	return &GRPCSidecarClient{
-		port:    port,
-		timeout: timeout,
-		conns:   make(map[string]*grpc.ClientConn),
+		port:      port,
+		timeout:   timeout,
+		grpcToken: token,
+		conns:     make(map[string]*grpc.ClientConn),
 	}
 }
 
@@ -55,10 +64,17 @@ func (c *GRPCSidecarClient) getOrCreateConn(podIP string) (*grpc.ClientConn, err
 	}
 
 	addr := fmt.Sprintf("%s:%d", podIP, c.port)
-	conn, err := grpc.NewClient(addr,
+	opts := []grpc.DialOption{
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
-	)
+	}
+	if c.grpcToken != "" {
+		opts = append(opts,
+			grpc.WithUnaryInterceptor(grpcauth.UnaryClientInterceptor(c.grpcToken)),
+			grpc.WithStreamInterceptor(grpcauth.StreamClientInterceptor(c.grpcToken)),
+		)
+	}
+	conn, err := grpc.NewClient(addr, opts...)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create gRPC connection to %s: %w", addr, err)
 	}

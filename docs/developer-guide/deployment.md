@@ -210,6 +210,81 @@ kubectl get warmpools
 kubectl get pods -l arl.infra.io/warmpool=python-pool
 ```
 
+## Authentication & Security
+
+The Gateway supports API key authentication with role-based access control. When enabled, all `/v1/` endpoints require a valid `Authorization: Bearer <api-key>` header. Prometheus metrics and debug endpoints are served on a separate internal port (default `9091`) that should not be exposed publicly.
+
+### Environment Variables
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `AUTH_ENABLED` | `false` | Enable API key authentication |
+| `AUTH_API_KEYS` | `""` | Comma-separated `key:role` pairs (e.g., `abc123:admin,def456:user`) |
+| `INTERNAL_PORT` | `9091` | Port for metrics, debug health, and AlertManager webhook |
+| `RATE_LIMIT_RPS` | `100` | Max requests per second per IP |
+| `RATE_LIMIT_BURST` | `200` | Rate limiter burst capacity |
+| `ALLOWED_ORIGINS` | `""` | Comma-separated WebSocket allowed origins (host:port). Empty = reject browser origins when auth is enabled |
+
+### Roles
+
+| Role | Permissions |
+|------|-------------|
+| `admin` | All operations: pool CRUD, managed sessions, experiment deletion |
+| `user` | Session CRUD, execute, upload, restore, shell, history, trajectory |
+
+### Example
+
+```bash
+# Generate API keys (use a proper secret manager in production)
+ADMIN_KEY=$(openssl rand -hex 32)
+USER_KEY=$(openssl rand -hex 32)
+
+# Set environment variables
+export AUTH_ENABLED=true
+export AUTH_API_KEYS="${ADMIN_KEY}:admin,${USER_KEY}:user"
+export INTERNAL_PORT=9091
+```
+
+Python SDK:
+
+```python
+from arl import SandboxSession
+
+with SandboxSession(
+    pool_ref="python-pool",
+    gateway_url="http://gateway:8080",
+    api_key="your-user-key",  # or set ARL_API_KEY env var
+) as session:
+    result = session.execute([{"name": "test", "command": ["echo", "hello"]}])
+```
+
+### Port Separation
+
+| Port | Purpose | Auth Required |
+|------|---------|---------------|
+| `8080` (public) | `/v1/*` API endpoints, `/healthz` | Yes (when `AUTH_ENABLED=true`) |
+| `9091` (internal) | `/metrics`, `/debug/health`, `/internal/*` | No (restrict via NetworkPolicy) |
+
+Configure Prometheus to scrape the internal port, and restrict it via Kubernetes NetworkPolicy:
+
+```yaml
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: arl-gateway-internal
+spec:
+  podSelector:
+    matchLabels:
+      app: arl-gateway
+  ingress:
+    - ports:
+        - port: 9091
+      from:
+        - namespaceSelector:
+            matchLabels:
+              name: monitoring
+```
+
 ## Production Considerations
 
 ### High Availability

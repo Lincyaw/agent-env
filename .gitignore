@@ -68,6 +68,9 @@ uv.lock
 *.tgz
 Chart.lockoperator
 
+# Auth secrets (contains API keys — never commit)
+auth-values.yaml
+
 # MkDocs
 site/
 *.parquet

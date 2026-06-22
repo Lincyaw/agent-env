@@ -75,6 +75,8 @@ profiles:
         chartPath: charts/arl-operator
         namespace: arl
         createNamespace: true
+        valuesFiles:
+          - auth-values.yaml
         setValues:
           image.repository: 10.10.10.240/library/arl-operator
           sidecar.image.repository: 10.10.10.240/library/arl-sidecar
@@ -126,6 +128,8 @@ profiles:
         namespace: arl
         createNamespace: true
         skipBuildDependencies: true
+        valuesFiles:
+          - auth-values.yaml
         setValues:
           image.repository: pair-cn-shanghai.cr.volces.com/opspai/arl-operator
           sidecar.image.repository: pair-cn-shanghai.cr.volces.com/opspai/arl-sidecar
