@@ -4,9 +4,10 @@ This tutorial walks you through using the ARL Python SDK from installation to ex
 
 ## Prerequisites
 
-- Python 3.9+
+- Python 3.12+
 - Access to an ARL-Infra cluster with the Gateway running
 - Gateway URL (e.g., `http://localhost:8080`)
+- API key (if authentication is enabled on the Gateway)
 
 ## Step 1: Install the SDK
 
@@ -14,7 +15,15 @@ This tutorial walks you through using the ARL Python SDK from installation to ex
 pip install arl-env
 ```
 
-## Step 2: Verify Setup
+## Step 2: Configure Authentication
+
+If the Gateway has authentication enabled, set your API key:
+
+```bash
+export ARL_API_KEY="your-api-key-here"
+```
+
+## Step 3: Verify Setup
 
 ```bash
 # Check ARL-Infra is deployed
@@ -23,7 +32,7 @@ kubectl get warmpools
 
 You should see at least one WarmPool. If not, ask your administrator to create one.
 
-## Step 3: Your First Execution
+## Step 4: Your First Execution
 
 Create a file called `hello.py`:
 
@@ -31,6 +40,7 @@ Create a file called `hello.py`:
 from arl import SandboxSession
 
 # Connect to a sandbox via the Gateway
+# API key is read from ARL_API_KEY env var automatically
 with SandboxSession(
     pool_ref="python-pool",
     namespace="default",

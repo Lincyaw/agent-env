@@ -31,6 +31,7 @@ Before using the SDK, ensure:
 1. **ARL-Infra deployed**: The operator and Gateway must be running on the cluster
 2. **Gateway URL**: You need the URL of the ARL Gateway API
 3. **WarmPool available**: At least one WarmPool must exist
+4. **API key**: If authentication is enabled on the Gateway, you need a valid API key
 
 Verify your setup:
 
@@ -45,6 +46,41 @@ kubectl get crds | grep arl.infra.io
 kubectl get warmpools
 ```
 
+## Authentication
+
+When the Gateway has authentication enabled (`AUTH_ENABLED=true`), all API requests require a valid API key. There are two ways to provide it:
+
+### Option 1: Environment Variable (Recommended)
+
+```bash
+export ARL_API_KEY="your-api-key-here"
+```
+
+The SDK automatically reads `ARL_API_KEY` — no code changes needed.
+
+### Option 2: Explicit Parameter
+
+```python
+from arl import SandboxSession
+
+session = SandboxSession(
+    pool_ref="python-pool",
+    gateway_url="http://gateway:8080",
+    api_key="your-api-key-here",
+)
+```
+
+All SDK classes (`SandboxSession`, `ManagedSession`, `GatewayClient`, `InteractiveShellClient`) accept `api_key`.
+
+### Roles
+
+| Role | Permissions |
+|------|-------------|
+| `admin` | All operations: pool CRUD, managed sessions, experiment deletion |
+| `user` | Session CRUD, execute, upload, restore, shell, history, trajectory |
+
+If your key has the `user` role, calling admin-only endpoints (e.g., pool creation) returns `403 Forbidden`.
+
 ## Quick Start
 
 ### Basic Usage with Context Manager
@@ -53,6 +89,7 @@ kubectl get warmpools
 from arl import SandboxSession
 
 # Using context manager (recommended)
+# Set ARL_API_KEY env var, or pass api_key= parameter
 with SandboxSession(
     pool_ref="python-pool",
     namespace="default",
@@ -120,6 +157,7 @@ session = SandboxSession(
 | `gateway_url` | str | Required | URL of the Gateway API |
 | `keep_alive` | bool | `False` | Keep sandbox after use |
 | `timeout` | str | `"30s"` | Default timeout for executions |
+| `api_key` | str \| None | `None` | API key for authentication. Falls back to `ARL_API_KEY` env var |
 
 **Methods:**
 

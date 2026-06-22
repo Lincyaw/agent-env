@@ -61,6 +61,7 @@ def attach(
     gateway_url: str = "http://localhost:8080",
     timeout: float = 300.0,
     keep_alive: bool = True,
+    api_key: str | None = None,
 ) -> SandboxSession
 ```
 
@@ -74,6 +75,7 @@ Attach to an existing session by session ID.
 | `gateway_url` | `str` | `"http://localhost:8080"` | Gateway base URL |
 | `timeout` | `float` | `300.0` | HTTP request timeout |
 | `keep_alive` | `bool` | `True` | If False, context manager exit deletes the session |
+| `api_key` | `str \| None` | `None` | API key for authentication. Falls back to `ARL_API_KEY` env var |
 
 **Example:**
 
@@ -258,8 +260,21 @@ class GatewayClient:
 #### Constructor
 
 ```python
-def __init__(self, base_url: str = "http://localhost:8080", timeout: float = 300.0) -> None
+def __init__(
+    self,
+    base_url: str = "http://localhost:8080",
+    timeout: float = 300.0,
+    api_key: str | None = None,
+) -> None
 ```
+
+**Parameters:**
+
+| Parameter | Type | Default | Description |
+|-----------|------|---------|-------------|
+| `base_url` | `str` | `"http://localhost:8080"` | Gateway API base URL |
+| `timeout` | `float` | `300.0` | HTTP request timeout in seconds |
+| `api_key` | `str \| None` | `None` | API key for authentication. Falls back to `ARL_API_KEY` env var |
 
 **Methods:**
 
