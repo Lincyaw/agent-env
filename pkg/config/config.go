@@ -180,8 +180,8 @@ func DefaultConfig() *Config {
 		AuthEnabled:    false,
 		AuthAPIKeys:    "",
 		InternalPort:   9091,
-		RateLimitRPS:   100,
-		RateLimitBurst: 200,
+		RateLimitRPS:   2048,
+		RateLimitBurst: 4096,
 		AllowedOrigins: "",
 	}
 }

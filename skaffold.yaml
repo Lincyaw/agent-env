@@ -142,7 +142,7 @@ profiles:
           prometheus.enabled: true
           prometheus.persistence.enabled: true
           prometheus.persistence.storageClass: ebs-ssd
-          prometheus.persistence.size: 20Gi
+          prometheus.persistence.size: 50Gi
           # Grafana
           grafana.enabled: true
           grafana.service.type: LoadBalancer

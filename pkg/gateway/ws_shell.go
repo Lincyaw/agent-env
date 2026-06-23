@@ -15,23 +15,23 @@ import (
 )
 
 // newUpgrader returns a WebSocket Upgrader with origin validation.
-// When allowedOrigins is non-empty, only those origins are accepted.
-// When it is empty and auth is enabled, all origins are rejected (no
-// unauthenticated browser access). When auth is disabled, all origins
-// are allowed for backward compatibility.
+// Non-browser clients (curl, SDKs) that omit the Origin header are always
+// allowed when auth passes. Browser clients that send Origin are checked
+// against AllowedOrigins; if the allowlist is empty, browser WebSocket
+// access is rejected. When auth is disabled, all origins are allowed.
 func newUpgrader(authCfg *AuthConfig) websocket.Upgrader {
 	return websocket.Upgrader{
 		CheckOrigin: func(r *http.Request) bool {
 			if authCfg == nil || !authCfg.Enabled {
 				return true
 			}
-			if len(authCfg.AllowedOrigins) == 0 {
-				return false
-			}
 			origin := r.Header.Get("Origin")
 			if origin == "" {
-				// Non-browser clients (curl, SDKs) typically don't send Origin.
+				// Non-browser clients (curl, SDKs) don't send Origin.
 				return true
+			}
+			if len(authCfg.AllowedOrigins) == 0 {
+				return false
 			}
 			parsed, err := url.Parse(origin)
 			if err != nil {
