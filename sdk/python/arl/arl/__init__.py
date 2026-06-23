@@ -35,7 +35,7 @@ from arl.types import (
 )
 from arl.warmpool import WarmPoolManager
 
-__version__ = "0.2.0"
+__version__ = "0.4.1"
 __all__ = [
     "ConfigEnvSpec",
     "ConfigMapTemplate",
