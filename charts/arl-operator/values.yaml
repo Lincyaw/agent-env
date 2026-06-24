@@ -74,9 +74,9 @@ auth:
   # Allowed WebSocket origins (comma-separated host:port). Empty = reject
   # browser origins when auth is enabled.
   allowedOrigins: ""
-  # gRPC shared token for gateway ↔ sidecar authentication. When set, both
-  # the gateway and every injected sidecar validate this token on each call.
-  # Leave empty to disable gRPC auth (not recommended for production).
+  # gRPC shared token for gateway ↔ sidecar authentication. Mandatory: the
+  # sidecar refuses to start without it. Leave empty to auto-generate a random
+  # token (preserved across upgrades); set explicitly to pin a known value.
   grpcToken: ""
 
 # Managed pool auto-scaling configuration (for POST /v1/managed/sessions)

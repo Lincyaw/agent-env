@@ -545,7 +545,7 @@ func (r *WarmPoolReconciler) constructPod(pool *arlv1alpha1.WarmPool, renderedCo
 	for i := range pod.Spec.Containers {
 		if pod.Spec.Containers[i].Name == "sidecar" {
 			hasSidecar = true
-			// Add shared volume mounts to existing sidecar
+			// Add shared volume mounts to a user-supplied sidecar.
 			r.ensureSidecarVolumeMounts(&pod.Spec.Containers[i])
 			break
 		}
@@ -564,26 +564,12 @@ func (r *WarmPoolReconciler) constructPod(pool *arlv1alpha1.WarmPool, renderedCo
 			{Name: "arl-socket", MountPath: "/var/run/arl"},
 		}
 
-		sidecarEnv := otelEnvFromOperator()
-		if r.Config.GRPCAuthToken != "" {
-			sidecarEnv = append(sidecarEnv, corev1.EnvVar{
-				Name: "GRPC_AUTH_TOKEN",
-				ValueFrom: &corev1.EnvVarSource{
-					SecretKeyRef: &corev1.SecretKeySelector{
-						LocalObjectReference: corev1.LocalObjectReference{Name: "arl-grpc-token"},
-						Key:                  "token",
-						Optional:             boolPtr(true),
-					},
-				},
-			})
-		}
-
 		sidecarContainer := corev1.Container{
 			Name:            "sidecar",
 			Image:           r.Config.SidecarImage,
 			ImagePullPolicy: r.injectedPullPolicy(),
 			Args:            sidecarArgs,
-			Env:             sidecarEnv,
+			Env:             otelEnvFromOperator(),
 			Ports: []corev1.ContainerPort{
 				{
 					Name:          "http",
@@ -600,6 +586,10 @@ func (r *WarmPoolReconciler) constructPod(pool *arlv1alpha1.WarmPool, renderedCo
 		}
 		pod.Spec.Containers = append(pod.Spec.Containers, sidecarContainer)
 	}
+
+	// Inject the mandatory gRPC auth token into the sidecar (whether
+	// user-supplied or default) so it can never run unauthenticated.
+	r.injectSidecarAuthEnv(pod)
 
 	// Add shared workspace volume if not exists
 	hasWorkspace := false
@@ -885,6 +875,33 @@ func (r *WarmPoolReconciler) injectExecutorAgent(pod *corev1.Pod) {
 
 		break // Only modify the first executor container
 	}
+}
+
+// sidecarAuthTokenEnv returns the env var that injects the shared gRPC auth
+// token from the arl-grpc-token secret. The secret reference is mandatory
+// (non-optional): if the token is missing the pod fails to start rather than
+// silently running an unauthenticated sidecar.
+func sidecarAuthTokenEnv() corev1.EnvVar {
+	return corev1.EnvVar{
+		Name: "GRPC_AUTH_TOKEN",
+		ValueFrom: &corev1.EnvVarSource{
+			SecretKeyRef: &corev1.SecretKeySelector{
+				LocalObjectReference: corev1.LocalObjectReference{Name: "arl-grpc-token"},
+				Key:                  "token",
+				Optional:             boolPtr(false),
+			},
+		},
+	}
+}
+
+// injectSidecarAuthEnv injects the mandatory gRPC auth token into the sidecar
+// container, regardless of whether it was user-supplied or operator-injected.
+// No-op when the operator has no token configured.
+func (r *WarmPoolReconciler) injectSidecarAuthEnv(pod *corev1.Pod) {
+	if r.Config.GRPCAuthToken == "" {
+		return
+	}
+	appendEnvVar(pod, "sidecar", sidecarAuthTokenEnv())
 }
 
 // ensureSidecarVolumeMounts adds executor-related volume mounts to an existing sidecar

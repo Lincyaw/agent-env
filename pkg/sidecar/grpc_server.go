@@ -26,26 +26,24 @@ type GRPCServer struct {
 	grpcServer *grpc.Server
 }
 
-// NewGRPCServer creates a new gRPC server (without executor agent).
-func NewGRPCServer(workspaceDir string, port int) *GRPCServer {
+// NewGRPCServer creates a new gRPC server (without executor agent). The token
+// is mandatory; every incoming call must present it in metadata.
+func NewGRPCServer(workspaceDir string, port int, token string) *GRPCServer {
 	return &GRPCServer{
-		service: NewAgentService(workspaceDir),
-		port:    port,
+		service:   NewAgentService(workspaceDir),
+		port:      port,
+		grpcToken: token,
 	}
 }
 
-// NewGRPCServerWithExecutor creates a new gRPC server that proxies to an executor agent.
-func NewGRPCServerWithExecutor(workspaceDir string, port int, executorSocket string) *GRPCServer {
+// NewGRPCServerWithExecutor creates a new gRPC server that proxies to an
+// executor agent. The token is mandatory; see NewGRPCServer.
+func NewGRPCServerWithExecutor(workspaceDir string, port int, executorSocket, token string) *GRPCServer {
 	return &GRPCServer{
-		service: NewAgentServiceWithExecutor(workspaceDir, executorSocket),
-		port:    port,
+		service:   NewAgentServiceWithExecutor(workspaceDir, executorSocket),
+		port:      port,
+		grpcToken: token,
 	}
-}
-
-// SetGRPCToken configures the shared authentication token. When set, every
-// incoming gRPC call must include this token in metadata.
-func (s *GRPCServer) SetGRPCToken(token string) {
-	s.grpcToken = token
 }
 
 // Service returns the underlying agent service (for init operations).
@@ -53,8 +51,13 @@ func (s *GRPCServer) Service() *AgentService {
 	return s.service
 }
 
-// Start starts the gRPC server
+// Start starts the gRPC server. A token is mandatory: the server refuses to
+// start without one so that no unauthenticated execution path is ever exposed.
 func (s *GRPCServer) Start() error {
+	if s.grpcToken == "" {
+		return fmt.Errorf("gRPC auth token is required (set GRPC_AUTH_TOKEN); refusing to start without authentication")
+	}
+
 	lis, err := net.Listen("tcp", fmt.Sprintf(":%d", s.port))
 	if err != nil {
 		return fmt.Errorf("failed to listen: %w", err)
@@ -62,14 +65,10 @@ func (s *GRPCServer) Start() error {
 
 	opts := []grpc.ServerOption{
 		grpc.StatsHandler(otelgrpc.NewServerHandler()),
+		grpc.UnaryInterceptor(grpcauth.UnaryServerInterceptor(s.grpcToken)),
+		grpc.StreamInterceptor(grpcauth.StreamServerInterceptor(s.grpcToken)),
 	}
-	if s.grpcToken != "" {
-		opts = append(opts,
-			grpc.UnaryInterceptor(grpcauth.UnaryServerInterceptor(s.grpcToken)),
-			grpc.StreamInterceptor(grpcauth.StreamServerInterceptor(s.grpcToken)),
-		)
-		log.Printf("gRPC token authentication enabled")
-	}
+	log.Printf("gRPC token authentication enabled")
 	s.grpcServer = grpc.NewServer(opts...)
 	pb.RegisterAgentServiceServer(s.grpcServer, s)
 

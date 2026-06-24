@@ -108,3 +108,21 @@ Redis address (host:port) — auto-resolves to the in-cluster Service when deplo
 {{- .Values.redis.addr }}
 {{- end }}
 {{- end }}
+
+{{/*
+Resolve the shared gRPC auth token. The sidecar refuses to start without one,
+so a token must always exist. Precedence: explicit value -> existing secret
+(preserved across upgrades) -> freshly generated random token.
+*/}}
+{{- define "arl-operator.grpcToken" -}}
+{{- if .Values.auth.grpcToken -}}
+{{- .Values.auth.grpcToken -}}
+{{- else -}}
+{{- $existing := lookup "v1" "Secret" .Release.Namespace "arl-grpc-token" -}}
+{{- if and $existing $existing.data.token -}}
+{{- $existing.data.token | b64dec -}}
+{{- else -}}
+{{- randAlphaNum 48 -}}
+{{- end -}}
+{{- end -}}
+{{- end }}

@@ -47,10 +47,12 @@ func main() {
 
 	httpServer := sidecar.NewServer(httpPort)
 
-	grpcServer := sidecar.NewGRPCServerWithExecutor(workspaceDir, grpcPort, executorSocket)
-	if token := os.Getenv("GRPC_AUTH_TOKEN"); token != "" {
-		grpcServer.SetGRPCToken(token)
+	// Token is mandatory; refuse to start an unauthenticated sidecar.
+	token := os.Getenv("GRPC_AUTH_TOKEN")
+	if token == "" {
+		log.Fatal("GRPC_AUTH_TOKEN is not set: refusing to start an unauthenticated sidecar")
 	}
+	grpcServer := sidecar.NewGRPCServerWithExecutor(workspaceDir, grpcPort, executorSocket, token)
 	log.Printf("Executor agent socket: %s", executorSocket)
 
 	// Wait for executor agent to be ready

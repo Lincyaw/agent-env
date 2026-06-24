@@ -48,13 +48,11 @@ spec:
               value: "{{ .Values.auth.allowedOrigins }}"
             {{- end }}
             {{- end }}
-            {{- if .Values.auth.grpcToken }}
             - name: GRPC_AUTH_TOKEN
               valueFrom:
                 secretKeyRef:
                   name: arl-grpc-token
                   key: token
-            {{- end }}
             - name: MANAGED_POOL_INITIAL_REPLICAS
               value: "{{ .Values.managedPool.initialReplicas }}"
             - name: MANAGED_POOL_MIN_REPLICAS

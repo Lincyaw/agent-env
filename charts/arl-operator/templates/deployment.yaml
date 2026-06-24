@@ -65,13 +65,11 @@ spec:
               value: "{{ .Values.operator.enableMiddleware }}"
             - name: GATEWAY_PORT
               value: "{{ .Values.gateway.port }}"
-            {{- if .Values.auth.grpcToken }}
             - name: GRPC_AUTH_TOKEN
               valueFrom:
                 secretKeyRef:
                   name: arl-grpc-token
                   key: token
-            {{- end }}
             {{- if .Values.clickhouse.enabled }}
             - name: CLICKHOUSE_ENABLED
               value: "true"
