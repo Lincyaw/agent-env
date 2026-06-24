@@ -62,7 +62,11 @@ gateway:
 
 # Authentication & security
 auth:
-  enabled: false
+  # Authentication is enabled by default (fail-closed). When enabled, apiKeys
+  # MUST be set or the install fails. Set to false only for trusted,
+  # network-isolated deployments where every endpoint may be reached without
+  # credentials.
+  enabled: true
   # API keys in "key:role" format, one per line. Stored in a K8s Secret.
   # Roles: "admin" (pool/experiment management) or "user" (session/exec only).
   # Example:

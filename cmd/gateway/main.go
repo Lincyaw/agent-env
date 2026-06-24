@@ -192,7 +192,8 @@ func main() {
 		}
 
 		if len(keys) == 0 {
-			log.Fatalf("AUTH_ENABLED=true but no valid keys from AUTH_API_KEYS or AUTH_KEY_FILE")
+			log.Fatalf("authentication is enabled but no API keys were provided: set AUTH_API_KEYS (key:role,...) or AUTH_KEY_FILE, " +
+				"or explicitly opt out of authentication with AUTH_ENABLED=false")
 		}
 		var origins []string
 		if cfg.AllowedOrigins != "" {
@@ -213,7 +214,9 @@ func main() {
 
 		stopKeyWatcher = gateway.StartKeyFileWatcher(authCfg)
 	} else {
-		log.Println("WARNING: Authentication is disabled (AUTH_ENABLED=false). All endpoints are publicly accessible.")
+		log.Println("SECURITY WARNING: authentication is explicitly disabled (AUTH_ENABLED=false). " +
+			"Every endpoint — including session creation, file upload, and command execution — is reachable without credentials. " +
+			"Only run this way on a trusted, network-isolated host.")
 	}
 
 	rateLimiter := gateway.NewRateLimiter(cfg.RateLimitRPS, cfg.RateLimitBurst)

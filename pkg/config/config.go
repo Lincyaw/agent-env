@@ -177,7 +177,7 @@ func DefaultConfig() *Config {
 		RedisPassword: "",
 		RedisDB:       0,
 
-		AuthEnabled:    false,
+		AuthEnabled:    true,
 		AuthAPIKeys:    "",
 		InternalPort:   9091,
 		RateLimitRPS:   2048,
@@ -443,9 +443,13 @@ func LoadFromEnv() *Config {
 		}
 	}
 
-	// Authentication configuration
-	if enable := os.Getenv("AUTH_ENABLED"); enable == "true" {
-		cfg.AuthEnabled = true
+	// Authentication configuration.
+	// Auth is on by default (fail-closed); disabling it requires an explicit
+	// AUTH_ENABLED=false, never an omitted or malformed value.
+	if v := os.Getenv("AUTH_ENABLED"); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			cfg.AuthEnabled = b
+		}
 	}
 
 	if v := os.Getenv("AUTH_API_KEYS"); v != "" {

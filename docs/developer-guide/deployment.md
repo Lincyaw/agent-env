@@ -218,7 +218,7 @@ The Gateway supports API key authentication with role-based access control. When
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `AUTH_ENABLED` | `false` | Enable API key authentication |
+| `AUTH_ENABLED` | `true` | Enable API key authentication. On by default (fail-closed): the gateway refuses to start when enabled with no keys. Set `AUTH_ENABLED=false` to explicitly opt out. |
 | `AUTH_API_KEYS` | `""` | Comma-separated `key:role` pairs (e.g., `abc123:admin,def456:user`) |
 | `INTERNAL_PORT` | `9091` | Port for metrics, debug health, and AlertManager webhook |
 | `RATE_LIMIT_RPS` | `100` | Max requests per second per IP |

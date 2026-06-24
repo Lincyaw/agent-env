@@ -34,9 +34,9 @@ spec:
           env:
             - name: INTERNAL_PORT
               value: "{{ .Values.gateway.internalPort }}"
-            {{- if .Values.auth.enabled }}
             - name: AUTH_ENABLED
-              value: "true"
+              value: {{ .Values.auth.enabled | quote }}
+            {{- if .Values.auth.enabled }}
             - name: AUTH_KEY_FILE
               value: "/etc/arl/keys/api-keys"
             - name: RATE_LIMIT_RPS
