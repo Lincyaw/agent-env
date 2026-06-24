@@ -42,13 +42,13 @@ spec:
             {{- end }}
           env:
             - name: SIDECAR_IMAGE
-              value: "{{ .Values.sidecar.image.repository }}:{{ .Values.sidecar.image.tag }}"
+              value: "{{ .Values.sidecar.image.repository }}:{{ .Values.sidecar.image.tag | default .Chart.AppVersion }}"
             - name: SIDECAR_HTTP_PORT
               value: "{{ .Values.sidecar.httpPort }}"
             - name: SIDECAR_GRPC_PORT
               value: "{{ .Values.sidecar.grpcPort }}"
             - name: EXECUTOR_AGENT_IMAGE
-              value: "{{ .Values.executorAgent.image.repository }}:{{ .Values.executorAgent.image.tag }}"
+              value: "{{ .Values.executorAgent.image.repository }}:{{ .Values.executorAgent.image.tag | default .Chart.AppVersion }}"
             - name: IMAGE_PULL_POLICY
               value: "{{ .Values.image.injectedPullPolicy | default "Always" }}"
             - name: WORKSPACE_DIR

@@ -117,7 +117,10 @@ profiles:
       docker:
         dockerfile: Dockerfile.executor-agent
     tagPolicy:
-      sha256: {}
+      # gitCommit yields a unique, immutable tag per commit so deployments
+      # reference a real version (never :latest) and IfNotPresent pulls the
+      # right image. The tag flows into the chart via IMAGE_TAG_* below.
+      gitCommit: {}
   manifests:
     rawYaml:
       - config/crd/*.yaml
@@ -150,10 +153,10 @@ profiles:
           grafana.persistence.storageClass: ebs-ssd
           grafana.persistence.size: 20Gi
         setValueTemplates:
-          image.tag: "{{.IMAGE_TAG}}"
-          sidecar.image.tag: "{{.IMAGE_TAG2}}"
-          gateway.image.tag: "{{.IMAGE_TAG3}}"
-          executorAgent.image.tag: "{{.IMAGE_TAG4}}"
+          image.tag: "{{.IMAGE_TAG_opspai_arl_operator}}"
+          sidecar.image.tag: "{{.IMAGE_TAG_opspai_arl_sidecar}}"
+          gateway.image.tag: "{{.IMAGE_TAG_opspai_arl_gateway}}"
+          executorAgent.image.tag: "{{.IMAGE_TAG_opspai_arl_executor_agent}}"
   deploy:
     kubectl:
       flags:

@@ -6,7 +6,9 @@ replicaCount: 1
 image:
   repository: arl-operator
   pullPolicy: IfNotPresent
-  tag: "latest"
+  # Empty by default; skaffold injects the git-commit tag. Plain `helm install`
+  # falls back to the chart appVersion. Never :latest.
+  tag: ""
   # ImagePullPolicy applied to operator-INJECTED containers (the sidecar and
   # the copy-executor-agent init container) in every warm/managed pod.
   # "Always" (default) keeps production pulling the latest pushed images.
@@ -19,7 +21,7 @@ sidecar:
   image:
     repository: arl-sidecar
     pullPolicy: IfNotPresent
-    tag: "latest"
+    tag: ""
   httpPort: 8080
   grpcPort: 9090
 
@@ -28,7 +30,7 @@ executorAgent:
   image:
     repository: arl-executor-agent
     pullPolicy: IfNotPresent
-    tag: "latest"
+    tag: ""
 
 # Gateway configuration
 gateway:
@@ -37,7 +39,7 @@ gateway:
   image:
     repository: arl-gateway
     pullPolicy: IfNotPresent
-    tag: "latest"
+    tag: ""
   port: 8080
   internalPort: 9091        # Metrics, debug, AlertManager webhook (no auth)
   sidecarGrpcPort: 9090
