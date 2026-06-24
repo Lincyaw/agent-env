@@ -1,6 +1,6 @@
 """ARL - High-level API for Agent Runtime Layer."""
 
-from arl.auth import ApiKeyAuth
+from arl.auth import ApiKeyAuth, SsoTokenAuth
 from arl.configenv import (
     ConfigEnvSpec,
     ConfigMapTemplate,
@@ -36,7 +36,7 @@ from arl.types import (
 )
 from arl.warmpool import WarmPoolManager
 
-__version__ = "0.7.0"
+__version__ = "0.8.0"
 __all__ = [
     "ApiKeyAuth",
     "ConfigEnvSpec",
@@ -59,6 +59,7 @@ __all__ = [
     "SecretTemplate",
     "SessionInfo",
     "ShellMessage",
+    "SsoTokenAuth",
     "StepOutput",
     "StepRequest",
     "StepResult",
