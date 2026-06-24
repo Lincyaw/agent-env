@@ -2137,8 +2137,8 @@
 <tbody>
 <tr>
 <td><code>AUTH_ENABLED</code></td>
-<td><code>false</code></td>
-<td>Enable API key authentication</td>
+<td><code>true</code></td>
+<td>Enable API key authentication. On by default (fail-closed): the gateway refuses to start when enabled with no keys. Set <code>AUTH_ENABLED=false</code> to explicitly opt out.</td>
 </tr>
 <tr>
 <td><code>AUTH_API_KEYS</code></td>
