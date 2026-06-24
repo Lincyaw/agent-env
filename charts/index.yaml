@@ -2,8 +2,29 @@ apiVersion: v1
 entries:
   arl-operator:
   - apiVersion: v2
+    appVersion: 0.7.0
+    created: "2026-06-24T17:26:02.868949114Z"
+    description: A Helm chart for deploying the ARL (Agent Runtime Layer) Operator
+    digest: 17da1ce8c9b8a0e4d7ef3c0fae80fe3fb68d475ca3c31b6996a213038583eef7
+    home: https://github.com/Lincyaw/agent-env
+    keywords:
+    - kubernetes
+    - operator
+    - agent
+    - warmpool
+    maintainers:
+    - name: Lincyaw
+      url: https://github.com/Lincyaw
+    name: arl-operator
+    sources:
+    - https://github.com/Lincyaw/agent-env
+    type: application
+    urls:
+    - https://lincyaw.github.io/agent-env/charts/arl-operator-0.7.0.tgz
+    version: 0.7.0
+  - apiVersion: v2
     appVersion: 0.6.0
-    created: "2026-06-24T13:34:46.759916432Z"
+    created: "2026-06-24T17:26:02.866369024Z"
     description: A Helm chart for deploying the ARL (Agent Runtime Layer) Operator
     digest: 6153bca8b205d0f615b3c023cba8dd8bf57c7351c481ede83ad7f69c1b7c8b35
     home: https://github.com/Lincyaw/agent-env
@@ -22,4 +43,4 @@ entries:
     urls:
     - https://lincyaw.github.io/agent-env/charts/arl-operator-0.6.0.tgz
     version: 0.6.0
-generated: "2026-06-24T13:34:46.757546709Z"
+generated: "2026-06-24T17:26:02.863765749Z"
