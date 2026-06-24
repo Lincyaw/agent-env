@@ -7,6 +7,7 @@ from typing import Any
 
 import httpx
 
+from arl.auth import resolve_auth
 from arl.configenv import ConfigEnvSpec
 from arl.types import (
     ErrorResponse,
@@ -69,9 +70,13 @@ class GatewayClient:
         base_url: str = "http://localhost:8080",
         timeout: float = 300.0,
         api_key: str | None = None,
+        auth: httpx.Auth | None = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")
-        self._api_key = api_key or os.environ.get("ARL_API_KEY", "")
+        # Resolve the credential: an explicit `auth` flow (e.g. ApiKeyAuth or a
+        # future refreshing SsoTokenAuth) takes precedence; otherwise fall back
+        # to `api_key` / ARL_API_KEY for backward compatibility.
+        resolved_auth = resolve_auth(auth, api_key or os.environ.get("ARL_API_KEY", ""))
         # Use explicit timeout configuration with longer connect timeout
         timeout_config = httpx.Timeout(
             connect=30.0,  # 30s for TCP connection (fail fast, rely on retries)
@@ -82,7 +87,9 @@ class GatewayClient:
         # Respect standard HTTP proxy environment variables.
         # httpx does not auto-detect proxies when a custom transport is provided,
         # so we read them explicitly and forward to HTTPTransport.
-        proxy_url = os.environ.get("http_proxy") or os.environ.get("HTTP_PROXY")
+        # `or None` so an empty-string proxy var (a real environment quirk)
+        # falls through instead of crashing httpx with "Unknown scheme for ''".
+        proxy_url = os.environ.get("http_proxy") or os.environ.get("HTTP_PROXY") or None
         # Configure transport with retries and keepalive management to avoid
         # stale connections causing ConnectTimeout during long polling loops.
         transport = httpx.HTTPTransport(
@@ -94,14 +101,11 @@ class GatewayClient:
                 keepalive_expiry=30.0,  # Close idle connections before LB/NAT timeout
             ),
         )
-        headers: dict[str, str] = {}
-        if self._api_key:
-            headers["Authorization"] = f"Bearer {self._api_key}"
         self._client = httpx.Client(
             base_url=self._base_url,
             timeout=timeout_config,
             transport=transport,
-            headers=headers,
+            auth=resolved_auth,
         )
 
     def _handle_error(self, response: httpx.Response) -> None:
