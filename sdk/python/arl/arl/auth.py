@@ -59,6 +59,7 @@ class SsoTokenAuth(httpx.Auth):
         scope: str | None = None,
         expiry_margin: float = 30.0,
         timeout: float = 30.0,
+        verify: bool | str = True,
     ) -> None:
         if not token_url:
             raise ValueError("token_url must be a non-empty string")
@@ -72,6 +73,11 @@ class SsoTokenAuth(httpx.Auth):
         self._scope = scope
         self._expiry_margin = expiry_margin
         self._timeout = timeout
+        # TLS verification for the token request. The SSO endpoint may sit
+        # behind an edge that terminates TLS with an internal/self-signed CA
+        # (e.g. https://<edge-eip>:8082/token) — pass a CA bundle path, or
+        # False to disable verification on a trusted network.
+        self._verify = verify
         self._lock = threading.Lock()
         self._token: str | None = None
         self._expires_at = 0.0
@@ -84,7 +90,9 @@ class SsoTokenAuth(httpx.Auth):
         }
         if self._scope:
             data["scope"] = self._scope
-        resp = httpx.post(self._token_url, data=data, timeout=self._timeout)
+        resp = httpx.post(
+            self._token_url, data=data, timeout=self._timeout, verify=self._verify
+        )
         resp.raise_for_status()
         payload = resp.json()
         raw_token = payload.get("access_token")
