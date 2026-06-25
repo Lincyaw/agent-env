@@ -34,6 +34,7 @@ func SetupRoutes(mux *http.ServeMux, gw *Gateway, authCfg *AuthConfig) {
 	// Execution (user role)
 	mux.HandleFunc("POST /v1/sessions/{id}/execute", user(handleExecute(gw)))
 	mux.HandleFunc("POST /v1/sessions/{id}/files", user(handleUploadFile(gw)))
+	mux.HandleFunc("GET /v1/sessions/{id}/files/{path...}", user(handleDownloadFile(gw)))
 	mux.HandleFunc("POST /v1/sessions/{id}/restore", user(handleRestore(gw)))
 
 	// Interactive shell — WebSocket (user role; token may come via query param)
@@ -204,6 +205,32 @@ func handleUploadFile(gw *Gateway) http.HandlerFunc {
 		}
 
 		writeJSON(w, http.StatusOK, resp)
+	}
+}
+
+func handleDownloadFile(gw *Gateway) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		if checkOwnership(gw, w, r, id) == nil {
+			return
+		}
+
+		filePath := r.PathValue("path")
+		if filePath == "" {
+			writeError(w, http.StatusBadRequest, "path is required")
+			return
+		}
+
+		content, err := gw.DownloadFile(r.Context(), id, filePath)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("Content-Disposition", "attachment; filename=\""+filePath+"\"")
+		w.WriteHeader(http.StatusOK)
+		w.Write(content)
 	}
 }
 

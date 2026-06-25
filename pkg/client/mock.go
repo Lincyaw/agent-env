@@ -40,6 +40,11 @@ func (m *MockSidecarClient) WriteFile(ctx context.Context, podIP string, path st
 	return 0, fmt.Errorf("not implemented")
 }
 
+// ReadFile mocks native file download
+func (m *MockSidecarClient) ReadFile(ctx context.Context, podIP string, path string) ([]byte, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+
 // HealthCheck mocks health check
 func (m *MockSidecarClient) HealthCheck(ctx context.Context, podIP string) error {
 	if m.HealthCheckFunc != nil {

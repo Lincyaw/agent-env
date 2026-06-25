@@ -165,6 +165,15 @@ class GatewayClient:
         self._handle_error(resp)
         return UploadFileResponse.model_validate(resp.json())
 
+    def download_file(
+        self,
+        session_id: str,
+        path: str,
+    ) -> bytes:
+        resp = self._client.get(f"/v1/sessions/{session_id}/files/{path}")
+        self._handle_error(resp)
+        return resp.content
+
     def restore(self, session_id: str, snapshot_id: str) -> None:
         resp = self._client.post(
             f"/v1/sessions/{session_id}/restore",

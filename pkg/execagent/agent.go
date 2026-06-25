@@ -1,7 +1,7 @@
 package execagent
 
 import (
-	"bufio"
+	// "bufio" removed: chunk-based I/O replaced line-based Scanner
 	"context"
 	"encoding/json"
 	"errors"
@@ -100,6 +100,9 @@ func (a *Agent) handleConn(ctx context.Context, conn net.Conn) {
 		case "write_file":
 			log.Printf("[write_file] id=%s path=%s bytes=%d", req.ID, req.Path, len(req.Content))
 			a.handleWriteFile(req, encoder)
+		case "read_file":
+			log.Printf("[read_file] id=%s path=%s", req.ID, req.Path)
+			a.handleReadFile(req, encoder)
 		case "shell":
 			log.Printf("[shell] id=%s workdir=%s", req.ID, req.WorkDir)
 			a.handleShell(ctx, req, decoder, encoder)
@@ -175,29 +178,33 @@ func (a *Agent) handleExec(ctx context.Context, req Request, encoder *json.Encod
 	var wg sync.WaitGroup
 	wg.Add(2)
 
-	// Stream stdout
+	// Stream stdout in fixed-size chunks (no line-length limit).
 	go func() {
 		defer wg.Done()
-		s := bufio.NewScanner(stdout)
-		s.Buffer(make([]byte, 1024*1024), 1024*1024)
-		for s.Scan() {
-			send(Response{ID: req.ID, Stdout: s.Text() + "\n"})
-		}
-		if s.Err() != nil {
-			send(Response{ID: req.ID, Stderr: fmt.Sprintf("stdout read error: %v\n", s.Err())})
+		buf := make([]byte, 64*1024)
+		for {
+			n, readErr := stdout.Read(buf)
+			if n > 0 {
+				send(Response{ID: req.ID, Stdout: string(buf[:n])})
+			}
+			if readErr != nil {
+				return
+			}
 		}
 	}()
 
-	// Stream stderr
+	// Stream stderr in fixed-size chunks.
 	go func() {
 		defer wg.Done()
-		s := bufio.NewScanner(stderr)
-		s.Buffer(make([]byte, 1024*1024), 1024*1024)
-		for s.Scan() {
-			send(Response{ID: req.ID, Stderr: s.Text() + "\n"})
-		}
-		if s.Err() != nil {
-			send(Response{ID: req.ID, Stderr: fmt.Sprintf("stderr read error: %v\n", s.Err())})
+		buf := make([]byte, 64*1024)
+		for {
+			n, readErr := stderr.Read(buf)
+			if n > 0 {
+				send(Response{ID: req.ID, Stderr: string(buf[:n])})
+			}
+			if readErr != nil {
+				return
+			}
 		}
 	}()
 
@@ -245,6 +252,27 @@ func (a *Agent) handleWriteFile(req Request, encoder *json.Encoder) {
 
 	written := int64(len(req.Content))
 	encoder.Encode(Response{ID: req.ID, BytesWritten: &written, Done: true})
+}
+
+func (a *Agent) handleReadFile(req Request, encoder *json.Encoder) {
+	if req.Path == "" {
+		encoder.Encode(Response{ID: req.ID, Error: "path is required", Done: true})
+		return
+	}
+
+	targetPath, err := a.resolveWorkspacePath(req.Path)
+	if err != nil {
+		encoder.Encode(Response{ID: req.ID, Error: err.Error(), Done: true})
+		return
+	}
+
+	content, err := os.ReadFile(targetPath)
+	if err != nil {
+		encoder.Encode(Response{ID: req.ID, Error: fmt.Sprintf("read file: %v", err), Done: true})
+		return
+	}
+
+	encoder.Encode(Response{ID: req.ID, Content: content, Done: true})
 }
 
 func (a *Agent) resolveWorkspacePath(relPath string) (string, error) {

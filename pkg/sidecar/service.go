@@ -205,3 +205,10 @@ func (s *AgentService) WriteFile(ctx context.Context, path string, content []byt
 	}
 	return s.executorClient.WriteFile(ctx, path, content)
 }
+
+func (s *AgentService) ReadFile(ctx context.Context, path string) ([]byte, error) {
+	if s.executorClient == nil {
+		return nil, fmt.Errorf("executor agent not configured: sidecar started without --executor-socket")
+	}
+	return s.executorClient.ReadFile(ctx, path)
+}

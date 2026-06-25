@@ -552,15 +552,36 @@ func (r *WarmPoolReconciler) constructPod(pool *arlv1alpha1.WarmPool, renderedCo
 	}
 
 	if !hasSidecar {
-		// Add default sidecar container with executor socket support
+		// Resolve the workspace mount path from the executor container so the
+		// sidecar and executor agree on the workspace location. Managed
+		// sessions can override the default (e.g. /app for terminal-bench).
+		sidecarWorkspace := r.Config.WorkspaceDir
+		for i := range pod.Spec.Containers {
+			c := &pod.Spec.Containers[i]
+			if c.Name == "sidecar" {
+				continue
+			}
+			for _, vm := range c.VolumeMounts {
+				if vm.Name == "workspace" {
+					sidecarWorkspace = vm.MountPath
+					break
+				}
+			}
+			break
+		}
+
 		sidecarArgs := []string{
-			"--workspace=" + r.Config.WorkspaceDir,
+			"--workspace=" + sidecarWorkspace,
 			"--http-port=" + fmt.Sprintf("%d", r.Config.SidecarHTTPPort),
 			"--grpc-port=" + fmt.Sprintf("%d", r.Config.SidecarGRPCPort),
 		}
 
+		// Mount the workspace volume at a fixed path that won't collide with
+		// the sidecar binary. The sidecar only needs the --workspace argument
+		// (passed to the executor agent via gRPC); it doesn't access files
+		// directly from its own filesystem.
 		sidecarVolumeMounts := []corev1.VolumeMount{
-			{Name: "workspace", MountPath: r.Config.WorkspaceDir},
+			{Name: "workspace", MountPath: "/var/run/arl/workspace"},
 			{Name: "arl-socket", MountPath: "/var/run/arl"},
 		}
 
@@ -608,6 +629,13 @@ func (r *WarmPoolReconciler) constructPod(pool *arlv1alpha1.WarmPool, renderedCo
 			},
 		})
 	}
+
+	// Seed workspace from the executor image: if the image ships files at
+	// workspaceDir (e.g. terminal-bench task images COPY project files to
+	// /app), the emptyDir mount hides them. An init container running the
+	// same image copies the original content into the volume so the
+	// executor sees the image's files on startup.
+	r.injectWorkspaceSeed(pod)
 
 	// Add shared volumes for executor agent
 	r.ensureExecutorVolumes(pod)
@@ -813,6 +841,51 @@ printf ']}' >> "$REGISTRY"
 // Defaults to Always when unset/invalid so production behavior is unchanged;
 // set IMAGE_PULL_POLICY=IfNotPresent on local kind/minikube clusters where
 // images are side-loaded rather than pushed to a registry.
+// injectWorkspaceSeed adds an init container that copies the executor image's
+// original files at the workspace mount path into the emptyDir workspace volume.
+// Without this, the emptyDir mount hides any files the image ships at that path
+// (e.g. terminal-bench task images COPY project skeletons to /app).
+func (r *WarmPoolReconciler) injectWorkspaceSeed(pod *corev1.Pod) {
+	// Find the executor container and its workspace mount.
+	var executorImage string
+	var workspaceMount string
+	for i := range pod.Spec.Containers {
+		c := &pod.Spec.Containers[i]
+		if c.Name == "sidecar" {
+			continue
+		}
+		executorImage = c.Image
+		for _, vm := range c.VolumeMounts {
+			if vm.Name == "workspace" {
+				workspaceMount = vm.MountPath
+				break
+			}
+		}
+		break
+	}
+	if executorImage == "" || workspaceMount == "" {
+		return
+	}
+
+	// The init container runs the executor image with the workspace volume
+	// mounted at a staging path, then copies whatever the image had at the
+	// original workspaceMount into the volume. `cp -a` preserves permissions;
+	// the trailing dot (src/.) copies directory contents, not the directory.
+	stagingPath := "/tmp/arl-workspace-seed"
+	pod.Spec.InitContainers = append(pod.Spec.InitContainers, corev1.Container{
+		Name:            "seed-workspace",
+		Image:           executorImage,
+		ImagePullPolicy: corev1.PullIfNotPresent,
+		Command: []string{"sh", "-c", fmt.Sprintf(
+			"if [ -d %q ] && [ \"$(ls -A %s 2>/dev/null)\" ]; then cp -a %s/. %s/; fi",
+			workspaceMount, workspaceMount, workspaceMount, stagingPath,
+		)},
+		VolumeMounts: []corev1.VolumeMount{
+			{Name: "workspace", MountPath: stagingPath},
+		},
+	})
+}
+
 func (r *WarmPoolReconciler) injectedPullPolicy() corev1.PullPolicy {
 	switch corev1.PullPolicy(r.Config.ImagePullPolicy) {
 	case corev1.PullIfNotPresent:
@@ -853,9 +926,17 @@ func (r *WarmPoolReconciler) injectExecutorAgent(pod *corev1.Pod) {
 			corev1.VolumeMount{Name: "arl-socket", MountPath: "/var/run/arl"},
 		)
 
-		// Run executor agent in foreground (logs visible via kubectl logs).
-		// User process runs in background; agent is exec'd so it becomes PID 1.
-		agentExec := "exec /arl-bin/executor-agent --socket=/var/run/arl/exec.sock --workspace=" + r.Config.WorkspaceDir
+		// Resolve the actual workspace path from the volume mount (which may
+		// differ from the global Config.WorkspaceDir when a managed session
+		// overrides it, e.g. workspace_dir=/app for terminal-bench images).
+		workspaceArg := r.Config.WorkspaceDir
+		for _, vm := range c.VolumeMounts {
+			if vm.Name == "workspace" {
+				workspaceArg = vm.MountPath
+				break
+			}
+		}
+		agentExec := "exec /arl-bin/executor-agent --socket=/var/run/arl/exec.sock --workspace=" + workspaceArg
 		if len(c.Command) > 0 {
 			originalCmd := ""
 			if len(c.Command) >= 3 && (c.Command[0] == "/bin/sh" || c.Command[0] == "sh") && c.Command[1] == "-c" {

@@ -163,6 +163,44 @@ func (c *ExecutorClient) WriteFile(ctx context.Context, path string, content []b
 	}
 }
 
+func (c *ExecutorClient) ReadFile(ctx context.Context, path string) ([]byte, error) {
+	conn, err := c.dial()
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+
+	encoder := json.NewEncoder(conn)
+	decoder := json.NewDecoder(conn)
+
+	req := execagent.Request{
+		ID:   fmt.Sprintf("read-%d", time.Now().UnixNano()),
+		Type: "read_file",
+		Path: path,
+	}
+	if err := encoder.Encode(req); err != nil {
+		return nil, fmt.Errorf("send read_file request: %w", err)
+	}
+
+	for {
+		var resp execagent.Response
+		if err := decoder.Decode(&resp); err != nil {
+			return nil, fmt.Errorf("read read_file response: %w", err)
+		}
+		if resp.Error != "" {
+			return nil, fmt.Errorf("read_file error: %s", resp.Error)
+		}
+		if resp.Done {
+			return resp.Content, nil
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+	}
+}
+
 func (c *ExecutorClient) dial() (net.Conn, error) {
 	conn, err := net.DialTimeout("unix", c.socketPath, 5*time.Second)
 	if err != nil {

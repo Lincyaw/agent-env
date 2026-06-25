@@ -67,6 +67,8 @@ func (s *GRPCServer) Start() error {
 		grpc.StatsHandler(otelgrpc.NewServerHandler()),
 		grpc.UnaryInterceptor(grpcauth.UnaryServerInterceptor(s.grpcToken)),
 		grpc.StreamInterceptor(grpcauth.StreamServerInterceptor(s.grpcToken)),
+		grpc.MaxRecvMsgSize(64 * 1024 * 1024),
+		grpc.MaxSendMsgSize(64 * 1024 * 1024),
 	}
 	log.Printf("gRPC token authentication enabled")
 	s.grpcServer = grpc.NewServer(opts...)
@@ -130,6 +132,24 @@ func (s *GRPCServer) WriteFile(ctx context.Context, req *pb.WriteFileRequest) (*
 	return &pb.WriteFileResponse{
 		Path:         req.GetPath(),
 		BytesWritten: written,
+	}, nil
+}
+
+// ReadFile reads one file from the executor workspace.
+func (s *GRPCServer) ReadFile(ctx context.Context, req *pb.ReadFileRequest) (*pb.ReadFileResponse, error) {
+	if req.GetPath() == "" {
+		return nil, status.Error(codes.InvalidArgument, "path is required")
+	}
+
+	content, err := s.service.ReadFile(ctx, req.GetPath())
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "read file: %v", err)
+	}
+
+	return &pb.ReadFileResponse{
+		Path:      req.GetPath(),
+		Content:   content,
+		SizeBytes: int64(len(content)),
 	}, nil
 }
 

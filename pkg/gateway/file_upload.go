@@ -105,6 +105,30 @@ func (g *Gateway) UploadFile(ctx context.Context, sessionID string, req UploadFi
 	}, nil
 }
 
+func (g *Gateway) DownloadFile(ctx context.Context, sessionID string, filePath string) ([]byte, error) {
+	s, ok := g.store.Get(sessionID)
+	if !ok {
+		return nil, fmt.Errorf("session %s not found", sessionID)
+	}
+
+	relPath, err := sanitizeUploadPath(filePath)
+	if err != nil {
+		return nil, err
+	}
+
+	s.mu.RLock()
+	podIP := s.Info.PodIP
+	s.mu.RUnlock()
+
+	content, err := g.sidecarClient.ReadFile(ctx, podIP, relPath)
+	if err != nil {
+		return nil, fmt.Errorf("read file: %w", err)
+	}
+
+	g.touchLastTaskTime(sessionID)
+	return content, nil
+}
+
 func normalizeUploadFileRequest(req UploadFileRequest) (string, []byte, error) {
 	relPath, err := sanitizeUploadPath(req.Path)
 	if err != nil {

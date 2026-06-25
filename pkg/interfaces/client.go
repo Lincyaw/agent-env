@@ -15,6 +15,9 @@ type SidecarClient interface {
 	// WriteFile writes one file into the session workspace.
 	WriteFile(ctx context.Context, podIP string, path string, content []byte) (int64, error)
 
+	// ReadFile reads one file from the session workspace.
+	ReadFile(ctx context.Context, podIP string, path string) ([]byte, error)
+
 	// InteractiveShell opens a bidirectional shell session
 	InteractiveShell(ctx context.Context, podIP string) (ShellStream, error)
 

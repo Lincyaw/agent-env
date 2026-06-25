@@ -67,6 +67,10 @@ func (c *GRPCSidecarClient) getOrCreateConn(podIP string) (*grpc.ClientConn, err
 	opts := []grpc.DialOption{
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithStatsHandler(otelgrpc.NewClientHandler()),
+		grpc.WithDefaultCallOptions(
+			grpc.MaxCallRecvMsgSize(64*1024*1024),
+			grpc.MaxCallSendMsgSize(64*1024*1024),
+		),
 	}
 	if c.grpcToken != "" {
 		opts = append(opts,
@@ -318,6 +322,22 @@ func (c *GRPCSidecarClient) WriteFile(ctx context.Context, podIP string, path st
 		return 0, fmt.Errorf("gRPC WriteFile failed: %w", err)
 	}
 	return resp.GetBytesWritten(), nil
+}
+
+func (c *GRPCSidecarClient) ReadFile(ctx context.Context, podIP string, path string) ([]byte, error) {
+	conn, err := c.getOrCreateConn(podIP)
+	if err != nil {
+		return nil, err
+	}
+
+	client := pb.NewAgentServiceClient(conn)
+	resp, err := client.ReadFile(ctx, &pb.ReadFileRequest{
+		Path: path,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("gRPC ReadFile failed: %w", err)
+	}
+	return resp.GetContent(), nil
 }
 
 // InteractiveShell opens a bidirectional shell session via sidecar gRPC

@@ -12,6 +12,9 @@ service AgentService {
   // WriteFile writes one file into the executor workspace.
   rpc WriteFile(WriteFileRequest) returns (WriteFileResponse);
 
+  // ReadFile reads one file from the executor workspace.
+  rpc ReadFile(ReadFileRequest) returns (ReadFileResponse);
+
   // InteractiveShell provides bidirectional streaming for interactive shell sessions
   rpc InteractiveShell(stream ShellInput) returns (stream ShellOutput);
 }
@@ -43,6 +46,18 @@ message WriteFileRequest {
 message WriteFileResponse {
   string path = 1;
   int64 bytes_written = 2;
+}
+
+// ReadFileRequest reads raw bytes from a relative path inside the workspace.
+message ReadFileRequest {
+  string path = 1;
+}
+
+// ReadFileResponse returns the file content.
+message ReadFileResponse {
+  string path = 1;
+  bytes content = 2;
+  int64 size_bytes = 3;
 }
 
 // ShellInput represents input to an interactive shell session
