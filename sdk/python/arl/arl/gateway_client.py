@@ -174,6 +174,19 @@ class GatewayClient:
         self._handle_error(resp)
         return resp.content
 
+    def replay_from(
+        self,
+        session_id: str,
+        source_session_id: str,
+        up_to_step: int | None = None,
+    ) -> dict:
+        body: dict = {"sourceSessionID": source_session_id}
+        if up_to_step is not None:
+            body["upToStep"] = up_to_step
+        resp = self._client.post(f"/v1/sessions/{session_id}/replay", json=body)
+        self._handle_error(resp)
+        return resp.json()
+
     def restore(self, session_id: str, snapshot_id: str) -> None:
         resp = self._client.post(
             f"/v1/sessions/{session_id}/restore",

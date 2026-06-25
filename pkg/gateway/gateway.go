@@ -484,6 +484,81 @@ func (g *Gateway) ExecuteSteps(ctx context.Context, sessionID string, req Execut
 }
 
 // Restore restores a session to a previous snapshot by allocating a new pod and replaying steps.
+// ReplayFrom replays steps from a source session into the target session's sandbox.
+// This is the cross-session counterpart of Restore: instead of restoring a session
+// to its own earlier state, it replays another session's history into a fresh sandbox.
+func (g *Gateway) ReplayFrom(ctx context.Context, targetSessionID string, req ReplayRequest) (*ReplayResponse, error) {
+	sourceSession, ok := g.store.Get(req.SourceSessionID)
+	if !ok {
+		return nil, fmt.Errorf("source session %s not found", req.SourceSessionID)
+	}
+	targetSession, ok := g.store.Get(targetSessionID)
+	if !ok {
+		return nil, fmt.Errorf("target session %s not found", targetSessionID)
+	}
+
+	// Get source history
+	var records []StepRecord
+	if req.UpToStep != nil {
+		records = sourceSession.History.GetUpTo(*req.UpToStep)
+	} else {
+		records = sourceSession.History.GetAll()
+	}
+
+	targetSession.mu.RLock()
+	podIP := targetSession.Info.PodIP
+	targetSession.mu.RUnlock()
+
+	replayed := 0
+	errors := 0
+
+	for _, record := range records {
+		if record.Name == uploadFileStepName {
+			var uploadReq UploadFileRequest
+			replayInput := record.ReplayInput
+			if len(replayInput) == 0 {
+				replayInput = record.Input
+			}
+			if len(replayInput) == 0 {
+				errors++
+				continue
+			}
+			if err := json.Unmarshal(replayInput, &uploadReq); err != nil {
+				errors++
+				continue
+			}
+			relPath, payload, err := normalizeUploadFileRequest(uploadReq)
+			if err != nil {
+				errors++
+				continue
+			}
+			if _, err := g.sidecarClient.WriteFile(ctx, podIP, relPath, payload); err != nil {
+				errors++
+				continue
+			}
+		} else {
+			var step StepRequest
+			if err := json.Unmarshal(record.Input, &step); err != nil {
+				errors++
+				continue
+			}
+			execReq := &sidecar.ExecRequest{
+				Command:    step.Command,
+				Env:        step.Env,
+				WorkingDir: step.WorkDir,
+			}
+			if _, err := g.sidecarClient.Execute(ctx, podIP, execReq); err != nil {
+				errors++
+				continue
+			}
+		}
+		replayed++
+	}
+
+	g.touchLastTaskTime(targetSessionID)
+	return &ReplayResponse{StepsReplayed: replayed, Errors: errors}, nil
+}
+
 func (g *Gateway) Restore(ctx context.Context, sessionID string, snapshotID string) (retErr error) {
 	restoreStart := time.Now()
 	defer func() {

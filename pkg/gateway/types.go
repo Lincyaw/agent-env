@@ -91,6 +91,18 @@ type RestoreRequest struct {
 	SnapshotID string `json:"snapshotID"`
 }
 
+// ReplayRequest is the body for POST /v1/sessions/{id}/replay
+type ReplayRequest struct {
+	SourceSessionID string `json:"sourceSessionID"`
+	UpToStep        *int   `json:"upToStep,omitempty"`
+}
+
+// ReplayResponse is the response for POST /v1/sessions/{id}/replay
+type ReplayResponse struct {
+	StepsReplayed int `json:"stepsReplayed"`
+	Errors        int `json:"errors"`
+}
+
 // CreatePoolRequest is the body for POST /v1/pools
 type CreatePoolRequest struct {
 	Name          string                         `json:"name"`

@@ -36,6 +36,7 @@ func SetupRoutes(mux *http.ServeMux, gw *Gateway, authCfg *AuthConfig) {
 	mux.HandleFunc("POST /v1/sessions/{id}/files", user(handleUploadFile(gw)))
 	mux.HandleFunc("GET /v1/sessions/{id}/files/{path...}", user(handleDownloadFile(gw)))
 	mux.HandleFunc("POST /v1/sessions/{id}/restore", user(handleRestore(gw)))
+	mux.HandleFunc("POST /v1/sessions/{id}/replay", user(handleReplay(gw)))
 
 	// Interactive shell — WebSocket (user role; token may come via query param)
 	mux.HandleFunc("/v1/sessions/{id}/shell", user(handleShell(gw, authCfg)))
@@ -231,6 +232,32 @@ func handleDownloadFile(gw *Gateway) http.HandlerFunc {
 		w.Header().Set("Content-Disposition", "attachment; filename=\""+filePath+"\"")
 		w.WriteHeader(http.StatusOK)
 		w.Write(content)
+	}
+}
+
+func handleReplay(gw *Gateway) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		if checkOwnership(gw, w, r, id) == nil {
+			return
+		}
+
+		var req ReplayRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if req.SourceSessionID == "" {
+			writeError(w, http.StatusBadRequest, "sourceSessionID is required")
+			return
+		}
+
+		resp, err := gw.ReplayFrom(r.Context(), id, req)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, resp)
 	}
 }
 
