@@ -480,6 +480,10 @@ func (g *Gateway) ExecuteSteps(ctx context.Context, sessionID string, req Execut
 	// Update in-memory lastTaskTime for session idle tracking
 	g.touchLastTaskTime(sessionID)
 
+	if rs, ok := g.store.(*RedisStore); ok {
+		rs.Sync(sessionID)
+	}
+
 	return resp, nil
 }
 
