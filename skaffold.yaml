@@ -52,16 +52,16 @@ profiles:
 - name: k8s
   build:
     artifacts:
-    - image: 10.10.10.240/library/arl-operator
+    - image: opspai/arl-operator
       docker:
         dockerfile: Dockerfile.operator
-    - image: 10.10.10.240/library/arl-sidecar
+    - image: opspai/arl-sidecar
       docker:
         dockerfile: Dockerfile.sidecar
-    - image: 10.10.10.240/library/arl-gateway
+    - image: opspai/arl-gateway
       docker:
         dockerfile: Dockerfile.gateway
-    - image: 10.10.10.240/library/arl-executor-agent
+    - image: opspai/arl-executor-agent
       docker:
         dockerfile: Dockerfile.executor-agent
     tagPolicy:
@@ -78,10 +78,10 @@ profiles:
         valuesFiles:
           - auth-values.yaml
         setValues:
-          image.repository: 10.10.10.240/library/arl-operator
-          sidecar.image.repository: 10.10.10.240/library/arl-sidecar
-          gateway.image.repository: 10.10.10.240/library/arl-gateway
-          executorAgent.image.repository: 10.10.10.240/library/arl-executor-agent
+          image.repository: opspai/arl-operator
+          sidecar.image.repository: opspai/arl-sidecar
+          gateway.image.repository: opspai/arl-gateway
+          executorAgent.image.repository: opspai/arl-executor-agent
           metrics.serviceMonitor.enabled: "false"
           gateway.service.type: NodePort
           gateway.service.nodePort: "30076"
@@ -237,10 +237,10 @@ profiles:
 - name: k8s-with-samples
   build:
     artifacts:
-    - image: 10.10.10.240/library/arl-operator
+    - image: opspai/arl-operator
       docker:
         dockerfile: Dockerfile.operator
-    - image: 10.10.10.240/library/arl-sidecar
+    - image: opspai/arl-sidecar
       docker:
         dockerfile: Dockerfile.sidecar
     tagPolicy:
@@ -254,8 +254,8 @@ profiles:
         createNamespace: true
         setValues:
           crds.install: true
-          image.repository: 10.10.10.240/library/arl-operator
-          sidecar.image.repository: 10.10.10.240/library/arl-sidecar
+          image.repository: opspai/arl-operator
+          sidecar.image.repository: opspai/arl-sidecar
         setValueTemplates:
           image.tag: "{{.IMAGE_TAG}}"
           sidecar.image.tag: "{{.IMAGE_TAG2}}"
