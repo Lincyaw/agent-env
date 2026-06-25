@@ -1144,13 +1144,16 @@ func (g *Gateway) CreateManagedSession(ctx context.Context, req CreateManagedSes
 		return nil, fmt.Errorf("create session: %w", err)
 	}
 
-	// Mark the session as managed
+	// Mark the session as managed and persist the experiment index.
 	s, ok := g.store.Get(info.ID)
 	if ok {
 		s.mu.Lock()
 		s.managed = true
 		s.experimentID = req.ExperimentID
 		s.mu.Unlock()
+		if rs, ok := g.store.(*RedisStore); ok {
+			rs.Sync(info.ID)
+		}
 	}
 
 	return &ManagedSessionInfo{
