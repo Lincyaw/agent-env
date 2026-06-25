@@ -12,8 +12,9 @@ import (
 )
 
 const (
-	redisSessionPrefix = "arl:session:"
-	redisCountKey      = "arl:session_count"
+	redisSessionPrefix     = "arl:session:"
+	redisExperimentPrefix  = "arl:experiment:"
+	redisCountKey          = "arl:session_count"
 )
 
 // redisSessionData is the JSON-serializable representation of a session
@@ -173,13 +174,9 @@ func (rs *RedisStore) Set(sessionID string, s *session) {
 
 func (rs *RedisStore) Delete(sessionID string) {
 	rs.cache.Delete(sessionID)
-
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-
-	if err := rs.client.Del(ctx, rs.redisKey(sessionID)).Err(); err != nil {
-		log.Printf("Warning: failed to delete session %s from Redis: %v", sessionID, err)
-	}
+	// Keep the Redis record alive — its TTL handles eventual cleanup.
+	// This allows replay_from to read a deleted session's history for
+	// fork-based environment restoration.
 }
 
 func (rs *RedisStore) Range(fn func(sessionID string, s *session) bool) {
@@ -242,4 +239,24 @@ func (rs *RedisStore) persistToRedis(sessionID string, s *session) {
 	if err := rs.client.Set(ctx, rs.redisKey(sessionID), raw, rs.ttl).Err(); err != nil {
 		log.Printf("Warning: failed to persist session %s to Redis: %v", sessionID, err)
 	}
+
+	if data.ExperimentID != "" {
+		expKey := redisExperimentPrefix + data.ExperimentID
+		rs.client.SAdd(ctx, expKey, sessionID)
+		rs.client.Expire(ctx, expKey, rs.ttl)
+	}
+}
+
+// FindByExperiment returns session IDs associated with an experiment,
+// including sessions that have been soft-deleted from cache but still
+// exist in Redis (within the TTL window).
+func (rs *RedisStore) FindByExperiment(experimentID string) []string {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	ids, err := rs.client.SMembers(ctx, redisExperimentPrefix+experimentID).Result()
+	if err != nil {
+		return nil
+	}
+	return ids
 }

@@ -1160,10 +1160,12 @@ func (g *Gateway) CreateManagedSession(ctx context.Context, req CreateManagedSes
 	}, nil
 }
 
-// ListExperimentSessions returns all active sessions for an experiment.
+// ListExperimentSessions returns all sessions for an experiment,
+// including soft-deleted sessions whose history is still in Redis.
 func (g *Gateway) ListExperimentSessions(experimentID string) []ManagedSessionInfo {
 	results := make([]ManagedSessionInfo, 0)
-	g.store.Range(func(_ string, s *session) bool {
+	seen := make(map[string]bool)
+	g.store.Range(func(id string, s *session) bool {
 		s.mu.RLock()
 		if s.managed && s.experimentID == experimentID {
 			results = append(results, ManagedSessionInfo{
@@ -1171,10 +1173,29 @@ func (g *Gateway) ListExperimentSessions(experimentID string) []ManagedSessionIn
 				ExperimentID: s.experimentID,
 				Managed:      true,
 			})
+			seen[id] = true
 		}
 		s.mu.RUnlock()
 		return true
 	})
+
+	if rs, ok := g.store.(*RedisStore); ok {
+		for _, id := range rs.FindByExperiment(experimentID) {
+			if seen[id] {
+				continue
+			}
+			if s, ok := rs.Get(id); ok {
+				s.mu.RLock()
+				results = append(results, ManagedSessionInfo{
+					SessionInfo:  s.Info,
+					ExperimentID: s.experimentID,
+					Managed:      true,
+				})
+				s.mu.RUnlock()
+			}
+		}
+	}
+
 	return results
 }
 
