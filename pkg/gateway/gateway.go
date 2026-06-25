@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
 	"regexp"
 	"strconv"
 	"strings"
@@ -485,6 +486,168 @@ func (g *Gateway) ExecuteSteps(ctx context.Context, sessionID string, req Execut
 	}
 
 	return resp, nil
+}
+
+// sseOutputEvent is the partial output streamed as an SSE "output" event.
+type sseOutputEvent struct {
+	Stdout string `json:"stdout"`
+	Stderr string `json:"stderr"`
+}
+
+// ExecuteStepsSSE streams step execution as SSE events to the HTTP response writer.
+// Each gRPC chunk produces an "output" event; each completed step produces a "result" event.
+// History, metrics, and trajectory recording are identical to ExecuteSteps.
+func (g *Gateway) ExecuteStepsSSE(w http.ResponseWriter, ctx context.Context, sessionID string, req ExecuteRequest) {
+	ctx, span := otel.Tracer("gateway").Start(ctx, "Gateway.ExecuteStepsSSE",
+		traceStartAttrs("session.id", sessionID),
+	)
+	span.SetAttributes(attribute.Int("steps.count", len(req.Steps)))
+	defer span.End()
+
+	s, ok := g.store.Get(sessionID)
+	if !ok {
+		err := fmt.Errorf("session %s not found", sessionID)
+		recordSpanErr(span, err)
+		http.Error(w, fmt.Sprintf(`{"error":%q}`, err.Error()), http.StatusNotFound)
+		return
+	}
+
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, `{"error":"streaming not supported"}`, http.StatusInternalServerError)
+		return
+	}
+
+	s.mu.RLock()
+	podIP := s.Info.PodIP
+	s.mu.RUnlock()
+	span.SetAttributes(attribute.String("pod.ip", podIP))
+
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+	w.WriteHeader(http.StatusOK)
+	flusher.Flush()
+
+	totalStart := time.Now()
+
+	for _, step := range req.Steps {
+		start := time.Now()
+		inputJSON, _ := json.Marshal(step)
+
+		var result StepResult
+		result.Name = step.Name
+		result.Input = inputJSON
+		result.Timestamp = start
+
+		execReq := &sidecar.ExecRequest{
+			Command:    step.Command,
+			Env:        step.Env,
+			WorkingDir: step.WorkDir,
+		}
+
+		grpcStart := time.Now()
+		streamCh, err := g.sidecarClient.ExecuteStream(ctx, podIP, execReq)
+		if g.metrics != nil {
+			g.metrics.RecordSidecarCallDuration("ExecuteStream", time.Since(grpcStart))
+		}
+
+		if err != nil {
+			result.Output.Stderr = err.Error()
+			result.Output.ExitCode = 1
+		} else {
+			var stdout, stderr strings.Builder
+			for chunk := range streamCh {
+				stdoutChunk := chunk.GetStdout()
+				stderrChunk := chunk.GetStderr()
+
+				if stdoutChunk != "" {
+					stdout.WriteString(stdoutChunk)
+				}
+				if stderrChunk != "" {
+					stderr.WriteString(stderrChunk)
+				}
+
+				// Stream partial output as SSE event
+				if stdoutChunk != "" || stderrChunk != "" {
+					outEvt := sseOutputEvent{Stdout: stdoutChunk, Stderr: stderrChunk}
+					data, _ := json.Marshal(outEvt)
+					fmt.Fprintf(w, "event: output\ndata: %s\n\n", data)
+					flusher.Flush()
+				}
+
+				if chunk.IsDone() {
+					result.Output.ExitCode = chunk.GetExitCode()
+				}
+			}
+			result.Output.Stdout = stdout.String()
+			result.Output.Stderr = stderr.String()
+		}
+
+		result.DurationMs = time.Since(start).Milliseconds()
+
+		// Record step metrics (same as ExecuteSteps)
+		if g.metrics != nil {
+			stepType := step.Name
+			if stepType == "" {
+				stepType = "unnamed"
+			}
+			g.metrics.RecordGatewayStepDuration(stepType, time.Since(start))
+			outcome := "success"
+			if result.Output.ExitCode != 0 {
+				outcome = "error"
+			}
+			g.metrics.IncrementGatewayStepResult(stepType, outcome)
+		}
+
+		// Record in history (same as ExecuteSteps)
+		stepRecord := StepRecord{
+			Name:       result.Name,
+			Input:      result.Input,
+			Output:     result.Output,
+			DurationMs: result.DurationMs,
+			Timestamp:  result.Timestamp,
+		}
+		globalIdx := s.History.Add(stepRecord)
+
+		result.Index = globalIdx
+		result.SnapshotID = fmt.Sprintf("%d", globalIdx)
+
+		// Write to ClickHouse trajectory (same as ExecuteSteps)
+		if g.trajCh != nil {
+			obsJSON, _ := json.Marshal(result.Output)
+			entry := audit.TrajectoryEntry{
+				SessionID:   sessionID,
+				Step:        globalIdx,
+				Name:        result.Name,
+				Action:      result.Input,
+				Observation: obsJSON,
+				SnapshotID:  result.SnapshotID,
+				DurationMs:  result.DurationMs,
+				Timestamp:   result.Timestamp,
+			}
+			select {
+			case g.trajCh <- entry:
+			default:
+				log.Printf("Warning: trajectory channel full, dropping entry for session %s step %d", sessionID, globalIdx)
+			}
+		}
+
+		// Stream the completed step result as SSE event
+		resultData, _ := json.Marshal(result)
+		fmt.Fprintf(w, "event: result\ndata: %s\n\n", resultData)
+		flusher.Flush()
+	}
+
+	_ = time.Since(totalStart) // totalDurationMs available if needed
+
+	// Update in-memory lastTaskTime for session idle tracking (same as ExecuteSteps)
+	g.touchLastTaskTime(sessionID)
+
+	if rs, ok := g.store.(*RedisStore); ok {
+		rs.Sync(sessionID)
+	}
 }
 
 // Restore restores a session to a previous snapshot by allocating a new pod and replaying steps.

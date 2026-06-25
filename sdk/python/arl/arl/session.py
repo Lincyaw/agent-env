@@ -5,6 +5,7 @@ from __future__ import annotations
 import base64
 import json
 import re
+from collections.abc import Callable
 from typing import Any
 
 from arl.configenv import ConfigEnvSpec
@@ -163,19 +164,22 @@ class SandboxSession:
         self,
         steps: list[dict[str, Any]],
         trace_id: str | None = None,
+        on_output: Callable[[str, str], None] | None = None,
     ) -> ExecuteResponse:
         """Execute steps in the sandbox. Returns synchronously.
 
         Args:
             steps: List of step dicts, each with 'name' and 'command'.
             trace_id: Optional trace ID for distributed tracing.
+            on_output: Optional callback invoked with (stdout_chunk, stderr_chunk)
+                for each partial output event during streaming execution.
 
         Returns:
             ExecuteResponse with per-step results, snapshot IDs, and durations.
         """
         if self._session_id is None:
             raise RuntimeError("No session created. Call create_sandbox() first.")
-        return self._client.execute(self._session_id, steps, trace_id)
+        return self._client.execute(self._session_id, steps, trace_id, on_output=on_output)
 
     def restore(self, snapshot_id: str) -> None:
         """Restore workspace to a previous step's snapshot.

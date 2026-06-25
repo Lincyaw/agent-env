@@ -167,6 +167,11 @@ func handleExecute(gw *Gateway) http.HandlerFunc {
 			return
 		}
 
+		if r.Header.Get("Accept") == "text/event-stream" {
+			gw.ExecuteStepsSSE(w, r.Context(), id, req)
+			return
+		}
+
 		resp, err := gw.ExecuteSteps(r.Context(), id, req)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())

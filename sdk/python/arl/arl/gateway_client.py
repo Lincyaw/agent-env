@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import json
 import os
+from collections.abc import Callable
 from typing import Any
 
 import httpx
@@ -145,13 +147,101 @@ class GatewayClient:
         session_id: str,
         steps: list[dict[str, Any]],
         trace_id: str | None = None,
+        on_output: Callable[[str, str], None] | None = None,
     ) -> ExecuteResponse:
         body: dict[str, Any] = {"steps": steps}
         if trace_id is not None:
             body["traceID"] = trace_id
-        resp = self._client.post(f"/v1/sessions/{session_id}/execute", json=body)
-        self._handle_error(resp)
-        return ExecuteResponse.model_validate(resp.json())
+
+        headers = {"Accept": "text/event-stream"}
+        try:
+            return self._execute_sse(session_id, body, headers, on_output)
+        except (httpx.HTTPStatusError, GatewayError):
+            raise
+        except Exception:
+            # Server does not support SSE (old version) — fall back to non-streaming
+            resp = self._client.post(f"/v1/sessions/{session_id}/execute", json=body)
+            self._handle_error(resp)
+            return ExecuteResponse.model_validate(resp.json())
+
+    def _execute_sse(
+        self,
+        session_id: str,
+        body: dict[str, Any],
+        headers: dict[str, str],
+        on_output: Callable[[str, str], None] | None,
+    ) -> ExecuteResponse:
+        results: list[StepResult] = []
+        with self._client.stream(
+            "POST",
+            f"/v1/sessions/{session_id}/execute",
+            json=body,
+            headers=headers,
+        ) as response:
+            if response.status_code >= 400:
+                # Read the full body for error handling
+                response.read()
+                try:
+                    err = ErrorResponse.model_validate(response.json())
+                    raise GatewayError(response.status_code, err.error, err.detail)
+                except (ValueError, KeyError):
+                    raise GatewayError(response.status_code, response.text) from None
+
+            content_type = response.headers.get("content-type", "")
+            if "text/event-stream" not in content_type:
+                # Server responded with JSON (old version), parse directly
+                response.read()
+                return ExecuteResponse.model_validate(response.json())
+
+            # Parse SSE stream
+            event_type = ""
+            data_buf = ""
+            for line in response.iter_lines():
+                if line.startswith("event: "):
+                    event_type = line[7:]
+                    data_buf = ""
+                elif line.startswith("data: "):
+                    data_buf = line[6:]
+                elif line == "":
+                    # Empty line = end of event
+                    if event_type and data_buf:
+                        self._handle_sse_event(
+                            event_type, data_buf, results, on_output
+                        )
+                    event_type = ""
+                    data_buf = ""
+
+            # Handle any trailing event without final blank line
+            if event_type and data_buf:
+                self._handle_sse_event(event_type, data_buf, results, on_output)
+
+        total_ms = sum(r.duration_ms for r in results)
+        return ExecuteResponse(
+            sessionID=session_id,
+            results=results,
+            totalDurationMs=total_ms,
+        )
+
+    @staticmethod
+    def _handle_sse_event(
+        event_type: str,
+        data: str,
+        results: list[StepResult],
+        on_output: Callable[[str, str], None] | None,
+    ) -> None:
+        if event_type == "output":
+            if on_output is not None:
+                try:
+                    parsed = json.loads(data)
+                    on_output(parsed.get("stdout", ""), parsed.get("stderr", ""))
+                except (json.JSONDecodeError, TypeError):
+                    pass
+        elif event_type == "result":
+            try:
+                result = StepResult.model_validate(json.loads(data))
+                results.append(result)
+            except (json.JSONDecodeError, ValueError):
+                pass
 
     def upload_file(
         self,
