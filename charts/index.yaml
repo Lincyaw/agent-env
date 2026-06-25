@@ -2,8 +2,29 @@ apiVersion: v1
 entries:
   arl-operator:
   - apiVersion: v2
+    appVersion: 0.11.0
+    created: "2026-06-25T19:28:21.340515806Z"
+    description: A Helm chart for deploying the ARL (Agent Runtime Layer) Operator
+    digest: e11a48d64e9dd01679e8b4d00e5d46aeccde03d6c8401d45c49e5e3256730108
+    home: https://github.com/Lincyaw/agent-env
+    keywords:
+    - kubernetes
+    - operator
+    - agent
+    - warmpool
+    maintainers:
+    - name: Lincyaw
+      url: https://github.com/Lincyaw
+    name: arl-operator
+    sources:
+    - https://github.com/Lincyaw/agent-env
+    type: application
+    urls:
+    - https://lincyaw.github.io/agent-env/charts/arl-operator-0.11.0.tgz
+    version: 0.11.0
+  - apiVersion: v2
     appVersion: 0.10.0
-    created: "2026-06-25T15:01:50.915501236Z"
+    created: "2026-06-25T19:28:21.339147534Z"
     description: A Helm chart for deploying the ARL (Agent Runtime Layer) Operator
     digest: 105c1afd3c8bcf9899fc775f051fe5743e149e0b6913df00bf519422e0993a81
     home: https://github.com/Lincyaw/agent-env
@@ -24,7 +45,7 @@ entries:
     version: 0.10.0
   - apiVersion: v2
     appVersion: 0.9.0
-    created: "2026-06-25T15:01:50.923925415Z"
+    created: "2026-06-25T19:28:21.347916177Z"
     description: A Helm chart for deploying the ARL (Agent Runtime Layer) Operator
     digest: 929fc4af6df0071f686d4b37b5c77178edb9af59c3fb8166692fe93afd5b5792
     home: https://github.com/Lincyaw/agent-env
@@ -45,7 +66,7 @@ entries:
     version: 0.9.0
   - apiVersion: v2
     appVersion: 0.8.0
-    created: "2026-06-25T15:01:50.921780102Z"
+    created: "2026-06-25T19:28:21.345761979Z"
     description: A Helm chart for deploying the ARL (Agent Runtime Layer) Operator
     digest: 01f8b5daa5cbb4e595afb0c1c39b9d92d286dfbe71c2e3f88fd3c114ab99ff5b
     home: https://github.com/Lincyaw/agent-env
@@ -66,7 +87,7 @@ entries:
     version: 0.8.0
   - apiVersion: v2
     appVersion: 0.7.0
-    created: "2026-06-25T15:01:50.919602962Z"
+    created: "2026-06-25T19:28:21.343184833Z"
     description: A Helm chart for deploying the ARL (Agent Runtime Layer) Operator
     digest: 17da1ce8c9b8a0e4d7ef3c0fae80fe3fb68d475ca3c31b6996a213038583eef7
     home: https://github.com/Lincyaw/agent-env
@@ -87,7 +108,7 @@ entries:
     version: 0.7.0
   - apiVersion: v2
     appVersion: 0.6.0
-    created: "2026-06-25T15:01:50.916901512Z"
+    created: "2026-06-25T19:28:21.341854963Z"
     description: A Helm chart for deploying the ARL (Agent Runtime Layer) Operator
     digest: 6153bca8b205d0f615b3c023cba8dd8bf57c7351c481ede83ad7f69c1b7c8b35
     home: https://github.com/Lincyaw/agent-env
@@ -106,4 +127,4 @@ entries:
     urls:
     - https://lincyaw.github.io/agent-env/charts/arl-operator-0.6.0.tgz
     version: 0.6.0
-generated: "2026-06-25T15:01:50.913909809Z"
+generated: "2026-06-25T19:28:21.33678039Z"
