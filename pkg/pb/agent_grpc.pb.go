@@ -23,6 +23,7 @@ const (
 	AgentService_WriteFile_FullMethodName        = "/arl.sidecar.AgentService/WriteFile"
 	AgentService_ReadFile_FullMethodName         = "/arl.sidecar.AgentService/ReadFile"
 	AgentService_InteractiveShell_FullMethodName = "/arl.sidecar.AgentService/InteractiveShell"
+	AgentService_StreamLogs_FullMethodName       = "/arl.sidecar.AgentService/StreamLogs"
 )
 
 // AgentServiceClient is the client API for AgentService service.
@@ -39,6 +40,8 @@ type AgentServiceClient interface {
 	ReadFile(ctx context.Context, in *ReadFileRequest, opts ...grpc.CallOption) (*ReadFileResponse, error)
 	// InteractiveShell provides bidirectional streaming for interactive shell sessions
 	InteractiveShell(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[ShellInput, ShellOutput], error)
+	// StreamLogs streams log entries from the sidecar ring buffer.
+	StreamLogs(ctx context.Context, in *LogsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[LogEntry], error)
 }
 
 type agentServiceClient struct {
@@ -101,6 +104,25 @@ func (c *agentServiceClient) InteractiveShell(ctx context.Context, opts ...grpc.
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type AgentService_InteractiveShellClient = grpc.BidiStreamingClient[ShellInput, ShellOutput]
 
+func (c *agentServiceClient) StreamLogs(ctx context.Context, in *LogsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[LogEntry], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &AgentService_ServiceDesc.Streams[2], AgentService_StreamLogs_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[LogsRequest, LogEntry]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type AgentService_StreamLogsClient = grpc.ServerStreamingClient[LogEntry]
+
 // AgentServiceServer is the server API for AgentService service.
 // All implementations must embed UnimplementedAgentServiceServer
 // for forward compatibility.
@@ -115,6 +137,8 @@ type AgentServiceServer interface {
 	ReadFile(context.Context, *ReadFileRequest) (*ReadFileResponse, error)
 	// InteractiveShell provides bidirectional streaming for interactive shell sessions
 	InteractiveShell(grpc.BidiStreamingServer[ShellInput, ShellOutput]) error
+	// StreamLogs streams log entries from the sidecar ring buffer.
+	StreamLogs(*LogsRequest, grpc.ServerStreamingServer[LogEntry]) error
 	mustEmbedUnimplementedAgentServiceServer()
 }
 
@@ -136,6 +160,9 @@ func (UnimplementedAgentServiceServer) ReadFile(context.Context, *ReadFileReques
 }
 func (UnimplementedAgentServiceServer) InteractiveShell(grpc.BidiStreamingServer[ShellInput, ShellOutput]) error {
 	return status.Error(codes.Unimplemented, "method InteractiveShell not implemented")
+}
+func (UnimplementedAgentServiceServer) StreamLogs(*LogsRequest, grpc.ServerStreamingServer[LogEntry]) error {
+	return status.Error(codes.Unimplemented, "method StreamLogs not implemented")
 }
 func (UnimplementedAgentServiceServer) mustEmbedUnimplementedAgentServiceServer() {}
 func (UnimplementedAgentServiceServer) testEmbeddedByValue()                      {}
@@ -212,6 +239,17 @@ func _AgentService_InteractiveShell_Handler(srv interface{}, stream grpc.ServerS
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type AgentService_InteractiveShellServer = grpc.BidiStreamingServer[ShellInput, ShellOutput]
 
+func _AgentService_StreamLogs_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(LogsRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(AgentServiceServer).StreamLogs(m, &grpc.GenericServerStream[LogsRequest, LogEntry]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type AgentService_StreamLogsServer = grpc.ServerStreamingServer[LogEntry]
+
 // AgentService_ServiceDesc is the grpc.ServiceDesc for AgentService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -239,6 +277,11 @@ var AgentService_ServiceDesc = grpc.ServiceDesc{
 			Handler:       _AgentService_InteractiveShell_Handler,
 			ServerStreams: true,
 			ClientStreams: true,
+		},
+		{
+			StreamName:    "StreamLogs",
+			Handler:       _AgentService_StreamLogs_Handler,
+			ServerStreams: true,
 		},
 	},
 	Metadata: "proto/agent.proto",

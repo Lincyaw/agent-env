@@ -165,9 +165,11 @@ type StepResult struct {
 type PoolInfo struct {
 	Name              string          `json:"name"`
 	Namespace         string          `json:"namespace"`
+	Image             string          `json:"image,omitempty"`
 	Replicas          int32           `json:"replicas"`
 	ReadyReplicas     int32           `json:"readyReplicas"`
 	AllocatedReplicas int32           `json:"allocatedReplicas"`
+	CreatedAt         time.Time       `json:"createdAt,omitempty"`
 	Conditions        []PoolCondition `json:"conditions,omitempty"`
 }
 
@@ -177,6 +179,21 @@ type PoolCondition struct {
 	Status  string `json:"status"`
 	Reason  string `json:"reason"`
 	Message string `json:"message"`
+}
+
+// SessionListItem extends SessionInfo for list responses.
+type SessionListItem struct {
+	SessionInfo
+	Managed      bool   `json:"managed,omitempty"`
+	ExperimentID string `json:"experimentId,omitempty"`
+}
+
+// ExperimentSummary describes an experiment with aggregate info.
+type ExperimentSummary struct {
+	ExperimentID string `json:"experimentId"`
+	SessionCount int    `json:"sessionCount"`
+	PoolRef      string `json:"poolRef,omitempty"`
+	Namespace    string `json:"namespace,omitempty"`
 }
 
 // ErrorResponse is a generic error response

@@ -17,6 +17,9 @@ service AgentService {
 
   // InteractiveShell provides bidirectional streaming for interactive shell sessions
   rpc InteractiveShell(stream ShellInput) returns (stream ShellOutput);
+
+  // StreamLogs streams log entries from the sidecar ring buffer.
+  rpc StreamLogs(LogsRequest) returns (stream LogEntry);
 }
 
 // ExecRequest specifies a command to execute
@@ -76,4 +79,18 @@ message ShellOutput {
   string data = 1;        // Stdout/stderr data from the shell
   int32 exit_code = 2;    // Exit code (set when shell exits)
   bool closed = 3;        // True when shell session has ended
+}
+
+// LogsRequest configures log streaming
+message LogsRequest {
+  bool follow = 1;        // Follow new log lines (like tail -f)
+  int32 tail_lines = 2;   // Number of recent lines to return (0 = all buffered)
+}
+
+// LogEntry is a single log line
+message LogEntry {
+  string timestamp = 1;   // RFC3339Nano
+  string level = 2;       // info, warn, error
+  string message = 3;     // Log line content
+  string source = 4;      // "sidecar", "executor", "exec"
 }

@@ -547,6 +547,128 @@ func (x *ShellOutput) GetClosed() bool {
 	return false
 }
 
+// LogsRequest configures log streaming
+type LogsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Follow        bool                   `protobuf:"varint,1,opt,name=follow,proto3" json:"follow,omitempty"`                        // Follow new log lines (like tail -f)
+	TailLines     int32                  `protobuf:"varint,2,opt,name=tail_lines,json=tailLines,proto3" json:"tail_lines,omitempty"` // Number of recent lines to return (0 = all buffered)
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LogsRequest) Reset() {
+	*x = LogsRequest{}
+	mi := &file_proto_agent_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LogsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LogsRequest) ProtoMessage() {}
+
+func (x *LogsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_agent_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LogsRequest.ProtoReflect.Descriptor instead.
+func (*LogsRequest) Descriptor() ([]byte, []int) {
+	return file_proto_agent_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *LogsRequest) GetFollow() bool {
+	if x != nil {
+		return x.Follow
+	}
+	return false
+}
+
+func (x *LogsRequest) GetTailLines() int32 {
+	if x != nil {
+		return x.TailLines
+	}
+	return 0
+}
+
+// LogEntry is a single log line
+type LogEntry struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Timestamp     string                 `protobuf:"bytes,1,opt,name=timestamp,proto3" json:"timestamp,omitempty"` // RFC3339Nano
+	Level         string                 `protobuf:"bytes,2,opt,name=level,proto3" json:"level,omitempty"`         // info, warn, error
+	Message       string                 `protobuf:"bytes,3,opt,name=message,proto3" json:"message,omitempty"`     // Log line content
+	Source        string                 `protobuf:"bytes,4,opt,name=source,proto3" json:"source,omitempty"`       // "sidecar", "executor", "exec"
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *LogEntry) Reset() {
+	*x = LogEntry{}
+	mi := &file_proto_agent_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *LogEntry) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*LogEntry) ProtoMessage() {}
+
+func (x *LogEntry) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_agent_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use LogEntry.ProtoReflect.Descriptor instead.
+func (*LogEntry) Descriptor() ([]byte, []int) {
+	return file_proto_agent_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *LogEntry) GetTimestamp() string {
+	if x != nil {
+		return x.Timestamp
+	}
+	return ""
+}
+
+func (x *LogEntry) GetLevel() string {
+	if x != nil {
+		return x.Level
+	}
+	return ""
+}
+
+func (x *LogEntry) GetMessage() string {
+	if x != nil {
+		return x.Message
+	}
+	return ""
+}
+
+func (x *LogEntry) GetSource() string {
+	if x != nil {
+		return x.Source
+	}
+	return ""
+}
+
 var File_proto_agent_proto protoreflect.FileDescriptor
 
 const file_proto_agent_proto_rawDesc = "" +
@@ -593,12 +715,23 @@ const file_proto_agent_proto_rawDesc = "" +
 	"\vShellOutput\x12\x12\n" +
 	"\x04data\x18\x01 \x01(\tR\x04data\x12\x1b\n" +
 	"\texit_code\x18\x02 \x01(\x05R\bexitCode\x12\x16\n" +
-	"\x06closed\x18\x03 \x01(\bR\x06closed2\xab\x02\n" +
+	"\x06closed\x18\x03 \x01(\bR\x06closed\"D\n" +
+	"\vLogsRequest\x12\x16\n" +
+	"\x06follow\x18\x01 \x01(\bR\x06follow\x12\x1d\n" +
+	"\n" +
+	"tail_lines\x18\x02 \x01(\x05R\ttailLines\"p\n" +
+	"\bLogEntry\x12\x1c\n" +
+	"\ttimestamp\x18\x01 \x01(\tR\ttimestamp\x12\x14\n" +
+	"\x05level\x18\x02 \x01(\tR\x05level\x12\x18\n" +
+	"\amessage\x18\x03 \x01(\tR\amessage\x12\x16\n" +
+	"\x06source\x18\x04 \x01(\tR\x06source2\xec\x02\n" +
 	"\fAgentService\x12;\n" +
 	"\aExecute\x12\x18.arl.sidecar.ExecRequest\x1a\x14.arl.sidecar.ExecLog0\x01\x12J\n" +
 	"\tWriteFile\x12\x1d.arl.sidecar.WriteFileRequest\x1a\x1e.arl.sidecar.WriteFileResponse\x12G\n" +
 	"\bReadFile\x12\x1c.arl.sidecar.ReadFileRequest\x1a\x1d.arl.sidecar.ReadFileResponse\x12I\n" +
-	"\x10InteractiveShell\x12\x17.arl.sidecar.ShellInput\x1a\x18.arl.sidecar.ShellOutput(\x010\x01B%Z#github.com/Lincyaw/agent-env/pkg/pbb\x06proto3"
+	"\x10InteractiveShell\x12\x17.arl.sidecar.ShellInput\x1a\x18.arl.sidecar.ShellOutput(\x010\x01\x12?\n" +
+	"\n" +
+	"StreamLogs\x12\x18.arl.sidecar.LogsRequest\x1a\x15.arl.sidecar.LogEntry0\x01B%Z#github.com/Lincyaw/agent-env/pkg/pbb\x06proto3"
 
 var (
 	file_proto_agent_proto_rawDescOnce sync.Once
@@ -612,7 +745,7 @@ func file_proto_agent_proto_rawDescGZIP() []byte {
 	return file_proto_agent_proto_rawDescData
 }
 
-var file_proto_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 9)
+var file_proto_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
 var file_proto_agent_proto_goTypes = []any{
 	(*ExecRequest)(nil),       // 0: arl.sidecar.ExecRequest
 	(*ExecLog)(nil),           // 1: arl.sidecar.ExecLog
@@ -622,23 +755,27 @@ var file_proto_agent_proto_goTypes = []any{
 	(*ReadFileResponse)(nil),  // 5: arl.sidecar.ReadFileResponse
 	(*ShellInput)(nil),        // 6: arl.sidecar.ShellInput
 	(*ShellOutput)(nil),       // 7: arl.sidecar.ShellOutput
-	nil,                       // 8: arl.sidecar.ExecRequest.EnvEntry
+	(*LogsRequest)(nil),       // 8: arl.sidecar.LogsRequest
+	(*LogEntry)(nil),          // 9: arl.sidecar.LogEntry
+	nil,                       // 10: arl.sidecar.ExecRequest.EnvEntry
 }
 var file_proto_agent_proto_depIdxs = []int32{
-	8, // 0: arl.sidecar.ExecRequest.env:type_name -> arl.sidecar.ExecRequest.EnvEntry
-	0, // 1: arl.sidecar.AgentService.Execute:input_type -> arl.sidecar.ExecRequest
-	2, // 2: arl.sidecar.AgentService.WriteFile:input_type -> arl.sidecar.WriteFileRequest
-	4, // 3: arl.sidecar.AgentService.ReadFile:input_type -> arl.sidecar.ReadFileRequest
-	6, // 4: arl.sidecar.AgentService.InteractiveShell:input_type -> arl.sidecar.ShellInput
-	1, // 5: arl.sidecar.AgentService.Execute:output_type -> arl.sidecar.ExecLog
-	3, // 6: arl.sidecar.AgentService.WriteFile:output_type -> arl.sidecar.WriteFileResponse
-	5, // 7: arl.sidecar.AgentService.ReadFile:output_type -> arl.sidecar.ReadFileResponse
-	7, // 8: arl.sidecar.AgentService.InteractiveShell:output_type -> arl.sidecar.ShellOutput
-	5, // [5:9] is the sub-list for method output_type
-	1, // [1:5] is the sub-list for method input_type
-	1, // [1:1] is the sub-list for extension type_name
-	1, // [1:1] is the sub-list for extension extendee
-	0, // [0:1] is the sub-list for field type_name
+	10, // 0: arl.sidecar.ExecRequest.env:type_name -> arl.sidecar.ExecRequest.EnvEntry
+	0,  // 1: arl.sidecar.AgentService.Execute:input_type -> arl.sidecar.ExecRequest
+	2,  // 2: arl.sidecar.AgentService.WriteFile:input_type -> arl.sidecar.WriteFileRequest
+	4,  // 3: arl.sidecar.AgentService.ReadFile:input_type -> arl.sidecar.ReadFileRequest
+	6,  // 4: arl.sidecar.AgentService.InteractiveShell:input_type -> arl.sidecar.ShellInput
+	8,  // 5: arl.sidecar.AgentService.StreamLogs:input_type -> arl.sidecar.LogsRequest
+	1,  // 6: arl.sidecar.AgentService.Execute:output_type -> arl.sidecar.ExecLog
+	3,  // 7: arl.sidecar.AgentService.WriteFile:output_type -> arl.sidecar.WriteFileResponse
+	5,  // 8: arl.sidecar.AgentService.ReadFile:output_type -> arl.sidecar.ReadFileResponse
+	7,  // 9: arl.sidecar.AgentService.InteractiveShell:output_type -> arl.sidecar.ShellOutput
+	9,  // 10: arl.sidecar.AgentService.StreamLogs:output_type -> arl.sidecar.LogEntry
+	6,  // [6:11] is the sub-list for method output_type
+	1,  // [1:6] is the sub-list for method input_type
+	1,  // [1:1] is the sub-list for extension type_name
+	1,  // [1:1] is the sub-list for extension extendee
+	0,  // [0:1] is the sub-list for field type_name
 }
 
 func init() { file_proto_agent_proto_init() }
@@ -656,7 +793,7 @@ func file_proto_agent_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_agent_proto_rawDesc), len(file_proto_agent_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   9,
+			NumMessages:   11,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

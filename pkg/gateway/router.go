@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"strconv"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	ctrlmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
@@ -41,15 +42,22 @@ func SetupRoutes(mux *http.ServeMux, gw *Gateway, authCfg *AuthConfig) {
 	// Interactive shell — WebSocket (user role; token may come via query param)
 	mux.HandleFunc("/v1/sessions/{id}/shell", user(handleShell(gw, authCfg)))
 
-	// History and trajectory (user role)
+	// History, trajectory, and logs (user role)
 	mux.HandleFunc("GET /v1/sessions/{id}/history", user(handleGetHistory(gw)))
 	mux.HandleFunc("GET /v1/sessions/{id}/trajectory", user(handleGetTrajectory(gw)))
+	mux.HandleFunc("GET /v1/sessions/{id}/logs", user(handleSessionLogs(gw)))
+
+	// List endpoints (admin role)
+	mux.HandleFunc("GET /v1/sessions", admin(handleListSessions(gw)))
+	mux.HandleFunc("GET /v1/pools", admin(handleListPools(gw)))
+	mux.HandleFunc("GET /v1/managed/experiments", admin(handleListExperiments(gw)))
 
 	// Pool management (admin role)
 	mux.HandleFunc("POST /v1/pools", admin(handleCreatePool(gw)))
 	mux.HandleFunc("GET /v1/pools/{name}", admin(handleGetPool(gw)))
 	mux.HandleFunc("PATCH /v1/pools/{name}", admin(handleScalePool(gw)))
 	mux.HandleFunc("DELETE /v1/pools/{name}", admin(handleDeletePool(gw)))
+	mux.HandleFunc("GET /v1/pools/{name}/logs", admin(handlePoolLogs(gw)))
 
 	// Managed sessions (admin role — creates infrastructure)
 	mux.HandleFunc("POST /v1/managed/sessions", admin(handleCreateManagedSession(gw)))
@@ -407,6 +415,123 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 
 func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, ErrorResponse{Error: msg})
+}
+
+func parseLogParams(r *http.Request) (bool, int32) {
+	follow := r.URL.Query().Get("follow") == "true"
+	tail := int32(100)
+	if v := r.URL.Query().Get("tail"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			tail = int32(n)
+		}
+	}
+	return follow, tail
+}
+
+func handleSessionLogs(gw *Gateway) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		if checkOwnership(gw, w, r, id) == nil {
+			return
+		}
+		follow, tail := parseLogParams(r)
+
+		ch, err := gw.StreamSessionLogs(r.Context(), id, follow, tail)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			writeError(w, http.StatusInternalServerError, "streaming not supported")
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("X-Accel-Buffering", "no")
+		w.WriteHeader(http.StatusOK)
+		flusher.Flush()
+
+		enc := json.NewEncoder(w)
+		for entry := range ch {
+			enc.Encode(entry)
+			flusher.Flush()
+		}
+	}
+}
+
+func handlePoolLogs(gw *Gateway) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		name := r.PathValue("name")
+		ns := r.URL.Query().Get("namespace")
+		follow, tail := parseLogParams(r)
+
+		ch, err := gw.StreamPoolLogs(r.Context(), name, ns, follow, tail)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		flusher, ok := w.(http.Flusher)
+		if !ok {
+			writeError(w, http.StatusInternalServerError, "streaming not supported")
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/x-ndjson")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Header().Set("X-Accel-Buffering", "no")
+		w.WriteHeader(http.StatusOK)
+		flusher.Flush()
+
+		type poolLogJSON struct {
+			PodName   string `json:"podName"`
+			Timestamp string `json:"timestamp"`
+			Level     string `json:"level"`
+			Message   string `json:"message"`
+			Source    string `json:"source"`
+		}
+
+		enc := json.NewEncoder(w)
+		for entry := range ch {
+			enc.Encode(poolLogJSON{
+				PodName:   entry.PodName,
+				Timestamp: entry.Entry.Timestamp,
+				Level:     entry.Entry.Level,
+				Message:   entry.Entry.Message,
+				Source:    entry.Entry.Source,
+			})
+			flusher.Flush()
+		}
+	}
+}
+
+func handleListSessions(gw *Gateway) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		sessions := gw.ListSessions()
+		writeJSON(w, http.StatusOK, sessions)
+	}
+}
+
+func handleListPools(gw *Gateway) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		ns := r.URL.Query().Get("namespace")
+		pools, err := gw.ListPools(r.Context(), ns)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, pools)
+	}
+}
+
+func handleListExperiments(gw *Gateway) http.HandlerFunc {
+	return func(w http.ResponseWriter, _ *http.Request) {
+		exps := gw.ListExperiments()
+		writeJSON(w, http.StatusOK, exps)
+	}
 }
 
 func handleCreateManagedSession(gw *Gateway) http.HandlerFunc {

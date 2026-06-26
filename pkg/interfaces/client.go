@@ -4,6 +4,14 @@ import (
 	"context"
 )
 
+// LogEntry represents a single log line from the sidecar.
+type LogEntry struct {
+	Timestamp string
+	Level     string
+	Message   string
+	Source    string
+}
+
 // SidecarClient defines the interface for communicating with sidecar containers
 type SidecarClient interface {
 	// Execute sends command execution request to sidecar and returns aggregated result
@@ -20,6 +28,9 @@ type SidecarClient interface {
 
 	// InteractiveShell opens a bidirectional shell session
 	InteractiveShell(ctx context.Context, podIP string) (ShellStream, error)
+
+	// StreamLogs streams log entries from the sidecar ring buffer.
+	StreamLogs(ctx context.Context, podIP string, follow bool, tailLines int32) (<-chan LogEntry, error)
 
 	// HealthCheck checks if sidecar is healthy
 	HealthCheck(ctx context.Context, podIP string) error

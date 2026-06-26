@@ -981,24 +981,8 @@ func (g *Gateway) GetPool(ctx context.Context, name, namespace string) (*PoolInf
 		return nil, err
 	}
 
-	info := &PoolInfo{
-		Name:              pool.Name,
-		Namespace:         pool.Namespace,
-		Replicas:          pool.Spec.Replicas,
-		ReadyReplicas:     pool.Status.ReadyReplicas,
-		AllocatedReplicas: pool.Status.AllocatedReplicas,
-	}
-
-	for _, c := range pool.Status.Conditions {
-		info.Conditions = append(info.Conditions, PoolCondition{
-			Type:    c.Type,
-			Status:  string(c.Status),
-			Reason:  c.Reason,
-			Message: c.Message,
-		})
-	}
-
-	return info, nil
+	info := poolInfoFromCRD(pool)
+	return &info, nil
 }
 
 // ScalePool updates the replica count of a WarmPool.
@@ -1367,6 +1351,169 @@ func (g *Gateway) ListExperimentSessions(experimentID string) []ManagedSessionIn
 	}
 
 	return results
+}
+
+// ListSessions returns all active sessions.
+func (g *Gateway) ListSessions() []SessionListItem {
+	var items []SessionListItem
+	g.store.Range(func(_ string, s *session) bool {
+		s.mu.RLock()
+		item := SessionListItem{
+			SessionInfo:  s.Info,
+			Managed:      s.managed,
+			ExperimentID: s.experimentID,
+		}
+		s.mu.RUnlock()
+		items = append(items, item)
+		return true
+	})
+	return items
+}
+
+// ListPools returns all WarmPool CRDs in the given namespace (empty = all namespaces).
+func (g *Gateway) ListPools(ctx context.Context, namespace string) ([]PoolInfo, error) {
+	var poolList arlv1alpha1.WarmPoolList
+	var opts []client.ListOption
+	if namespace != "" {
+		opts = append(opts, client.InNamespace(namespace))
+	}
+	if err := g.k8sClient.List(ctx, &poolList, opts...); err != nil {
+		return nil, err
+	}
+
+	pools := make([]PoolInfo, 0, len(poolList.Items))
+	for i := range poolList.Items {
+		pools = append(pools, poolInfoFromCRD(&poolList.Items[i]))
+	}
+	return pools, nil
+}
+
+// ListExperiments returns aggregate experiment summaries.
+func (g *Gateway) ListExperiments() []ExperimentSummary {
+	expMap := make(map[string]*ExperimentSummary)
+	g.store.Range(func(_ string, s *session) bool {
+		s.mu.RLock()
+		if s.managed && s.experimentID != "" {
+			if exp, ok := expMap[s.experimentID]; ok {
+				exp.SessionCount++
+			} else {
+				expMap[s.experimentID] = &ExperimentSummary{
+					ExperimentID: s.experimentID,
+					SessionCount: 1,
+					PoolRef:      s.Info.PoolRef,
+					Namespace:    s.Info.Namespace,
+				}
+			}
+		}
+		s.mu.RUnlock()
+		return true
+	})
+
+	results := make([]ExperimentSummary, 0, len(expMap))
+	for _, v := range expMap {
+		results = append(results, *v)
+	}
+	return results
+}
+
+// StreamSessionLogs streams log entries from a session's sidecar to a channel.
+func (g *Gateway) StreamSessionLogs(ctx context.Context, sessionID string, follow bool, tailLines int32) (<-chan interfaces.LogEntry, error) {
+	s, ok := g.store.Get(sessionID)
+	if !ok {
+		return nil, fmt.Errorf("session %s not found", sessionID)
+	}
+	s.mu.RLock()
+	podIP := s.Info.PodIP
+	s.mu.RUnlock()
+
+	return g.sidecarClient.StreamLogs(ctx, podIP, follow, tailLines)
+}
+
+// StreamPoolLogs fans out log streaming to all pods in a pool and merges output.
+func (g *Gateway) StreamPoolLogs(ctx context.Context, poolName, namespace string, follow bool, tailLines int32) (<-chan PoolLogEntry, error) {
+	if namespace == "" {
+		namespace = "default"
+	}
+
+	pool := &arlv1alpha1.WarmPool{}
+	if err := g.k8sClient.Get(ctx, types.NamespacedName{Name: poolName, Namespace: namespace}, pool); err != nil {
+		return nil, fmt.Errorf("get pool: %w", err)
+	}
+
+	// List all pods belonging to this pool
+	var podList corev1.PodList
+	if err := g.k8sClient.List(ctx, &podList,
+		client.InNamespace(namespace),
+		client.MatchingLabels{labels.PoolLabelKey: poolName},
+	); err != nil {
+		return nil, fmt.Errorf("list pods: %w", err)
+	}
+
+	merged := make(chan PoolLogEntry, 256)
+	var wg sync.WaitGroup
+
+	for _, pod := range podList.Items {
+		if pod.Status.PodIP == "" {
+			continue
+		}
+		podName := pod.Name
+		podIP := pod.Status.PodIP
+
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			ch, err := g.sidecarClient.StreamLogs(ctx, podIP, follow, tailLines)
+			if err != nil {
+				merged <- PoolLogEntry{PodName: podName, Entry: interfaces.LogEntry{
+					Level: "error", Message: fmt.Sprintf("connect: %v", err), Source: "gateway",
+				}}
+				return
+			}
+			for entry := range ch {
+				select {
+				case merged <- PoolLogEntry{PodName: podName, Entry: entry}:
+				case <-ctx.Done():
+					return
+				}
+			}
+		}()
+	}
+
+	go func() {
+		wg.Wait()
+		close(merged)
+	}()
+
+	return merged, nil
+}
+
+// PoolLogEntry wraps a LogEntry with the source pod name.
+type PoolLogEntry struct {
+	PodName string              `json:"podName"`
+	Entry   interfaces.LogEntry `json:"entry"`
+}
+
+func poolInfoFromCRD(pool *arlv1alpha1.WarmPool) PoolInfo {
+	info := PoolInfo{
+		Name:              pool.Name,
+		Namespace:         pool.Namespace,
+		Replicas:          pool.Spec.Replicas,
+		ReadyReplicas:     pool.Status.ReadyReplicas,
+		AllocatedReplicas: pool.Status.AllocatedReplicas,
+		CreatedAt:         pool.CreationTimestamp.Time,
+	}
+	if len(pool.Spec.Template.Spec.Containers) > 0 {
+		info.Image = pool.Spec.Template.Spec.Containers[0].Image
+	}
+	for _, c := range pool.Status.Conditions {
+		info.Conditions = append(info.Conditions, PoolCondition{
+			Type:    c.Type,
+			Status:  string(c.Status),
+			Reason:  c.Reason,
+			Message: c.Message,
+		})
+	}
+	return info
 }
 
 // DeleteExperiment deletes all sessions for an experiment.

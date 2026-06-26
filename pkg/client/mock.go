@@ -75,3 +75,10 @@ func (m *MockSidecarClient) InteractiveShell(ctx context.Context, podIP string) 
 	}
 	return nil, fmt.Errorf("interactive shell not supported in mock")
 }
+
+// StreamLogs mocks log streaming
+func (m *MockSidecarClient) StreamLogs(_ context.Context, _ string, _ bool, _ int32) (<-chan interfaces.LogEntry, error) {
+	ch := make(chan interfaces.LogEntry)
+	close(ch)
+	return ch, nil
+}

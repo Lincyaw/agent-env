@@ -7,6 +7,7 @@ import (
 	"log"
 	"net"
 	"strings"
+	"time"
 
 	"go.opentelemetry.io/contrib/instrumentation/google.golang.org/grpc/otelgrpc"
 	"google.golang.org/grpc"
@@ -151,6 +152,52 @@ func (s *GRPCServer) ReadFile(ctx context.Context, req *pb.ReadFileRequest) (*pb
 		Content:   content,
 		SizeBytes: int64(len(content)),
 	}, nil
+}
+
+// StreamLogs streams log entries from the sidecar ring buffer.
+func (s *GRPCServer) StreamLogs(req *pb.LogsRequest, stream grpc.ServerStreamingServer[pb.LogEntry]) error {
+	tailN := int(req.GetTailLines())
+	if tailN <= 0 {
+		tailN = 100
+	}
+
+	// Send buffered tail lines first
+	for _, line := range s.service.Logs.Tail(tailN) {
+		entry := &pb.LogEntry{
+			Timestamp: line.Timestamp.Format(time.RFC3339Nano),
+			Level:     line.Level,
+			Message:   line.Message,
+			Source:    line.Source,
+		}
+		if err := stream.Send(entry); err != nil {
+			return err
+		}
+	}
+
+	if !req.GetFollow() {
+		return nil
+	}
+
+	// Follow mode: subscribe and stream until client disconnects
+	ch := s.service.Logs.Subscribe()
+	defer s.service.Logs.Unsubscribe(ch)
+
+	for {
+		select {
+		case line := <-ch:
+			entry := &pb.LogEntry{
+				Timestamp: line.Timestamp.Format(time.RFC3339Nano),
+				Level:     line.Level,
+				Message:   line.Message,
+				Source:    line.Source,
+			}
+			if err := stream.Send(entry); err != nil {
+				return err
+			}
+		case <-stream.Context().Done():
+			return nil
+		}
+	}
 }
 
 // InteractiveShell implements bidirectional streaming for interactive shell sessions

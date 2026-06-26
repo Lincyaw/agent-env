@@ -340,6 +340,48 @@ func (c *GRPCSidecarClient) ReadFile(ctx context.Context, podIP string, path str
 	return resp.GetContent(), nil
 }
 
+// StreamLogs streams log entries from the sidecar ring buffer via gRPC.
+func (c *GRPCSidecarClient) StreamLogs(ctx context.Context, podIP string, follow bool, tailLines int32) (<-chan interfaces.LogEntry, error) {
+	conn, err := c.getOrCreateConn(podIP)
+	if err != nil {
+		return nil, err
+	}
+
+	client := pb.NewAgentServiceClient(conn)
+	stream, err := client.StreamLogs(ctx, &pb.LogsRequest{
+		Follow:    follow,
+		TailLines: tailLines,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("gRPC StreamLogs failed: %w", err)
+	}
+
+	ch := make(chan interfaces.LogEntry, 128)
+	go func() {
+		defer close(ch)
+		for {
+			entry, err := stream.Recv()
+			if err == io.EOF {
+				return
+			}
+			if err != nil {
+				return
+			}
+			select {
+			case ch <- interfaces.LogEntry{
+				Timestamp: entry.GetTimestamp(),
+				Level:     entry.GetLevel(),
+				Message:   entry.GetMessage(),
+				Source:    entry.GetSource(),
+			}:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	return ch, nil
+}
+
 // InteractiveShell opens a bidirectional shell session via sidecar gRPC
 func (c *GRPCSidecarClient) InteractiveShell(ctx context.Context, podIP string) (interfaces.ShellStream, error) {
 	conn, err := c.getOrCreateConn(podIP)

@@ -79,6 +79,10 @@ build-sidecar: ## Build sidecar binary
 build-operator: ## Build operator binary
 	CGO_ENABLED=0 go build -o bin/operator cmd/operator/main.go
 
+.PHONY: build-cli
+build-cli: ## Build arl CLI binary
+	CGO_ENABLED=0 go build -o bin/arl cmd/arl/main.go
+
 ##@ Development
 
 .PHONY: fmt

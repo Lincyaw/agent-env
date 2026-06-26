@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"time"
 
 	"github.com/Lincyaw/agent-env/pkg/execagent"
 	"github.com/google/uuid"
@@ -72,6 +73,7 @@ type AgentService struct {
 	workspaceDir   string
 	processes      map[int]*exec.Cmd
 	executorClient *ExecutorClient
+	Logs           *LogBuffer
 }
 
 // NewAgentService creates a new agent service
@@ -79,6 +81,7 @@ func NewAgentService(workspaceDir string) *AgentService {
 	return &AgentService{
 		workspaceDir: workspaceDir,
 		processes:    make(map[int]*exec.Cmd),
+		Logs:         NewLogBuffer(2000),
 	}
 }
 
@@ -88,7 +91,16 @@ func NewAgentServiceWithExecutor(workspaceDir, executorSocket string) *AgentServ
 		workspaceDir:   workspaceDir,
 		processes:      make(map[int]*exec.Cmd),
 		executorClient: NewExecutorClient(executorSocket),
+		Logs:           NewLogBuffer(2000),
 	}
+}
+
+func (s *AgentService) logInfo(source, msg string) {
+	s.Logs.Append(LogLine{Timestamp: time.Now(), Level: "info", Message: msg, Source: source})
+}
+
+func (s *AgentService) logError(source, msg string) {
+	s.Logs.Append(LogLine{Timestamp: time.Now(), Level: "error", Message: msg, Source: source})
 }
 
 // HasExecutor reports whether an executor agent is configured.
@@ -112,6 +124,7 @@ func (s *AgentService) Execute(ctx context.Context, req *ExecRequest, stream cha
 
 	// All commands must execute in the executor (main) container
 	if s.executorClient == nil {
+		s.logError("sidecar", "executor agent not configured")
 		stream <- &ExecLog{
 			Stderr:   "executor agent not configured: sidecar started without --executor-socket",
 			ExitCode: 1,
@@ -120,7 +133,13 @@ func (s *AgentService) Execute(ctx context.Context, req *ExecRequest, stream cha
 		return nil
 	}
 
-	return s.executeViaAgent(ctx, req, stream)
+	cmdStr := strings.Join(req.Command, " ")
+	s.logInfo("exec", fmt.Sprintf("exec: %s", cmdStr))
+	err := s.executeViaAgent(ctx, req, stream)
+	if err != nil {
+		s.logError("exec", fmt.Sprintf("exec failed: %s: %v", cmdStr, err))
+	}
+	return err
 }
 
 // executeViaAgent forwards execution to the executor agent in the main container.
@@ -203,6 +222,7 @@ func (s *AgentService) WriteFile(ctx context.Context, path string, content []byt
 	if s.executorClient == nil {
 		return 0, fmt.Errorf("executor agent not configured: sidecar started without --executor-socket")
 	}
+	s.logInfo("sidecar", fmt.Sprintf("write file: %s (%d bytes)", path, len(content)))
 	return s.executorClient.WriteFile(ctx, path, content)
 }
 
@@ -210,5 +230,6 @@ func (s *AgentService) ReadFile(ctx context.Context, path string) ([]byte, error
 	if s.executorClient == nil {
 		return nil, fmt.Errorf("executor agent not configured: sidecar started without --executor-socket")
 	}
+	s.logInfo("sidecar", fmt.Sprintf("read file: %s", path))
 	return s.executorClient.ReadFile(ctx, path)
 }
