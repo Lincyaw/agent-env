@@ -19,6 +19,12 @@ spec:
         app: mihomo
     spec:
       initContainers:
+      - name: copy-mmdb
+        image: pair-diag-cn-guangzhou.cr.volces.com/pair/mihomo-mmdb:latest
+        command: ["cp", "/Country.mmdb", "/data/Country.mmdb"]
+        volumeMounts:
+        - name: data
+          mountPath: /data
       - name: copy-config
         image: pair-diag-cn-guangzhou.cr.volces.com/pair/redis:8-alpine
         command: ["sh", "-c", "cp /config-template/config.yaml /data/config.yaml"]

@@ -304,6 +304,8 @@ func (g *Gateway) CreateSession(ctx context.Context, req CreateSessionRequest) (
 	g.store.Set(sessionID, &session{
 		Info:         info,
 		History:      NewStepHistory(),
+		managed:      req.Managed,
+		experimentID: req.ExperimentID,
 		ownerKeyHash: ownerHash,
 		lastTaskTime: time.Now(),
 		createdAt:    time.Now(),
@@ -1295,31 +1297,20 @@ func (g *Gateway) CreateManagedSession(ctx context.Context, req CreateManagedSes
 	}
 	span.SetAttributes(attribute.String("pool.name", poolName))
 
-	// Create session using existing logic, with experiment labels pre-applied
 	info, err := g.CreateSession(ctx, CreateSessionRequest{
-		PoolRef:   poolName,
-		Namespace: ns,
-		ExtraLabels: map[string]string{
-			labelManaged:    "true",
-			labelExperiment: req.ExperimentID,
-		},
+		PoolRef:      poolName,
+		Namespace:    ns,
+		Managed:      true,
+		ExperimentID: req.ExperimentID,
 	})
 	if err != nil {
-		// Release the acquired slot since session creation failed
 		g.poolManager.ReleaseSession(poolName)
 		return nil, fmt.Errorf("create session: %w", err)
 	}
 
-	// Mark the session as managed and persist the experiment index.
-	s, ok := g.store.Get(info.ID)
-	if ok {
-		s.mu.Lock()
-		s.managed = true
-		s.experimentID = req.ExperimentID
-		s.mu.Unlock()
-		if rs, ok := g.store.(*RedisStore); ok {
-			rs.Sync(info.ID)
-		}
+	// Persist experiment index to Redis (if using RedisStore).
+	if rs, ok := g.store.(*RedisStore); ok {
+		rs.Sync(info.ID)
 	}
 
 	return &ManagedSessionInfo{

@@ -28,6 +28,8 @@ type CreateSessionRequest struct {
 	IdleTimeoutSeconds int               `json:"idleTimeoutSeconds,omitempty"`
 	MaxLifetimeSeconds int               `json:"maxLifetimeSeconds,omitempty"`
 	ExtraLabels        map[string]string `json:"-"` // internal use only, not exposed via JSON
+	Managed            bool              `json:"-"`
+	ExperimentID       string            `json:"-"`
 }
 
 // configEnvAnnotationKey stores the raw ConfigEnv payload on WarmPool annotations
