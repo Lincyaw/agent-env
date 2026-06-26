@@ -18,9 +18,11 @@ import (
 	"golang.org/x/time/rate"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/util/workqueue"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -585,6 +587,9 @@ func (r *WarmPoolReconciler) constructPod(pool *arlv1alpha1.WarmPool, renderedCo
 			{Name: "arl-socket", MountPath: "/var/run/arl"},
 		}
 
+		httpPort := int32(r.Config.SidecarHTTPPort)
+		grpcPort := int32(r.Config.SidecarGRPCPort)
+
 		sidecarContainer := corev1.Container{
 			Name:            "sidecar",
 			Image:           r.Config.SidecarImage,
@@ -594,16 +599,45 @@ func (r *WarmPoolReconciler) constructPod(pool *arlv1alpha1.WarmPool, renderedCo
 			Ports: []corev1.ContainerPort{
 				{
 					Name:          "http",
-					ContainerPort: int32(r.Config.SidecarHTTPPort),
+					ContainerPort: httpPort,
 					Protocol:      corev1.ProtocolTCP,
 				},
 				{
 					Name:          "grpc",
-					ContainerPort: int32(r.Config.SidecarGRPCPort),
+					ContainerPort: grpcPort,
 					Protocol:      corev1.ProtocolTCP,
 				},
 			},
 			VolumeMounts: sidecarVolumeMounts,
+			StartupProbe: &corev1.Probe{
+				ProbeHandler: corev1.ProbeHandler{
+					HTTPGet: &corev1.HTTPGetAction{
+						Path: "/readyz",
+						Port: intstr.FromInt32(httpPort),
+					},
+				},
+				PeriodSeconds:    2,
+				FailureThreshold: 30, // 60s for slow images
+			},
+			ReadinessProbe: &corev1.Probe{
+				ProbeHandler: corev1.ProbeHandler{
+					HTTPGet: &corev1.HTTPGetAction{
+						Path: "/readyz",
+						Port: intstr.FromInt32(httpPort),
+					},
+				},
+				PeriodSeconds:    5,
+				FailureThreshold: 3,
+			},
+			LivenessProbe: &corev1.Probe{
+				ProbeHandler: corev1.ProbeHandler{
+					TCPSocket: &corev1.TCPSocketAction{
+						Port: intstr.FromInt32(grpcPort),
+					},
+				},
+				PeriodSeconds:    10,
+				FailureThreshold: 3,
+			},
 		}
 		pod.Spec.Containers = append(pod.Spec.Containers, sidecarContainer)
 	}
@@ -629,6 +663,10 @@ func (r *WarmPoolReconciler) constructPod(pool *arlv1alpha1.WarmPool, renderedCo
 			},
 		})
 	}
+
+	// Ensure executor containers have ephemeral-storage limits to prevent
+	// a single sandbox from filling the node's disk and triggering eviction.
+	r.ensureEphemeralStorageLimits(pod)
 
 	// Seed workspace from the executor image: if the image ships files at
 	// workspaceDir (e.g. terminal-bench task images COPY project files to
@@ -1024,6 +1062,33 @@ func (r *WarmPoolReconciler) ensureExecutorVolumes(pod *corev1.Pod) {
 				EmptyDir: &corev1.EmptyDirVolumeSource{},
 			},
 		})
+	}
+}
+
+// ensureEphemeralStorageLimits sets a default ephemeral-storage limit on executor
+// containers that don't already have one, preventing a single sandbox from filling
+// the node's disk and triggering node-level eviction.
+func (r *WarmPoolReconciler) ensureEphemeralStorageLimits(pod *corev1.Pod) {
+	defaultLimit := resource.MustParse("10Gi")
+	defaultRequest := resource.MustParse("100Mi")
+
+	for i := range pod.Spec.Containers {
+		if pod.Spec.Containers[i].Name == "sidecar" {
+			continue
+		}
+		c := &pod.Spec.Containers[i]
+		if c.Resources.Limits == nil {
+			c.Resources.Limits = corev1.ResourceList{}
+		}
+		if _, ok := c.Resources.Limits[corev1.ResourceEphemeralStorage]; !ok {
+			c.Resources.Limits[corev1.ResourceEphemeralStorage] = defaultLimit
+		}
+		if c.Resources.Requests == nil {
+			c.Resources.Requests = corev1.ResourceList{}
+		}
+		if _, ok := c.Resources.Requests[corev1.ResourceEphemeralStorage]; !ok {
+			c.Resources.Requests[corev1.ResourceEphemeralStorage] = defaultRequest
+		}
 	}
 }
 

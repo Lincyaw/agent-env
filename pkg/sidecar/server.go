@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"sync/atomic"
 	"time"
 )
 
@@ -13,6 +14,7 @@ import (
 type Server struct {
 	port       int
 	httpServer *http.Server
+	ready      atomic.Bool
 }
 
 // NewServer creates a new HTTP server for health checks
@@ -38,6 +40,14 @@ func NewServer(port int) *Server {
 	return srv
 }
 
+// SetReady marks the sidecar as ready to serve traffic.
+func (s *Server) SetReady(ready bool) {
+	s.ready.Store(ready)
+	if ready {
+		log.Println("Sidecar marked ready")
+	}
+}
+
 // Start starts the HTTP server
 func (s *Server) Start() error {
 	log.Printf("HTTP server starting on %s", s.httpServer.Addr)
@@ -60,6 +70,11 @@ func (s *Server) handleHealthz(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) handleReadyz(w http.ResponseWriter, r *http.Request) {
+	if !s.ready.Load() {
+		w.WriteHeader(http.StatusServiceUnavailable)
+		w.Write([]byte("not ready"))
+		return
+	}
 	w.WriteHeader(http.StatusOK)
 	w.Write([]byte("ok"))
 }

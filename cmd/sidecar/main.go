@@ -62,6 +62,7 @@ func main() {
 		log.Printf("ERROR: executor agent not ready after 60s: %v (Execute requests will fail until agent connects)", err)
 	} else {
 		log.Println("Executor agent connected")
+		httpServer.SetReady(true)
 	}
 	waitCancel()
 
