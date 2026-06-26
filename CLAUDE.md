@@ -9,7 +9,11 @@ make build              # Build all Go binaries
 make check              # fmt + vet + tidy + ruff + mypy
 make generate           # Proto, CRDs, deepcopy
 make arch-check         # Validate architecture docs
-skaffold run --profile=k8s  # Deploy
+skaffold run --profile=k8s  # Deploy (dev)
+
+# Prod deploy (arl cluster) — use --default-repo to pick registry:
+skaffold run --profile=prod --kube-context=arl \
+  --default-repo=pair-diag-cn-guangzhou.cr.volces.com/pair
 ```
 
 Python: use `uv` exclusively (`uv run`, `uv add`). SDK: `make build-sdk`.
@@ -51,6 +55,16 @@ After modifying components or interfaces:
 3. Update `architecture/{components,dependencies,propagation-rules}.yaml` if needed
 4. Validate with `make arch-check`
 5. Update `docs/` if the change affects user-facing behavior, APIs, CRDs, or deployment config
+
+## Deployment Tips
+
+- **Registry**: `pair-diag-cn-guangzhou.cr.volces.com/pair/` is the private registry for arl cluster images. `pair-cn-shanghai.cr.volces.com/` is a Docker Hub mirror (read-only). Push custom images to Docker Hub under `opspai/` or directly to the guangzhou registry.
+- **`--default-repo`**: Prod skaffold profile uses short image names (`arl-operator`). Pass `--default-repo=<registry>` to control where images are pushed and pulled. Never hardcode registry in skaffold build artifacts.
+- **Docker Hub rate limit**: The `opspai` Docker Hub account hits rate limits quickly. Prefer pushing to `pair-diag-cn-guangzhou.cr.volces.com/pair/` directly.
+- **Git push**: Use HTTPS remote + `GIT_SSH_COMMAND="ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes"` for pushing as Lincyaw. Default SSH key (`id_ed25519_boxi`) maps to BoxiYu.
+- **Mihomo proxy**: In-cluster Clash proxy at `mihomo.arl.svc:7890` for GitHub/PyPI/npm access. Config is a static ConfigMap (`mihomo-config`); MMDB is provided via `pair-diag-cn-guangzhou.cr.volces.com/pair/mihomo-mmdb:latest` init container. Update config: `kubectl create configmap mihomo-config -n arl --from-file=config.yaml=... --dry-run=client -o yaml | kubectl apply -f -` then restart.
+- **Pool replicas=0**: Default. Controller creates a pre-pull pod to cache the image; pods are created on-demand when sessions are requested. ImageLocality scheduler routes to nodes with cached images.
+- **K8s contexts**: `arl` = prod cluster. Current context may differ — always pass `--kube-context=arl` for prod operations.
 
 ## Docs
 

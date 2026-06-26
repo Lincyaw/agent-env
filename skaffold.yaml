@@ -106,22 +106,19 @@ profiles:
 - name: prod
   build:
     artifacts:
-    - image: opspai/arl-operator
+    - image: arl-operator
       docker:
         dockerfile: Dockerfile.operator
-    - image: opspai/arl-sidecar
+    - image: arl-sidecar
       docker:
         dockerfile: Dockerfile.sidecar
-    - image: opspai/arl-gateway
+    - image: arl-gateway
       docker:
         dockerfile: Dockerfile.gateway
-    - image: opspai/arl-executor-agent
+    - image: arl-executor-agent
       docker:
         dockerfile: Dockerfile.executor-agent
     tagPolicy:
-      # gitCommit yields a unique, immutable tag per commit so deployments
-      # reference a real version (never :latest) and IfNotPresent pulls the
-      # right image. The tag flows into the chart via IMAGE_TAG_* below.
       gitCommit: {}
   manifests:
     rawYaml:
@@ -136,34 +133,30 @@ profiles:
         valuesFiles:
           - auth-values.yaml
         setValues:
-          image.repository: pair-cn-shanghai.cr.volces.com/opspai/arl-operator
-          sidecar.image.repository: pair-cn-shanghai.cr.volces.com/opspai/arl-sidecar
-          gateway.image.repository: pair-cn-shanghai.cr.volces.com/opspai/arl-gateway
-          executorAgent.image.repository: pair-cn-shanghai.cr.volces.com/opspai/arl-executor-agent
           redis.enabled: true
           clickhouse.enabled: true
           clickhouse.storageClassName: ebs-ssd
-          # Prometheus
           prometheus.enabled: true
           prometheus.persistence.enabled: true
           prometheus.persistence.storageClass: ebs-ssd
           prometheus.persistence.size: 50Gi
-          # Gateway
           gateway.service.type: LoadBalancer
           gateway.service.port: "80"
-          # Grafana
           grafana.enabled: true
           grafana.service.type: NodePort
           grafana.persistence.enabled: true
           grafana.persistence.storageClass: ebs-ssd
           grafana.persistence.size: 20Gi
-          # Proxy
           proxy.url: "http://mihomo.arl.svc:7890"
         setValueTemplates:
-          image.tag: "{{.IMAGE_TAG_opspai_arl_operator}}"
-          sidecar.image.tag: "{{.IMAGE_TAG_opspai_arl_sidecar}}"
-          gateway.image.tag: "{{.IMAGE_TAG_opspai_arl_gateway}}"
-          executorAgent.image.tag: "{{.IMAGE_TAG_opspai_arl_executor_agent}}"
+          image.repository: "{{.IMAGE_REPO_arl_operator}}"
+          image.tag: "{{.IMAGE_TAG_arl_operator}}"
+          sidecar.image.repository: "{{.IMAGE_REPO_arl_sidecar}}"
+          sidecar.image.tag: "{{.IMAGE_TAG_arl_sidecar}}"
+          gateway.image.repository: "{{.IMAGE_REPO_arl_gateway}}"
+          gateway.image.tag: "{{.IMAGE_TAG_arl_gateway}}"
+          executorAgent.image.repository: "{{.IMAGE_REPO_arl_executor_agent}}"
+          executorAgent.image.tag: "{{.IMAGE_TAG_arl_executor_agent}}"
   deploy:
     kubectl:
       flags:
