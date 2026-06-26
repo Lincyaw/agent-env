@@ -106,6 +106,13 @@ type CreatePoolRequest struct {
 	Namespace string `json:"namespace,omitempty"`
 }
 
+type CreateManagedSessionRequest struct {
+	Image        string `json:"image"`
+	ExperimentID string `json:"experimentId"`
+	Namespace    string `json:"namespace,omitempty"`
+	MaxReplicas  int32  `json:"maxReplicas,omitempty"`
+}
+
 type ErrorResponse struct {
 	Error string `json:"error"`
 }

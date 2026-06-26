@@ -13,6 +13,56 @@ var expCmd = &cobra.Command{
 	Short:   "Manage experiments",
 }
 
+var expCreateCmd = &cobra.Command{
+	Use:   "create <experiment-id>",
+	Short: "Create an experiment with managed sessions",
+	Long:  "Creates one or more managed sessions under an experiment ID. The pool is auto-created and auto-scaled.",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		image, _ := cmd.Flags().GetString("image")
+		count, _ := cmd.Flags().GetInt("sessions")
+		maxReplicas, _ := cmd.Flags().GetInt32("max-replicas")
+
+		if image == "" {
+			return fmt.Errorf("--image is required")
+		}
+
+		c := newClient()
+		var sessions []ManagedSessionInfo
+
+		for i := 0; i < count; i++ {
+			info, err := c.CreateManagedSession(CreateManagedSessionRequest{
+				Image:        image,
+				ExperimentID: args[0],
+				Namespace:    flagNamespace,
+				MaxReplicas:  maxReplicas,
+			})
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "Session %d/%d failed: %v\n", i+1, count, err)
+				continue
+			}
+			sessions = append(sessions, *info)
+		}
+
+		if flagOutput == "json" {
+			printJSON(sessions)
+			return nil
+		}
+
+		if len(sessions) == 0 {
+			return fmt.Errorf("no sessions created")
+		}
+
+		fmt.Printf("Experiment %s: created %d session(s), pool=%s\n", args[0], len(sessions), sessions[0].PoolRef)
+		w := newTabWriter()
+		fmt.Fprintln(w, "ID\tPOOL\tPOD")
+		for _, s := range sessions {
+			fmt.Fprintf(w, "%s\t%s\t%s\n", s.ID, s.PoolRef, s.PodName)
+		}
+		return w.Flush()
+	},
+}
+
 var expListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all experiments",
@@ -135,8 +185,13 @@ var expDeleteCmd = &cobra.Command{
 }
 
 func init() {
+	expCreateCmd.Flags().String("image", "", "Container image (required)")
+	expCreateCmd.Flags().Int("sessions", 1, "Number of sessions to create")
+	expCreateCmd.Flags().Int32("max-replicas", 0, "Max replicas hint for auto-scaling (0 = use server default)")
+
 	expDeleteCmd.Flags().Bool("force", false, "Skip confirmation")
 
+	expCmd.AddCommand(expCreateCmd)
 	expCmd.AddCommand(expListCmd)
 	expCmd.AddCommand(expSessionsCmd)
 	expCmd.AddCommand(expStatsCmd)

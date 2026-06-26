@@ -171,6 +171,11 @@ func (c *Client) ListExperimentSessions(experimentID string) ([]ManagedSessionIn
 	return sessions, c.do("GET", "/v1/managed/experiments/"+experimentID+"/sessions", nil, &sessions)
 }
 
+func (c *Client) CreateManagedSession(req CreateManagedSessionRequest) (*ManagedSessionInfo, error) {
+	var info ManagedSessionInfo
+	return &info, c.do("POST", "/v1/managed/sessions", req, &info)
+}
+
 func (c *Client) DeleteExperiment(experimentID string) (map[string]any, error) {
 	var resp map[string]any
 	return resp, c.do("DELETE", "/v1/managed/experiments/"+experimentID, nil, &resp)
