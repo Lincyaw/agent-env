@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"go.opentelemetry.io/otel"
@@ -52,6 +53,7 @@ type session struct {
 	idleTimeout         time.Duration
 	maxLifetime         time.Duration
 	createdAt           time.Time
+	activeExecs         int32 // atomic; >0 means execution in progress, sweep must not kill
 }
 
 // Gateway manages sessions and forwards execution to sidecars.
@@ -385,6 +387,9 @@ func (g *Gateway) ExecuteSteps(ctx context.Context, sessionID string, req Execut
 		return nil, err
 	}
 
+	atomic.AddInt32(&s.activeExecs, 1)
+	defer atomic.AddInt32(&s.activeExecs, -1)
+
 	s.mu.RLock()
 	podIP := s.Info.PodIP
 	s.mu.RUnlock()
@@ -511,6 +516,9 @@ func (g *Gateway) ExecuteStepsSSE(w http.ResponseWriter, ctx context.Context, se
 		http.Error(w, fmt.Sprintf(`{"error":%q}`, err.Error()), http.StatusNotFound)
 		return
 	}
+
+	atomic.AddInt32(&s.activeExecs, 1)
+	defer atomic.AddInt32(&s.activeExecs, -1)
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -748,6 +756,9 @@ func (g *Gateway) Restore(ctx context.Context, sessionID string, snapshotID stri
 	if !ok {
 		return fmt.Errorf("session %s not found", sessionID)
 	}
+
+	atomic.AddInt32(&s.activeExecs, 1)
+	defer atomic.AddInt32(&s.activeExecs, -1)
 
 	// Get history records up to the target index
 	records := s.History.GetUpTo(targetIdx)
@@ -1203,6 +1214,10 @@ func (g *Gateway) sessionSweepLoop() {
 func (g *Gateway) sweepSessions() {
 	now := time.Now()
 	g.store.Range(func(sessionID string, s *session) bool {
+		if atomic.LoadInt32(&s.activeExecs) > 0 {
+			return true
+		}
+
 		s.mu.RLock()
 		lastTask := s.lastTaskTime
 		created := s.createdAt
