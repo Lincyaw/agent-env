@@ -58,13 +58,10 @@ After modifying components or interfaces:
 
 ## Deployment Tips
 
-- **Registry**: `pair-diag-cn-guangzhou.cr.volces.com/pair/` is the private registry for arl cluster images. `pair-cn-shanghai.cr.volces.com/` is a Docker Hub mirror (read-only). Push custom images to Docker Hub under `opspai/` or directly to the guangzhou registry.
-- **`--default-repo`**: Prod skaffold profile uses short image names (`arl-operator`). Pass `--default-repo=<registry>` to control where images are pushed and pulled. Never hardcode registry in skaffold build artifacts.
-- **Docker Hub rate limit**: The `opspai` Docker Hub account hits rate limits quickly. Prefer pushing to `pair-diag-cn-guangzhou.cr.volces.com/pair/` directly.
-- **Git push**: Use HTTPS remote + `GIT_SSH_COMMAND="ssh -i ~/.ssh/id_ed25519 -o IdentitiesOnly=yes"` for pushing as Lincyaw. Default SSH key (`id_ed25519_boxi`) maps to BoxiYu.
-- **Mihomo proxy**: In-cluster Clash proxy at `mihomo.arl.svc:7890` for GitHub/PyPI/npm access. Config is a static ConfigMap (`mihomo-config`); MMDB is provided via `pair-diag-cn-guangzhou.cr.volces.com/pair/mihomo-mmdb:latest` init container. Update config: `kubectl create configmap mihomo-config -n arl --from-file=config.yaml=... --dry-run=client -o yaml | kubectl apply -f -` then restart.
-- **Pool replicas=0**: Default. Controller creates a pre-pull pod to cache the image; pods are created on-demand when sessions are requested. ImageLocality scheduler routes to nodes with cached images.
-- **K8s contexts**: `arl` = prod cluster. Current context may differ — always pass `--kube-context=arl` for prod operations.
+- **Prod deploy**: `skaffold run --profile=prod --kube-context=arl --default-repo=pair-diag-cn-guangzhou.cr.volces.com/pair`
+- **Registry**: Push to `pair-diag-cn-guangzhou.cr.volces.com/pair/` (Docker Hub has rate limits). `pair-cn-shanghai.cr.volces.com/` is a read-only Docker Hub mirror.
+- **Mihomo**: In-cluster proxy at `mihomo.arl.svc:7890`. Sandbox pods get `HTTP_PROXY` injected automatically.
+- **replicas=0**: Default. Pre-pulls image only; pods created on-demand when sessions arrive.
 
 ## Docs
 
