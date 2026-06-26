@@ -171,7 +171,7 @@ func DefaultConfig() *Config {
 		ImageLocalitySpreadFactor: 0.25,
 		ImageLocalityWeight:       100,
 
-		ManagedPoolInitialReplicas: 2,
+		ManagedPoolInitialReplicas: 0,
 		ManagedPoolMinReplicas:     0,
 		ManagedPoolMaxReplicas:     50,
 		ManagedPoolScaleUpStep:     2,

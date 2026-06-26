@@ -29,7 +29,7 @@ spec:
           mountPath: /data
       containers:
       - name: mihomo
-        image: pair-cn-shanghai.cr.volces.com/opspai/mihomo:latest
+        image: pair-diag-cn-guangzhou.cr.volces.com/pair/mihomo:latest
         imagePullPolicy: IfNotPresent
         args: ["-d", "/data"]
         ports:

@@ -48,7 +48,7 @@ type PoolManagerConfig struct {
 // DefaultPoolManagerConfig returns sensible defaults.
 func DefaultPoolManagerConfig() PoolManagerConfig {
 	return PoolManagerConfig{
-		InitialReplicas: 2,
+		InitialReplicas: 0,
 		MinReplicas:     0,
 		MaxReplicas:     50,
 		ScaleUpStep:     2,

@@ -88,7 +88,7 @@ auth:
 
 # Managed pool auto-scaling configuration (for POST /v1/managed/sessions)
 managedPool:
-  initialReplicas: 2       # Starting replicas when pool is first created
+  initialReplicas: 0       # Starting replicas when pool is first created (0 = pre-pull only)
   minReplicas: 0           # Scale-down floor
   maxReplicas: 100          # Scale-up ceiling
   scaleUpStep: 2           # Minimum replicas added per scale-up event
@@ -171,7 +171,7 @@ proxy:
 # Mihomo (Clash Meta) in-cluster proxy for accessing GitHub etc.
 mihomo:
   enabled: false
-  image: pair-cn-shanghai.cr.volces.com/opspai/mihomo:latest
+  image: pair-diag-cn-guangzhou.cr.volces.com/pair/mihomo:latest
   subscriptionURL: ""   # your Clash subscription URL
   resources:
     requests:

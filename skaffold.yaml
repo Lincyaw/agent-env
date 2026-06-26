@@ -90,6 +90,8 @@ profiles:
           # Monitoring
           prometheus.enabled: "true"
           grafana.enabled: "true"
+          # Proxy
+          proxy.url: "http://mihomo.arl.svc:7890"
         setValueTemplates:
           image.tag: "{{.IMAGE_TAG}}"
           sidecar.image.tag: "{{.IMAGE_TAG2}}"
@@ -155,6 +157,8 @@ profiles:
           grafana.persistence.enabled: true
           grafana.persistence.storageClass: ebs-ssd
           grafana.persistence.size: 20Gi
+          # Proxy
+          proxy.url: "http://mihomo.arl.svc:7890"
         setValueTemplates:
           image.tag: "{{.IMAGE_TAG_opspai_arl_operator}}"
           sidecar.image.tag: "{{.IMAGE_TAG_opspai_arl_sidecar}}"
