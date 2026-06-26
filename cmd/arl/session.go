@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -197,9 +196,7 @@ var sessionExecCmd = &cobra.Command{
 		sessionID := args[0]
 		cmdArgs := args[1:]
 
-		// cobra passes everything after "--" as remaining args
 		if dash := cmd.ArgsLenAtDash(); dash >= 0 {
-			sessionID = args[0]
 			cmdArgs = args[dash:]
 		}
 
@@ -225,18 +222,7 @@ var sessionExecCmd = &cobra.Command{
 			return nil
 		}
 
-		for _, r := range resp.Results {
-			if r.Output.Stdout != "" {
-				fmt.Print(r.Output.Stdout)
-			}
-			if r.Output.Stderr != "" {
-				fmt.Fprint(os.Stderr, r.Output.Stderr)
-			}
-			if r.Output.ExitCode != 0 {
-				return fmt.Errorf("exit code %d", r.Output.ExitCode)
-			}
-		}
-		return nil
+		return printExecResults(resp.Results)
 	},
 }
 
@@ -281,28 +267,4 @@ func init() {
 	sessionCmd.AddCommand(sessionExecCmd)
 	sessionCmd.AddCommand(sessionShellCmd)
 	sessionCmd.AddCommand(sessionLogsCmd)
-}
-
-// printStepOutput prints execution output inline, skipping JSON formatting.
-func printStepOutput(results []StepResult) {
-	for _, r := range results {
-		if r.Output.Stdout != "" {
-			fmt.Print(r.Output.Stdout)
-		}
-		if r.Output.Stderr != "" {
-			fmt.Fprint(os.Stderr, r.Output.Stderr)
-		}
-	}
-}
-
-// printHistoryRecord formats a single step record for terminal display.
-func printHistoryRecord(r StepRecord) {
-	var inputCmd string
-	var step StepRequest
-	if json.Unmarshal(r.Input, &step) == nil && len(step.Command) > 0 {
-		inputCmd = strings.Join(step.Command, " ")
-	} else {
-		inputCmd = r.Name
-	}
-	fmt.Printf("[%d] %s  (exit=%d, %dms)\n", r.Index, inputCmd, r.Output.ExitCode, r.DurationMs)
 }

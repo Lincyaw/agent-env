@@ -462,6 +462,14 @@ func handleSessionLogs(gw *Gateway) http.HandlerFunc {
 	}
 }
 
+type poolLogJSON struct {
+	PodName   string `json:"podName"`
+	Timestamp string `json:"timestamp"`
+	Level     string `json:"level"`
+	Message   string `json:"message"`
+	Source    string `json:"source"`
+}
+
 func handlePoolLogs(gw *Gateway) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		name := r.PathValue("name")
@@ -485,14 +493,6 @@ func handlePoolLogs(gw *Gateway) http.HandlerFunc {
 		w.Header().Set("X-Accel-Buffering", "no")
 		w.WriteHeader(http.StatusOK)
 		flusher.Flush()
-
-		type poolLogJSON struct {
-			PodName   string `json:"podName"`
-			Timestamp string `json:"timestamp"`
-			Level     string `json:"level"`
-			Message   string `json:"message"`
-			Source    string `json:"source"`
-		}
 
 		enc := json.NewEncoder(w)
 		for entry := range ch {

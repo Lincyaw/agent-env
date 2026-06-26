@@ -217,18 +217,7 @@ var poolExecCmd = &cobra.Command{
 			return nil
 		}
 
-		for _, r := range resp.Results {
-			if r.Output.Stdout != "" {
-				fmt.Print(r.Output.Stdout)
-			}
-			if r.Output.Stderr != "" {
-				fmt.Fprint(os.Stderr, r.Output.Stderr)
-			}
-			if r.Output.ExitCode != 0 {
-				return fmt.Errorf("exit code %d", r.Output.ExitCode)
-			}
-		}
-		return nil
+		return printExecResults(resp.Results)
 	},
 }
 

@@ -40,7 +40,10 @@ func (b *LogBuffer) Append(line LogLine) {
 	if b.head == 0 && !b.full {
 		b.full = true
 	}
-	// Copy subscribers under lock, send outside
+	if len(b.subs) == 0 {
+		b.mu.Unlock()
+		return
+	}
 	subs := make([]chan LogLine, 0, len(b.subs))
 	for ch := range b.subs {
 		subs = append(subs, ch)
@@ -51,7 +54,6 @@ func (b *LogBuffer) Append(line LogLine) {
 		select {
 		case ch <- line:
 		default:
-			// slow subscriber, drop
 		}
 	}
 }
@@ -95,12 +97,10 @@ func (b *LogBuffer) Subscribe() chan LogLine {
 	return ch
 }
 
-// Unsubscribe removes a follow channel.
+// Unsubscribe removes a follow channel and closes it.
 func (b *LogBuffer) Unsubscribe(ch chan LogLine) {
 	b.mu.Lock()
 	delete(b.subs, ch)
 	b.mu.Unlock()
-	// drain
-	for range ch {
-	}
+	close(ch)
 }

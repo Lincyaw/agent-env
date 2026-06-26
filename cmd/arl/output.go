@@ -67,3 +67,18 @@ func shortImage(image string) string {
 	last := parts[len(parts)-1]
 	return truncate(last, 40)
 }
+
+func printExecResults(results []StepResult) error {
+	for _, r := range results {
+		if r.Output.Stdout != "" {
+			fmt.Print(r.Output.Stdout)
+		}
+		if r.Output.Stderr != "" {
+			fmt.Fprint(os.Stderr, r.Output.Stderr)
+		}
+		if r.Output.ExitCode != 0 {
+			return fmt.Errorf("exit code %d", r.Output.ExitCode)
+		}
+	}
+	return nil
+}

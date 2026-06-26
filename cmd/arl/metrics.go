@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"fmt"
 	"strings"
 
@@ -31,7 +32,7 @@ var metricsCmd = &cobra.Command{
 			return nil
 		}
 
-		scanner := bufio.NewScanner(strings.NewReader(string(data)))
+		scanner := bufio.NewScanner(bytes.NewReader(data))
 		for scanner.Scan() {
 			line := scanner.Text()
 			if strings.HasPrefix(line, "#") {
