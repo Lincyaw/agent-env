@@ -153,7 +153,7 @@ metadata:
 spec:
   type: {{ .Values.gateway.service.type }}
   ports:
-    - port: {{ .Values.gateway.port }}
+    - port: {{ .Values.gateway.service.port | default .Values.gateway.port }}
       targetPort: http
       protocol: TCP
       name: http

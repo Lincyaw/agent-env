@@ -45,6 +45,7 @@ gateway:
   sidecarGrpcPort: 9090
   service:
     type: ClusterIP
+    port: ""      # external service port; defaults to gateway.port (8080) if empty
     nodePort: ""  # e.g. 30080, only used when type is NodePort
   serviceAccount:
     name: ""

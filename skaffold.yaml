@@ -146,9 +146,12 @@ profiles:
           prometheus.persistence.enabled: true
           prometheus.persistence.storageClass: ebs-ssd
           prometheus.persistence.size: 50Gi
+          # Gateway
+          gateway.service.type: LoadBalancer
+          gateway.service.port: "80"
           # Grafana
           grafana.enabled: true
-          grafana.service.type: LoadBalancer
+          grafana.service.type: NodePort
           grafana.persistence.enabled: true
           grafana.persistence.storageClass: ebs-ssd
           grafana.persistence.size: 20Gi
