@@ -1,6 +1,6 @@
 {
   "name": "arl",
-  "version": "0.12.0",
+  "version": "0.13.0",
   "description": "ARL (Agentic RL) runtime CLI & operations — manage experiments, warm pools, sessions, logs from Claude Code",
   "author": {
     "name": "lincyaw",
