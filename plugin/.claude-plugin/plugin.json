@@ -9,5 +9,7 @@
   "repository": "https://github.com/Lincyaw/agent-env",
   "homepage": "https://lincyaw.github.io/agent-env/",
   "license": "Apache-2.0",
-  "keywords": ["arl", "kubernetes", "warm-pool", "agentic-rl", "sandbox", "experiment"]
+  "keywords": ["arl", "kubernetes", "warm-pool", "agentic-rl", "sandbox", "experiment"],
+  "skills": "./skills/",
+  "commands": "./commands/"
 }

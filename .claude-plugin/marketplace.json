@@ -1,0 +1,11 @@
+{
+  "name": "arl",
+  "owner": { "name": "lincyaw" },
+  "plugins": [
+    {
+      "name": "arl",
+      "source": "./plugin/",
+      "description": "ARL (Agentic RL) runtime CLI & operations — manage experiments, warm pools, sessions, logs from Claude Code"
+    }
+  ]
+}
