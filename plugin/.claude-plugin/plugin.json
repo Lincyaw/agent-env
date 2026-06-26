@@ -1,0 +1,13 @@
+{
+  "name": "arl",
+  "version": "0.12.0",
+  "description": "ARL (Agentic RL) runtime CLI & operations — manage experiments, warm pools, sessions, logs from Claude Code",
+  "author": {
+    "name": "lincyaw",
+    "url": "https://github.com/Lincyaw"
+  },
+  "repository": "https://github.com/Lincyaw/agent-env",
+  "homepage": "https://lincyaw.github.io/agent-env/",
+  "license": "Apache-2.0",
+  "keywords": ["arl", "kubernetes", "warm-pool", "agentic-rl", "sandbox", "experiment"]
+}
