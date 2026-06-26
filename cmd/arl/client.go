@@ -21,7 +21,7 @@ func NewClient(baseURL, apiKey string) *Client {
 	return &Client{
 		base:   strings.TrimRight(baseURL, "/"),
 		apiKey: apiKey,
-		http:   &http.Client{Timeout: 30 * time.Second},
+		http:   &http.Client{Timeout: 5 * time.Minute},
 	}
 }
 
