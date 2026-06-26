@@ -158,8 +158,28 @@ operator:
 
 # Pool configuration
 pool:
-  defaultReplicas: 3
+  defaultReplicas: 0
   defaultRequeueDelay: "10s"
+
+# HTTP proxy injected into warm pool pods. When set, all containers get
+# HTTP_PROXY/HTTPS_PROXY/NO_PROXY env vars pointing to this address.
+# Use with the mihomo deployment for GitHub access.
+proxy:
+  url: ""       # e.g. "http://mihomo.arl.svc:7890"
+  noProxy: ""   # defaults to localhost,127.0.0.1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,.svc,.svc.cluster.local
+
+# Mihomo (Clash Meta) in-cluster proxy for accessing GitHub etc.
+mihomo:
+  enabled: false
+  image: pair-cn-shanghai.cr.volces.com/opspai/mihomo:latest
+  subscriptionURL: ""   # your Clash subscription URL
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
 
 # ClickHouse configuration (for audit logging and trajectory)
 clickhouse:

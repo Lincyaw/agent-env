@@ -20,4 +20,7 @@ const (
 	// allocated back to idle (RFC3339). Used by LRU scale-down to delete the
 	// least-recently-used idle pods first.
 	LastReleasedAnnotation = "arl.infra.io/last-released"
+
+	RoleLabelKey = "arl.infra.io/role"
+	RolePrePull  = "pre-pull"
 )

@@ -919,8 +919,8 @@ func (g *Gateway) CreatePool(ctx context.Context, req CreatePoolRequest) error {
 	}
 
 	replicas := req.Replicas
-	if replicas <= 0 {
-		replicas = 2
+	if replicas < 0 {
+		replicas = 0
 	}
 
 	// Set default resources if not specified

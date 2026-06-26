@@ -90,6 +90,14 @@ spec:
             - name: CLICKHOUSE_FLUSH_INTERVAL
               value: "{{ .Values.clickhouse.flushInterval }}"
             {{- end }}
+            {{- if .Values.proxy.url }}
+            - name: POD_HTTP_PROXY
+              value: {{ .Values.proxy.url | quote }}
+            {{- end }}
+            {{- if .Values.proxy.noProxy }}
+            - name: POD_NO_PROXY
+              value: {{ .Values.proxy.noProxy | quote }}
+            {{- end }}
             {{- include "arl-operator.otelEnv" . | nindent 12 }}
           ports:
             - name: metrics

@@ -117,6 +117,17 @@ type Config struct {
 	RateLimitRPS   float64
 	RateLimitBurst int
 	AllowedOrigins string
+
+	// PodInitTimeout is the maximum time a pod may stay in Pending phase
+	// (e.g. stuck pulling an init container image) before the controller
+	// force-deletes it. Prevents pods from blocking termination indefinitely
+	// when containerd image pulls hang. Env: POD_INIT_TIMEOUT. Default: 10m.
+	PodInitTimeout time.Duration
+
+	// HTTP proxy injected into warm pool pods (all containers).
+	// When non-empty, HTTP_PROXY/HTTPS_PROXY/NO_PROXY env vars are set.
+	PodHTTPProxy string
+	PodNoProxy   string
 }
 
 // DefaultConfig returns the default configuration
@@ -127,7 +138,7 @@ func DefaultConfig() *Config {
 		SidecarGRPCPort:         9090,
 		WorkspaceDir:            "/workspace",
 		HTTPClientTimeout:       30 * time.Second,
-		DefaultPoolReplicas:     3,
+		DefaultPoolReplicas:     0,
 		DefaultRequeueDelay:     10 * time.Second,
 		MetricsAddr:             ":8080",
 		ProbeAddr:               ":8081",
@@ -167,6 +178,7 @@ func DefaultConfig() *Config {
 		ManagedPoolIdleCooldown:    5 * time.Minute,
 		ManagedPoolEmptyTTL:        10 * time.Minute,
 		ManagedPoolSweepInterval:   30 * time.Second,
+		PodInitTimeout:             10 * time.Minute,
 
 		GatewayIdleTimeout:   600 * time.Second,
 		GatewayMaxLifetime:   3600 * time.Second,
@@ -405,6 +417,12 @@ func LoadFromEnv() *Config {
 		}
 	}
 
+	if v := os.Getenv("POD_INIT_TIMEOUT"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			cfg.PodInitTimeout = d
+		}
+	}
+
 	// Gateway session lifecycle configuration
 	if v := os.Getenv("GATEWAY_IDLE_TIMEOUT"); v != "" {
 		if d, err := time.ParseDuration(v); err == nil {
@@ -476,6 +494,13 @@ func LoadFromEnv() *Config {
 
 	if v := os.Getenv("ALLOWED_ORIGINS"); v != "" {
 		cfg.AllowedOrigins = v
+	}
+
+	if v := os.Getenv("POD_HTTP_PROXY"); v != "" {
+		cfg.PodHTTPProxy = v
+	}
+	if v := os.Getenv("POD_NO_PROXY"); v != "" {
+		cfg.PodNoProxy = v
 	}
 
 	return cfg

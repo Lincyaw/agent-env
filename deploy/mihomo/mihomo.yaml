@@ -1,0 +1,88 @@
+# ConfigMap 'mihomo-config' must be created separately from the Clash config file:
+#   kubectl create configmap mihomo-config -n arl --from-file=config.yaml=/path/to/config.yaml
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mihomo
+  namespace: arl
+  labels:
+    app: mihomo
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mihomo
+  template:
+    metadata:
+      labels:
+        app: mihomo
+    spec:
+      initContainers:
+      - name: copy-config
+        image: pair-diag-cn-guangzhou.cr.volces.com/pair/redis:8-alpine
+        command: ["sh", "-c", "cp /config-template/config.yaml /data/config.yaml"]
+        volumeMounts:
+        - name: config-template
+          mountPath: /config-template
+        - name: data
+          mountPath: /data
+      containers:
+      - name: mihomo
+        image: pair-cn-shanghai.cr.volces.com/opspai/mihomo:latest
+        imagePullPolicy: IfNotPresent
+        args: ["-d", "/data"]
+        ports:
+        - name: mixed
+          containerPort: 7890
+          protocol: TCP
+        - name: api
+          containerPort: 9090
+          protocol: TCP
+        readinessProbe:
+          tcpSocket:
+            port: 7890
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        livenessProbe:
+          tcpSocket:
+            port: 7890
+          initialDelaySeconds: 10
+          periodSeconds: 30
+        resources:
+          requests:
+            cpu: 50m
+            memory: 64Mi
+          limits:
+            cpu: 500m
+            memory: 256Mi
+        volumeMounts:
+        - name: data
+          mountPath: /data
+      volumes:
+      - name: config-template
+        configMap:
+          name: mihomo-config
+      - name: data
+        emptyDir: {}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mihomo
+  namespace: arl
+  labels:
+    app: mihomo
+spec:
+  type: ClusterIP
+  selector:
+    app: mihomo
+  ports:
+  - name: mixed
+    port: 7890
+    targetPort: 7890
+    protocol: TCP
+  - name: api
+    port: 9090
+    targetPort: 9090
+    protocol: TCP

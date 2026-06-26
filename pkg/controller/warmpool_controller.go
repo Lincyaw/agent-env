@@ -151,8 +151,14 @@ func (r *WarmPoolReconciler) reconcile(ctx context.Context, req ctrl.Request) (c
 	var readyIdle, totalIdle, allocated, totalPods, failedPods int32
 	var failureMessage string
 	var staleConfigPods []*corev1.Pod
+	var initTimeoutPods []corev1.Pod
+	var prePullPods []corev1.Pod
 	for _, pod := range podList.Items {
 		if pod.DeletionTimestamp != nil {
+			continue
+		}
+		if pod.Labels[labels.RoleLabelKey] == labels.RolePrePull {
+			prePullPods = append(prePullPods, pod)
 			continue
 		}
 
@@ -211,6 +217,41 @@ func (r *WarmPoolReconciler) reconcile(ctx context.Context, req ctrl.Request) (c
 
 		// Observe image-pull errors (deduplicated per pod+container+reason)
 		r.observeImagePullErrors(pool.Name, pod)
+
+		// Detect pods stuck in Pending (e.g. hanging image pull) beyond the init timeout.
+		if pod.Status.Phase == corev1.PodPending && r.Config.PodInitTimeout > 0 {
+			if time.Since(pod.CreationTimestamp.Time) > r.Config.PodInitTimeout {
+				initTimeoutPods = append(initTimeoutPods, pod)
+			}
+		}
+	}
+
+	// Force-delete pods that exceeded the init timeout.
+	if len(initTimeoutPods) > 0 {
+		logger.Info("Deleting pods stuck in init", "count", len(initTimeoutPods), "timeout", r.Config.PodInitTimeout)
+		grace := int64(0)
+		delOpts := &client.DeleteOptions{GracePeriodSeconds: &grace}
+		g, gCtx := errgroup.WithContext(ctx)
+		g.SetLimit(20)
+		for i := range initTimeoutPods {
+			pod := &initTimeoutPods[i]
+			g.Go(func() error {
+				age := time.Since(pod.CreationTimestamp.Time).Round(time.Second)
+				if err := r.Delete(gCtx, pod, delOpts); err != nil && !errors.IsNotFound(err) {
+					logger.Error(err, "Failed to force-delete init-timeout pod", "pod", pod.Name)
+					failedPods++
+					failureMessage = fmt.Sprintf("pod %s stuck in Pending for %s (init timeout)",
+						pod.Name, age)
+				} else {
+					logger.Info("Force-deleted init-timeout pod", "pod", pod.Name, "age", age)
+					if r.Metrics != nil {
+						r.Metrics.IncrementPodDelete(pool.Name, "init_timeout")
+					}
+				}
+				return nil
+			})
+		}
+		_ = g.Wait()
 	}
 
 	if len(staleConfigPods) > 0 {
@@ -319,6 +360,10 @@ func (r *WarmPoolReconciler) reconcile(ctx context.Context, req ctrl.Request) (c
 		}
 	}
 
+	// Pre-pull: when replicas=0, ensure a lightweight pod exists to cache
+	// the image on at least one node. When replicas>0 warm pods handle caching.
+	r.reconcilePrePull(ctx, pool, prePullPods)
+
 	// Update status with conditions
 	pool.Status.ReadyReplicas = readyIdle
 	pool.Status.AllocatedReplicas = allocated
@@ -394,6 +439,94 @@ func (r *WarmPoolReconciler) checkScaleComplete(pool *arlv1alpha1.WarmPool, read
 		r.Metrics.RecordAllPodsReady(pool.Name, time.Since(startVal.(time.Time)))
 		r.scaleStartTime.Delete(key)
 	}
+}
+
+// reconcilePrePull ensures a lightweight pre-pull pod exists when replicas=0
+// to cache the primary container image on at least one node. When replicas>0,
+// warm pods handle image caching and any leftover pre-pull pod is cleaned up.
+// prePullPods is the subset already collected from the main pod list.
+func (r *WarmPoolReconciler) reconcilePrePull(ctx context.Context, pool *arlv1alpha1.WarmPool, prePullPods []corev1.Pod) {
+	logger := log.FromContext(ctx)
+
+	if pool.Spec.Replicas > 0 {
+		for i := range prePullPods {
+			if err := r.Delete(ctx, &prePullPods[i]); err != nil && !errors.IsNotFound(err) {
+				logger.Error(err, "Failed to delete pre-pull pod", "pod", prePullPods[i].Name)
+			}
+		}
+		return
+	}
+
+	// replicas == 0: ensure exactly one pre-pull pod exists.
+
+	// Clean up terminated pre-pull pods (image is already cached regardless
+	// of whether the container succeeded or failed).
+	var alive bool
+	for i := range prePullPods {
+		pod := &prePullPods[i]
+		if pod.Status.Phase == corev1.PodSucceeded || pod.Status.Phase == corev1.PodFailed {
+			if err := r.Delete(ctx, pod); err != nil && !errors.IsNotFound(err) {
+				logger.Error(err, "Failed to clean up terminated pre-pull pod", "pod", pod.Name)
+			}
+			continue
+		}
+		alive = true
+	}
+
+	if alive {
+		return // pre-pull pod already running or pending
+	}
+
+	// Extract primary image from the pool template.
+	var image string
+	for _, c := range pool.Spec.Template.Spec.Containers {
+		if c.Name != "sidecar" {
+			image = c.Image
+			break
+		}
+	}
+	if image == "" {
+		return
+	}
+
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			GenerateName: pool.Name + "-prepull-",
+			Namespace:    pool.Namespace,
+			Labels: map[string]string{
+				PoolLabelKey:        pool.Name,
+				labels.RoleLabelKey: labels.RolePrePull,
+			},
+		},
+		Spec: corev1.PodSpec{
+			RestartPolicy: corev1.RestartPolicyNever,
+			Containers: []corev1.Container{
+				{
+					Name:    "pull",
+					Image:   image,
+					Command: []string{"/bin/true"},
+					Resources: corev1.ResourceRequirements{
+						Requests: corev1.ResourceList{
+							corev1.ResourceCPU:    resource.MustParse("1m"),
+							corev1.ResourceMemory: resource.MustParse("1Mi"),
+						},
+						Limits: corev1.ResourceList{
+							corev1.ResourceCPU:    resource.MustParse("10m"),
+							corev1.ResourceMemory: resource.MustParse("8Mi"),
+						},
+					},
+				},
+			},
+		},
+	}
+
+	ctrl.SetControllerReference(pool, pod, r.Scheme)
+
+	if err := r.Create(ctx, pod); err != nil {
+		logger.Error(err, "Failed to create pre-pull pod")
+		return
+	}
+	logger.Info("Created pre-pull pod to cache image", "pod", pod.Name, "image", image)
 }
 
 // observePodMetrics records one-time per-pod startup metrics for newly-ready pods.
@@ -680,6 +813,9 @@ func (r *WarmPoolReconciler) constructPod(pool *arlv1alpha1.WarmPool, renderedCo
 
 	// Inject managed config resources and env vars.
 	r.injectConfigEnv(pod, renderedConfig)
+
+	// Inject HTTP proxy env vars into all containers.
+	r.injectProxyEnv(pod)
 
 	// Set owner reference
 	ctrl.SetControllerReference(pool, pod, r.Scheme)
@@ -1021,6 +1157,51 @@ func (r *WarmPoolReconciler) injectSidecarAuthEnv(pod *corev1.Pod) {
 		return
 	}
 	appendEnvVar(pod, "sidecar", sidecarAuthTokenEnv())
+}
+
+// injectProxyEnv sets HTTP_PROXY/HTTPS_PROXY/NO_PROXY on executor and init
+// containers when PodHTTPProxy is configured. The sidecar is excluded because
+// it communicates in-cluster (gRPC to gateway, OTEL export) and routing that
+// traffic through an external proxy would break connectivity.
+func (r *WarmPoolReconciler) injectProxyEnv(pod *corev1.Pod) {
+	if r.Config.PodHTTPProxy == "" {
+		return
+	}
+	noProxy := r.Config.PodNoProxy
+	if noProxy == "" {
+		noProxy = "localhost,127.0.0.1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,.svc,.svc.cluster.local"
+	}
+	envVars := []corev1.EnvVar{
+		{Name: "HTTP_PROXY", Value: r.Config.PodHTTPProxy},
+		{Name: "HTTPS_PROXY", Value: r.Config.PodHTTPProxy},
+		{Name: "http_proxy", Value: r.Config.PodHTTPProxy},
+		{Name: "https_proxy", Value: r.Config.PodHTTPProxy},
+		{Name: "NO_PROXY", Value: noProxy},
+		{Name: "no_proxy", Value: noProxy},
+	}
+	for i := range pod.Spec.InitContainers {
+		for _, ev := range envVars {
+			upsertEnv(&pod.Spec.InitContainers[i].Env, ev)
+		}
+	}
+	for i := range pod.Spec.Containers {
+		if pod.Spec.Containers[i].Name == "sidecar" {
+			continue
+		}
+		for _, ev := range envVars {
+			appendEnvVar(pod, pod.Spec.Containers[i].Name, ev)
+		}
+	}
+}
+
+func upsertEnv(envs *[]corev1.EnvVar, ev corev1.EnvVar) {
+	for i := range *envs {
+		if (*envs)[i].Name == ev.Name {
+			(*envs)[i] = ev
+			return
+		}
+	}
+	*envs = append(*envs, ev)
 }
 
 // ensureSidecarVolumeMounts adds executor-related volume mounts to an existing sidecar
