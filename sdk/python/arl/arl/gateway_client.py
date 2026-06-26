@@ -380,6 +380,8 @@ class GatewayClient:
         tools: ToolsSpec | None = None,
         workspace_dir: str = "/workspace",
         max_replicas: int | None = None,
+        min_replicas: int | None = None,
+        scale_up_step: int | None = None,
         config_env: ConfigEnvSpec | dict[str, Any] | None = None,
     ) -> ManagedSessionInfo:
         """Create a managed session with automatic pool management.
@@ -394,10 +396,12 @@ class GatewayClient:
             resources: Optional CPU/memory requirements (used on first pool creation).
             tools: Optional tools specification (used on first pool creation).
             workspace_dir: Workspace mount path.
-            max_replicas: Optional per-pool scale ceiling hint. When set, the server
-                scales the pool eagerly up to this value on first request, instead of
-                scaling incrementally. Useful when you know the final concurrency target
-                (e.g., max_replicas=8 means "I will use at most 8 sessions for this image").
+            max_replicas: Per-pool scale ceiling hint. The server scales eagerly
+                up to this value instead of scaling incrementally.
+            min_replicas: Per-pool scale floor hint. The server will not scale
+                below this value during scale-down (0 = use server default).
+            scale_up_step: Max replicas to add per scale-up event
+                (0 = use server default).
 
         Returns:
             ManagedSessionInfo with session details and experiment metadata.
@@ -417,6 +421,10 @@ class GatewayClient:
             body["tools"] = tools.model_dump(by_alias=True, exclude_none=True)
         if max_replicas is not None:
             body["maxReplicas"] = max_replicas
+        if min_replicas is not None:
+            body["minReplicas"] = min_replicas
+        if scale_up_step is not None:
+            body["scaleUpStep"] = scale_up_step
         resp = self._client.post("/v1/managed/sessions", json=body)
         self._handle_error(resp)
         return ManagedSessionInfo.model_validate(resp.json())

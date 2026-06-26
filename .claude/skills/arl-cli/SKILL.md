@@ -139,12 +139,35 @@ arl session logs <session-id> -f
 arl pool logs <pool-name> -f
 ```
 
-### 3. Quick-test a container image
+### 3. Pre-warm an image (replicas=0)
+
+When `replicas=0`, the controller creates a lightweight pre-pull pod to cache the
+image on one node without running actual warm pods. When a session is requested,
+the pool scales up and the ImageLocality scheduler routes the pod to the node that
+already has the cached image — near-instant startup.
+
+```bash
+# Pre-warm: create a pool with replicas=0 (image-only, no running pods)
+arl pool create my-pool --image my-registry/my-image:latest --replicas 0
+
+# Check that the pre-pull pod ran (image is cached)
+arl pool get my-pool            # readyReplicas=0, no active pods, image cached
+
+# Later, scale up when needed
+arl pool scale my-pool --replicas 5
+```
+
+This is the **default behavior** — `DefaultPoolReplicas=0` and
+`ManagedPoolInitialReplicas=0`. All new pools (including managed pools created
+via `POST /v1/managed/sessions`) start with replicas=0 and pre-pull only.
+The pool auto-scales when a session is requested.
+
+### 4. Quick-test a container image
 
 Before using an image in a large experiment, validate it works:
 
 ```bash
-# Create a small pool and run a command
+# Create a pool with 1 replica for testing
 arl pool create test-pool --image my-registry/my-image:latest --replicas 1
 
 # Wait for it to be ready, then test
@@ -156,7 +179,7 @@ arl pool exec test-pool -- cat /etc/os-release
 arl pool delete test-pool --force
 ```
 
-### 4. Export training trajectories
+### 5. Export training trajectories
 
 After an experiment completes, export all session trajectories for SFT/RL:
 
@@ -171,7 +194,7 @@ while read sid; do
 done < session_ids.txt
 ```
 
-### 5. Monitor pool utilization
+### 6. Monitor pool utilization
 
 Watch pool metrics for capacity planning:
 
@@ -185,7 +208,7 @@ arl metrics --filter pod_schedule_seconds
 arl metrics --filter image_pull
 ```
 
-### 6. Scale up before a big run
+### 7. Scale up before a big run
 
 Pre-scale pools before launching many sessions:
 
@@ -194,7 +217,7 @@ arl pool scale training-pool --replicas 20
 arl pool get training-pool    # watch ready count climb
 ```
 
-### 7. Clean up after experiments
+### 8. Clean up after experiments
 
 ```bash
 # Delete a single experiment (all its sessions)
@@ -222,6 +245,37 @@ arl session list --pool my-pool -o json | jq -r '.[].podIP'
 arl pool list -o json | jq '[.[].allocatedReplicas] | add'
 ```
 
+## HTTP Proxy (mihomo)
+
+The cluster runs an in-cluster mihomo (Clash Meta) proxy at `mihomo.arl.svc:7890`
+so sandbox pods can access GitHub, PyPI, npm, etc. The operator automatically
+injects `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY` env vars into all warm pool
+containers (except sidecar) when `proxy.url` is set in Helm values.
+
+```bash
+# Verify proxy is running
+kubectl --context=arl get deploy mihomo -n arl
+
+# Test connectivity
+kubectl --context=arl run test-proxy --rm -i --restart=Never -n arl \
+  --image=pair-diag-cn-guangzhou.cr.volces.com/pair/redis:8-alpine \
+  --env="https_proxy=http://mihomo.arl.svc:7890" \
+  -- sh -c 'wget -q -O /dev/null https://github.com && echo OK || echo FAIL'
+
+# Update proxy config (static Clash YAML)
+kubectl --context=arl create configmap mihomo-config -n arl \
+  --from-file=config.yaml=/path/to/config.yaml --dry-run=client -o yaml | \
+  kubectl --context=arl apply -f -
+kubectl --context=arl rollout restart deploy/mihomo -n arl
+```
+
+Helm values controlling proxy injection:
+```yaml
+proxy:
+  url: "http://mihomo.arl.svc:7890"    # injected into all warm pool pods
+  noProxy: ""                           # defaults to K8s internal ranges
+```
+
 ## Tips
 
 - `arl pool exec` is the fastest way to test something in a pool — it handles session lifecycle automatically
@@ -229,3 +283,5 @@ arl pool list -o json | jq '[.[].allocatedReplicas] | add'
 - Use `-o wide` for extra columns (image, namespace, pod IP) without switching to JSON
 - Logs stream from the sidecar's ring buffer (last 2000 lines), not from K8s — works without kubeconfig
 - `arl exp` aliases to `arl experiment`, `arl session` aliases to `arl sess`
+- Default `replicas=0` means new pools only pre-pull the image; pods are created on-demand when sessions are requested
+- The mihomo proxy config is a static Clash YAML in ConfigMap `mihomo-config`; update it and restart the deployment to change proxy nodes

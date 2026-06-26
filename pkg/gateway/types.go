@@ -58,7 +58,9 @@ type CreateManagedSessionRequest struct {
 	Resources    *corev1.ResourceRequirements `json:"resources,omitempty"`
 	Tools        *arlv1alpha1.ToolsSpec       `json:"tools,omitempty"`
 	WorkspaceDir string                       `json:"workspaceDir,omitempty"`
-	MaxReplicas  int32                        `json:"maxReplicas,omitempty"` // per-session scale ceiling hint; server scales up eagerly to this value
+	MaxReplicas  int32                        `json:"maxReplicas,omitempty"`  // per-pool scale ceiling hint; server scales up eagerly to this value
+	MinReplicas  int32                        `json:"minReplicas,omitempty"`  // per-pool scale floor hint (0 = use global default)
+	ScaleUpStep  int32                        `json:"scaleUpStep,omitempty"`  // per-pool max replicas to add per scale-up event (0 = use global default)
 }
 
 // ExecuteRequest is the body for POST /v1/sessions/{id}/execute

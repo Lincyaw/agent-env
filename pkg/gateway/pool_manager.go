@@ -80,7 +80,23 @@ type poolState struct {
 	configEnv      json.RawMessage
 	scaleCh        chan scaleReq // per-pool coalesce channel for scale-up requests
 	maxReplicas    atomic.Int32  // per-pool max replicas hint from clients (0 = use global config)
+	minReplicas    atomic.Int32  // per-pool min replicas hint from clients (0 = use global config)
+	scaleUpStep    atomic.Int32  // per-pool scale-up step hint from clients (0 = use global config)
 	poolCreated    bool          // true once the WarmPool CRD has been successfully created
+}
+
+func (s *poolState) effectiveMinReplicas(global int32) int32 {
+	if v := s.minReplicas.Load(); v > 0 {
+		return v
+	}
+	return global
+}
+
+func (s *poolState) effectiveScaleUpStep(global int32) int32 {
+	if v := s.scaleUpStep.Load(); v > 0 {
+		return v
+	}
+	return global
 }
 
 // PoolManager manages WarmPools automatically for the managed session API.
@@ -268,8 +284,8 @@ func (pm *PoolManager) AcquireSession(ctx context.Context, req CreateManagedSess
 	// Increment BEFORE capacity check so concurrent calls see correct demand
 	state.sessionCount.Add(1)
 
-	// Update per-pool maxReplicas hint if the client provides a larger one.
-	// This is a CAS loop so concurrent callers always keep the highest value.
+	// Update per-pool scaling hints if the client provides them.
+	// CAS loops so concurrent callers always keep the highest value.
 	if req.MaxReplicas > 0 {
 		for {
 			cur := state.maxReplicas.Load()
@@ -280,6 +296,20 @@ func (pm *PoolManager) AcquireSession(ctx context.Context, req CreateManagedSess
 				break
 			}
 		}
+	}
+	if req.MinReplicas > 0 {
+		for {
+			cur := state.minReplicas.Load()
+			if req.MinReplicas <= cur {
+				break
+			}
+			if state.minReplicas.CompareAndSwap(cur, req.MinReplicas) {
+				break
+			}
+		}
+	}
+	if req.ScaleUpStep > 0 {
+		state.scaleUpStep.Store(req.ScaleUpStep)
 	}
 
 	// Check if we need to scale up
@@ -521,16 +551,19 @@ func (pm *PoolManager) doScaleUp(state *poolState) error {
 			demand = clientMax
 		}
 
-		desired := max(demand, pm.config.MinReplicas)
+		minR := state.effectiveMinReplicas(pm.config.MinReplicas)
+		stepR := state.effectiveScaleUpStep(pm.config.ScaleUpStep)
+
+		desired := max(demand, minR)
 		desired = min(desired, pm.config.MaxReplicas)
 
 		if pool.Spec.Replicas >= desired {
 			return nil // Already at or above desired capacity
 		}
 
-		// Also ensure at least ScaleUpStep growth for responsiveness
-		grown := pool.Spec.Replicas + pm.config.ScaleUpStep
-		newReplicas := min(max(desired, grown), pm.config.MaxReplicas)
+		// Cap each scale-up to at most ScaleUpStep replicas above current
+		grown := pool.Spec.Replicas + stepR
+		newReplicas := min(desired, grown)
 		if newReplicas <= pool.Spec.Replicas {
 			return nil
 		}
@@ -607,7 +640,8 @@ func (pm *PoolManager) sweep() {
 		}
 
 		// Scale down: if we have more replicas than needed
-		desiredReplicas := max(activeSessions+1, pm.config.MinReplicas) // keep 1 spare
+		minR := state.effectiveMinReplicas(pm.config.MinReplicas)
+		desiredReplicas := max(activeSessions+1, minR) // keep 1 spare
 
 		if pool.Spec.Replicas > desiredReplicas {
 			state.mu.Lock()
@@ -627,7 +661,7 @@ func (pm *PoolManager) sweep() {
 					}, fresh); err != nil {
 						return err
 					}
-					freshDesired := max(state.sessionCount.Load()+1, pm.config.MinReplicas)
+					freshDesired := max(state.sessionCount.Load()+1, minR)
 					if fresh.Spec.Replicas <= freshDesired {
 						return nil
 					}

@@ -404,6 +404,8 @@ class ManagedSession(SandboxSession):
         tools: ToolsSpec | None = None,
         workspace_dir: str = "/workspace",
         max_replicas: int | None = None,
+        min_replicas: int | None = None,
+        scale_up_step: int | None = None,
         config_env: ConfigEnvSpec | dict[str, Any] | None = None,
         api_key: str | None = None,
     ) -> None:
@@ -422,6 +424,8 @@ class ManagedSession(SandboxSession):
         self._tools = tools
         self._workspace_dir = workspace_dir
         self._max_replicas = max_replicas
+        self._min_replicas = min_replicas
+        self._scale_up_step = scale_up_step
 
     @property
     def experiment_id(self) -> str:
@@ -444,6 +448,8 @@ class ManagedSession(SandboxSession):
             tools=self._tools,
             workspace_dir=self._workspace_dir,
             max_replicas=self._max_replicas,
+            min_replicas=self._min_replicas,
+            scale_up_step=self._scale_up_step,
         )
         self._session_id = info.id
         self._session_info = info
