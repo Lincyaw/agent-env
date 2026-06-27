@@ -238,7 +238,7 @@ func main() {
 			}),
 		),
 		ReadTimeout:  30 * time.Second,
-		WriteTimeout: 600 * time.Second,
+		WriteTimeout: cfg.GatewayWriteTimeout,
 		IdleTimeout:  60 * time.Second,
 	}
 

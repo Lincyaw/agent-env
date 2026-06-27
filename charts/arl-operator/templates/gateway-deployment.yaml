@@ -73,6 +73,8 @@ spec:
               value: "{{ .Values.gateway.maxLifetime }}"
             - name: GATEWAY_SWEEP_INTERVAL
               value: "{{ .Values.gateway.sweepInterval }}"
+            - name: GATEWAY_WRITE_TIMEOUT
+              value: "{{ .Values.gateway.writeTimeout }}"
             {{- if .Values.clickhouse.enabled }}
             - name: CLICKHOUSE_ENABLED
               value: "true"

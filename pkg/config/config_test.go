@@ -129,6 +129,14 @@ func TestConfig_Validate(t *testing.T) {
 				WarmPoolRateLimitBurst:    100,
 				ImageLocalitySpreadFactor: 0.25,
 				ImageLocalityWeight:       80,
+				ManagedPoolMaxReplicas:    10,
+				ManagedPoolScaleUpStep:    1,
+				ManagedPoolSweepInterval:  time.Second,
+				ManagedPoolEmptyTTL:       time.Minute,
+				GatewaySweepInterval:      time.Second,
+				InternalPort:              9091,
+				RateLimitRPS:              1,
+				RateLimitBurst:            1,
 			},
 			wantErr: false,
 		},
@@ -183,8 +191,8 @@ func TestDefaultConfig(t *testing.T) {
 		t.Errorf("Expected SidecarGRPCPort = 9090, got %d", cfg.SidecarGRPCPort)
 	}
 
-	if cfg.DefaultPoolReplicas != 3 {
-		t.Errorf("Expected DefaultPoolReplicas = 3, got %d", cfg.DefaultPoolReplicas)
+	if cfg.DefaultPoolReplicas != 0 {
+		t.Errorf("Expected DefaultPoolReplicas = 0, got %d", cfg.DefaultPoolReplicas)
 	}
 
 	if cfg.EnableMetrics != true {

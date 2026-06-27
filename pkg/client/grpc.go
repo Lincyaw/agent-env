@@ -108,6 +108,7 @@ func (c *GRPCSidecarClient) Execute(ctx context.Context, podIP string, req inter
 
 	stream, err := client.Execute(ctx, pbReq)
 	if err != nil {
+		_ = c.CloseConnection(podIP)
 		return nil, fmt.Errorf("gRPC Execute failed: %w", err)
 	}
 
@@ -121,6 +122,7 @@ func (c *GRPCSidecarClient) Execute(ctx context.Context, podIP string, req inter
 			break
 		}
 		if err != nil {
+			_ = c.CloseConnection(podIP)
 			return nil, fmt.Errorf("gRPC stream receive failed: %w", err)
 		}
 
@@ -162,6 +164,7 @@ func (c *GRPCSidecarClient) ExecuteStream(ctx context.Context, podIP string, req
 
 	stream, err := client.Execute(ctx, pbReq)
 	if err != nil {
+		_ = c.CloseConnection(podIP)
 		return nil, fmt.Errorf("gRPC Execute failed: %w", err)
 	}
 
@@ -175,6 +178,7 @@ func (c *GRPCSidecarClient) ExecuteStream(ctx context.Context, podIP string, req
 				return
 			}
 			if err != nil {
+				_ = c.CloseConnection(podIP)
 				// Send error as final message
 				resultChan <- &sidecar.ExecLog{
 					Stderr:   err.Error(),
@@ -319,6 +323,7 @@ func (c *GRPCSidecarClient) WriteFile(ctx context.Context, podIP string, path st
 		Content: content,
 	})
 	if err != nil {
+		_ = c.CloseConnection(podIP)
 		return 0, fmt.Errorf("gRPC WriteFile failed: %w", err)
 	}
 	return resp.GetBytesWritten(), nil
@@ -335,6 +340,7 @@ func (c *GRPCSidecarClient) ReadFile(ctx context.Context, podIP string, path str
 		Path: path,
 	})
 	if err != nil {
+		_ = c.CloseConnection(podIP)
 		return nil, fmt.Errorf("gRPC ReadFile failed: %w", err)
 	}
 	return resp.GetContent(), nil
@@ -353,6 +359,7 @@ func (c *GRPCSidecarClient) StreamLogs(ctx context.Context, podIP string, follow
 		TailLines: tailLines,
 	})
 	if err != nil {
+		_ = c.CloseConnection(podIP)
 		return nil, fmt.Errorf("gRPC StreamLogs failed: %w", err)
 	}
 
@@ -365,6 +372,7 @@ func (c *GRPCSidecarClient) StreamLogs(ctx context.Context, podIP string, follow
 				return
 			}
 			if err != nil {
+				_ = c.CloseConnection(podIP)
 				return
 			}
 			select {
@@ -393,6 +401,7 @@ func (c *GRPCSidecarClient) InteractiveShell(ctx context.Context, podIP string) 
 
 	stream, err := client.InteractiveShell(ctx)
 	if err != nil {
+		_ = c.CloseConnection(podIP)
 		return nil, fmt.Errorf("gRPC InteractiveShell failed: %w", err)
 	}
 

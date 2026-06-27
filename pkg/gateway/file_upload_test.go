@@ -7,6 +7,10 @@ import (
 	"testing"
 
 	"github.com/Lincyaw/agent-env/pkg/client"
+	"github.com/Lincyaw/agent-env/pkg/labels"
+	corev1 "k8s.io/api/core/v1"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
 func TestNormalizeUploadFileRequestBase64(t *testing.T) {
@@ -36,9 +40,28 @@ func TestSanitizeUploadPathRejectsEscape(t *testing.T) {
 }
 
 func TestUploadFileUsesNativeWritePathAndRecordsHistory(t *testing.T) {
+	pod := &corev1.Pod{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      "pod-1",
+			Namespace: "arl",
+			Labels: map[string]string{
+				labels.StatusLabelKey: labels.StatusAllocated,
+			},
+			Annotations: map[string]string{
+				labels.SessionAnnotation: "sess-1",
+			},
+		},
+		Status: corev1.PodStatus{PodIP: "10.0.0.1"},
+	}
+
 	store := NewMemoryStore()
 	store.Set("sess-1", &session{
-		Info:    SessionInfo{ID: "sess-1", PodIP: "10.0.0.1"},
+		Info: SessionInfo{
+			ID:        "sess-1",
+			Namespace: "arl",
+			PodName:   "pod-1",
+			PodIP:     "10.0.0.1",
+		},
 		History: NewStepHistory(),
 	})
 
@@ -47,7 +70,8 @@ func TestUploadFileUsesNativeWritePathAndRecordsHistory(t *testing.T) {
 	var gotContent []byte
 
 	gw := &Gateway{
-		store: store,
+		k8sClient: fake.NewClientBuilder().WithObjects(pod).Build(),
+		store:     store,
 		sidecarClient: &client.MockSidecarClient{
 			WriteFileFunc: func(ctx context.Context, podIP string, path string, content []byte) (int64, error) {
 				gotPodIP = podIP

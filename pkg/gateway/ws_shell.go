@@ -71,7 +71,6 @@ func handleShell(gw *Gateway, authCfg *AuthConfig) http.HandlerFunc {
 			return
 		}
 		s.mu.RLock()
-		podIP := s.Info.PodIP
 		ownerHash := s.ownerKeyHash
 		s.mu.RUnlock()
 
@@ -79,6 +78,12 @@ func handleShell(gw *Gateway, authCfg *AuthConfig) http.HandlerFunc {
 			http.Error(w, err.Error(), http.StatusForbidden)
 			return
 		}
+		_, podIP, releaseSession, err := gw.acquireSessionPodIP(r.Context(), id)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		defer releaseSession()
 
 		// Upgrade HTTP to WebSocket
 		ws, err := upgrader.Upgrade(w, r, nil)

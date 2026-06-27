@@ -24,6 +24,7 @@ type redisSessionData struct {
 	Info                SessionInfo             `json:"info"`
 	Managed             bool                    `json:"managed"`
 	ExperimentID        string                  `json:"experimentId"`
+	Deleted             bool                    `json:"deleted,omitempty"`
 	LastTaskTime        time.Time               `json:"lastTaskTime"`
 	LastAnnotationPatch time.Time               `json:"lastAnnotationPatch"`
 	IdleTimeout         time.Duration           `json:"idleTimeout"`
@@ -161,6 +162,9 @@ func (rs *RedisStore) Get(sessionID string) (*session, bool) {
 		log.Printf("Warning: failed to unmarshal session %s from Redis: %v", sessionID, err)
 		return nil, false
 	}
+	if data.Deleted {
+		return nil, false
+	}
 
 	s := redisDataToSession(data)
 	rs.cache.Store(sessionID, s)
@@ -173,10 +177,23 @@ func (rs *RedisStore) Set(sessionID string, s *session) {
 }
 
 func (rs *RedisStore) Delete(sessionID string) {
+	var data *redisSessionData
+	if val, ok := rs.cache.Load(sessionID); ok {
+		d := sessionToRedisData(val.(*session))
+		data = &d
+	} else if d, ok := rs.loadRedisData(sessionID); ok {
+		data = &d
+	}
+
 	rs.cache.Delete(sessionID)
-	// Keep the Redis record alive — its TTL handles eventual cleanup.
-	// This allows replay_from to read a deleted session's history for
-	// fork-based environment restoration.
+	if data == nil {
+		return
+	}
+
+	// Keep a tombstoned Redis record for history/replay, but make active
+	// lookups return "not found" so deleted sessions cannot be resurrected.
+	data.Deleted = true
+	rs.persistDataToRedis(sessionID, *data)
 }
 
 func (rs *RedisStore) Range(fn func(sessionID string, s *session) bool) {
@@ -225,8 +242,38 @@ func (rs *RedisStore) Sync(sessionID string) {
 	rs.persistToRedis(sessionID, val.(*session))
 }
 
+// GetHistorical retrieves a session record for replay even if it has been
+// tombstoned by Delete. Active request paths must use Get instead.
+func (rs *RedisStore) GetHistorical(sessionID string) (*session, bool) {
+	data, ok := rs.loadRedisData(sessionID)
+	if !ok {
+		return nil, false
+	}
+	return redisDataToSession(data), true
+}
+
+func (rs *RedisStore) loadRedisData(sessionID string) (redisSessionData, bool) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	raw, err := rs.client.Get(ctx, rs.redisKey(sessionID)).Bytes()
+	if err != nil {
+		return redisSessionData{}, false
+	}
+
+	var data redisSessionData
+	if err := json.Unmarshal(raw, &data); err != nil {
+		log.Printf("Warning: failed to unmarshal session %s from Redis: %v", sessionID, err)
+		return redisSessionData{}, false
+	}
+	return data, true
+}
+
 func (rs *RedisStore) persistToRedis(sessionID string, s *session) {
-	data := sessionToRedisData(s)
+	rs.persistDataToRedis(sessionID, sessionToRedisData(s))
+}
+
+func (rs *RedisStore) persistDataToRedis(sessionID string, data redisSessionData) {
 	raw, err := json.Marshal(data)
 	if err != nil {
 		log.Printf("Warning: failed to marshal session %s for Redis: %v", sessionID, err)

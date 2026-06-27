@@ -60,6 +60,7 @@ gateway:
   idleTimeout: "600s"       # Max idle time before session is reaped
   maxLifetime: "3600s"      # Max total session lifetime
   sweepInterval: "30s"      # How often to check for expired sessions
+  writeTimeout: "0s"        # Public HTTP write timeout; 0 disables it for long streaming execs
 
 # Authentication & security
 auth:

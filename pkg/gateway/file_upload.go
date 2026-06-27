@@ -24,11 +24,6 @@ type uploadFileAuditInput struct {
 }
 
 func (g *Gateway) UploadFile(ctx context.Context, sessionID string, req UploadFileRequest) (*UploadFileResponse, error) {
-	s, ok := g.store.Get(sessionID)
-	if !ok {
-		return nil, fmt.Errorf("session %s not found", sessionID)
-	}
-
 	relPath, payload, err := normalizeUploadFileRequest(req)
 	if err != nil {
 		return nil, err
@@ -40,9 +35,11 @@ func (g *Gateway) UploadFile(ctx context.Context, sessionID string, req UploadFi
 		Encoding: normalizedEncoding(req.Encoding),
 	})
 
-	s.mu.RLock()
-	podIP := s.Info.PodIP
-	s.mu.RUnlock()
+	s, podIP, releaseSession, err := g.acquireSessionPodIP(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer releaseSession()
 
 	start := time.Now()
 	written, err := g.sidecarClient.WriteFile(ctx, podIP, relPath, payload)
@@ -106,19 +103,16 @@ func (g *Gateway) UploadFile(ctx context.Context, sessionID string, req UploadFi
 }
 
 func (g *Gateway) DownloadFile(ctx context.Context, sessionID string, filePath string) ([]byte, error) {
-	s, ok := g.store.Get(sessionID)
-	if !ok {
-		return nil, fmt.Errorf("session %s not found", sessionID)
-	}
-
 	relPath, err := sanitizeUploadPath(filePath)
 	if err != nil {
 		return nil, err
 	}
 
-	s.mu.RLock()
-	podIP := s.Info.PodIP
-	s.mu.RUnlock()
+	_, podIP, releaseSession, err := g.acquireSessionPodIP(ctx, sessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer releaseSession()
 
 	content, err := g.sidecarClient.ReadFile(ctx, podIP, relPath)
 	if err != nil {

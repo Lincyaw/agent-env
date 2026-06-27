@@ -48,6 +48,7 @@ type session struct {
 	managed             bool
 	experimentID        string
 	ownerKeyHash        string
+	closed              bool
 	lastTaskTime        time.Time
 	lastAnnotationPatch time.Time
 	idleTimeout         time.Duration
@@ -340,13 +341,18 @@ func (g *Gateway) DeleteSession(ctx context.Context, sessionID string) error {
 		return fmt.Errorf("session %s not found", sessionID)
 	}
 
-	s.mu.RLock()
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return fmt.Errorf("session %s not found", sessionID)
+	}
+	s.closed = true
 	podName := s.Info.PodName
 	podIP := s.Info.PodIP
 	namespace := s.Info.Namespace
 	poolRef := s.Info.PoolRef
 	managed := s.managed
-	s.mu.RUnlock()
+	s.mu.Unlock()
 
 	// Delete pod directly via PodAllocator (WarmPoolController will create replacement)
 	if err := g.podAllocator.Release(ctx, podName, namespace); err != nil && !errors.IsNotFound(err) {
@@ -374,6 +380,118 @@ func (g *Gateway) DeleteSession(ctx context.Context, sessionID string) error {
 	return nil
 }
 
+// resolveSessionPodIP validates that the session still owns the recorded pod
+// before using the pod IP. Pod IPs are reusable; the pod name plus session
+// annotation is the control-plane identity.
+func (g *Gateway) resolveSessionPodIP(ctx context.Context, sessionID string) (*session, string, error) {
+	s, ok := g.store.Get(sessionID)
+	if !ok {
+		return nil, "", fmt.Errorf("session %s not found", sessionID)
+	}
+
+	s.mu.RLock()
+	closed := s.closed
+	info := s.Info
+	s.mu.RUnlock()
+	if closed {
+		return nil, "", fmt.Errorf("session %s not found", sessionID)
+	}
+	if info.PodName == "" || info.Namespace == "" {
+		return nil, "", fmt.Errorf("session %s has incomplete pod binding", sessionID)
+	}
+
+	pod := &corev1.Pod{}
+	if err := g.k8sClient.Get(ctx, types.NamespacedName{Name: info.PodName, Namespace: info.Namespace}, pod); err != nil {
+		if errors.IsNotFound(err) {
+			g.dropSession(sessionID, s)
+			return nil, "", fmt.Errorf("session %s pod %s/%s no longer exists", sessionID, info.Namespace, info.PodName)
+		}
+		return nil, "", fmt.Errorf("validate session %s pod %s/%s: %w", sessionID, info.Namespace, info.PodName, err)
+	}
+	if pod.DeletionTimestamp != nil {
+		g.dropSession(sessionID, s)
+		return nil, "", fmt.Errorf("session %s pod %s/%s is terminating", sessionID, info.Namespace, info.PodName)
+	}
+	if got := pod.Annotations[labels.SessionAnnotation]; got != sessionID {
+		g.dropSession(sessionID, s)
+		return nil, "", fmt.Errorf("session %s lost pod ownership for %s/%s (annotation=%q)", sessionID, info.Namespace, info.PodName, got)
+	}
+	if status := pod.Labels[labels.StatusLabelKey]; status != labels.StatusAllocated {
+		g.dropSession(sessionID, s)
+		return nil, "", fmt.Errorf("session %s pod %s/%s is not allocated (status=%q)", sessionID, info.Namespace, info.PodName, status)
+	}
+	if pod.Status.PodIP == "" {
+		return nil, "", fmt.Errorf("session %s pod %s/%s has no pod IP", sessionID, info.Namespace, info.PodName)
+	}
+
+	if pod.Status.PodIP != info.PodIP {
+		if info.PodIP != "" {
+			if err := g.sidecarClient.CloseConnection(info.PodIP); err != nil {
+				log.Printf("Warning: failed to close stale sidecar connection for pod %s: %v", info.PodName, err)
+			}
+		}
+		s.mu.Lock()
+		s.Info.PodIP = pod.Status.PodIP
+		s.mu.Unlock()
+		if rs, ok := g.store.(*RedisStore); ok {
+			rs.Sync(sessionID)
+		}
+	}
+
+	return s, pod.Status.PodIP, nil
+}
+
+func (g *Gateway) acquireSessionPodIP(ctx context.Context, sessionID string) (*session, string, func(), error) {
+	s, ok := g.store.Get(sessionID)
+	if !ok {
+		return nil, "", func() {}, fmt.Errorf("session %s not found", sessionID)
+	}
+	s.mu.RLock()
+	closed := s.closed
+	s.mu.RUnlock()
+	if closed {
+		return nil, "", func() {}, fmt.Errorf("session %s not found", sessionID)
+	}
+
+	atomic.AddInt32(&s.activeExecs, 1)
+	release := func() {
+		atomic.AddInt32(&s.activeExecs, -1)
+	}
+
+	validated, podIP, err := g.resolveSessionPodIP(ctx, sessionID)
+	if err != nil {
+		release()
+		return nil, "", func() {}, err
+	}
+	return validated, podIP, release, nil
+}
+
+func (g *Gateway) dropSession(sessionID string, s *session) {
+	s.mu.Lock()
+	if s.closed {
+		s.mu.Unlock()
+		return
+	}
+	s.closed = true
+	info := s.Info
+	managed := s.managed
+	poolRef := s.Info.PoolRef
+	s.mu.Unlock()
+
+	if info.PodIP != "" {
+		if err := g.sidecarClient.CloseConnection(info.PodIP); err != nil {
+			log.Printf("Warning: failed to close sidecar connection for dropped session %s: %v", sessionID, err)
+		}
+	}
+	g.store.Delete(sessionID)
+	if g.metrics != nil {
+		g.metrics.SetActiveSessions(g.store.IncrCount(-1))
+	}
+	if managed && g.poolManager != nil {
+		g.poolManager.ReleaseSession(poolRef)
+	}
+}
+
 // ExecuteSteps executes steps directly via sidecar gRPC.
 func (g *Gateway) ExecuteSteps(ctx context.Context, sessionID string, req ExecuteRequest) (*ExecuteResponse, error) {
 	ctx, span := otel.Tracer("gateway").Start(ctx, "Gateway.ExecuteSteps",
@@ -382,19 +500,13 @@ func (g *Gateway) ExecuteSteps(ctx context.Context, sessionID string, req Execut
 	span.SetAttributes(attribute.Int("steps.count", len(req.Steps)))
 	defer span.End()
 
-	s, ok := g.store.Get(sessionID)
-	if !ok {
-		err := fmt.Errorf("session %s not found", sessionID)
+	s, podIP, releaseSession, err := g.acquireSessionPodIP(ctx, sessionID)
+	if err != nil {
 		recordSpanErr(span, err)
 		return nil, err
 	}
+	defer releaseSession()
 
-	atomic.AddInt32(&s.activeExecs, 1)
-	defer atomic.AddInt32(&s.activeExecs, -1)
-
-	s.mu.RLock()
-	podIP := s.Info.PodIP
-	s.mu.RUnlock()
 	span.SetAttributes(attribute.String("pod.ip", podIP))
 
 	resp := &ExecuteResponse{
@@ -511,16 +623,13 @@ func (g *Gateway) ExecuteStepsSSE(w http.ResponseWriter, ctx context.Context, se
 	span.SetAttributes(attribute.Int("steps.count", len(req.Steps)))
 	defer span.End()
 
-	s, ok := g.store.Get(sessionID)
-	if !ok {
-		err := fmt.Errorf("session %s not found", sessionID)
+	s, podIP, releaseSession, err := g.acquireSessionPodIP(ctx, sessionID)
+	if err != nil {
 		recordSpanErr(span, err)
 		http.Error(w, fmt.Sprintf(`{"error":%q}`, err.Error()), http.StatusNotFound)
 		return
 	}
-
-	atomic.AddInt32(&s.activeExecs, 1)
-	defer atomic.AddInt32(&s.activeExecs, -1)
+	defer releaseSession()
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
@@ -528,9 +637,6 @@ func (g *Gateway) ExecuteStepsSSE(w http.ResponseWriter, ctx context.Context, se
 		return
 	}
 
-	s.mu.RLock()
-	podIP := s.Info.PodIP
-	s.mu.RUnlock()
 	span.SetAttributes(attribute.String("pod.ip", podIP))
 
 	w.Header().Set("Content-Type", "text/event-stream")
@@ -667,13 +773,15 @@ func (g *Gateway) ExecuteStepsSSE(w http.ResponseWriter, ctx context.Context, se
 func (g *Gateway) ReplayFrom(ctx context.Context, targetSessionID string, req ReplayRequest) (*ReplayResponse, error) {
 	sourceSession, ok := g.store.Get(req.SourceSessionID)
 	if !ok {
-		return nil, fmt.Errorf("source session %s not found", req.SourceSessionID)
+		if historical, hasHistory := g.store.(interface {
+			GetHistorical(string) (*session, bool)
+		}); hasHistory {
+			sourceSession, ok = historical.GetHistorical(req.SourceSessionID)
+		}
+		if !ok {
+			return nil, fmt.Errorf("source session %s not found", req.SourceSessionID)
+		}
 	}
-	targetSession, ok := g.store.Get(targetSessionID)
-	if !ok {
-		return nil, fmt.Errorf("target session %s not found", targetSessionID)
-	}
-
 	// Get source history
 	var records []StepRecord
 	if req.UpToStep != nil {
@@ -682,9 +790,11 @@ func (g *Gateway) ReplayFrom(ctx context.Context, targetSessionID string, req Re
 		records = sourceSession.History.GetAll()
 	}
 
-	targetSession.mu.RLock()
-	podIP := targetSession.Info.PodIP
-	targetSession.mu.RUnlock()
+	_, podIP, releaseSession, err := g.acquireSessionPodIP(ctx, targetSessionID)
+	if err != nil {
+		return nil, err
+	}
+	defer releaseSession()
 
 	replayed := 0
 	errors := 0
@@ -1149,6 +1259,18 @@ func (g *Gateway) touchLastTaskTime(sessionID string) {
 			pod := &corev1.Pod{}
 			if err := g.k8sClient.Get(bgCtx, types.NamespacedName{Name: podName, Namespace: namespace}, pod); err != nil {
 				log.Printf("Warning: failed to get pod %s for annotation patch: %v", podName, err)
+				if errors.IsNotFound(err) {
+					if current, ok := g.store.Get(sessionID); ok {
+						g.dropSession(sessionID, current)
+					}
+				}
+				return
+			}
+			if got := pod.Annotations[labels.SessionAnnotation]; got != sessionID {
+				if current, ok := g.store.Get(sessionID); ok {
+					g.dropSession(sessionID, current)
+				}
+				log.Printf("Warning: session %s lost pod ownership for annotation patch on pod %s (annotation=%q)", sessionID, podName, got)
 				return
 			}
 			patch := client.MergeFrom(pod.DeepCopy())
@@ -1424,15 +1546,29 @@ func (g *Gateway) ListExperiments() []ExperimentSummary {
 
 // StreamSessionLogs streams log entries from a session's sidecar to a channel.
 func (g *Gateway) StreamSessionLogs(ctx context.Context, sessionID string, follow bool, tailLines int32) (<-chan interfaces.LogEntry, error) {
-	s, ok := g.store.Get(sessionID)
-	if !ok {
-		return nil, fmt.Errorf("session %s not found", sessionID)
+	_, podIP, releaseSession, err := g.acquireSessionPodIP(ctx, sessionID)
+	if err != nil {
+		return nil, err
 	}
-	s.mu.RLock()
-	podIP := s.Info.PodIP
-	s.mu.RUnlock()
 
-	return g.sidecarClient.StreamLogs(ctx, podIP, follow, tailLines)
+	source, err := g.sidecarClient.StreamLogs(ctx, podIP, follow, tailLines)
+	if err != nil {
+		releaseSession()
+		return nil, err
+	}
+	out := make(chan interfaces.LogEntry, 128)
+	go func() {
+		defer releaseSession()
+		defer close(out)
+		for entry := range source {
+			select {
+			case out <- entry:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	return out, nil
 }
 
 // StreamPoolLogs fans out log streaming to all pods in a pool and merges output.

@@ -103,6 +103,7 @@ type Config struct {
 	GatewayIdleTimeout   time.Duration
 	GatewayMaxLifetime   time.Duration
 	GatewaySweepInterval time.Duration
+	GatewayWriteTimeout  time.Duration
 
 	// Redis session store configuration
 	RedisEnabled  bool
@@ -183,6 +184,7 @@ func DefaultConfig() *Config {
 		GatewayIdleTimeout:   600 * time.Second,
 		GatewayMaxLifetime:   3600 * time.Second,
 		GatewaySweepInterval: 30 * time.Second,
+		GatewayWriteTimeout:  0,
 
 		RedisEnabled:  false,
 		RedisAddr:     "localhost:6379",
@@ -442,6 +444,12 @@ func LoadFromEnv() *Config {
 		}
 	}
 
+	if v := os.Getenv("GATEWAY_WRITE_TIMEOUT"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			cfg.GatewayWriteTimeout = d
+		}
+	}
+
 	// Redis session store configuration
 	if enable := os.Getenv("REDIS_ENABLED"); enable == "true" {
 		cfg.RedisEnabled = true
@@ -628,6 +636,10 @@ func (c *Config) Validate() error {
 
 	if c.GatewayMaxLifetime < 0 {
 		return fmt.Errorf("gateway max lifetime cannot be negative: %v", c.GatewayMaxLifetime)
+	}
+
+	if c.GatewayWriteTimeout < 0 {
+		return fmt.Errorf("gateway write timeout cannot be negative: %v", c.GatewayWriteTimeout)
 	}
 
 	if c.GatewaySweepInterval <= 0 {
