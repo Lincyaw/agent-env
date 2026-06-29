@@ -37,10 +37,8 @@ spec:
             - name: AUTH_ENABLED
               value: {{ .Values.auth.enabled | quote }}
             {{- if .Values.auth.enabled }}
-            {{- if .Values.auth.apiKeys }}
             - name: AUTH_KEY_FILE
               value: "/etc/arl/keys/api-keys"
-            {{- end }}
             - name: RATE_LIMIT_RPS
               value: "{{ .Values.auth.rateLimitRPS }}"
             - name: RATE_LIMIT_BURST
@@ -48,18 +46,6 @@ spec:
             {{- if .Values.auth.allowedOrigins }}
             - name: ALLOWED_ORIGINS
               value: "{{ .Values.auth.allowedOrigins }}"
-            {{- end }}
-            {{- if .Values.auth.forwardHeaders.enabled }}
-            - name: AUTH_FORWARD_HEADERS_ENABLED
-              value: "true"
-            - name: AUTH_FORWARD_USER_HEADER
-              value: {{ .Values.auth.forwardHeaders.userHeader | quote }}
-            - name: AUTH_FORWARD_TRUSTED_PROXIES
-              value: {{ required "auth.forwardHeaders.enabled is true but auth.forwardHeaders.trustedProxies is empty" .Values.auth.forwardHeaders.trustedProxies | quote }}
-            {{- if .Values.auth.forwardHeaders.adminUsers }}
-            - name: AUTH_FORWARD_ADMIN_USERS
-              value: {{ .Values.auth.forwardHeaders.adminUsers | quote }}
-            {{- end }}
             {{- end }}
             {{- end }}
             - name: GRPC_AUTH_TOKEN
@@ -127,7 +113,7 @@ spec:
             - name: internal
               containerPort: {{ .Values.gateway.internalPort }}
               protocol: TCP
-          {{- if and .Values.auth.enabled .Values.auth.apiKeys }}
+          {{- if .Values.auth.enabled }}
           volumeMounts:
             - name: auth-keys
               mountPath: /etc/arl/keys
@@ -147,7 +133,7 @@ spec:
             periodSeconds: 5
           resources:
             {{- toYaml .Values.gateway.resources | nindent 12 }}
-      {{- if and .Values.auth.enabled .Values.auth.apiKeys }}
+      {{- if .Values.auth.enabled }}
       volumes:
         - name: auth-keys
           secret:

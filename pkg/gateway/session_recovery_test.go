@@ -1,0 +1,231 @@
+package gateway
+
+import (
+	"context"
+	"fmt"
+	"sync"
+	"testing"
+	"time"
+)
+
+func TestGatewayRecoverSessionsValidatesRuntimeBindings(t *testing.T) {
+	store := newRecoverableMemoryStore(map[string]*session{
+		"sess-ok": {
+			Info: SessionInfo{
+				ID:          "sess-ok",
+				SandboxName: "old-sandbox",
+				Namespace:   "default",
+				PoolRef:     "code",
+				PodName:     "old-pod",
+				PodIP:       "10.0.0.1",
+			},
+			Runtime: RuntimeAllocation{
+				Backend:     runtimeBackendSandboxClaim,
+				PoolRef:     "code",
+				Namespace:   "default",
+				ClaimName:   "claim-ok",
+				SandboxName: "old-sandbox",
+				PodName:     "old-pod",
+				PodIP:       "10.0.0.1",
+			},
+			History:      NewStepHistory(),
+			lastTaskTime: time.Now(),
+			createdAt:    time.Now(),
+		},
+		"sess-stale": {
+			Info: SessionInfo{
+				ID:        "sess-stale",
+				Namespace: "default",
+				PoolRef:   "code",
+				PodName:   "stale-pod",
+				PodIP:     "10.0.0.9",
+			},
+			Runtime: RuntimeAllocation{
+				Backend:   runtimeBackendSandboxClaim,
+				PoolRef:   "code",
+				Namespace: "default",
+				ClaimName: "missing-claim",
+				PodName:   "stale-pod",
+				PodIP:     "10.0.0.9",
+			},
+			History:      NewStepHistory(),
+			lastTaskTime: time.Now(),
+			createdAt:    time.Now(),
+		},
+	})
+	allocator := &recoveryRuntimeAllocator{
+		resolved: map[string]RuntimeAllocation{
+			"sess-ok": {
+				Backend:     runtimeBackendSandboxClaim,
+				PoolRef:     "code",
+				Namespace:   "default",
+				ClaimName:   "claim-ok",
+				SandboxName: "sandbox-ok",
+				PodName:     "pod-ok",
+				PodIP:       "10.0.0.2",
+			},
+		},
+		errs: map[string]error{
+			"sess-stale": fmt.Errorf("claim missing"),
+		},
+	}
+	gw := New(nil, allocator, nil, nil, nil, GatewayConfig{}, store)
+
+	recovered, err := gw.RecoverSessions(context.Background())
+	if err != nil {
+		t.Fatalf("RecoverSessions returned error: %v", err)
+	}
+	if recovered != 1 {
+		t.Fatalf("recovered = %d, want 1", recovered)
+	}
+	if store.Count() != 1 {
+		t.Fatalf("store count = %d, want 1", store.Count())
+	}
+	if _, ok := store.Get("sess-stale"); ok {
+		t.Fatal("stale session is still active after recovery")
+	}
+	s, ok := store.Get("sess-ok")
+	if !ok {
+		t.Fatal("valid session was not recovered")
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.Info.PodIP != "10.0.0.2" || s.Info.PodName != "pod-ok" || s.Info.SandboxName != "sandbox-ok" {
+		t.Fatalf("session info = %#v, want resolved pod/sandbox binding", s.Info)
+	}
+	if s.Runtime.ClaimName != "claim-ok" || s.Runtime.SandboxName != "sandbox-ok" {
+		t.Fatalf("runtime = %#v, want resolved allocation", s.Runtime)
+	}
+}
+
+type recoverableMemoryStore struct {
+	mu       sync.Mutex
+	sessions map[string]*session
+	count    int64
+}
+
+func newRecoverableMemoryStore(sessions map[string]*session) *recoverableMemoryStore {
+	cp := make(map[string]*session, len(sessions))
+	for id, s := range sessions {
+		cp[id] = s
+	}
+	return &recoverableMemoryStore{
+		sessions: cp,
+		count:    int64(len(cp)),
+	}
+}
+
+func (s *recoverableMemoryStore) Get(sessionID string) (*session, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	session, ok := s.sessions[sessionID]
+	return session, ok
+}
+
+func (s *recoverableMemoryStore) Set(sessionID string, session *session) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, exists := s.sessions[sessionID]; !exists {
+		s.count++
+	}
+	s.sessions[sessionID] = session
+}
+
+func (s *recoverableMemoryStore) Delete(sessionID string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, exists := s.sessions[sessionID]; exists {
+		delete(s.sessions, sessionID)
+		s.count--
+	}
+}
+
+func (s *recoverableMemoryStore) Range(fn func(sessionID string, s *session) bool) {
+	s.mu.Lock()
+	items := make(map[string]*session, len(s.sessions))
+	for id, session := range s.sessions {
+		items[id] = session
+	}
+	s.mu.Unlock()
+
+	for id, session := range items {
+		if !fn(id, session) {
+			return
+		}
+	}
+}
+
+func (s *recoverableMemoryStore) Count() int64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.count
+}
+
+func (s *recoverableMemoryStore) IncrCount(delta int64) int64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.count += delta
+	return s.count
+}
+
+func (s *recoverableMemoryStore) SetCount(count int64) int64 {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.count = count
+	return count
+}
+
+func (s *recoverableMemoryStore) Close() error {
+	return nil
+}
+
+func (s *recoverableMemoryStore) RecoverActiveSessions(ctx context.Context) (map[string]*session, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	recovered := make(map[string]*session, len(s.sessions))
+	for id, session := range s.sessions {
+		recovered[id] = session
+	}
+	return recovered, nil
+}
+
+type recoveryRuntimeAllocator struct {
+	resolved map[string]RuntimeAllocation
+	errs     map[string]error
+}
+
+func (a *recoveryRuntimeAllocator) Start(ctx context.Context) error { return nil }
+func (a *recoveryRuntimeAllocator) Stop()                           {}
+
+func (a *recoveryRuntimeAllocator) Allocate(ctx context.Context, req RuntimeAllocateRequest) (*RuntimeAllocation, error) {
+	return nil, fmt.Errorf("unexpected Allocate in recovery test")
+}
+
+func (a *recoveryRuntimeAllocator) Release(ctx context.Context, allocation RuntimeAllocation) error {
+	return nil
+}
+
+func (a *recoveryRuntimeAllocator) Resolve(ctx context.Context, allocation RuntimeAllocation, sessionID string) (*RuntimeAllocation, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if err := a.errs[sessionID]; err != nil {
+		return nil, err
+	}
+	allocation, ok := a.resolved[sessionID]
+	if !ok {
+		return nil, fmt.Errorf("no resolved allocation for %s", sessionID)
+	}
+	return &allocation, nil
+}
+
+func (a *recoveryRuntimeAllocator) Touch(ctx context.Context, allocation RuntimeAllocation, sessionID string, at time.Time) error {
+	return nil
+}
+
+func (a *recoveryRuntimeAllocator) DiagnosticStats() map[string]AllocatorPoolStats {
+	return nil
+}

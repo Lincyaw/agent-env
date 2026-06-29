@@ -50,16 +50,21 @@ type GatewayConfig struct {
 	PodNoProxy         string
 	// AdmissionDisableColdStart forces requests to wait/reject when a selected
 	// pool has no warm capacity instead of relying on agent-sandbox cold create.
-	AdmissionDisableColdStart  bool
-	AdmissionQueueTimeout      time.Duration
-	AdmissionQueuePollInterval time.Duration
-	PoolAutoscalerEnabled      bool
-	PoolAutoscalerInterval     time.Duration
-	PoolAutoscalerBuffer       int32
-	PoolAutoscalerMinReplicas  int32
-	PoolAutoscalerMaxReplicas  int32
-	SchedulerName              string
-	ImageLocalityEnabled       bool
+	AdmissionDisableColdStart       bool
+	AdmissionQueueTimeout           time.Duration
+	AdmissionQueuePollInterval      time.Duration
+	PoolAutoscalerEnabled           bool
+	PoolAutoscalerInterval          time.Duration
+	PoolAutoscalerBuffer            int32
+	PoolAutoscalerMinReplicas       int32
+	PoolAutoscalerMaxReplicas       int32
+	SchedulerName                   string
+	ImageLocalityEnabled            bool
+	SandboxNetworkPolicyManagement  string
+	SandboxRuntimeClassName         string
+	SandboxSeccompProfileType       string
+	SandboxSeccompLocalhostProfile  string
+	SandboxAllowPrivilegeEscalation bool
 }
 
 // session holds internal session state.
@@ -366,7 +371,7 @@ func (g *Gateway) DeleteSession(ctx context.Context, sessionID string) error {
 	}
 
 	// Close the gRPC connection to the deleted pod
-	if podIP != "" {
+	if podIP != "" && g.sidecarClient != nil {
 		if err := g.sidecarClient.CloseConnection(podIP); err != nil {
 			log.Printf("Warning: failed to close sidecar connection for pod %s: %v", podName, err)
 		}
@@ -379,6 +384,81 @@ func (g *Gateway) DeleteSession(ctx context.Context, sessionID string) error {
 	}
 
 	return nil
+}
+
+// RecoverSessions hydrates durable session records and keeps only those whose
+// SandboxClaim/Sandbox binding can still be resolved through the runtime
+// allocator. Stale records are tombstoned so they cannot be resurrected.
+func (g *Gateway) RecoverSessions(ctx context.Context) (int, error) {
+	recoverable, ok := g.store.(RecoverableSessionStore)
+	if !ok {
+		return 0, nil
+	}
+	recovered, err := recoverable.RecoverActiveSessions(ctx)
+	if err != nil {
+		return 0, err
+	}
+
+	active := 0
+	for sessionID, s := range recovered {
+		if err := ctx.Err(); err != nil {
+			return active, err
+		}
+		if s == nil {
+			continue
+		}
+
+		s.mu.RLock()
+		closed := s.closed
+		allocation := s.runtimeAllocation()
+		s.mu.RUnlock()
+		if closed {
+			g.store.Delete(sessionID)
+			continue
+		}
+
+		if g.runtimeAllocator != nil {
+			resolved, err := g.runtimeAllocator.Resolve(ctx, allocation, sessionID)
+			if err != nil {
+				log.Printf("Warning: dropping recovered session %s: %v", sessionID, err)
+				g.store.Delete(sessionID)
+				continue
+			}
+			s.mu.Lock()
+			s.Runtime = *resolved
+			if resolved.Namespace != "" {
+				s.Info.Namespace = resolved.Namespace
+			}
+			if resolved.PoolRef != "" {
+				s.Info.PoolRef = resolved.PoolRef
+			}
+			if resolved.PodName != "" {
+				s.Info.PodName = resolved.PodName
+			}
+			if resolved.PodIP != "" {
+				s.Info.PodIP = resolved.PodIP
+			}
+			if resolved.SandboxName != "" {
+				s.Info.SandboxName = resolved.SandboxName
+			}
+			s.mu.Unlock()
+		}
+
+		g.store.Set(sessionID, s)
+		active++
+	}
+
+	if counter, ok := g.store.(SessionCountSetter); ok {
+		counter.SetCount(int64(active))
+	}
+	if g.metrics != nil {
+		if _, ok := g.store.(SessionCountSetter); ok {
+			g.metrics.SetActiveSessions(int64(active))
+		} else {
+			g.metrics.SetActiveSessions(g.store.Count())
+		}
+	}
+	return active, nil
 }
 
 // resolveSessionPodIP validates the session's SandboxClaim binding before
@@ -461,8 +541,10 @@ func (g *Gateway) dropSession(sessionID string, s *session) {
 	s.mu.Unlock()
 
 	if info.PodIP != "" {
-		if err := g.sidecarClient.CloseConnection(info.PodIP); err != nil {
-			log.Printf("Warning: failed to close sidecar connection for dropped session %s: %v", sessionID, err)
+		if g.sidecarClient != nil {
+			if err := g.sidecarClient.CloseConnection(info.PodIP); err != nil {
+				log.Printf("Warning: failed to close sidecar connection for dropped session %s: %v", sessionID, err)
+			}
 		}
 	}
 	g.store.Delete(sessionID)
@@ -891,7 +973,7 @@ func (g *Gateway) Restore(ctx context.Context, sessionID string, snapshotID stri
 		if err := g.runtimeAllocator.Release(bgCtx, oldAllocation); err != nil {
 			log.Printf("Warning: failed to release old runtime %s: %v", oldAllocation.PodName, err)
 		}
-		if oldAllocation.PodIP != "" {
+		if oldAllocation.PodIP != "" && g.sidecarClient != nil {
 			if err := g.sidecarClient.CloseConnection(oldAllocation.PodIP); err != nil {
 				log.Printf("Warning: failed to close sidecar connection for old runtime %s: %v", oldAllocation.PodName, err)
 			}
@@ -1007,7 +1089,7 @@ func (g *Gateway) CreatePool(ctx context.Context, req CreatePoolRequest) error {
 	template := &extensionsv1beta1.SandboxTemplate{
 		ObjectMeta: templateMeta,
 		Spec: extensionsv1beta1.SandboxTemplateSpec{
-			NetworkPolicyManagement: extensionsv1beta1.NetworkPolicyManagementUnmanaged,
+			NetworkPolicyManagement: g.sandboxNetworkPolicyManagement(),
 			Service:                 boolPtr(false),
 			PodTemplate: sandboxv1beta1.PodTemplate{
 				ObjectMeta: podMetadata,
@@ -1197,6 +1279,9 @@ func (g *Gateway) StopSessionSweep() {
 
 // CleanupStaleConnections removes gRPC connections in Shutdown or TransientFailure state.
 func (g *Gateway) CleanupStaleConnections() int {
+	if g.sidecarClient == nil {
+		return 0
+	}
 	return g.sidecarClient.CleanupStale()
 }
 

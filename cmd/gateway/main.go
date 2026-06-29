@@ -123,29 +123,34 @@ func main() {
 	}
 
 	gw := gateway.New(k8sClient, runtimeAllocator, sidecarClient, metricsCollector, nil, gateway.GatewayConfig{
-		IdleTimeout:                cfg.GatewayIdleTimeout,
-		MaxLifetime:                cfg.GatewayMaxLifetime,
-		SweepInterval:              cfg.GatewaySweepInterval,
-		SidecarImage:               cfg.SidecarImage,
-		SidecarHTTPPort:            cfg.SidecarHTTPPort,
-		SidecarGRPCPort:            cfg.SidecarGRPCPort,
-		WorkspaceDir:               cfg.WorkspaceDir,
-		ExecutorAgentImage:         cfg.ExecutorAgentImage,
-		ImagePullPolicy:            cfg.ImagePullPolicy,
-		GRPCAuthToken:              cfg.GRPCAuthToken,
-		GRPCAuthSecretName:         cfg.GRPCAuthSecretName,
-		PodHTTPProxy:               cfg.PodHTTPProxy,
-		PodNoProxy:                 cfg.PodNoProxy,
-		AdmissionDisableColdStart:  cfg.AdmissionDisableColdStart,
-		AdmissionQueueTimeout:      cfg.AdmissionQueueTimeout,
-		AdmissionQueuePollInterval: cfg.AdmissionQueuePollInterval,
-		PoolAutoscalerEnabled:      cfg.PoolAutoscalerEnabled,
-		PoolAutoscalerInterval:     cfg.PoolAutoscalerInterval,
-		PoolAutoscalerBuffer:       cfg.PoolAutoscalerBuffer,
-		PoolAutoscalerMinReplicas:  cfg.PoolAutoscalerMinReplicas,
-		PoolAutoscalerMaxReplicas:  cfg.PoolAutoscalerMaxReplicas,
-		SchedulerName:              cfg.SchedulerName,
-		ImageLocalityEnabled:       cfg.ImageLocalityEnabled,
+		IdleTimeout:                     cfg.GatewayIdleTimeout,
+		MaxLifetime:                     cfg.GatewayMaxLifetime,
+		SweepInterval:                   cfg.GatewaySweepInterval,
+		SidecarImage:                    cfg.SidecarImage,
+		SidecarHTTPPort:                 cfg.SidecarHTTPPort,
+		SidecarGRPCPort:                 cfg.SidecarGRPCPort,
+		WorkspaceDir:                    cfg.WorkspaceDir,
+		ExecutorAgentImage:              cfg.ExecutorAgentImage,
+		ImagePullPolicy:                 cfg.ImagePullPolicy,
+		GRPCAuthToken:                   cfg.GRPCAuthToken,
+		GRPCAuthSecretName:              cfg.GRPCAuthSecretName,
+		PodHTTPProxy:                    cfg.PodHTTPProxy,
+		PodNoProxy:                      cfg.PodNoProxy,
+		AdmissionDisableColdStart:       cfg.AdmissionDisableColdStart,
+		AdmissionQueueTimeout:           cfg.AdmissionQueueTimeout,
+		AdmissionQueuePollInterval:      cfg.AdmissionQueuePollInterval,
+		PoolAutoscalerEnabled:           cfg.PoolAutoscalerEnabled,
+		PoolAutoscalerInterval:          cfg.PoolAutoscalerInterval,
+		PoolAutoscalerBuffer:            cfg.PoolAutoscalerBuffer,
+		PoolAutoscalerMinReplicas:       cfg.PoolAutoscalerMinReplicas,
+		PoolAutoscalerMaxReplicas:       cfg.PoolAutoscalerMaxReplicas,
+		SchedulerName:                   cfg.SchedulerName,
+		ImageLocalityEnabled:            cfg.ImageLocalityEnabled,
+		SandboxNetworkPolicyManagement:  cfg.SandboxNetworkPolicyManagement,
+		SandboxRuntimeClassName:         cfg.SandboxRuntimeClassName,
+		SandboxSeccompProfileType:       cfg.SandboxSeccompProfileType,
+		SandboxSeccompLocalhostProfile:  cfg.SandboxSeccompLocalhostProfile,
+		SandboxAllowPrivilegeEscalation: cfg.SandboxAllowPrivilegeEscalation,
 	}, sessionStore)
 
 	// Start runtime allocator cache and event handlers.
@@ -153,6 +158,11 @@ func main() {
 	if err := runtimeAllocator.Start(allocCtx); err != nil {
 		allocCancel()
 		log.Fatalf("Failed to start runtime allocator: %v", err)
+	}
+	if recovered, err := gw.RecoverSessions(ctx); err != nil {
+		log.Printf("Warning: session recovery failed: %v", err)
+	} else if recovered > 0 {
+		log.Printf("Recovered %d active session(s) from durable store", recovered)
 	}
 
 	// Start session sweep (idle timeout / max lifetime reaper)
@@ -185,17 +195,8 @@ func main() {
 			}
 		}
 
-		forwardTrustedNets, err := gateway.ParseTrustedProxies(cfg.AuthForwardTrustedProxies)
-		if err != nil {
-			log.Fatalf("Invalid AUTH_FORWARD_TRUSTED_PROXIES: %v", err)
-		}
-		if cfg.AuthForwardHeadersEnabled && len(forwardTrustedNets) == 0 {
-			log.Fatalf("AUTH_FORWARD_TRUSTED_PROXIES must include at least one IP or CIDR when forward-header auth is enabled")
-		}
-
-		if len(keys) == 0 && !cfg.AuthForwardHeadersEnabled {
+		if len(keys) == 0 {
 			log.Fatalf("authentication is enabled but no API keys were provided: set AUTH_API_KEYS (key:role,...) or AUTH_KEY_FILE, " +
-				"configure AUTH_FORWARD_HEADERS_ENABLED=true with AUTH_FORWARD_TRUSTED_PROXIES, " +
 				"or explicitly opt out of authentication with AUTH_ENABLED=false")
 		}
 		var origins []string
@@ -208,17 +209,12 @@ func main() {
 			}
 		}
 		authCfg = &gateway.AuthConfig{
-			Enabled:            true,
-			Keys:               keys,
-			AllowedOrigins:     origins,
-			ForwardAuthEnabled: cfg.AuthForwardHeadersEnabled,
-			ForwardUserHeader:  cfg.AuthForwardUserHeader,
-			ForwardAdminUsers:  gateway.ParseForwardAdminUsers(cfg.AuthForwardAdminUsers),
-			ForwardTrustedNets: forwardTrustedNets,
-			KeyFile:            keyFile,
+			Enabled:        true,
+			Keys:           keys,
+			AllowedOrigins: origins,
+			KeyFile:        keyFile,
 		}
-		log.Printf("Authentication enabled: %d API key(s) registered, forward-header auth enabled=%t",
-			len(keys), cfg.AuthForwardHeadersEnabled)
+		log.Printf("Authentication enabled: %d API key(s) registered", len(keys))
 
 		stopKeyWatcher = gateway.StartKeyFileWatcher(authCfg)
 	} else {

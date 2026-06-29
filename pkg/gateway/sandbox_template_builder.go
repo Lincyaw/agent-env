@@ -40,6 +40,15 @@ func desiredSandboxWarmPoolReplicas(pool *extensionsv1beta1.SandboxWarmPool) int
 	return *pool.Spec.Replicas
 }
 
+func (g *Gateway) sandboxNetworkPolicyManagement() extensionsv1beta1.NetworkPolicyManagement {
+	switch strings.ToLower(strings.TrimSpace(g.gwConfig.SandboxNetworkPolicyManagement)) {
+	case strings.ToLower(string(extensionsv1beta1.NetworkPolicyManagementManaged)):
+		return extensionsv1beta1.NetworkPolicyManagementManaged
+	default:
+		return extensionsv1beta1.NetworkPolicyManagementUnmanaged
+	}
+}
+
 func primarySandboxTemplateImage(template *extensionsv1beta1.SandboxTemplate) string {
 	for _, container := range template.Spec.PodTemplate.Spec.Containers {
 		if container.Name != "sidecar" {
@@ -160,8 +169,52 @@ func (g *Gateway) sandboxPodSpec(image, workspaceDir string, resources corev1.Re
 	if schedulerName := strings.TrimSpace(g.gwConfig.SchedulerName); schedulerName != "" {
 		pod.SchedulerName = schedulerName
 	}
+	if runtimeClassName := strings.TrimSpace(g.gwConfig.SandboxRuntimeClassName); runtimeClassName != "" {
+		pod.RuntimeClassName = &runtimeClassName
+	}
+	if seccomp := g.sandboxSeccompProfile(); seccomp != nil {
+		pod.SecurityContext = &corev1.PodSecurityContext{SeccompProfile: seccomp}
+	}
+	g.applyContainerSecurityPolicy(&pod)
 	g.injectProxyEnv(&pod)
 	return pod
+}
+
+func (g *Gateway) sandboxSeccompProfile() *corev1.SeccompProfile {
+	profileType := strings.TrimSpace(g.gwConfig.SandboxSeccompProfileType)
+	if profileType == "" {
+		profileType = string(corev1.SeccompProfileTypeRuntimeDefault)
+	}
+	switch strings.ToLower(profileType) {
+	case strings.ToLower(string(corev1.SeccompProfileTypeRuntimeDefault)):
+		return &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault}
+	case strings.ToLower(string(corev1.SeccompProfileTypeUnconfined)):
+		return &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeUnconfined}
+	case strings.ToLower(string(corev1.SeccompProfileTypeLocalhost)):
+		localhostProfile := strings.TrimSpace(g.gwConfig.SandboxSeccompLocalhostProfile)
+		return &corev1.SeccompProfile{
+			Type:             corev1.SeccompProfileTypeLocalhost,
+			LocalhostProfile: &localhostProfile,
+		}
+	default:
+		return &corev1.SeccompProfile{Type: corev1.SeccompProfileTypeRuntimeDefault}
+	}
+}
+
+func (g *Gateway) applyContainerSecurityPolicy(pod *corev1.PodSpec) {
+	allowPrivilegeEscalation := g.gwConfig.SandboxAllowPrivilegeEscalation
+	apply := func(container *corev1.Container) {
+		if container.SecurityContext == nil {
+			container.SecurityContext = &corev1.SecurityContext{}
+		}
+		container.SecurityContext.AllowPrivilegeEscalation = boolPtr(allowPrivilegeEscalation)
+	}
+	for i := range pod.InitContainers {
+		apply(&pod.InitContainers[i])
+	}
+	for i := range pod.Containers {
+		apply(&pod.Containers[i])
+	}
 }
 
 func (g *Gateway) injectedPullPolicy() corev1.PullPolicy {

@@ -8,12 +8,16 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"regexp"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/Lincyaw/agent-env/pkg/interfaces"
+	corev1 "k8s.io/api/core/v1"
+	"k8s.io/apimachinery/pkg/types"
 )
 
 // CheckResult represents the outcome of a single health check.
@@ -41,17 +45,23 @@ type HealthChecker struct {
 	feishuURL       string
 	stopCh          chan struct{}
 	wg              sync.WaitGroup
+	imagePullStarts map[string]time.Time
+	imagePullSeen   map[types.UID]struct{}
 }
+
+var imagePullMessageRE = regexp.MustCompile(`image "([^"]+)"`)
 
 // NewHealthChecker creates a new HealthChecker.
 func NewHealthChecker(gw *Gateway, metrics interfaces.MetricsCollector, feishuURL string) *HealthChecker {
 	return &HealthChecker{
-		gw:         gw,
-		metrics:    metrics,
-		windowSize: 5,
-		interval:   60 * time.Second,
-		feishuURL:  feishuURL,
-		stopCh:     make(chan struct{}),
+		gw:              gw,
+		metrics:         metrics,
+		windowSize:      5,
+		interval:        60 * time.Second,
+		feishuURL:       feishuURL,
+		stopCh:          make(chan struct{}),
+		imagePullStarts: make(map[string]time.Time),
+		imagePullSeen:   make(map[types.UID]struct{}),
 	}
 }
 
@@ -121,6 +131,9 @@ func (hc *HealthChecker) collect() {
 		if err := hc.gw.publishCurrentPoolMetrics(ctx); err != nil {
 			log.Printf("Warning: failed to publish pool metrics: %v", err)
 		}
+		if err := hc.collectImagePullMetrics(ctx); err != nil {
+			log.Printf("Warning: failed to collect image pull metrics: %v", err)
+		}
 		cancel()
 	}
 
@@ -128,6 +141,73 @@ func (hc *HealthChecker) collect() {
 	if cleaned := hc.gw.CleanupStaleConnections(); cleaned > 0 {
 		log.Printf("Cleaned up %d stale sidecar connections", cleaned)
 	}
+}
+
+func (hc *HealthChecker) collectImagePullMetrics(ctx context.Context) error {
+	if hc.gw == nil || hc.gw.k8sClient == nil || hc.metrics == nil {
+		return nil
+	}
+	var events corev1.EventList
+	if err := hc.gw.k8sClient.List(ctx, &events); err != nil {
+		return err
+	}
+	sort.SliceStable(events.Items, func(i, j int) bool {
+		return eventTimestamp(events.Items[i]).Before(eventTimestamp(events.Items[j]))
+	})
+	for i := range events.Items {
+		event := &events.Items[i]
+		if event.InvolvedObject.Kind != "Pod" || event.InvolvedObject.Name == "" {
+			continue
+		}
+		image := imageFromPullEventMessage(event.Message)
+		if image == "" {
+			continue
+		}
+		eventTime := eventTimestamp(*event)
+		if eventTime.IsZero() {
+			continue
+		}
+		key := event.InvolvedObject.Namespace + "/" + event.InvolvedObject.Name + "/" + image
+		switch event.Reason {
+		case "Pulling":
+			if _, ok := hc.imagePullStarts[key]; !ok {
+				hc.imagePullStarts[key] = eventTime
+			}
+		case "Pulled":
+			if _, seen := hc.imagePullSeen[event.UID]; seen {
+				continue
+			}
+			start, ok := hc.imagePullStarts[key]
+			if !ok || eventTime.Before(start) {
+				continue
+			}
+			hc.metrics.RecordImagePullDuration(image, eventTime.Sub(start))
+			hc.imagePullSeen[event.UID] = struct{}{}
+			delete(hc.imagePullStarts, key)
+		}
+	}
+	return nil
+}
+
+func imageFromPullEventMessage(message string) string {
+	match := imagePullMessageRE.FindStringSubmatch(message)
+	if len(match) != 2 {
+		return ""
+	}
+	return match[1]
+}
+
+func eventTimestamp(event corev1.Event) time.Time {
+	if !event.EventTime.IsZero() {
+		return event.EventTime.Time
+	}
+	if !event.LastTimestamp.IsZero() {
+		return event.LastTimestamp.Time
+	}
+	if !event.FirstTimestamp.IsZero() {
+		return event.FirstTimestamp.Time
+	}
+	return event.CreationTimestamp.Time
 }
 
 // BuildReport constructs a full health report.

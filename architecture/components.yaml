@@ -13,7 +13,6 @@ components:
       - Persist sessions in memory or Redis
       - Write trajectory/audit records to ClickHouse
       - Expose Prometheus metrics on the internal HTTP port
-      - Authenticate callers with API keys or trusted forward-auth headers
     interfaces:
       exposes:
         - Public REST API on gateway.port
@@ -94,16 +93,8 @@ components:
       - charts/agent-env/
     responsibilities:
       - Deploy gateway
-      - Configure Redis, ClickHouse, Prometheus, Grafana, Alertmanager, Tinyauth, and proxy options
+      - Configure Redis, ClickHouse, Prometheus, Grafana, Alertmanager, and proxy options
       - Grant gateway RBAC for agent-sandbox CRDs
-
-  - name: tinyauth
-    type: external-auth
-    paths:
-      - charts/agent-env/templates/tinyauth.yaml
-    responsibilities:
-      - Optional edge authentication service for ingress-protected browser access
-      - Return Remote-User style headers to trusted ingress auth checks
 
   - name: observability
     type: support

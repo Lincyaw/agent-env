@@ -11,7 +11,8 @@ import (
 // PrometheusCollector implements interfaces.MetricsCollector using Prometheus.
 type PrometheusCollector struct {
 	sessionAllocationDuration *prometheus.HistogramVec
-	sandboxReadyDuration     *prometheus.HistogramVec
+	sandboxReadyDuration      *prometheus.HistogramVec
+	imagePullDuration         *prometheus.HistogramVec
 
 	activeSessions      prometheus.Gauge
 	gatewayStepDuration *prometheus.HistogramVec
@@ -20,14 +21,14 @@ type PrometheusCollector struct {
 	restoreDuration     prometheus.Histogram
 	restoreResult       *prometheus.CounterVec
 
-	gatewayGoroutines    prometheus.Gauge
-	gatewaySessionsTotal prometheus.Gauge
-	idleQueueDepth       *prometheus.GaugeVec
-	pendingWaiters       *prometheus.GaugeVec
-	admissionQueueDepth  *prometheus.GaugeVec
-	poolSaturation       *prometheus.GaugeVec
-	poolDesiredReplicas  *prometheus.GaugeVec
-	poolReadyReplicas    *prometheus.GaugeVec
+	gatewayGoroutines     prometheus.Gauge
+	gatewaySessionsTotal  prometheus.Gauge
+	idleQueueDepth        *prometheus.GaugeVec
+	pendingWaiters        *prometheus.GaugeVec
+	admissionQueueDepth   *prometheus.GaugeVec
+	poolSaturation        *prometheus.GaugeVec
+	poolDesiredReplicas   *prometheus.GaugeVec
+	poolReadyReplicas     *prometheus.GaugeVec
 	poolAllocatedReplicas *prometheus.GaugeVec
 }
 
@@ -49,6 +50,14 @@ func NewPrometheusCollector() interfaces.MetricsCollector {
 				Buckets: []float64{0.5, 1, 2, 5, 10, 15, 20, 30, 60, 120, 300},
 			},
 			[]string{"pool"},
+		),
+		imagePullDuration: prometheus.NewHistogramVec(
+			prometheus.HistogramOpts{
+				Name:    "arl_image_pull_seconds",
+				Help:    "Best-effort image pull latency derived from Kubernetes Pod events.",
+				Buckets: []float64{0.5, 1, 2, 5, 10, 15, 20, 30, 60, 120, 300, 600},
+			},
+			[]string{"image"},
 		),
 		activeSessions: prometheus.NewGauge(
 			prometheus.GaugeOpts{
@@ -159,6 +168,7 @@ func NewPrometheusCollector() interfaces.MetricsCollector {
 	metrics.Registry.MustRegister(
 		c.sessionAllocationDuration,
 		c.sandboxReadyDuration,
+		c.imagePullDuration,
 		c.activeSessions,
 		c.gatewayStepDuration,
 		c.gatewayStepResult,
@@ -185,6 +195,10 @@ func (c *PrometheusCollector) RecordSessionAllocationDuration(poolName string, d
 
 func (c *PrometheusCollector) RecordSandboxReadyDuration(poolName string, duration time.Duration) {
 	c.sandboxReadyDuration.WithLabelValues(poolName).Observe(duration.Seconds())
+}
+
+func (c *PrometheusCollector) RecordImagePullDuration(image string, duration time.Duration) {
+	c.imagePullDuration.WithLabelValues(image).Observe(duration.Seconds())
 }
 
 func (c *PrometheusCollector) SetActiveSessions(count int64) {

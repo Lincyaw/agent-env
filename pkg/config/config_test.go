@@ -117,21 +117,25 @@ func TestConfigValidate(t *testing.T) {
 			wantErr: "pool autoscaler max replicas",
 		},
 		{
-			name: "forward auth missing user header",
+			name: "invalid sandbox network policy management",
 			mutate: func(cfg *Config) {
-				cfg.AuthForwardHeadersEnabled = true
-				cfg.AuthForwardUserHeader = ""
-				cfg.AuthForwardTrustedProxies = "10.0.0.0/8"
+				cfg.SandboxNetworkPolicyManagement = "sometimes"
 			},
-			wantErr: "auth forward user header",
+			wantErr: "sandbox network policy management",
 		},
 		{
-			name: "forward auth missing trusted proxies",
+			name: "invalid sandbox seccomp profile type",
 			mutate: func(cfg *Config) {
-				cfg.AuthForwardHeadersEnabled = true
-				cfg.AuthForwardTrustedProxies = ""
+				cfg.SandboxSeccompProfileType = "custom"
 			},
-			wantErr: "auth forward trusted proxies",
+			wantErr: "sandbox seccomp profile type",
+		},
+		{
+			name: "localhost seccomp requires profile",
+			mutate: func(cfg *Config) {
+				cfg.SandboxSeccompProfileType = "Localhost"
+			},
+			wantErr: "sandbox seccomp localhost profile",
 		},
 	}
 
@@ -191,6 +195,15 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.PoolAutoscalerBuffer != 1 {
 		t.Errorf("PoolAutoscalerBuffer = %d, want 1", cfg.PoolAutoscalerBuffer)
 	}
+	if cfg.SandboxNetworkPolicyManagement != "Unmanaged" {
+		t.Errorf("SandboxNetworkPolicyManagement = %q, want Unmanaged", cfg.SandboxNetworkPolicyManagement)
+	}
+	if cfg.SandboxSeccompProfileType != "RuntimeDefault" {
+		t.Errorf("SandboxSeccompProfileType = %q, want RuntimeDefault", cfg.SandboxSeccompProfileType)
+	}
+	if cfg.SandboxAllowPrivilegeEscalation {
+		t.Error("SandboxAllowPrivilegeEscalation = true, want false")
+	}
 }
 
 func TestLoadFromEnvImagePullPolicy(t *testing.T) {
@@ -221,6 +234,11 @@ func TestLoadFromEnvGatewaySettings(t *testing.T) {
 	t.Setenv("POOL_AUTOSCALER_MAX_REPLICAS", "20")
 	t.Setenv("SCHEDULER_NAME", "agent-env-image-locality")
 	t.Setenv("IMAGE_LOCALITY_ENABLED", "true")
+	t.Setenv("SANDBOX_NETWORK_POLICY_MANAGEMENT", "Managed")
+	t.Setenv("SANDBOX_RUNTIME_CLASS_NAME", "kata")
+	t.Setenv("SANDBOX_SECCOMP_PROFILE_TYPE", "Localhost")
+	t.Setenv("SANDBOX_SECCOMP_LOCALHOST_PROFILE", "profiles/agent-env.json")
+	t.Setenv("SANDBOX_ALLOW_PRIVILEGE_ESCALATION", "true")
 
 	cfg := LoadFromEnv()
 	if cfg.AuthEnabled {
@@ -268,25 +286,19 @@ func TestLoadFromEnvGatewaySettings(t *testing.T) {
 	if !cfg.ImageLocalityEnabled {
 		t.Fatal("ImageLocalityEnabled = false, want true")
 	}
-}
-
-func TestLoadFromEnvForwardAuthSettings(t *testing.T) {
-	t.Setenv("AUTH_FORWARD_HEADERS_ENABLED", "true")
-	t.Setenv("AUTH_FORWARD_USER_HEADER", "X-Remote-User")
-	t.Setenv("AUTH_FORWARD_TRUSTED_PROXIES", "10.0.0.0/8")
-	t.Setenv("AUTH_FORWARD_ADMIN_USERS", "alice,bob")
-
-	cfg := LoadFromEnv()
-	if !cfg.AuthForwardHeadersEnabled {
-		t.Fatal("AuthForwardHeadersEnabled = false, want true")
+	if cfg.SandboxNetworkPolicyManagement != "Managed" {
+		t.Fatalf("SandboxNetworkPolicyManagement = %q, want Managed", cfg.SandboxNetworkPolicyManagement)
 	}
-	if cfg.AuthForwardUserHeader != "X-Remote-User" {
-		t.Fatalf("AuthForwardUserHeader = %q, want X-Remote-User", cfg.AuthForwardUserHeader)
+	if cfg.SandboxRuntimeClassName != "kata" {
+		t.Fatalf("SandboxRuntimeClassName = %q, want kata", cfg.SandboxRuntimeClassName)
 	}
-	if cfg.AuthForwardTrustedProxies != "10.0.0.0/8" {
-		t.Fatalf("AuthForwardTrustedProxies = %q, want 10.0.0.0/8", cfg.AuthForwardTrustedProxies)
+	if cfg.SandboxSeccompProfileType != "Localhost" {
+		t.Fatalf("SandboxSeccompProfileType = %q, want Localhost", cfg.SandboxSeccompProfileType)
 	}
-	if cfg.AuthForwardAdminUsers != "alice,bob" {
-		t.Fatalf("AuthForwardAdminUsers = %q, want alice,bob", cfg.AuthForwardAdminUsers)
+	if cfg.SandboxSeccompLocalhostProfile != "profiles/agent-env.json" {
+		t.Fatalf("SandboxSeccompLocalhostProfile = %q, want profiles/agent-env.json", cfg.SandboxSeccompLocalhostProfile)
+	}
+	if !cfg.SandboxAllowPrivilegeEscalation {
+		t.Fatal("SandboxAllowPrivilegeEscalation = false, want true")
 	}
 }
