@@ -25,7 +25,8 @@ helm upgrade --install agent-env charts/agent-env \
   --set image.injectedPullPolicy=IfNotPresent \
   --set gateway.image.tag=dev \
   --set sidecar.image.tag=dev \
-  --set executorAgent.image.tag=dev
+  --set executorAgent.image.tag=dev \
+  --set imageLocalityScheduler.image.tag=dev
 ```
 
 Enable Redis, ClickHouse, Prometheus, and Grafana:

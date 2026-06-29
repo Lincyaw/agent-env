@@ -43,7 +43,7 @@ pkg/client/             # gRPC client for sidecar
 pkg/interfaces/         # Shared interfaces (SidecarClient, MetricsCollector)
 pkg/metrics/            # Prometheus metrics
 pkg/audit/              # ClickHouse trajectory storage
-cmd/{gateway,sidecar,executor-agent}/  # Entry points
+cmd/{gateway,sidecar,executor-agent,image-locality-scheduler}/  # Entry points
 proto/agent.proto       # gRPC service definition
 sdk/python/arl/         # Python SDK (ManagedSession, SandboxSession, GatewayClient)
 charts/agent-env/    # Helm chart
@@ -77,7 +77,7 @@ After modifying components or interfaces:
 - **agent-sandbox namespace**: Bundled installs should keep the controller in `agent-sandbox-system`; the upstream CRDs currently reference that namespace for conversion webhooks.
 - **agent-sandbox image**: The controller image is not built by the `agent-env` Skaffold config. Build/push it from the `agent-sandbox` repo, sync it to the same target registry as the gateway images, and set `agentSandbox.image.repository/tag`. Do not leave bundled installs pointing at `registry.k8s.io`.
 - **agent-sandbox extensions**: Keep `agentSandbox.controller.extensions=true`; the gateway uses the extension CRDs (`SandboxClaim`, `SandboxWarmPool`, `SandboxTemplate`).
-- **Registry path**: The runtime image set is `arl-gateway`, `arl-sidecar`, `arl-executor-agent`, plus `agent-sandbox-controller` when bundling sandbox.
+- **Registry path**: The runtime image set is `arl-gateway`, `arl-sidecar`, `arl-executor-agent`, `arl-image-locality-scheduler`, plus `agent-sandbox-controller` when bundling sandbox.
 - **Image tags**: Use one immutable tag for all images in a deployment. Avoid reusing a tag after a failed push; create a fresh tag to avoid registry-side partial state.
 - **Docker Hub handoff**: If direct local push to the Guangzhou registry stalls, push to Docker Hub first, then registry-to-registry sync with `crane copy`.
 - **Crane sync**:
@@ -85,7 +85,7 @@ After modifying components or interfaces:
   TAG=<tag>
   SRC=docker.io/opspai
   DST=pair-diag-cn-guangzhou.cr.volces.com/pair
-  for img in agent-sandbox-controller arl-gateway arl-sidecar arl-executor-agent; do
+  for img in agent-sandbox-controller arl-gateway arl-sidecar arl-executor-agent arl-image-locality-scheduler; do
     crane copy "${SRC}/${img}:${TAG}" "${DST}/${img}:${TAG}"
     crane digest "${DST}/${img}:${TAG}"
   done
@@ -98,6 +98,7 @@ After modifying components or interfaces:
   ```bash
   kubectl --context <context> get crd | grep -i sandbox
   kubectl --context <context> -n agent-sandbox-system rollout status deploy/agent-sandbox-controller
+  kubectl --context <context> -n arl rollout status deploy/agent-env-image-locality-scheduler
   kubectl --context <context> -n arl rollout status deploy/agent-env-gateway
   kubectl --context <context> -n arl port-forward svc/agent-env-gateway 18080:8080
   uv run python examples/python/test_arl_sdk.py --gateway-url http://127.0.0.1:18080 --namespace arl

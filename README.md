@@ -67,6 +67,7 @@ helm dependency build charts/agent-env
 docker build -f Dockerfile.gateway -t arl-gateway:dev .
 docker build -f Dockerfile.sidecar -t arl-sidecar:dev .
 docker build -f Dockerfile.executor-agent -t arl-executor-agent:dev .
+docker build -f Dockerfile.image-locality-scheduler -t arl-image-locality-scheduler:dev .
 
 # Local trusted install. Production should keep auth enabled and set auth.apiKeys.
 helm upgrade --install agent-env charts/agent-env \
@@ -75,7 +76,8 @@ helm upgrade --install agent-env charts/agent-env \
   --set image.injectedPullPolicy=IfNotPresent \
   --set gateway.image.tag=dev \
   --set sidecar.image.tag=dev \
-  --set executorAgent.image.tag=dev
+  --set executorAgent.image.tag=dev \
+  --set imageLocalityScheduler.image.tag=dev
 ```
 
 ## Architecture
