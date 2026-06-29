@@ -55,17 +55,6 @@ func main() {
 	grpcServer := sidecar.NewGRPCServerWithExecutor(workspaceDir, grpcPort, executorSocket, token)
 	log.Printf("Executor agent socket: %s", executorSocket)
 
-	// Wait for executor agent to be ready
-	execClient := sidecar.NewExecutorClient(executorSocket)
-	waitCtx, waitCancel := context.WithTimeout(context.Background(), 60*time.Second)
-	if err := execClient.WaitForReady(waitCtx, 60*time.Second); err != nil {
-		log.Printf("ERROR: executor agent not ready after 60s: %v (Execute requests will fail until agent connects)", err)
-	} else {
-		log.Println("Executor agent connected")
-		httpServer.SetReady(true)
-	}
-	waitCancel()
-
 	// Setup signal handling for graceful shutdown
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -81,6 +70,28 @@ func main() {
 	go func() {
 		if err := grpcServer.Start(); err != nil {
 			log.Fatalf("Failed to start gRPC server: %v", err)
+		}
+	}()
+
+	// Wait for executor agent asynchronously. Health/liveness should reflect
+	// that the sidecar process is up; readiness flips only after the executor
+	// socket accepts a ping.
+	execClient := sidecar.NewExecutorClient(executorSocket)
+	go func() {
+		for {
+			waitCtx, waitCancel := context.WithTimeout(ctx, 60*time.Second)
+			err := execClient.WaitForReady(waitCtx, 60*time.Second)
+			waitCancel()
+			if err == nil {
+				log.Println("Executor agent connected")
+				httpServer.SetReady(true)
+				return
+			}
+			if ctx.Err() != nil {
+				return
+			}
+			log.Printf("ERROR: executor agent not ready after 60s: %v (will retry)", err)
+			time.Sleep(time.Second)
 		}
 	}()
 

@@ -27,12 +27,18 @@ var dnsLabelCleaner = regexp.MustCompile(`[^a-z0-9-]+`)
 // agent-sandbox SandboxClaim resources.
 type SandboxClaimRuntimeAllocator struct {
 	k8sClient    client.Client
+	namespace    string
 	pollInterval time.Duration
 }
 
-func NewSandboxClaimRuntimeAllocator(k8sClient client.Client) *SandboxClaimRuntimeAllocator {
+func NewSandboxClaimRuntimeAllocator(k8sClient client.Client, namespace ...string) *SandboxClaimRuntimeAllocator {
+	ns := ""
+	if len(namespace) > 0 {
+		ns = strings.TrimSpace(namespace[0])
+	}
 	return &SandboxClaimRuntimeAllocator{
 		k8sClient:    k8sClient,
+		namespace:    ns,
 		pollInterval: 500 * time.Millisecond,
 	}
 }
@@ -222,12 +228,16 @@ func (a *SandboxClaimRuntimeAllocator) DiagnosticStats() map[string]AllocatorPoo
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
+	var opts []client.ListOption
+	if a.namespace != "" {
+		opts = append(opts, client.InNamespace(a.namespace))
+	}
 	var pools extensionsv1beta1.SandboxWarmPoolList
-	if err := a.k8sClient.List(ctx, &pools); err != nil {
+	if err := a.k8sClient.List(ctx, &pools, opts...); err != nil {
 		return map[string]AllocatorPoolStats{}
 	}
 	var claims extensionsv1beta1.SandboxClaimList
-	if err := a.k8sClient.List(ctx, &claims); err != nil {
+	if err := a.k8sClient.List(ctx, &claims, opts...); err != nil {
 		return map[string]AllocatorPoolStats{}
 	}
 

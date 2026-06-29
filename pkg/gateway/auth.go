@@ -113,8 +113,9 @@ func CheckSessionOwnership(ctx context.Context, ownerKeyHash string) error {
 	return nil
 }
 
-// extractBearerToken gets the token from the Authorization header or the
-// "token" query parameter (for WebSocket clients that cannot set headers).
+// extractBearerToken gets the token from the Authorization header. WebSocket
+// upgrade requests may also use the "token" query parameter because browser
+// clients cannot set custom headers during the upgrade.
 func extractBearerToken(r *http.Request) string {
 	auth := r.Header.Get("Authorization")
 	if auth != "" {
@@ -122,6 +123,9 @@ func extractBearerToken(r *http.Request) string {
 		if len(auth) >= len(prefix) && strings.EqualFold(auth[:len(prefix)], prefix) {
 			return auth[len(prefix):]
 		}
+	}
+	if !strings.EqualFold(r.Header.Get("Upgrade"), "websocket") {
+		return ""
 	}
 	return r.URL.Query().Get("token")
 }

@@ -44,7 +44,8 @@ type Config struct {
 	ImagePullPolicy string
 
 	// Gateway configuration
-	GatewayPort int
+	GatewayPort      int
+	GatewayNamespace string
 
 	// Kubernetes client tuning.
 	K8sClientQPS   float32
@@ -117,6 +118,7 @@ func DefaultConfig() *Config {
 		ExecutorAgentImage: "arl-executor-agent:latest",
 		ImagePullPolicy:    "Always",
 		GatewayPort:        8080,
+		GatewayNamespace:   "default",
 		K8sClientQPS:       10000,
 		K8sClientBurst:     20000,
 
@@ -236,6 +238,11 @@ func LoadFromEnv() *Config {
 		if p, err := strconv.Atoi(port); err == nil {
 			cfg.GatewayPort = p
 		}
+	}
+	if v := os.Getenv("GATEWAY_NAMESPACE"); v != "" {
+		cfg.GatewayNamespace = v
+	} else if v := os.Getenv("POD_NAMESPACE"); v != "" {
+		cfg.GatewayNamespace = v
 	}
 	if v := os.Getenv("K8S_CLIENT_QPS"); v != "" {
 		if f, err := strconv.ParseFloat(v, 32); err == nil {
@@ -442,6 +449,9 @@ func (c *Config) Validate() error {
 	// Validate gateway configuration
 	if c.GatewayPort < 1 || c.GatewayPort > 65535 {
 		return fmt.Errorf("invalid gateway port: %d (must be 1-65535)", c.GatewayPort)
+	}
+	if strings.TrimSpace(c.GatewayNamespace) == "" {
+		return fmt.Errorf("gateway namespace is required")
 	}
 	if c.K8sClientQPS <= 0 {
 		return fmt.Errorf("k8s client QPS must be > 0: %v", c.K8sClientQPS)

@@ -122,7 +122,7 @@ func handleCreateSession(gw *Gateway) http.HandlerFunc {
 
 		info, err := gw.CreateSession(r.Context(), req)
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
+			writeGatewayError(w, err)
 			return
 		}
 
@@ -381,7 +381,7 @@ func handleCreatePool(gw *Gateway) http.HandlerFunc {
 		}
 
 		if err := gw.CreatePool(r.Context(), req); err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
+			writeGatewayError(w, err)
 			return
 		}
 
@@ -395,6 +395,10 @@ func handleGetPool(gw *Gateway) http.HandlerFunc {
 		ns := r.URL.Query().Get("namespace")
 		info, err := gw.GetPool(r.Context(), name, ns)
 		if err != nil {
+			if errors.Is(err, ErrNamespaceNotAllowed) {
+				writeGatewayError(w, err)
+				return
+			}
 			writeError(w, http.StatusNotFound, err.Error())
 			return
 		}
@@ -419,7 +423,7 @@ func handleScalePool(gw *Gateway) http.HandlerFunc {
 
 		info, err := gw.ScalePool(r.Context(), name, req)
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
+			writeGatewayError(w, err)
 			return
 		}
 
@@ -433,7 +437,7 @@ func handleDeletePool(gw *Gateway) http.HandlerFunc {
 		ns := r.URL.Query().Get("namespace")
 
 		if err := gw.DeletePool(r.Context(), name, ns); err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
+			writeGatewayError(w, err)
 			return
 		}
 
@@ -449,6 +453,14 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 
 func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, ErrorResponse{Error: msg})
+}
+
+func writeGatewayError(w http.ResponseWriter, err error) {
+	if errors.Is(err, ErrNamespaceNotAllowed) {
+		writeError(w, http.StatusForbidden, err.Error())
+		return
+	}
+	writeError(w, http.StatusInternalServerError, err.Error())
 }
 
 func parseLogParams(r *http.Request) (bool, int32) {
@@ -512,7 +524,7 @@ func handlePoolLogs(gw *Gateway) http.HandlerFunc {
 
 		ch, err := gw.StreamPoolLogs(r.Context(), name, ns, follow, tail)
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
+			writeGatewayError(w, err)
 			return
 		}
 
@@ -554,7 +566,7 @@ func handleListPools(gw *Gateway) http.HandlerFunc {
 		ns := r.URL.Query().Get("namespace")
 		pools, err := gw.ListPools(r.Context(), ns)
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
+			writeGatewayError(w, err)
 			return
 		}
 		writeJSON(w, http.StatusOK, pools)
@@ -587,6 +599,10 @@ func handleCreateManagedSession(gw *Gateway) http.HandlerFunc {
 
 		info, err := gw.CreateManagedSession(r.Context(), req)
 		if err != nil {
+			if errors.Is(err, ErrNamespaceNotAllowed) {
+				writeGatewayError(w, err)
+				return
+			}
 			if errors.Is(err, ErrPoolAtCapacity) {
 				writeError(w, http.StatusTooManyRequests, err.Error())
 				return

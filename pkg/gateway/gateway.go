@@ -38,6 +38,7 @@ type GatewayConfig struct {
 	IdleTimeout        time.Duration
 	MaxLifetime        time.Duration
 	SweepInterval      time.Duration
+	Namespace          string
 	SidecarImage       string
 	SidecarHTTPPort    int
 	SidecarGRPCPort    int
@@ -154,6 +155,26 @@ func New(k8sClient client.Client, runtimeAllocator RuntimeAllocator, sidecarClie
 	return gw
 }
 
+func (g *Gateway) runtimeNamespace() string {
+	ns := strings.TrimSpace(g.gwConfig.Namespace)
+	if ns == "" {
+		return "default"
+	}
+	return ns
+}
+
+func (g *Gateway) resolveNamespace(requested string) (string, error) {
+	allowed := g.runtimeNamespace()
+	ns := strings.TrimSpace(requested)
+	if ns == "" {
+		return allowed, nil
+	}
+	if ns != allowed {
+		return "", fmt.Errorf("%w: namespace %q is not allowed; gateway is scoped to namespace %q", ErrNamespaceNotAllowed, ns, allowed)
+	}
+	return ns, nil
+}
+
 // SetTrajectoryWriter installs a ClickHouse writer after gateway startup and
 // starts the trajectory worker. If the worker is already running, the new
 // writer is closed and ignored.
@@ -240,16 +261,16 @@ func (g *Gateway) CreateSession(ctx context.Context, req CreateSessionRequest) (
 	)
 	defer span.End()
 
-	ns := req.Namespace
-	if ns == "" {
-		ns = "default"
+	ns, err := g.resolveNamespace(req.Namespace)
+	if err != nil {
+		recordSpanErr(span, err)
+		return nil, err
 	}
 	if strings.TrimSpace(req.Image) == "" && strings.TrimSpace(req.Profile) == "" && strings.TrimSpace(req.PoolName) == "" {
 		err := fmt.Errorf("image or profile is required")
 		recordSpanErr(span, err)
 		return nil, err
 	}
-	var err error
 	req, err = g.ensureImageBackedSessionPool(ctx, req, ns)
 	if err != nil {
 		recordSpanErr(span, err)
@@ -1009,9 +1030,9 @@ func (g *Gateway) ExportTrajectory(sessionID string) ([]byte, error) {
 
 // CreatePool creates an agent-sandbox SandboxTemplate and SandboxWarmPool.
 func (g *Gateway) CreatePool(ctx context.Context, req CreatePoolRequest) error {
-	ns := req.Namespace
-	if ns == "" {
-		ns = "default"
+	ns, err := g.resolveNamespace(req.Namespace)
+	if err != nil {
+		return err
 	}
 
 	replicas := req.Replicas
@@ -1121,8 +1142,9 @@ func (g *Gateway) CreatePool(ctx context.Context, req CreatePoolRequest) error {
 
 // GetPool returns SandboxWarmPool info.
 func (g *Gateway) GetPool(ctx context.Context, name, namespace string) (*PoolInfo, error) {
-	if namespace == "" {
-		namespace = "default"
+	namespace, err := g.resolveNamespace(namespace)
+	if err != nil {
+		return nil, err
 	}
 
 	pool := &extensionsv1beta1.SandboxWarmPool{}
@@ -1136,9 +1158,9 @@ func (g *Gateway) GetPool(ctx context.Context, name, namespace string) (*PoolInf
 
 // ScalePool updates the replica count of a SandboxWarmPool.
 func (g *Gateway) ScalePool(ctx context.Context, name string, req ScalePoolRequest) (*PoolInfo, error) {
-	ns := req.Namespace
-	if ns == "" {
-		ns = "default"
+	ns, err := g.resolveNamespace(req.Namespace)
+	if err != nil {
+		return nil, err
 	}
 
 	pool := &extensionsv1beta1.SandboxWarmPool{}
@@ -1160,8 +1182,9 @@ func (g *Gateway) ScalePool(ctx context.Context, name string, req ScalePoolReque
 
 // DeletePool deletes a SandboxWarmPool and the default SandboxTemplate created by CreatePool.
 func (g *Gateway) DeletePool(ctx context.Context, name, namespace string) error {
-	if namespace == "" {
-		namespace = "default"
+	namespace, err := g.resolveNamespace(namespace)
+	if err != nil {
+		return err
 	}
 
 	pool := &extensionsv1beta1.SandboxWarmPool{
@@ -1367,9 +1390,10 @@ func (g *Gateway) CreateManagedSession(ctx context.Context, req CreateManagedSes
 		return nil, err
 	}
 
-	ns := req.Namespace
-	if ns == "" {
-		ns = "default"
+	ns, err := g.resolveNamespace(req.Namespace)
+	if err != nil {
+		recordSpanErr(span, err)
+		return nil, err
 	}
 
 	if hasJSONPayload(req.ConfigEnv) {
@@ -1485,13 +1509,15 @@ func (g *Gateway) ListSessions() []SessionListItem {
 	return items
 }
 
-// ListPools returns all SandboxWarmPool CRDs in the given namespace (empty = all namespaces).
+// ListPools returns SandboxWarmPool CRDs in the gateway namespace.
 func (g *Gateway) ListPools(ctx context.Context, namespace string) ([]PoolInfo, error) {
-	var poolList extensionsv1beta1.SandboxWarmPoolList
-	var opts []client.ListOption
-	if namespace != "" {
-		opts = append(opts, client.InNamespace(namespace))
+	namespace, err := g.resolveNamespace(namespace)
+	if err != nil {
+		return nil, err
 	}
+
+	var poolList extensionsv1beta1.SandboxWarmPoolList
+	opts := []client.ListOption{client.InNamespace(namespace)}
 	if err := g.k8sClient.List(ctx, &poolList, opts...); err != nil {
 		return nil, err
 	}
@@ -1561,8 +1587,9 @@ func (g *Gateway) StreamSessionLogs(ctx context.Context, sessionID string, follo
 
 // StreamPoolLogs fans out log streaming to all pods in a pool and merges output.
 func (g *Gateway) StreamPoolLogs(ctx context.Context, poolName, namespace string, follow bool, tailLines int32) (<-chan PoolLogEntry, error) {
-	if namespace == "" {
-		namespace = "default"
+	namespace, err := g.resolveNamespace(namespace)
+	if err != nil {
+		return nil, err
 	}
 
 	pool := &extensionsv1beta1.SandboxWarmPool{}

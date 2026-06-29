@@ -11,7 +11,7 @@ make check              # fmt + vet + tidy + ruff + mypy
 make generate           # Proto codegen
 make arch-check         # Validate architecture docs
 helm dependency build charts/agent-env
-helm lint charts/agent-env --set auth.enabled=false
+helm lint charts/agent-env --set auth.enabled=false --set grafana.adminPassword=test-grafana-password
 
 # Build and render deployment manifests with an explicit registry/tag:
 TAG=$(git rev-parse --short HEAD)-$(date +%Y%m%d%H%M%S)
@@ -22,6 +22,7 @@ skaffold render --build-artifacts /tmp/agent-env-builds.json \
   --default-repo "$REG" --platform linux/amd64 --tag "$TAG" \
   --namespace arl \
   --set auth.enabled=false \
+  --set grafana.adminPassword="$GRAFANA_ADMIN_PASSWORD" \
   --set agentSandbox.enabled=true \
   --set agentSandbox.image.repository="$REG/agent-sandbox-controller" \
   --set agentSandbox.image.tag="$TAG" \

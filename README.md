@@ -73,6 +73,7 @@ docker build -f Dockerfile.image-locality-scheduler -t arl-image-locality-schedu
 helm upgrade --install agent-env charts/agent-env \
   -n arl --create-namespace \
   --set auth.enabled=false \
+  --set grafana.adminPassword="$GRAFANA_ADMIN_PASSWORD" \
   --set image.injectedPullPolicy=IfNotPresent \
   --set gateway.image.tag=dev \
   --set sidecar.image.tag=dev \

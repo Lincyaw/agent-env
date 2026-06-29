@@ -21,6 +21,7 @@ import (
 )
 
 const fileChunkSize = 1024 * 1024
+const sidecarSocketGID = 65532
 
 // Agent listens on a Unix socket and executes commands in the current container.
 type Agent struct {
@@ -53,8 +54,16 @@ func (a *Agent) Run(ctx context.Context) error {
 	}
 	defer a.listener.Close()
 
-	// Make socket accessible to sidecar container (owner + group only)
-	if err := os.Chmod(a.socketPath, 0660); err != nil {
+	// The sidecar image runs as distroless nonroot (gid 65532). The executor
+	// usually runs as root in the user image, so make the pod-local Unix socket
+	// group-readable by the sidecar. Fall back to a pod-local world-writable
+	// socket if the executor image is non-root and cannot chown.
+	socketMode := os.FileMode(0660)
+	if err := os.Chown(a.socketPath, -1, sidecarSocketGID); err != nil {
+		log.Printf("warning: chown socket group to %d failed: %v; falling back to 0666", sidecarSocketGID, err)
+		socketMode = 0666
+	}
+	if err := os.Chmod(a.socketPath, socketMode); err != nil {
 		return fmt.Errorf("chmod socket: %w", err)
 	}
 

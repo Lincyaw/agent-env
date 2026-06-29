@@ -249,7 +249,7 @@ var sessionUploadCmd = &cobra.Command{
 			}
 			digest, err := computeFileSHA256(localPath)
 			if err != nil {
-				return err
+				return uploadLocalFileError(localPath, remotePath, err)
 			}
 			expectedSHA256 = digest
 		}
@@ -258,7 +258,7 @@ var sessionUploadCmd = &cobra.Command{
 		if localPath != "-" {
 			file, err := os.Open(localPath)
 			if err != nil {
-				return fmt.Errorf("open local file: %w", err)
+				return uploadLocalFileError(localPath, remotePath, err)
 			}
 			defer file.Close()
 			input = file
@@ -479,6 +479,19 @@ func computeFileSHA256(localPath string) (string, error) {
 		return "", fmt.Errorf("compute sha256: %w", err)
 	}
 	return hex.EncodeToString(hash.Sum(nil)), nil
+}
+
+func uploadLocalFileError(localPath, remotePath string, err error) error {
+	if os.IsNotExist(err) {
+		msg := fmt.Sprintf("open local file %q: %v; usage is: arl session upload <id> <local-path> <remote-path>", localPath, err)
+		if remotePath != "-" {
+			if _, statErr := os.Stat(remotePath); statErr == nil {
+				msg += fmt.Sprintf("; %q exists locally, so the arguments may be reversed", remotePath)
+			}
+		}
+		return usageError("%s", msg)
+	}
+	return fmt.Errorf("open local file %q: %w", localPath, err)
 }
 
 func init() {

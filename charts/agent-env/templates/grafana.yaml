@@ -10,7 +10,7 @@ metadata:
 type: Opaque
 stringData:
   admin-user: {{ .Values.grafana.adminUser | quote }}
-  admin-password: {{ .Values.grafana.adminPassword | quote }}
+  admin-password: {{ required "grafana.enabled is true but grafana.adminPassword is empty" .Values.grafana.adminPassword | quote }}
 ---
 # Dashboard provider — tells Grafana to load JSON files from /var/lib/grafana/dashboards
 apiVersion: v1

@@ -22,6 +22,7 @@ Local development:
 helm upgrade --install agent-env charts/agent-env \
   -n arl --create-namespace \
   --set auth.enabled=false \
+  --set grafana.adminPassword="$GRAFANA_ADMIN_PASSWORD" \
   --set image.injectedPullPolicy=IfNotPresent \
   --set gateway.image.tag=dev \
   --set sidecar.image.tag=dev \
@@ -35,6 +36,8 @@ Enable Redis, ClickHouse, Prometheus, and Grafana:
 helm upgrade --install agent-env charts/agent-env \
   -n arl --create-namespace \
   --set auth.enabled=false \
+  --set grafana.adminPassword="$GRAFANA_ADMIN_PASSWORD" \
+  --set clickhouse.password="$CLICKHOUSE_PASSWORD" \
   --set redis.enabled=true \
   --set clickhouse.enabled=true \
   --set prometheus.enabled=true \

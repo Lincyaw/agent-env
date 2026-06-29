@@ -219,6 +219,45 @@ func TestCreateSessionWithImageEnsuresProfiledPool(t *testing.T) {
 	}
 }
 
+func TestCreateSessionDefaultsToGatewayNamespace(t *testing.T) {
+	scheme := newGatewayTestScheme(t)
+	pool := testSandboxWarmPool("code", "arl1", "code-template", 1, 1, "code")
+	template := testSandboxTemplate("code-template", "arl1", "python:3.12", "code")
+	k8sClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(pool, template).Build()
+	allocator := &recordingRuntimeAllocator{
+		allocation: RuntimeAllocation{
+			Backend:   runtimeBackendSandboxClaim,
+			PodName:   "pod-1",
+			PodIP:     "10.0.0.1",
+			ClaimName: "claim-1",
+		},
+	}
+	gw := New(k8sClient, allocator, nil, nil, nil, GatewayConfig{Namespace: "arl1"}, NewMemoryStore())
+
+	info, err := gw.CreateSession(context.Background(), CreateSessionRequest{Profile: "code"})
+	if err != nil {
+		t.Fatalf("CreateSession returned error: %v", err)
+	}
+	if info.Namespace != "arl1" {
+		t.Fatalf("Namespace = %q, want arl1", info.Namespace)
+	}
+	if allocator.lastRequest.Namespace != "arl1" {
+		t.Fatalf("allocator Namespace = %q, want arl1", allocator.lastRequest.Namespace)
+	}
+}
+
+func TestCreateSessionRejectsCrossNamespaceRequest(t *testing.T) {
+	gw := New(nil, &recordingRuntimeAllocator{}, nil, nil, nil, GatewayConfig{Namespace: "arl1"}, NewMemoryStore())
+
+	_, err := gw.CreateSession(context.Background(), CreateSessionRequest{
+		Namespace: "default",
+		Profile:   "code",
+	})
+	if err == nil || !strings.Contains(err.Error(), `namespace "default" is not allowed`) {
+		t.Fatalf("CreateSession error = %v, want namespace rejection", err)
+	}
+}
+
 func TestSessionJSONDoesNotExposePoolRef(t *testing.T) {
 	payload, err := json.Marshal(SessionInfo{
 		ID:        "gw-1",
