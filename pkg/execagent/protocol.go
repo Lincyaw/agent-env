@@ -3,7 +3,7 @@ package execagent
 // Request is the JSON-over-socket protocol request from sidecar to executor agent.
 type Request struct {
 	ID             string            `json:"id"`
-	Type           string            `json:"type"` // "exec", "signal", "ping", "shell", "stdin", "write_file_stream", "write_file_chunk", "write_file_finish", "read_file_stream"
+	Type           string            `json:"type"` // "exec", "signal", "ping", "shell", "stdin", "resize", "write_file_stream", "write_file_chunk", "write_file_finish", "read_file_stream"
 	Cmd            []string          `json:"cmd,omitempty"`
 	Env            map[string]string `json:"env,omitempty"`
 	WorkDir        string            `json:"workdir,omitempty"`
@@ -11,6 +11,8 @@ type Request struct {
 	PID            int               `json:"pid,omitempty"`
 	Signal         string            `json:"signal,omitempty"`
 	Data           string            `json:"data,omitempty"` // stdin data for "stdin" type
+	Rows           int32             `json:"rows,omitempty"`
+	Cols           int32             `json:"cols,omitempty"`
 	Path           string            `json:"path,omitempty"`
 	Content        []byte            `json:"content,omitempty"`
 	ExpectedSHA256 string            `json:"expected_sha256,omitempty"`

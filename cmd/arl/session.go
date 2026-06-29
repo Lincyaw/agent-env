@@ -30,16 +30,7 @@ var sessionListCmd = &cobra.Command{
 			return err
 		}
 
-		var filtered []SessionListItem
-		for _, s := range sessions {
-			if filterProfile != "" && s.Profile != filterProfile {
-				continue
-			}
-			if filterExp != "" && s.ExperimentID != filterExp {
-				continue
-			}
-			filtered = append(filtered, s)
-		}
+		filtered := filterSessions(sessions, filterProfile, filterExp)
 
 		if flagOutput == "json" {
 			printJSON(filtered)
@@ -75,6 +66,20 @@ var sessionListCmd = &cobra.Command{
 		}
 		return w.Flush()
 	},
+}
+
+func filterSessions(sessions []SessionListItem, profile, experimentID string) []SessionListItem {
+	filtered := make([]SessionListItem, 0, len(sessions))
+	for _, s := range sessions {
+		if profile != "" && s.Profile != profile {
+			continue
+		}
+		if experimentID != "" && s.ExperimentID != experimentID {
+			continue
+		}
+		filtered = append(filtered, s)
+	}
+	return filtered
 }
 
 var sessionCreateCmd = &cobra.Command{
