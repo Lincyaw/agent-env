@@ -37,6 +37,17 @@ func TestHealthCheckerCollectsImagePullDuration(t *testing.T) {
 			Message:   `Successfully pulled image "python:3.12" in 5s`,
 			EventTime: metav1.MicroTime{Time: start.Add(5 * time.Second)},
 		},
+		&corev1.Event{
+			ObjectMeta: metav1.ObjectMeta{Name: "other-ns-pulled", Namespace: "other", UID: types.UID("other-ns-pulled-1")},
+			InvolvedObject: corev1.ObjectReference{
+				Kind:      "Pod",
+				Namespace: "other",
+				Name:      "sandbox-pod",
+			},
+			Reason:    "Pulled",
+			Message:   `Successfully pulled image "ignored:latest" in 1s`,
+			EventTime: metav1.MicroTime{Time: start.Add(time.Second)},
+		},
 	).Build()
 	metrics := &recordingMetricsCollector{}
 	hc := NewHealthChecker(&Gateway{k8sClient: k8sClient}, metrics, "")

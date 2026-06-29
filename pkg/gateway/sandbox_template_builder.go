@@ -139,7 +139,7 @@ func (g *Gateway) sandboxPodSpec(image, workspaceDir string, resources corev1.Re
 				},
 				StartupProbe: &corev1.Probe{
 					ProbeHandler: corev1.ProbeHandler{
-						HTTPGet: &corev1.HTTPGetAction{Path: "/readyz", Port: intstr.FromInt32(int32(sidecarHTTPPort))},
+						HTTPGet: &corev1.HTTPGetAction{Path: "/healthz", Port: intstr.FromInt32(int32(sidecarHTTPPort))},
 					},
 					PeriodSeconds:    2,
 					FailureThreshold: 30,

@@ -232,8 +232,8 @@ clickhouse:
   port: 9000
   database: "arl"
   username: "default"
-  # REQUIRED: Must be set by the user. Do not use a default password.
-  password: "clickhouse123"
+  # REQUIRED when clickhouse.enabled=true. Do not use a default password.
+  password: ""
   # Storage configuration
   storageClassName: "ebs-ssd"
   storageSize: "10Gi"
@@ -302,7 +302,8 @@ grafana:
   enabled: true
   image: pair-diag-cn-guangzhou.cr.volces.com/pair/grafana:12.3.1
   adminUser: admin
-  adminPassword: newpassword123
+  # REQUIRED when grafana.enabled=true. Do not use a default password.
+  adminPassword: ""
   service:
     type: ClusterIP
   resources:

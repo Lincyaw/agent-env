@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 )
@@ -104,6 +105,9 @@ var poolCreateCmd = &cobra.Command{
 		profile, _ := cmd.Flags().GetString("profile")
 		replicas, _ := cmd.Flags().GetInt32("replicas")
 		workspaceDir, _ := cmd.Flags().GetString("workspace-dir")
+		wait, _ := cmd.Flags().GetBool("wait")
+		timeout, _ := cmd.Flags().GetDuration("timeout")
+		minReady, _ := cmd.Flags().GetInt32("min-ready")
 
 		if image == "" {
 			return usageError("--image is required")
@@ -124,6 +128,31 @@ var poolCreateCmd = &cobra.Command{
 			return err
 		}
 
+		if wait {
+			if minReady < 0 {
+				minReady = replicas
+			}
+			p, err := waitForPoolReady(c, args[0], flagNamespace, minReady, timeout)
+			if err != nil {
+				return err
+			}
+			if flagOutput == "json" {
+				printJSON(p)
+				return nil
+			}
+			fmt.Printf("Pool %s ready (ready=%d/%d).\n", p.Name, p.ReadyReplicas, p.Replicas)
+			return nil
+		}
+
+		if flagOutput == "json" {
+			p, err := c.GetPool(args[0], flagNamespace)
+			if err != nil {
+				return err
+			}
+			printJSON(p)
+			return nil
+		}
+
 		fmt.Printf("Pool %s created.\n", args[0])
 		return nil
 	},
@@ -135,6 +164,9 @@ var poolScaleCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		replicas, _ := cmd.Flags().GetInt32("replicas")
+		wait, _ := cmd.Flags().GetBool("wait")
+		timeout, _ := cmd.Flags().GetDuration("timeout")
+		minReady, _ := cmd.Flags().GetInt32("min-ready")
 
 		c := newClient()
 		p, err := c.ScalePool(args[0], ScalePoolRequest{
@@ -144,6 +176,15 @@ var poolScaleCmd = &cobra.Command{
 		if err != nil {
 			return err
 		}
+		if wait {
+			if minReady < 0 {
+				minReady = replicas
+			}
+			p, err = waitForPoolReady(c, args[0], flagNamespace, minReady, timeout)
+			if err != nil {
+				return err
+			}
+		}
 
 		if flagOutput == "json" {
 			printJSON(p)
@@ -151,6 +192,30 @@ var poolScaleCmd = &cobra.Command{
 		}
 
 		fmt.Printf("Pool %s scaled to %d replicas (ready=%d).\n", args[0], p.Replicas, p.ReadyReplicas)
+		return nil
+	},
+}
+
+var poolWaitCmd = &cobra.Command{
+	Use:   "wait <name>",
+	Short: "Wait for a WarmPool to have ready capacity",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		minReady, _ := cmd.Flags().GetInt32("min-ready")
+		timeout, _ := cmd.Flags().GetDuration("timeout")
+
+		c := newClient()
+		p, err := waitForPoolReady(c, args[0], flagNamespace, minReady, timeout)
+		if err != nil {
+			return err
+		}
+
+		if flagOutput == "json" {
+			printJSON(p)
+			return nil
+		}
+
+		fmt.Printf("Pool %s ready (ready=%d/%d).\n", p.Name, p.ReadyReplicas, p.Replicas)
 		return nil
 	},
 }
@@ -237,6 +302,46 @@ var poolExecCmd = &cobra.Command{
 	},
 }
 
+func waitForPoolReady(c *Client, name, namespace string, minReady int32, timeout time.Duration) (*PoolInfo, error) {
+	if timeout <= 0 {
+		return nil, usageError("--timeout must be positive")
+	}
+
+	deadline := time.Now().Add(timeout)
+	var last *PoolInfo
+	var lastErr error
+	for {
+		p, err := c.GetPool(name, namespace)
+		if err != nil {
+			lastErr = err
+		} else {
+			last = p
+			target := minReady
+			if target < 0 {
+				target = p.Replicas
+			}
+			if target < 0 {
+				target = 0
+			}
+			if p.ReadyReplicas >= target {
+				return p, nil
+			}
+		}
+
+		if time.Now().After(deadline) {
+			if last != nil {
+				target := minReady
+				if target < 0 {
+					target = last.Replicas
+				}
+				return nil, fmt.Errorf("timeout waiting for pool %s ready: ready=%d want=%d replicas=%d", name, last.ReadyReplicas, target, last.Replicas)
+			}
+			return nil, fmt.Errorf("timeout waiting for pool %s ready: last error: %w", name, lastErr)
+		}
+		time.Sleep(2 * time.Second)
+	}
+}
+
 var poolLogsCmd = &cobra.Command{
 	Use:   "logs <name>",
 	Short: "Stream aggregated pod logs for a pool",
@@ -257,9 +362,18 @@ func init() {
 	poolCreateCmd.Flags().String("profile", "", "Pool selection profile (default: pool name)")
 	poolCreateCmd.Flags().Int32("replicas", 2, "Number of warm replicas")
 	poolCreateCmd.Flags().String("workspace-dir", "", "Workspace directory inside each sandbox")
+	poolCreateCmd.Flags().Bool("wait", false, "Wait until the pool has ready capacity")
+	poolCreateCmd.Flags().Duration("timeout", 10*time.Minute, "Maximum time to wait with --wait")
+	poolCreateCmd.Flags().Int32("min-ready", -1, "Minimum ready sandboxes to wait for (-1 means desired replicas)")
 
 	poolScaleCmd.Flags().Int32("replicas", 0, "Target replica count")
 	poolScaleCmd.MarkFlagRequired("replicas")
+	poolScaleCmd.Flags().Bool("wait", false, "Wait until the scaled pool has ready capacity")
+	poolScaleCmd.Flags().Duration("timeout", 10*time.Minute, "Maximum time to wait with --wait")
+	poolScaleCmd.Flags().Int32("min-ready", -1, "Minimum ready sandboxes to wait for (-1 means target replicas)")
+
+	poolWaitCmd.Flags().Duration("timeout", 10*time.Minute, "Maximum time to wait")
+	poolWaitCmd.Flags().Int32("min-ready", -1, "Minimum ready sandboxes to wait for (-1 means desired replicas)")
 
 	poolDeleteCmd.Flags().Bool("force", false, "Skip confirmation")
 
@@ -267,6 +381,7 @@ func init() {
 	poolCmd.AddCommand(poolGetCmd)
 	poolCmd.AddCommand(poolCreateCmd)
 	poolCmd.AddCommand(poolScaleCmd)
+	poolCmd.AddCommand(poolWaitCmd)
 	poolLogsCmd.Flags().BoolP("follow", "f", false, "Follow log output")
 	poolLogsCmd.Flags().Int("tail", 100, "Number of recent lines to show")
 

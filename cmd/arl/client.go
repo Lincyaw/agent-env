@@ -98,7 +98,11 @@ func (c *Client) rawGet(path string) ([]byte, int, error) {
 
 func (c *Client) ListSessions() ([]SessionListItem, error) {
 	var sessions []SessionListItem
-	return sessions, c.do("GET", "/v1/sessions", nil, &sessions)
+	err := c.do("GET", "/v1/sessions", nil, &sessions)
+	if sessions == nil {
+		sessions = []SessionListItem{}
+	}
+	return sessions, err
 }
 
 func (c *Client) CreateSession(req CreateSessionRequest) (*SessionInfo, error) {
@@ -233,7 +237,11 @@ func (c *Client) ListPools(namespace string) ([]PoolInfo, error) {
 		path += "?namespace=" + url.QueryEscape(namespace)
 	}
 	var pools []PoolInfo
-	return pools, c.do("GET", path, nil, &pools)
+	err := c.do("GET", path, nil, &pools)
+	if pools == nil {
+		pools = []PoolInfo{}
+	}
+	return pools, err
 }
 
 func (c *Client) GetPool(name, namespace string) (*PoolInfo, error) {
@@ -266,12 +274,20 @@ func (c *Client) DeletePool(name, namespace string) error {
 
 func (c *Client) ListExperiments() ([]ExperimentSummary, error) {
 	var exps []ExperimentSummary
-	return exps, c.do("GET", "/v1/managed/experiments", nil, &exps)
+	err := c.do("GET", "/v1/managed/experiments", nil, &exps)
+	if exps == nil {
+		exps = []ExperimentSummary{}
+	}
+	return exps, err
 }
 
 func (c *Client) ListExperimentSessions(experimentID string) ([]ManagedSessionInfo, error) {
 	var sessions []ManagedSessionInfo
-	return sessions, c.do("GET", "/v1/managed/experiments/"+experimentID+"/sessions", nil, &sessions)
+	err := c.do("GET", "/v1/managed/experiments/"+experimentID+"/sessions", nil, &sessions)
+	if sessions == nil {
+		sessions = []ManagedSessionInfo{}
+	}
+	return sessions, err
 }
 
 func (c *Client) CreateManagedSession(req CreateManagedSessionRequest) (*ManagedSessionInfo, error) {

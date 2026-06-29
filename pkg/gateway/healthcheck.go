@@ -18,6 +18,7 @@ import (
 	"github.com/Lincyaw/agent-env/pkg/interfaces"
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 )
 
 // CheckResult represents the outcome of a single health check.
@@ -147,8 +148,9 @@ func (hc *HealthChecker) collectImagePullMetrics(ctx context.Context) error {
 	if hc.gw == nil || hc.gw.k8sClient == nil || hc.metrics == nil {
 		return nil
 	}
+	namespace := hc.gw.runtimeNamespace()
 	var events corev1.EventList
-	if err := hc.gw.k8sClient.List(ctx, &events); err != nil {
+	if err := hc.gw.k8sClient.List(ctx, &events, client.InNamespace(namespace)); err != nil {
 		return err
 	}
 	sort.SliceStable(events.Items, func(i, j int) bool {

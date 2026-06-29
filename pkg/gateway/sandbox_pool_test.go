@@ -123,6 +123,12 @@ func TestCreatePoolCreatesSandboxWarmPoolAndExecutableTemplate(t *testing.T) {
 	if !hasVolumeMount(sidecar.VolumeMounts, "workspace", "/workspace") {
 		t.Fatalf("sidecar workspace mounts = %#v, want workspace mounted at /workspace", sidecar.VolumeMounts)
 	}
+	if sidecar.StartupProbe == nil || sidecar.StartupProbe.HTTPGet == nil || sidecar.StartupProbe.HTTPGet.Path != "/healthz" {
+		t.Fatalf("sidecar startup probe = %#v, want HTTP /healthz", sidecar.StartupProbe)
+	}
+	if sidecar.ReadinessProbe == nil || sidecar.ReadinessProbe.HTTPGet == nil || sidecar.ReadinessProbe.HTTPGet.Path != "/readyz" {
+		t.Fatalf("sidecar readiness probe = %#v, want HTTP /readyz", sidecar.ReadinessProbe)
+	}
 	if template.Spec.NetworkPolicyManagement != extensionsv1beta1.NetworkPolicyManagementManaged {
 		t.Fatalf("NetworkPolicyManagement = %q, want Managed", template.Spec.NetworkPolicyManagement)
 	}

@@ -9,9 +9,10 @@ metadata:
     app.kubernetes.io/component: gateway
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRole
+kind: Role
 metadata:
   name: {{ include "agent-env.fullname" . }}-gateway
+  namespace: {{ .Release.Namespace }}
   labels:
     {{- include "agent-env.labels" . | nindent 4 }}
     app.kubernetes.io/component: gateway
@@ -20,12 +21,27 @@ rules:
       - extensions.agents.x-k8s.io
     resources:
       - sandboxclaims
+    verbs:
+      - get
+      - list
+      - create
+      - patch
+      - delete
+  - apiGroups:
+      - extensions.agents.x-k8s.io
+    resources:
       - sandboxtemplates
+    verbs:
+      - get
+      - create
+      - delete
+  - apiGroups:
+      - extensions.agents.x-k8s.io
+    resources:
       - sandboxwarmpools
     verbs:
       - get
       - list
-      - watch
       - create
       - update
       - patch
@@ -39,42 +55,73 @@ rules:
     verbs:
       - get
       - list
-      - watch
   - apiGroups:
       - agents.x-k8s.io
     resources:
       - sandboxes
     verbs:
       - get
-      - list
-      - watch
       - patch
-      - delete
   - apiGroups:
       - ""
     resources:
       - pods
+    verbs:
+      - list
+  - apiGroups:
+      - ""
+    resources:
       - secrets
     verbs:
       - get
-      - list
-      - watch
       - create
-      - update
       - patch
-      - delete
 ---
 apiVersion: rbac.authorization.k8s.io/v1
-kind: ClusterRoleBinding
+kind: RoleBinding
 metadata:
   name: {{ include "agent-env.fullname" . }}-gateway
+  namespace: {{ .Release.Namespace }}
   labels:
     {{- include "agent-env.labels" . | nindent 4 }}
     app.kubernetes.io/component: gateway
 roleRef:
   apiGroup: rbac.authorization.k8s.io
-  kind: ClusterRole
+  kind: Role
   name: {{ include "agent-env.fullname" . }}-gateway
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "agent-env.fullname" . }}-gateway
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ include "agent-env.fullname" . }}-gateway-events
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "agent-env.labels" . | nindent 4 }}
+    app.kubernetes.io/component: gateway
+rules:
+  - apiGroups:
+      - ""
+    resources:
+      - events
+    verbs:
+      - list
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ include "agent-env.fullname" . }}-gateway-events
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "agent-env.labels" . | nindent 4 }}
+    app.kubernetes.io/component: gateway
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ include "agent-env.fullname" . }}-gateway-events
 subjects:
   - kind: ServiceAccount
     name: {{ include "agent-env.fullname" . }}-gateway

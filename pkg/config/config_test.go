@@ -81,6 +81,13 @@ func TestConfigValidate(t *testing.T) {
 			wantErr: "invalid gateway port",
 		},
 		{
+			name: "missing gateway namespace",
+			mutate: func(cfg *Config) {
+				cfg.GatewayNamespace = " "
+			},
+			wantErr: "gateway namespace is required",
+		},
+		{
 			name: "invalid k8s QPS",
 			mutate: func(cfg *Config) {
 				cfg.K8sClientQPS = 0
@@ -177,6 +184,9 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.ImagePullPolicy != "Always" {
 		t.Errorf("ImagePullPolicy = %q, want Always", cfg.ImagePullPolicy)
 	}
+	if cfg.GatewayNamespace != "default" {
+		t.Errorf("GatewayNamespace = %q, want default", cfg.GatewayNamespace)
+	}
 	if cfg.GRPCAuthSecretName != "agent-env-grpc-token" {
 		t.Errorf("GRPCAuthSecretName = %q, want agent-env-grpc-token", cfg.GRPCAuthSecretName)
 	}
@@ -218,8 +228,18 @@ func TestLoadFromEnvImagePullPolicy(t *testing.T) {
 	}
 }
 
+func TestLoadFromEnvGatewayNamespaceFallsBackToPodNamespace(t *testing.T) {
+	t.Setenv("POD_NAMESPACE", "arl1")
+
+	if got := LoadFromEnv().GatewayNamespace; got != "arl1" {
+		t.Fatalf("GatewayNamespace = %q, want arl1", got)
+	}
+}
+
 func TestLoadFromEnvGatewaySettings(t *testing.T) {
 	t.Setenv("AUTH_ENABLED", "false")
+	t.Setenv("POD_NAMESPACE", "pod-ns")
+	t.Setenv("GATEWAY_NAMESPACE", "gateway-ns")
 	t.Setenv("GATEWAY_IDLE_TIMEOUT", "45s")
 	t.Setenv("K8S_CLIENT_QPS", "123")
 	t.Setenv("K8S_CLIENT_BURST", "456")
@@ -246,6 +266,9 @@ func TestLoadFromEnvGatewaySettings(t *testing.T) {
 	}
 	if cfg.GatewayIdleTimeout != 45*time.Second {
 		t.Fatalf("GatewayIdleTimeout = %v, want 45s", cfg.GatewayIdleTimeout)
+	}
+	if cfg.GatewayNamespace != "gateway-ns" {
+		t.Fatalf("GatewayNamespace = %q, want gateway-ns", cfg.GatewayNamespace)
 	}
 	if cfg.K8sClientQPS != 123 {
 		t.Fatalf("K8sClientQPS = %v, want 123", cfg.K8sClientQPS)

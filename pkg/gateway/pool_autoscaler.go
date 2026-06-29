@@ -63,8 +63,9 @@ func (g *Gateway) poolAutoscaleLoop() {
 }
 
 func (g *Gateway) reconcilePoolAutoscaling(ctx context.Context) error {
+	namespace := g.runtimeNamespace()
 	var pools v1beta1.SandboxWarmPoolList
-	if err := g.k8sClient.List(ctx, &pools); err != nil {
+	if err := g.k8sClient.List(ctx, &pools, client.InNamespace(namespace)); err != nil {
 		return fmt.Errorf("list sandbox warm pools: %w", err)
 	}
 
@@ -104,8 +105,9 @@ func (g *Gateway) publishCurrentPoolMetrics(ctx context.Context) error {
 	if g.metrics == nil || g.k8sClient == nil {
 		return nil
 	}
+	namespace := g.runtimeNamespace()
 	var pools v1beta1.SandboxWarmPoolList
-	if err := g.k8sClient.List(ctx, &pools); err != nil {
+	if err := g.k8sClient.List(ctx, &pools, client.InNamespace(namespace)); err != nil {
 		return fmt.Errorf("list sandbox warm pools: %w", err)
 	}
 	claimCounts, err := g.activeClaimCountsByPool(ctx)
@@ -122,8 +124,9 @@ func (g *Gateway) publishCurrentPoolMetrics(ctx context.Context) error {
 }
 
 func (g *Gateway) activeClaimCountsByPool(ctx context.Context) (map[types.NamespacedName]int32, error) {
+	namespace := g.runtimeNamespace()
 	var claims v1beta1.SandboxClaimList
-	if err := g.k8sClient.List(ctx, &claims); err != nil {
+	if err := g.k8sClient.List(ctx, &claims, client.InNamespace(namespace)); err != nil {
 		return nil, fmt.Errorf("list sandbox claims: %w", err)
 	}
 

@@ -80,7 +80,7 @@ func main() {
 
 	// Create the sandbox runtime allocator backed by agent-sandbox CRDs.
 	metricsCollector := metrics.NewPrometheusCollector()
-	runtimeAllocator := gateway.NewSandboxClaimRuntimeAllocator(k8sClient)
+	runtimeAllocator := gateway.NewSandboxClaimRuntimeAllocator(k8sClient, cfg.GatewayNamespace)
 	log.Println("Runtime allocator backend: sandboxclaim")
 
 	// Trajectory writer is connected asynchronously so ClickHouse startup
@@ -126,6 +126,7 @@ func main() {
 		IdleTimeout:                     cfg.GatewayIdleTimeout,
 		MaxLifetime:                     cfg.GatewayMaxLifetime,
 		SweepInterval:                   cfg.GatewaySweepInterval,
+		Namespace:                       cfg.GatewayNamespace,
 		SidecarImage:                    cfg.SidecarImage,
 		SidecarHTTPPort:                 cfg.SidecarHTTPPort,
 		SidecarGRPCPort:                 cfg.SidecarGRPCPort,
