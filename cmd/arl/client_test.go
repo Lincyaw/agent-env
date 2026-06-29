@@ -73,3 +73,13 @@ func TestUploadLocalFileErrorHintsReversedArguments(t *testing.T) {
 		}
 	}
 }
+
+func TestFilterSessionsReturnsEmptySlice(t *testing.T) {
+	filtered := filterSessions(nil, "missing-profile", "")
+	if filtered == nil {
+		t.Fatal("filterSessions returned nil, want empty non-nil slice")
+	}
+	if len(filtered) != 0 {
+		t.Fatalf("filterSessions returned %d item(s), want 0", len(filtered))
+	}
+}

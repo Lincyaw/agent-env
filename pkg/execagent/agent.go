@@ -18,6 +18,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/creack/pty"
 )
 
 const fileChunkSize = 1024 * 1024
@@ -475,35 +477,29 @@ func (a *Agent) handleShell(ctx context.Context, req Request, decoder *json.Deco
 		workDir = a.workspaceDir
 	}
 
-	cmd := exec.CommandContext(ctx, shellPath)
+	cmd := exec.CommandContext(ctx, shellPath, "-i")
 	cmd.Dir = workDir
 	cmd.Env = os.Environ()
+	if os.Getenv("TERM") == "" {
+		cmd.Env = append(cmd.Env, "TERM=xterm-256color")
+	}
 	for k, v := range req.Env {
 		cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", k, v))
 	}
 
-	stdin, err := cmd.StdinPipe()
-	if err != nil {
-		encoder.Encode(Response{ID: req.ID, Error: fmt.Sprintf("stdin pipe: %v", err), Done: true})
-		return
+	rows, cols := uint16(24), uint16(80)
+	if req.Rows > 0 {
+		rows = uint16(req.Rows)
 	}
-
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		encoder.Encode(Response{ID: req.ID, Error: fmt.Sprintf("stdout pipe: %v", err), Done: true})
-		return
+	if req.Cols > 0 {
+		cols = uint16(req.Cols)
 	}
-
-	stderr, err := cmd.StderrPipe()
+	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: rows, Cols: cols})
 	if err != nil {
-		encoder.Encode(Response{ID: req.ID, Error: fmt.Sprintf("stderr pipe: %v", err), Done: true})
-		return
-	}
-
-	if err := cmd.Start(); err != nil {
 		encoder.Encode(Response{ID: req.ID, Error: fmt.Sprintf("start shell: %v", err), Done: true})
 		return
 	}
+	defer ptmx.Close()
 
 	a.mu.Lock()
 	a.processes[cmd.Process.Pid] = cmd
@@ -517,14 +513,13 @@ func (a *Agent) handleShell(ctx context.Context, req Request, decoder *json.Deco
 	}
 
 	var wg sync.WaitGroup
-	wg.Add(2)
+	wg.Add(1)
 
-	// Goroutine 1: stream stdout
 	go func() {
 		defer wg.Done()
 		buf := make([]byte, 4096)
 		for {
-			n, readErr := stdout.Read(buf)
+			n, readErr := ptmx.Read(buf)
 			if n > 0 {
 				send(Response{ID: req.ID, Stdout: string(buf[:n])})
 			}
@@ -534,34 +529,26 @@ func (a *Agent) handleShell(ctx context.Context, req Request, decoder *json.Deco
 		}
 	}()
 
-	// Goroutine 2: stream stderr
-	go func() {
-		defer wg.Done()
-		buf := make([]byte, 4096)
-		for {
-			n, readErr := stderr.Read(buf)
-			if n > 0 {
-				send(Response{ID: req.ID, Stderr: string(buf[:n])})
-			}
-			if readErr != nil {
-				return
-			}
-		}
-	}()
-
-	// Goroutine 3: read subsequent requests (stdin data, signals)
 	go func() {
 		for {
 			var sub Request
 			if err := decoder.Decode(&sub); err != nil {
-				stdin.Close()
+				ptmx.Close()
 				return
 			}
 			switch sub.Type {
 			case "stdin":
-				if _, err := io.WriteString(stdin, sub.Data); err != nil {
+				if _, err := io.WriteString(ptmx, sub.Data); err != nil {
 					return
 				}
+			case "resize":
+				if sub.Rows <= 0 || sub.Cols <= 0 {
+					continue
+				}
+				_ = pty.Setsize(ptmx, &pty.Winsize{
+					Rows: uint16(sub.Rows),
+					Cols: uint16(sub.Cols),
+				})
 			case "signal":
 				var sig syscall.Signal
 				switch strings.ToUpper(sub.Signal) {
@@ -589,6 +576,7 @@ func (a *Agent) handleShell(ctx context.Context, req Request, decoder *json.Deco
 			exitCode = 1
 		}
 	}
+	ptmx.Close()
 
 	wg.Wait()
 

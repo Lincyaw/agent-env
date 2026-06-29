@@ -320,6 +320,13 @@ func (s *GRPCServer) InteractiveShell(stream grpc.BidiStreamingServer[pb.ShellIn
 				return
 			}
 
+			if input.GetResize() {
+				if err := session.Resize(input.GetRows(), input.GetCols()); err != nil {
+					return
+				}
+				continue
+			}
+
 			switch v := input.GetInput().(type) {
 			case *pb.ShellInput_Data:
 				if err := session.SendInput(v.Data); err != nil {

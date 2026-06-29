@@ -367,6 +367,19 @@ func (s *ShellSession) SendSignal(signal string) error {
 	})
 }
 
+// Resize updates the remote shell terminal size.
+func (s *ShellSession) Resize(rows, cols int32) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return s.encoder.Encode(execagent.Request{
+		ID:   s.id,
+		Type: "resize",
+		Rows: rows,
+		Cols: cols,
+	})
+}
+
 // Close closes the underlying connection, which causes the shell to exit.
 func (s *ShellSession) Close() error {
 	return s.conn.Close()
