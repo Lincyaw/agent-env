@@ -10,20 +10,21 @@ var configCmd = &cobra.Command{
 	Use:   "config",
 	Short: "Show current CLI configuration",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		apiKey := effectiveAPIKey()
 		if flagOutput == "json" {
 			printJSON(map[string]string{
 				"gatewayURL": flagGatewayURL,
 				"namespace":  flagNamespace,
-				"apiKey":     maskKey(flagAPIKey),
-				"output":     flagOutput,
+				"apiKey":     maskKey(apiKey),
+				"format":     flagOutput,
 			})
 			return nil
 		}
 
 		fmt.Printf("Gateway URL:  %s\n", flagGatewayURL)
 		fmt.Printf("Namespace:    %s\n", flagNamespace)
-		fmt.Printf("API Key:      %s\n", maskKey(flagAPIKey))
-		fmt.Printf("Output:       %s\n", flagOutput)
+		fmt.Printf("API Key:      %s\n", maskKey(apiKey))
+		fmt.Printf("Format:       %s\n", flagOutput)
 		return nil
 	},
 }

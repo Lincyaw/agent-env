@@ -150,7 +150,7 @@ with SandboxSession(
     profile="python-pool",
     namespace="default",
     gateway_url="http://localhost:8080",
-    timeout="120s",
+    timeout=120.0,
 ) as session:
     result = session.execute([
         # Install dependencies
@@ -338,7 +338,7 @@ except Exception:
         profile=pool_name,
         replicas=2,
     )
-    manager.wait_for_warmpool_ready(pool_name, timeout=120)
+    manager.wait_for_ready(pool_name, timeout=120.0)
     print(f"WarmPool '{pool_name}' is ready")
 
 # Use the pool
@@ -420,4 +420,4 @@ For more examples, see the [examples/python](https://github.com/Lincyaw/agent-en
 |---------|-------------|
 | `test_arl_sdk.py` | Comprehensive SDK test |
 | `bench_gateway.py` | Gateway benchmarking |
-| `test_interactive_shell.py` | Interactive shell test |
+| `shell.py` | Interactive shell client |

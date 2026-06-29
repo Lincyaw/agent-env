@@ -7,8 +7,8 @@ Run the following commands and present the results as a concise dashboard:
 
 ```bash
 arl status
-arl pool list -o wide
-arl session list -o wide
+arl pool list --format wide
+arl session list --format wide
 arl exp list
 ```
 

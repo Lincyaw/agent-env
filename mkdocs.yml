@@ -80,6 +80,7 @@ nav:
       - Installation: developer-guide/installation.md
       - Deployment: developer-guide/deployment.md
       - Development: developer-guide/development.md
+      - Session State: developer-guide/session-state.md
   - User Guide:
       - Python SDK: user-guide/python-sdk.md
       - Quick Start: user-guide/quickstart.md

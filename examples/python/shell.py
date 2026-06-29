@@ -1,10 +1,10 @@
 """ARL Interactive Shell — connect to a remote sandbox terminal.
 
 Usage:
-    uv run python examples/python/test_interactive_shell.py
-    uv run python examples/python/test_interactive_shell.py --gateway-url http://localhost:8080
-    uv run python examples/python/test_interactive_shell.py --pool my-pool --image python:3.11
-    uv run python examples/python/test_interactive_shell.py --keep-alive
+    uv run python examples/python/shell.py
+    uv run python examples/python/shell.py --gateway-url http://localhost:8080
+    uv run python examples/python/shell.py --pool my-pool --image python:3.11
+    uv run python examples/python/shell.py --keep-alive
 
 Environment variables (override defaults):
     ARL_GATEWAY_URL   Gateway base URL

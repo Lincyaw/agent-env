@@ -29,12 +29,13 @@
 - **Image-Locality Scheduler**: Pod scheduling with image-locality awareness
   - Rendezvous hashing for consistent node selection
   - Prefers nodes that already have required container images
-- **Tools Provisioning**: WarmPool CRD supports pre-provisioned tools
-  - ToolsSpec with images, configmaps, and inline tool definitions
-  - Tools mounted at /opt/arl/tools/ in executor containers
-  - Tool invocation via SDK (list_tools, call_tool)
-- **Workspace Snapshots**: Auto-snapshot workspace after each step (git-based)
-  - Restore to any previous step's snapshot
+- **Tool Invocation Helpers**: SDK can list and call tools that already exist
+  in the executor image under `/opt/arl/tools`
+  - Sandbox-backed pool creation currently rejects `tools` provisioning payloads
+  - `list_tools` and `call_tool` are image-content helpers, not provisioning
+- **Workspace Restore**: Each step receives a snapshot ID equal to its history
+  index
+  - Restore allocates a fresh runtime and replays history up to that step
 - **Trajectory Export**: JSONL export of execution history for RL/SFT training
 
 ### Removed

@@ -96,6 +96,7 @@ All Gateway code accesses sessions through this interface. The implementation is
 ```yaml
 redis:
   enabled: true
+  deploy: true
   addr: "redis:6379"
   password: "your-redis-password"  # Stored in K8s Secret
   db: 0
@@ -129,15 +130,16 @@ All replicas share session state via Redis. Any replica can serve any session. P
 
 ### Redis Deployment
 
-ARL does not include Redis in its Helm chart. Use an external Redis instance or deploy one separately:
+The chart can deploy a single Redis instance when both `redis.enabled=true` and
+`redis.deploy=true`. Set `redis.deploy=false` to use an external Redis service:
 
 ```bash
-# Using Bitnami Redis chart
-helm repo add bitnami https://charts.bitnami.com/bitnami
-helm install redis bitnami/redis \
+helm upgrade --install agent-env charts/agent-env \
   -n arl \
-  --set auth.password=your-redis-password \
-  --set architecture=standalone
+  --set redis.enabled=true \
+  --set redis.deploy=false \
+  --set redis.addr=redis-master.redis.svc:6379 \
+  --set redis.password=your-redis-password
 ```
 
 ## Design Decisions
