@@ -13,6 +13,7 @@ from arl.configenv import ConfigEnvSpec
 from arl.gateway_client import GatewayClient
 from arl.types import (
     ExecuteResponse,
+    LogEntry,
     ResourceRequirements,
     SessionInfo,
     StepResult,
@@ -199,11 +200,25 @@ class SandboxSession:
         snapshot_id from a StepResult to restore to that step's state.
 
         Args:
-            snapshot_id: Snapshot ID (git commit SHA) from a step result.
+            snapshot_id: Snapshot ID (step index string) from a step result.
         """
         if self._session_id is None:
             raise RuntimeError("No session created. Call create_sandbox() first.")
         self._client.restore(self._session_id, snapshot_id)
+
+    def replay_from(
+        self,
+        source_session_id: str,
+        up_to_step: int | None = None,
+    ) -> dict[Any, Any]:
+        """Replay another session's history into this session."""
+        if self._session_id is None:
+            raise RuntimeError("No session created. Call create_sandbox() first.")
+        return self._client.replay_from(
+            self._session_id,
+            source_session_id=source_session_id,
+            up_to_step=up_to_step,
+        )
 
     def upload_file(
         self,
@@ -283,6 +298,23 @@ class SandboxSession:
         if self._session_id is None:
             raise RuntimeError("No session created. Call create_sandbox() first.")
         return self._client.get_trajectory(self._session_id)
+
+    def iter_logs(
+        self,
+        *,
+        follow: bool = False,
+        tail: int = 100,
+    ) -> Iterator[LogEntry]:
+        """Iterate over session sidecar log entries."""
+        if self._session_id is None:
+            raise RuntimeError("No session created. Call create_sandbox() first.")
+        return self._client.iter_session_logs(self._session_id, follow=follow, tail=tail)
+
+    def get_logs(self, *, tail: int = 100) -> list[LogEntry]:
+        """Return recent session sidecar log entries."""
+        if self._session_id is None:
+            raise RuntimeError("No session created. Call create_sandbox() first.")
+        return self._client.list_session_logs(self._session_id, tail=tail)
 
     def list_tools(self) -> ToolsRegistry:
         """List all available tools in the sandbox.
