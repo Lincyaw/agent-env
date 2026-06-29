@@ -120,8 +120,14 @@ func TestCreatePoolCreatesSandboxWarmPoolAndExecutableTemplate(t *testing.T) {
 		t.Fatal("template missing sidecar container")
 	}
 	sidecar := findContainer(podSpec.Containers, "sidecar")
-	if !hasVolumeMount(sidecar.VolumeMounts, "workspace", "/workspace") {
-		t.Fatalf("sidecar workspace mounts = %#v, want workspace mounted at /workspace", sidecar.VolumeMounts)
+	if got := sidecar.Command; len(got) != 1 || got[0] != "/sidecar" {
+		t.Fatalf("sidecar command = %#v, want /sidecar", got)
+	}
+	if hasVolumeMountName(sidecar.VolumeMounts, "workspace") {
+		t.Fatalf("sidecar workspace mounts = %#v, want no workspace mount", sidecar.VolumeMounts)
+	}
+	if !hasVolumeMount(sidecar.VolumeMounts, "arl-socket", "/var/run/arl") {
+		t.Fatalf("sidecar mounts = %#v, want arl-socket mounted at /var/run/arl", sidecar.VolumeMounts)
 	}
 	if sidecar.StartupProbe == nil || sidecar.StartupProbe.HTTPGet == nil || sidecar.StartupProbe.HTTPGet.Path != "/healthz" {
 		t.Fatalf("sidecar startup probe = %#v, want HTTP /healthz", sidecar.StartupProbe)
@@ -226,6 +232,15 @@ func findContainer(containers []corev1.Container, name string) corev1.Container 
 func hasVolumeMount(mounts []corev1.VolumeMount, name, mountPath string) bool {
 	for _, mount := range mounts {
 		if mount.Name == name && mount.MountPath == mountPath {
+			return true
+		}
+	}
+	return false
+}
+
+func hasVolumeMountName(mounts []corev1.VolumeMount, name string) bool {
+	for _, mount := range mounts {
+		if mount.Name == name {
 			return true
 		}
 	}

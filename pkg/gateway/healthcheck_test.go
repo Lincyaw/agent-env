@@ -76,6 +76,7 @@ type recordingMetricsCollector struct {
 
 func (m *recordingMetricsCollector) RecordSessionAllocationDuration(poolName string, duration time.Duration) {
 }
+func (m *recordingMetricsCollector) IncrementPodAllocationResult(poolName, result string) {}
 func (m *recordingMetricsCollector) RecordSandboxReadyDuration(poolName string, duration time.Duration) {
 }
 func (m *recordingMetricsCollector) RecordImagePullDuration(image string, duration time.Duration) {
@@ -84,7 +85,9 @@ func (m *recordingMetricsCollector) RecordImagePullDuration(image string, durati
 	}
 	m.imagePullDurations[image] = duration
 }
-func (m *recordingMetricsCollector) SetActiveSessions(count int64) {}
+func (m *recordingMetricsCollector) SetActiveSessions(count int64)                 {}
+func (m *recordingMetricsCollector) IncrementSessionDeletion(reason string)        {}
+func (m *recordingMetricsCollector) IncrementExecuteOperationResult(result string) {}
 func (m *recordingMetricsCollector) RecordGatewayStepDuration(stepType string, duration time.Duration) {
 }
 func (m *recordingMetricsCollector) IncrementGatewayStepResult(stepType, result string) {}

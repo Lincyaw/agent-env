@@ -178,8 +178,8 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.WorkspaceDir != "/workspace" {
 		t.Errorf("WorkspaceDir = %q, want /workspace", cfg.WorkspaceDir)
 	}
-	if cfg.HTTPClientTimeout != 30*time.Second {
-		t.Errorf("HTTPClientTimeout = %v, want 30s", cfg.HTTPClientTimeout)
+	if cfg.HTTPClientTimeout != 5*time.Minute {
+		t.Errorf("HTTPClientTimeout = %v, want 5m", cfg.HTTPClientTimeout)
 	}
 	if cfg.ImagePullPolicy != "Always" {
 		t.Errorf("ImagePullPolicy = %q, want Always", cfg.ImagePullPolicy)

@@ -72,8 +72,8 @@ data:
 
           - alert: PodAllocationTimeoutHigh
             expr: |
-              rate(arl_gateway_pod_allocation_result_total{result="timeout"}[5m])
-              / on(pool) rate(arl_gateway_pod_allocation_result_total[5m]) > 0.1
+              sum by (pool) (rate(arl_gateway_pod_allocation_result_total{result="timeout"}[5m]))
+              / clamp_min(sum by (pool) (rate(arl_gateway_pod_allocation_result_total[5m])), 0.001) > 0.1
             for: 5m
             labels:
               severity: warning
@@ -81,10 +81,39 @@ data:
               summary: "Pod allocation timeout rate > 10% for pool {{ "{{" }} $labels.pool {{ "}}" }}"
               description: "More than 10% of pod allocation attempts are timing out."
 
+          - alert: SessionRuntimeLost
+            expr: rate(arl_gateway_session_deletion_total{reason=~"runtime_lost|recovery_runtime_lost"}[5m]) > 0
+            for: 2m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Gateway is dropping sessions because runtime bindings disappeared"
+              description: "Sessions are being tombstoned after SandboxClaim/Sandbox validation failed."
+
+          - alert: ExecuteOperationClientDisconnects
+            expr: rate(arl_gateway_execute_operation_result_total{result="client_disconnected"}[5m]) > 0.05
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Clients are disconnecting while execute operations are still running"
+              description: "Check client timeout settings and gateway/sidecar execution latency."
+
+          - alert: ExecuteOperationErrorRateHigh
+            expr: |
+              sum(rate(arl_gateway_execute_operation_result_total{result="error"}[5m]))
+              / clamp_min(sum(rate(arl_gateway_execute_operation_result_total[5m])), 0.001) > 0.2
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Execute operation error rate > 20%"
+              description: "Idempotent execute operations are failing frequently."
+
           - alert: StepErrorRateHigh
             expr: |
               sum by (step_type) (rate(arl_gateway_step_result_total{result="error"}[5m]))
-              / sum by (step_type) (rate(arl_gateway_step_result_total[5m])) > 0.3
+              / clamp_min(sum by (step_type) (rate(arl_gateway_step_result_total[5m])), 0.001) > 0.3
             for: 5m
             labels:
               severity: warning

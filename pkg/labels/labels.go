@@ -16,6 +16,16 @@ const (
 	// Used during gateway recovery to rebuild in-memory session state.
 	SessionAnnotation = "arl.infra.io/session"
 
+	// OwnerKeyHashAnnotation records the hashed API key that owns a session.
+	// This preserves ownership checks when sessions are recovered after restart.
+	OwnerKeyHashAnnotation = "arl.infra.io/owner-key-hash"
+
+	// ExperimentAnnotation records the managed experiment ID for recovery.
+	ExperimentAnnotation = "arl.infra.io/experiment"
+
+	// ManagedAnnotation marks sessions created through the managed-session API.
+	ManagedAnnotation = "arl.infra.io/managed"
+
 	// LastReleasedAnnotation records the last time a pod transitioned from
 	// allocated back to idle (RFC3339). Used by LRU scale-down to delete the
 	// least-recently-used idle pods first.

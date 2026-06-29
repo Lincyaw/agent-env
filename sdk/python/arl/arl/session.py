@@ -176,6 +176,7 @@ class SandboxSession:
         self,
         steps: list[dict[str, Any]],
         trace_id: str | None = None,
+        operation_id: str | None = None,
         on_output: Callable[[str, str], None] | None = None,
     ) -> ExecuteResponse:
         """Execute steps in the sandbox. Returns synchronously.
@@ -191,7 +192,13 @@ class SandboxSession:
         """
         if self._session_id is None:
             raise RuntimeError("No session created. Call create_sandbox() first.")
-        return self._client.execute(self._session_id, steps, trace_id, on_output=on_output)
+        return self._client.execute(
+            self._session_id,
+            steps,
+            trace_id,
+            operation_id=operation_id,
+            on_output=on_output,
+        )
 
     def restore(self, snapshot_id: str) -> None:
         """Restore workspace to a previous step's snapshot.

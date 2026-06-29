@@ -28,11 +28,6 @@ func main() {
 	flag.StringVar(&executorSocket, "executor-socket", "/var/run/arl/exec.sock", "Unix socket path for executor agent")
 	flag.Parse()
 
-	// Ensure workspace exists
-	if err := os.MkdirAll(workspaceDir, 0755); err != nil {
-		log.Fatalf("Failed to create workspace directory: %v", err)
-	}
-
 	tracingShutdown, err := tracing.Setup(context.Background(), "arl-sidecar")
 	if err != nil {
 		log.Fatalf("failed to initialise tracing: %v", err)

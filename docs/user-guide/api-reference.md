@@ -70,6 +70,7 @@ session = SandboxSession.attach(
 result = session.execute(
     steps: list[dict[str, object]],
     trace_id: str | None = None,
+    operation_id: str | None = None,
     on_output: Callable[[str, str], None] | None = None,
 )
 ```
@@ -82,12 +83,16 @@ Step dictionaries are serialized directly to the gateway:
     "command": ["python", "-c", "print('hello')"],
     "env": {"MODE": "test"},
     "workDir": "/workspace",
+    "timeout": 300,
 }
 ```
 
-The Python `StepRequest` model also has a `timeout` field, but the current Go
-gateway request type does not consume per-step timeouts. Use the SDK HTTP
-`timeout` constructor argument for client-side request timeouts.
+`timeout` and `timeoutSeconds` are per-step execution timeouts in seconds. The
+SDK HTTP `timeout` constructor argument is only the client request timeout.
+Non-streaming `execute()` requests use an idempotent `operationID` by default,
+so a client timeout does not require re-running the command. Catch
+`GatewayOperationTimeout`, keep its `operation_id`, and query
+`get_execute_operation()` or retry with the same `operation_id`.
 
 Streaming output:
 
@@ -200,7 +205,8 @@ Important methods:
 | `get_session(session_id)` | Fetch session metadata. |
 | `list_sessions()` | List active sessions. |
 | `delete_session(session_id)` | Delete and release a session. |
-| `execute(session_id, steps, trace_id=None, on_output=None)` | Execute steps, preferring SSE streaming. |
+| `execute(session_id, steps, trace_id=None, operation_id=None, on_output=None)` | Execute steps. Non-streaming calls use an idempotent operation ID; `on_output` enables SSE streaming. |
+| `get_execute_operation(session_id, operation_id)` | Query an idempotent execute operation after a client timeout. |
 | `upload_file(...)`, `download_file(...)` | Transfer one workspace file. |
 | `upload_path(...)`, `download_path(...)`, `iter_download_file(...)` | Stream local/workspace files. |
 | `replay_from(session_id, source_session_id, up_to_step=None)` | Replay another session's history into a target session. |

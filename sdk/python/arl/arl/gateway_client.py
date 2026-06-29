@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import uuid
 from collections.abc import Callable, Iterable, Iterator
 from pathlib import Path
 from typing import Any, BinaryIO, TypeVar, cast
@@ -16,6 +17,7 @@ from arl.auth import resolve_auth
 from arl.configenv import ConfigEnvSpec
 from arl.types import (
     ErrorResponse,
+    ExecuteOperationInfo,
     ExecuteResponse,
     ExperimentSummary,
     LogEntry,
@@ -61,6 +63,14 @@ class GatewayError(Exception):
         super().__init__(
             f"Gateway error ({status_code}): {error}" + (f" - {detail}" if detail else "")
         )
+
+
+class GatewayOperationTimeout(TimeoutError):
+    """Raised when an idempotent execute operation outlives the HTTP request."""
+
+    def __init__(self, operation_id: str, message: str) -> None:
+        self.operation_id = operation_id
+        super().__init__(f"{message}; operation_id={operation_id}")
 
 
 class PoolNotReadyError(Exception):
@@ -174,22 +184,37 @@ class GatewayClient:
         session_id: str,
         steps: list[dict[str, Any]],
         trace_id: str | None = None,
+        operation_id: str | None = None,
         on_output: Callable[[str, str], None] | None = None,
     ) -> ExecuteResponse:
         body: dict[str, Any] = {"steps": steps}
         if trace_id is not None:
             body["traceID"] = trace_id
 
-        headers = {"Accept": "text/event-stream"}
-        try:
+        if on_output is not None:
+            headers = {"Accept": "text/event-stream"}
             return self._execute_sse(session_id, body, headers, on_output)
-        except (httpx.HTTPStatusError, GatewayError):
-            raise
-        except Exception:
-            # Server does not support SSE (old version) — fall back to non-streaming
+
+        op_id = operation_id or str(uuid.uuid4())
+        body["operationID"] = op_id
+        try:
             resp = self._client.post(f"/v1/sessions/{session_id}/execute", json=body)
-            self._handle_error(resp)
-            return ExecuteResponse.model_validate(resp.json())
+        except httpx.TimeoutException as exc:
+            raise GatewayOperationTimeout(op_id, "execute operation is still pending") from exc
+        self._handle_error(resp)
+        result = ExecuteResponse.model_validate(resp.json())
+        if not result.operation_id:
+            result.operation_id = op_id
+        return result
+
+    def get_execute_operation(
+        self,
+        session_id: str,
+        operation_id: str,
+    ) -> ExecuteOperationInfo:
+        resp = self._client.get(f"/v1/sessions/{session_id}/operations/{operation_id}")
+        self._handle_error(resp)
+        return ExecuteOperationInfo.model_validate(resp.json())
 
     def _execute_sse(
         self,

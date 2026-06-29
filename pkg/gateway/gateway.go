@@ -29,6 +29,7 @@ import (
 
 	"github.com/Lincyaw/agent-env/pkg/audit"
 	"github.com/Lincyaw/agent-env/pkg/interfaces"
+	"github.com/Lincyaw/agent-env/pkg/labels"
 	"github.com/Lincyaw/agent-env/pkg/scheduling"
 	"github.com/Lincyaw/agent-env/pkg/sidecar"
 )
@@ -78,12 +79,15 @@ type session struct {
 	experimentID        string
 	ownerKeyHash        string
 	closed              bool
+	deletionReason      string
+	deletedAt           *time.Time
 	lastTaskTime        time.Time
 	lastAnnotationPatch time.Time
 	idleTimeout         time.Duration
 	maxLifetime         time.Duration
 	createdAt           time.Time
 	activeExecs         int32 // atomic; >0 means execution in progress, sweep must not kill
+	operations          map[string]*executeOperation
 }
 
 func (s *session) runtimeAllocation() RuntimeAllocation {
@@ -288,6 +292,7 @@ func (g *Gateway) CreateSession(ctx context.Context, req CreateSessionRequest) (
 
 	sessionID := fmt.Sprintf("gw-%d-%s", time.Now().UnixMilli(), randomSuffix(8))
 	sandboxName := sessionID
+	ownerHash, _ := KeyHashFromContext(ctx)
 	span.SetAttributes(
 		attribute.String("session.id", sessionID),
 		attribute.String("pool.selected", poolRef),
@@ -303,13 +308,23 @@ func (g *Gateway) CreateSession(ctx context.Context, req CreateSessionRequest) (
 
 	allocStart := time.Now()
 	allocation, err := g.runtimeAllocator.Allocate(allocCtx, RuntimeAllocateRequest{
-		PoolRef:     poolRef,
-		Namespace:   ns,
-		SessionID:   sessionID,
-		SandboxName: sandboxName,
+		PoolRef:      poolRef,
+		Namespace:    ns,
+		SessionID:    sessionID,
+		SandboxName:  sandboxName,
+		OwnerKeyHash: ownerHash,
+		Managed:      req.Managed,
+		ExperimentID: req.ExperimentID,
 	})
 	if err != nil {
 		recordSpanErr(span, err)
+		if g.metrics != nil {
+			result := "error"
+			if allocCtx.Err() == context.DeadlineExceeded {
+				result = "timeout"
+			}
+			g.metrics.IncrementPodAllocationResult(poolRef, result)
+		}
 		diag := g.diagnosePoolHealth(ctx, poolRef, ns)
 		return nil, fmt.Errorf("allocate runtime from pool %s: %w (%s)", poolRef, err, diag)
 	}
@@ -329,9 +344,9 @@ func (g *Gateway) CreateSession(ctx context.Context, req CreateSessionRequest) (
 		PodIP:       allocation.PodIP,
 		PodName:     allocation.PodName,
 		CreatedAt:   time.Now(),
+		Status:      "active",
 	}
 
-	ownerHash, _ := KeyHashFromContext(ctx)
 	g.store.Set(sessionID, &session{
 		Info:         info,
 		Runtime:      *allocation,
@@ -343,6 +358,7 @@ func (g *Gateway) CreateSession(ctx context.Context, req CreateSessionRequest) (
 		createdAt:    time.Now(),
 		idleTimeout:  g.resolveIdleTimeout(req),
 		maxLifetime:  g.resolveMaxLifetime(req),
+		operations:   make(map[string]*executeOperation),
 	})
 
 	if g.metrics != nil {
@@ -350,6 +366,7 @@ func (g *Gateway) CreateSession(ctx context.Context, req CreateSessionRequest) (
 		allocationDuration := time.Since(allocStart)
 		g.metrics.RecordSessionAllocationDuration(poolRef, allocationDuration)
 		g.metrics.RecordSandboxReadyDuration(poolRef, allocationDuration)
+		g.metrics.IncrementPodAllocationResult(poolRef, "success")
 	}
 
 	return &info, nil
@@ -363,12 +380,29 @@ func (g *Gateway) GetSession(sessionID string) (*SessionInfo, error) {
 	}
 	s.mu.RLock()
 	info := s.Info
+	if info.Status == "" {
+		info.Status = "active"
+	}
 	s.mu.RUnlock()
 	return &info, nil
 }
 
+func (g *Gateway) GetHistoricalSession(sessionID string) (*session, bool) {
+	historical, ok := g.store.(interface {
+		GetHistorical(string) (*session, bool)
+	})
+	if !ok {
+		return nil, false
+	}
+	return historical.GetHistorical(sessionID)
+}
+
 // DeleteSession releases the sandbox runtime and removes the session.
 func (g *Gateway) DeleteSession(ctx context.Context, sessionID string) error {
+	return g.deleteSession(ctx, sessionID, "deleted")
+}
+
+func (g *Gateway) deleteSession(ctx context.Context, sessionID string, reason string) error {
 	s, ok := g.store.Get(sessionID)
 	if !ok {
 		return fmt.Errorf("session %s not found", sessionID)
@@ -380,6 +414,15 @@ func (g *Gateway) DeleteSession(ctx context.Context, sessionID string) error {
 		return fmt.Errorf("session %s not found", sessionID)
 	}
 	s.closed = true
+	if reason == "" {
+		reason = "deleted"
+	}
+	now := time.Now()
+	s.deletionReason = reason
+	s.deletedAt = &now
+	s.Info.Status = "deleted"
+	s.Info.DeletionReason = reason
+	s.Info.DeletedAt = &now
 	allocation := s.runtimeAllocation()
 	podName := allocation.PodName
 	podIP := allocation.PodIP
@@ -402,6 +445,7 @@ func (g *Gateway) DeleteSession(ctx context.Context, sessionID string) error {
 
 	if g.metrics != nil {
 		g.metrics.SetActiveSessions(g.store.IncrCount(-1))
+		g.metrics.IncrementSessionDeletion(reason)
 	}
 
 	return nil
@@ -413,7 +457,7 @@ func (g *Gateway) DeleteSession(ctx context.Context, sessionID string) error {
 func (g *Gateway) RecoverSessions(ctx context.Context) (int, error) {
 	recoverable, ok := g.store.(RecoverableSessionStore)
 	if !ok {
-		return 0, nil
+		return g.recoverSessionsFromRuntimeBindings(ctx)
 	}
 	recovered, err := recoverable.RecoverActiveSessions(ctx)
 	if err != nil {
@@ -434,6 +478,7 @@ func (g *Gateway) RecoverSessions(ctx context.Context) (int, error) {
 		allocation := s.runtimeAllocation()
 		s.mu.RUnlock()
 		if closed {
+			g.markSessionDeleted(s, "recovery_closed")
 			g.store.Delete(sessionID)
 			continue
 		}
@@ -442,7 +487,11 @@ func (g *Gateway) RecoverSessions(ctx context.Context) (int, error) {
 			resolved, err := g.runtimeAllocator.Resolve(ctx, allocation, sessionID)
 			if err != nil {
 				log.Printf("Warning: dropping recovered session %s: %v", sessionID, err)
+				g.markSessionDeleted(s, "recovery_runtime_lost")
 				g.store.Delete(sessionID)
+				if g.metrics != nil {
+					g.metrics.IncrementSessionDeletion("recovery_runtime_lost")
+				}
 				continue
 			}
 			s.mu.Lock()
@@ -480,6 +529,105 @@ func (g *Gateway) RecoverSessions(ctx context.Context) (int, error) {
 		}
 	}
 	return active, nil
+}
+
+func (g *Gateway) recoverSessionsFromRuntimeBindings(ctx context.Context) (int, error) {
+	if g.k8sClient == nil || g.runtimeAllocator == nil {
+		return 0, nil
+	}
+	var claims extensionsv1beta1.SandboxClaimList
+	if err := g.k8sClient.List(ctx, &claims, client.InNamespace(g.runtimeNamespace())); err != nil {
+		return 0, fmt.Errorf("list sandbox claims for recovery: %w", err)
+	}
+
+	active := 0
+	for i := range claims.Items {
+		claim := &claims.Items[i]
+		if claim.DeletionTimestamp != nil {
+			continue
+		}
+		sessionID := strings.TrimSpace(claim.Annotations[labels.SessionAnnotation])
+		if sessionID == "" {
+			continue
+		}
+		if _, exists := g.store.Get(sessionID); exists {
+			continue
+		}
+		poolRef := claim.Spec.WarmPoolRef.Name
+		allocation := RuntimeAllocation{
+			Backend:     runtimeBackendSandboxClaim,
+			PoolRef:     poolRef,
+			Namespace:   claim.Namespace,
+			ClaimName:   claim.Name,
+			SandboxName: claim.Status.SandboxStatus.Name,
+			PodIP:       firstString(claim.Status.SandboxStatus.PodIPs),
+		}
+		resolved, err := g.runtimeAllocator.Resolve(ctx, allocation, sessionID)
+		if err != nil {
+			log.Printf("Warning: cannot recover session %s from claim %s/%s: %v", sessionID, claim.Namespace, claim.Name, err)
+			continue
+		}
+		info := g.recoveredSessionInfo(ctx, sessionID, *resolved, claim)
+		lastTask := info.CreatedAt
+		if raw := strings.TrimSpace(claim.Annotations[labels.LastActivityAnnotation]); raw != "" {
+			if parsed, err := time.Parse(time.RFC3339, raw); err == nil {
+				lastTask = parsed
+			}
+		}
+		managed := strings.EqualFold(claim.Annotations[labels.ManagedAnnotation], "true")
+		s := &session{
+			Info:         info,
+			Runtime:      *resolved,
+			History:      NewStepHistory(),
+			managed:      managed,
+			experimentID: claim.Annotations[labels.ExperimentAnnotation],
+			ownerKeyHash: claim.Annotations[labels.OwnerKeyHashAnnotation],
+			lastTaskTime: lastTask,
+			createdAt:    info.CreatedAt,
+			idleTimeout:  g.gwConfig.IdleTimeout,
+			maxLifetime:  g.gwConfig.MaxLifetime,
+			operations:   make(map[string]*executeOperation),
+		}
+		g.store.Set(sessionID, s)
+		active++
+	}
+	if counter, ok := g.store.(SessionCountSetter); ok {
+		counter.SetCount(int64(active))
+	} else if active > 0 {
+		g.store.IncrCount(int64(active))
+	}
+	if g.metrics != nil {
+		g.metrics.SetActiveSessions(g.store.Count())
+	}
+	return active, nil
+}
+
+func (g *Gateway) recoveredSessionInfo(ctx context.Context, sessionID string, allocation RuntimeAllocation, claim *extensionsv1beta1.SandboxClaim) SessionInfo {
+	createdAt := claim.CreationTimestamp.Time
+	if createdAt.IsZero() {
+		createdAt = time.Now()
+	}
+	info := SessionInfo{
+		ID:          sessionID,
+		SandboxName: allocation.SandboxName,
+		Namespace:   allocation.Namespace,
+		PoolRef:     allocation.PoolRef,
+		PodIP:       allocation.PodIP,
+		PodName:     allocation.PodName,
+		CreatedAt:   createdAt,
+		Status:      "active",
+	}
+	if allocation.PoolRef == "" || g.k8sClient == nil {
+		return info
+	}
+	pool := &extensionsv1beta1.SandboxWarmPool{}
+	if err := g.k8sClient.Get(ctx, types.NamespacedName{Name: allocation.PoolRef, Namespace: allocation.Namespace}, pool); err != nil {
+		return info
+	}
+	poolInfo := g.poolInfoFromSandboxWarmPool(ctx, pool)
+	info.Image = poolInfo.Image
+	info.Profile = poolInfo.Profile
+	return info
 }
 
 // resolveSessionPodIP validates the session's SandboxClaim binding before
@@ -558,6 +706,12 @@ func (g *Gateway) dropSession(sessionID string, s *session) {
 		return
 	}
 	s.closed = true
+	now := time.Now()
+	s.deletionReason = "runtime_lost"
+	s.deletedAt = &now
+	s.Info.Status = "deleted"
+	s.Info.DeletionReason = s.deletionReason
+	s.Info.DeletedAt = &now
 	info := s.Info
 	s.mu.Unlock()
 
@@ -571,11 +725,34 @@ func (g *Gateway) dropSession(sessionID string, s *session) {
 	g.store.Delete(sessionID)
 	if g.metrics != nil {
 		g.metrics.SetActiveSessions(g.store.IncrCount(-1))
+		g.metrics.IncrementSessionDeletion("runtime_lost")
 	}
+}
+
+func (g *Gateway) markSessionDeleted(s *session, reason string) {
+	if s == nil {
+		return
+	}
+	if reason == "" {
+		reason = "deleted"
+	}
+	now := time.Now()
+	s.mu.Lock()
+	s.closed = true
+	s.deletionReason = reason
+	s.deletedAt = &now
+	s.Info.Status = "deleted"
+	s.Info.DeletionReason = reason
+	s.Info.DeletedAt = &now
+	s.mu.Unlock()
 }
 
 // ExecuteSteps executes steps directly via sidecar gRPC.
 func (g *Gateway) ExecuteSteps(ctx context.Context, sessionID string, req ExecuteRequest) (*ExecuteResponse, error) {
+	return g.executeStepsWithOperation(ctx, sessionID, req)
+}
+
+func (g *Gateway) executeStepsNow(ctx context.Context, sessionID string, req ExecuteRequest) (*ExecuteResponse, error) {
 	ctx, span := otel.Tracer("gateway").Start(ctx, "Gateway.ExecuteSteps",
 		traceStartAttrs("session.id", sessionID),
 	)
@@ -592,7 +769,8 @@ func (g *Gateway) ExecuteSteps(ctx context.Context, sessionID string, req Execut
 	span.SetAttributes(attribute.String("pod.ip", podIP))
 
 	resp := &ExecuteResponse{
-		SessionID: sessionID,
+		SessionID:   sessionID,
+		OperationID: req.OperationID,
 	}
 
 	totalStart := time.Now()
@@ -607,9 +785,10 @@ func (g *Gateway) ExecuteSteps(ctx context.Context, sessionID string, req Execut
 		result.Timestamp = start
 
 		execReq := &sidecar.ExecRequest{
-			Command:    step.Command,
-			Env:        step.Env,
-			WorkingDir: step.WorkDir,
+			Command:        step.Command,
+			Env:            step.Env,
+			WorkingDir:     step.WorkDir,
+			TimeoutSeconds: resolveStepTimeoutSeconds(step),
 		}
 		grpcStart := time.Now()
 		execResp, err := g.sidecarClient.Execute(ctx, podIP, execReq)
@@ -732,9 +911,10 @@ func (g *Gateway) ExecuteStepsSSE(w http.ResponseWriter, ctx context.Context, se
 		result.Timestamp = start
 
 		execReq := &sidecar.ExecRequest{
-			Command:    step.Command,
-			Env:        step.Env,
-			WorkingDir: step.WorkDir,
+			Command:        step.Command,
+			Env:            step.Env,
+			WorkingDir:     step.WorkDir,
+			TimeoutSeconds: resolveStepTimeoutSeconds(step),
 		}
 
 		grpcStart := time.Now()
@@ -876,9 +1056,10 @@ func (g *Gateway) ReplayFrom(ctx context.Context, targetSessionID string, req Re
 			continue
 		}
 		execReq := &sidecar.ExecRequest{
-			Command:    step.Command,
-			Env:        step.Env,
-			WorkingDir: step.WorkDir,
+			Command:        step.Command,
+			Env:            step.Env,
+			WorkingDir:     step.WorkDir,
+			TimeoutSeconds: resolveStepTimeoutSeconds(step),
 		}
 		if _, err := g.sidecarClient.Execute(ctx, podIP, execReq); err != nil {
 			errors++
@@ -960,9 +1141,10 @@ func (g *Gateway) Restore(ctx context.Context, sessionID string, snapshotID stri
 		}
 
 		execReq := &sidecar.ExecRequest{
-			Command:    step.Command,
-			Env:        step.Env,
-			WorkingDir: step.WorkDir,
+			Command:        step.Command,
+			Env:            step.Env,
+			WorkingDir:     step.WorkDir,
+			TimeoutSeconds: resolveStepTimeoutSeconds(step),
 		}
 		if _, err := g.sidecarClient.Execute(ctx, newAllocation.PodIP, execReq); err != nil {
 			if err := g.releaseRestoreAllocation(*newAllocation); err != nil {
@@ -1288,6 +1470,16 @@ func (g *Gateway) resolveMaxLifetime(req CreateSessionRequest) time.Duration {
 	return g.gwConfig.MaxLifetime
 }
 
+func resolveStepTimeoutSeconds(step StepRequest) int32 {
+	if step.TimeoutSeconds > 0 {
+		return step.TimeoutSeconds
+	}
+	if step.Timeout > 0 {
+		return step.Timeout
+	}
+	return 0
+}
+
 // StartSessionSweep starts the background session reaper goroutine.
 func (g *Gateway) StartSessionSweep() {
 	g.sweepWg.Add(1)
@@ -1341,7 +1533,7 @@ func (g *Gateway) sweepSessions() {
 		if maxLifetime > 0 && now.Sub(created) > maxLifetime {
 			log.Printf("Session %s exceeded max lifetime (%v), deleting", sessionID, maxLifetime)
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			if err := g.DeleteSession(ctx, sessionID); err != nil {
+			if err := g.deleteSession(ctx, sessionID, "max_lifetime"); err != nil {
 				log.Printf("Warning: failed to delete expired session %s: %v", sessionID, err)
 			}
 			cancel()
@@ -1352,7 +1544,7 @@ func (g *Gateway) sweepSessions() {
 		if idleTimeout > 0 && now.Sub(lastTask) > idleTimeout {
 			log.Printf("Session %s idle for %v (timeout=%v), deleting", sessionID, now.Sub(lastTask), idleTimeout)
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			if err := g.DeleteSession(ctx, sessionID); err != nil {
+			if err := g.deleteSession(ctx, sessionID, "idle_timeout"); err != nil {
 				log.Printf("Warning: failed to delete idle session %s: %v", sessionID, err)
 			}
 			cancel()
@@ -1477,7 +1669,7 @@ func (g *Gateway) ListExperimentSessions(experimentID string) []ManagedSessionIn
 			if seen[id] {
 				continue
 			}
-			if s, ok := rs.Get(id); ok {
+			if s, ok := rs.GetHistorical(id); ok {
 				s.mu.RLock()
 				results = append(results, ManagedSessionInfo{
 					SessionInfo:  s.Info,
@@ -1689,6 +1881,9 @@ func (g *Gateway) DeleteExperiment(ctx context.Context, experimentID string) (in
 	deleted := 0
 	var lastErr error
 	for _, s := range sessions {
+		if s.Status == "deleted" || s.DeletedAt != nil {
+			continue
+		}
 		if err := g.DeleteSession(ctx, s.ID); err != nil {
 			lastErr = err
 			log.Printf("Warning: failed to delete session %s in experiment %s: %v", s.ID, experimentID, err)

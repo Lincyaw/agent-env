@@ -70,16 +70,19 @@ type CreateManagedSessionRequest struct {
 
 // ExecuteRequest is the body for POST /v1/sessions/{id}/execute
 type ExecuteRequest struct {
-	Steps   []StepRequest `json:"steps"`
-	TraceID string        `json:"traceID,omitempty"`
+	Steps       []StepRequest `json:"steps"`
+	TraceID     string        `json:"traceID,omitempty"`
+	OperationID string        `json:"operationID,omitempty"`
 }
 
 // StepRequest describes a single execution step
 type StepRequest struct {
-	Name    string            `json:"name"`
-	Command []string          `json:"command,omitempty"`
-	Env     map[string]string `json:"env,omitempty"`
-	WorkDir string            `json:"workDir,omitempty"`
+	Name           string            `json:"name"`
+	Command        []string          `json:"command,omitempty"`
+	Env            map[string]string `json:"env,omitempty"`
+	WorkDir        string            `json:"workDir,omitempty"`
+	TimeoutSeconds int32             `json:"timeoutSeconds,omitempty"`
+	Timeout        int32             `json:"timeout,omitempty"`
 }
 
 // UploadFileResponse is the response for PUT /v1/sessions/{id}/files/{path...}
@@ -131,15 +134,18 @@ type ScalePoolRequest struct {
 
 // SessionInfo describes a session
 type SessionInfo struct {
-	ID          string    `json:"id"`
-	SandboxName string    `json:"sandboxName"`
-	Namespace   string    `json:"namespace"`
-	Image       string    `json:"image,omitempty"`
-	Profile     string    `json:"profile,omitempty"`
-	PoolRef     string    `json:"-"`
-	PodIP       string    `json:"podIP"`
-	PodName     string    `json:"podName"`
-	CreatedAt   time.Time `json:"createdAt"`
+	ID             string     `json:"id"`
+	SandboxName    string     `json:"sandboxName"`
+	Namespace      string     `json:"namespace"`
+	Image          string     `json:"image,omitempty"`
+	Profile        string     `json:"profile,omitempty"`
+	PoolRef        string     `json:"-"`
+	PodIP          string     `json:"podIP"`
+	PodName        string     `json:"podName"`
+	CreatedAt      time.Time  `json:"createdAt"`
+	Status         string     `json:"status,omitempty"`
+	DeletedAt      *time.Time `json:"deletedAt,omitempty"`
+	DeletionReason string     `json:"deletionReason,omitempty"`
 }
 
 // ExecuteResponse is the response for POST /v1/sessions/{id}/execute
@@ -147,6 +153,19 @@ type ExecuteResponse struct {
 	SessionID       string       `json:"sessionID"`
 	Results         []StepResult `json:"results"`
 	TotalDurationMs int64        `json:"totalDurationMs"`
+	OperationID     string       `json:"operationID,omitempty"`
+}
+
+// ExecuteOperationInfo describes an idempotent execute operation.
+type ExecuteOperationInfo struct {
+	OperationID string           `json:"operationID"`
+	SessionID   string           `json:"sessionID"`
+	Status      string           `json:"status"`
+	Result      *ExecuteResponse `json:"result,omitempty"`
+	Error       string           `json:"error,omitempty"`
+	CreatedAt   time.Time        `json:"createdAt"`
+	StartedAt   time.Time        `json:"startedAt,omitempty"`
+	FinishedAt  *time.Time       `json:"finishedAt,omitempty"`
 }
 
 // StepOutput is the output of an execution step
@@ -206,7 +225,8 @@ type ExperimentSummary struct {
 
 // ErrorResponse is a generic error response
 type ErrorResponse struct {
-	Error string `json:"error"`
+	Error  string `json:"error"`
+	Detail string `json:"detail,omitempty"`
 }
 
 // TrajectoryEntry is a single entry in JSONL trajectory export

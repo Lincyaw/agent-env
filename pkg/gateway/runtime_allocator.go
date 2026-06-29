@@ -20,10 +20,13 @@ type RuntimeAllocation struct {
 
 // RuntimeAllocateRequest describes one session allocation request.
 type RuntimeAllocateRequest struct {
-	PoolRef     string
-	Namespace   string
-	SessionID   string
-	SandboxName string
+	PoolRef      string
+	Namespace    string
+	SessionID    string
+	SandboxName  string
+	OwnerKeyHash string
+	Managed      bool
+	ExperimentID string
 }
 
 // AllocatorPoolStats holds diagnostic statistics for a pool allocator.

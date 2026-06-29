@@ -77,6 +77,8 @@ spec:
               value: "{{ .Values.gateway.maxLifetime }}"
             - name: GATEWAY_SWEEP_INTERVAL
               value: "{{ .Values.gateway.sweepInterval }}"
+            - name: HTTP_CLIENT_TIMEOUT
+              value: "{{ .Values.gateway.sidecarClientTimeout }}"
             - name: GATEWAY_WRITE_TIMEOUT
               value: "{{ .Values.gateway.writeTimeout }}"
             - name: ADMISSION_DISABLE_COLD_START

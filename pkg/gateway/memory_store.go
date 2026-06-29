@@ -9,6 +9,7 @@ import (
 // This is the default store for single-replica deployments and testing.
 type MemoryStore struct {
 	sessions     sync.Map
+	tombstones   sync.Map
 	sessionCount atomic.Int64
 }
 
@@ -30,6 +31,9 @@ func (ms *MemoryStore) Set(sessionID string, s *session) {
 }
 
 func (ms *MemoryStore) Delete(sessionID string) {
+	if val, ok := ms.sessions.Load(sessionID); ok {
+		ms.tombstones.Store(sessionID, val.(*session))
+	}
 	ms.sessions.Delete(sessionID)
 }
 
@@ -49,4 +53,15 @@ func (ms *MemoryStore) IncrCount(delta int64) int64 {
 
 func (ms *MemoryStore) Close() error {
 	return nil
+}
+
+// GetHistorical retrieves a session snapshot even after Delete tombstoned it.
+func (ms *MemoryStore) GetHistorical(sessionID string) (*session, bool) {
+	if val, ok := ms.sessions.Load(sessionID); ok {
+		return val.(*session), true
+	}
+	if val, ok := ms.tombstones.Load(sessionID); ok {
+		return val.(*session), true
+	}
+	return nil, false
 }

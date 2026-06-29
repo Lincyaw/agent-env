@@ -22,6 +22,7 @@ dependencies = [
     "urllib3>=2.3.0",
     "arl-env",
     "websockets>=16.0",
+    "typer>=0.16.0",
 ]
 
 [dependency-groups]
@@ -30,7 +31,6 @@ prefetch = [
     "pyarrow>=23.0.0",
     "hf-transfer>=0.1.9",
     "huggingface-hub>=1.4.1",
-    "typer>=0.16.0",
     "datasets>=4.6.0",
 ]
 dev = [

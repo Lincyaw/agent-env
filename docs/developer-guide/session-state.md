@@ -40,7 +40,8 @@ All Gateway code accesses sessions through this interface. The implementation is
 
 - Wraps `sync.Map` + `atomic.Int64`
 - Zero external dependencies
-- Session recovery on restart via pod annotations (`arl.infra.io/session`, `arl.infra.io/last-activity`)
+- Session recovery on restart via SandboxClaim annotations (`arl.infra.io/session`, `arl.infra.io/last-activity`, owner hash, managed experiment metadata)
+- Keeps in-memory tombstones for recently deleted sessions so `GET /v1/sessions/{id}` can explain why a session disappeared while the process is still alive
 - Suitable for single-replica deployments
 
 ## RedisStore
@@ -49,6 +50,7 @@ All Gateway code accesses sessions through this interface. The implementation is
 - Sessions serialized as JSON with configurable TTL (default: 2 hours)
 - Session count tracked via Redis `INCR`/`DECRBY` on `arl:session_count` key
 - `Sync(sessionID)` method for explicit persistence after in-memory mutations
+- Deletes are tombstoned, not immediately removed, preserving history and deletion reason until Redis TTL expiry
 
 ### Redis Key Schema
 
@@ -73,6 +75,10 @@ All Gateway code accesses sessions through this interface. The implementation is
   },
   "managed": true,
   "experimentId": "swe-bench-42",
+  "ownerKeyHash": "<sha256>",
+  "deleted": false,
+  "deletedAt": null,
+  "deletionReason": "",
   "lastTaskTime": "2024-03-10T10:05:00Z",
   "idleTimeout": 600000000000,
   "maxLifetime": 3600000000000,
@@ -112,7 +118,9 @@ gateway:
 # redis: not needed
 ```
 
-Session state is in-memory. On gateway restart, sessions are recovered from pod annotations.
+Session state is in-memory. On gateway restart, sessions are recovered from
+active SandboxClaim annotations and validated against the current
+SandboxClaim/Sandbox binding before being served again.
 
 ### Multi-Replica HA
 
@@ -155,7 +163,11 @@ The RedisStore maintains a local `sync.Map` cache to avoid Redis round-trips on 
 
 ### TTL vs Explicit Cleanup
 
-Session keys in Redis have a TTL (default: 2 hours). This acts as a safety net — if a gateway crashes without cleaning up, sessions expire automatically. Normal session deletion still explicitly removes the Redis key.
+Session keys in Redis have a TTL (default: 2 hours). This acts as a safety net
+for abandoned records. Normal session deletion writes a tombstone with
+`deleted=true`, `deletedAt`, and `deletionReason`; active lookups return gone,
+but history/replay and experiment listing can still inspect the record until
+the TTL expires.
 
 ### Why Not etcd?
 

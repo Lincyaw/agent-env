@@ -170,7 +170,7 @@ session = SandboxSession(
 |--------|-------------|
 | `create_sandbox()` | Allocate a sandbox from the pool |
 | `delete_sandbox()` | Release the sandbox |
-| `execute(steps)` | Execute steps in the sandbox |
+| `execute(steps, operation_id=None)` | Execute steps in the sandbox with an idempotent operation ID |
 | `replay_from(source_session_id)` | Replay another session's history into this sandbox |
 | `restore(snapshot_id)` | Restore by replaying history up to a previous step snapshot |
 | `get_logs()` / `iter_logs()` | Read or stream session sidecar logs |
@@ -211,8 +211,15 @@ Steps are passed to `session.execute()` as a list of dictionaries. Each step spe
 {
     "name": "run_script",
     "command": ["python", "script.py"],
+    "timeout": 300,
 }
 ```
+
+By default, non-streaming `execute()` calls use an idempotent operation ID. If
+the HTTP client times out, catch `GatewayOperationTimeout`, keep the
+`operation_id`, and call `GatewayClient.get_execute_operation(session_id,
+operation_id)` or retry `execute(..., operation_id=operation_id)`. Pass
+`on_output` when you need SSE streaming output.
 
 ## Result Handling
 

@@ -100,7 +100,7 @@ func (c *GRPCSidecarClient) Execute(ctx context.Context, podIP string, req inter
 
 	client := pb.NewAgentServiceClient(conn)
 
-	ctx, cancel := context.WithTimeout(ctx, c.timeout)
+	ctx, cancel := context.WithTimeout(ctx, c.callTimeout(req.GetTimeout()))
 	defer cancel()
 
 	pbReq := &pb.ExecRequest{
@@ -158,6 +158,7 @@ func (c *GRPCSidecarClient) ExecuteStream(ctx context.Context, podIP string, req
 	}
 
 	client := pb.NewAgentServiceClient(conn)
+	ctx, cancel := context.WithTimeout(ctx, c.callTimeout(req.GetTimeout()))
 
 	pbReq := &pb.ExecRequest{
 		Command:        req.GetCommand(),
@@ -168,6 +169,7 @@ func (c *GRPCSidecarClient) ExecuteStream(ctx context.Context, podIP string, req
 
 	stream, err := client.Execute(ctx, pbReq)
 	if err != nil {
+		cancel()
 		_ = c.CloseConnection(podIP)
 		return nil, fmt.Errorf("gRPC Execute failed: %w", err)
 	}
@@ -175,6 +177,7 @@ func (c *GRPCSidecarClient) ExecuteStream(ctx context.Context, podIP string, req
 	resultChan := make(chan interfaces.ExecResponse, 100)
 
 	go func() {
+		defer cancel()
 		defer close(resultChan)
 		for {
 			log, err := stream.Recv()
@@ -206,6 +209,17 @@ func (c *GRPCSidecarClient) ExecuteStream(ctx context.Context, podIP string, req
 	}()
 
 	return resultChan, nil
+}
+
+func (c *GRPCSidecarClient) callTimeout(requested int32) time.Duration {
+	timeout := c.timeout
+	if requested > 0 {
+		stepTimeout := time.Duration(requested)*time.Second + 10*time.Second
+		if stepTimeout > timeout {
+			timeout = stepTimeout
+		}
+	}
+	return timeout
 }
 
 // HealthCheck checks if sidecar is healthy by verifying gRPC connection state

@@ -26,7 +26,10 @@ type redisSessionData struct {
 	Runtime             RuntimeAllocation       `json:"runtime,omitempty"`
 	Managed             bool                    `json:"managed"`
 	ExperimentID        string                  `json:"experimentId"`
+	OwnerKeyHash        string                  `json:"ownerKeyHash,omitempty"`
 	Deleted             bool                    `json:"deleted,omitempty"`
+	DeletedAt           *time.Time              `json:"deletedAt,omitempty"`
+	DeletionReason      string                  `json:"deletionReason,omitempty"`
 	LastTaskTime        time.Time               `json:"lastTaskTime"`
 	LastAnnotationPatch time.Time               `json:"lastAnnotationPatch"`
 	IdleTimeout         time.Duration           `json:"idleTimeout"`
@@ -46,6 +49,10 @@ func sessionToRedisData(s *session) redisSessionData {
 		Runtime:             s.Runtime,
 		Managed:             s.managed,
 		ExperimentID:        s.experimentID,
+		OwnerKeyHash:        s.ownerKeyHash,
+		Deleted:             s.closed,
+		DeletedAt:           s.deletedAt,
+		DeletionReason:      s.deletionReason,
 		LastTaskTime:        s.lastTaskTime,
 		LastAnnotationPatch: s.lastAnnotationPatch,
 		IdleTimeout:         s.idleTimeout,
@@ -88,11 +95,16 @@ func redisDataToSession(data redisSessionData) *session {
 		History:             h,
 		managed:             data.Managed,
 		experimentID:        data.ExperimentID,
+		ownerKeyHash:        data.OwnerKeyHash,
+		closed:              data.Deleted,
+		deletedAt:           data.DeletedAt,
+		deletionReason:      data.DeletionReason,
 		lastTaskTime:        data.LastTaskTime,
 		lastAnnotationPatch: data.LastAnnotationPatch,
 		idleTimeout:         data.IdleTimeout,
 		maxLifetime:         data.MaxLifetime,
 		createdAt:           data.CreatedAt,
+		operations:          make(map[string]*executeOperation),
 	}
 }
 
@@ -197,6 +209,13 @@ func (rs *RedisStore) Delete(sessionID string) {
 	// Keep a tombstoned Redis record for history/replay, but make active
 	// lookups return "not found" so deleted sessions cannot be resurrected.
 	data.Deleted = true
+	if data.DeletedAt == nil {
+		now := time.Now()
+		data.DeletedAt = &now
+	}
+	if data.DeletionReason == "" {
+		data.DeletionReason = "deleted"
+	}
 	rs.persistDataToRedis(sessionID, *data)
 }
 

@@ -71,6 +71,27 @@ func (a *SandboxClaimRuntimeAllocator) Allocate(ctx context.Context, req Runtime
 	}
 	claimName := runtimeDNSLabel(claimBase)
 	now := time.Now().UTC()
+	annotations := map[string]string{
+		labels.SessionAnnotation:      req.SessionID,
+		labels.SandboxLabelKey:        req.SandboxName,
+		labels.LastActivityAnnotation: now.Format(time.RFC3339),
+	}
+	podAnnotations := map[string]string{
+		labels.SessionAnnotation:      req.SessionID,
+		labels.LastActivityAnnotation: now.Format(time.RFC3339),
+	}
+	if req.OwnerKeyHash != "" {
+		annotations[labels.OwnerKeyHashAnnotation] = req.OwnerKeyHash
+		podAnnotations[labels.OwnerKeyHashAnnotation] = req.OwnerKeyHash
+	}
+	if req.ExperimentID != "" {
+		annotations[labels.ExperimentAnnotation] = req.ExperimentID
+		podAnnotations[labels.ExperimentAnnotation] = req.ExperimentID
+	}
+	if req.Managed {
+		annotations[labels.ManagedAnnotation] = "true"
+		podAnnotations[labels.ManagedAnnotation] = "true"
+	}
 	claim := &extensionsv1beta1.SandboxClaim{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      claimName,
@@ -78,19 +99,12 @@ func (a *SandboxClaimRuntimeAllocator) Allocate(ctx context.Context, req Runtime
 			Labels: map[string]string{
 				labels.PoolLabelKey: req.PoolRef,
 			},
-			Annotations: map[string]string{
-				labels.SessionAnnotation:      req.SessionID,
-				labels.SandboxLabelKey:        req.SandboxName,
-				labels.LastActivityAnnotation: now.Format(time.RFC3339),
-			},
+			Annotations: annotations,
 		},
 		Spec: extensionsv1beta1.SandboxClaimSpec{
 			WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: req.PoolRef},
 			AdditionalPodMetadata: sandboxv1beta1.PodMetadata{
-				Annotations: map[string]string{
-					labels.SessionAnnotation:      req.SessionID,
-					labels.LastActivityAnnotation: now.Format(time.RFC3339),
-				},
+				Annotations: podAnnotations,
 			},
 		},
 	}
@@ -180,7 +194,7 @@ func (a *SandboxClaimRuntimeAllocator) Touch(ctx context.Context, allocation Run
 	claim := &extensionsv1beta1.SandboxClaim{}
 	if err := a.k8sClient.Get(ctx, types.NamespacedName{Name: allocation.ClaimName, Namespace: allocation.Namespace}, claim); err != nil {
 		if apierrors.IsNotFound(err) {
-			return nil
+			return err
 		}
 		return err
 	}
@@ -195,7 +209,7 @@ func (a *SandboxClaimRuntimeAllocator) Touch(ctx context.Context, allocation Run
 	claim.Annotations[labels.LastActivityAnnotation] = at.UTC().Format(time.RFC3339)
 	if err := a.k8sClient.Patch(ctx, claim, patch); err != nil {
 		if apierrors.IsNotFound(err) {
-			return nil
+			return err
 		}
 		return fmt.Errorf("patch sandbox claim %s/%s last activity: %w", allocation.Namespace, allocation.ClaimName, err)
 	}
@@ -206,7 +220,7 @@ func (a *SandboxClaimRuntimeAllocator) Touch(ctx context.Context, allocation Run
 	sandbox := &sandboxv1beta1.Sandbox{}
 	if err := a.k8sClient.Get(ctx, types.NamespacedName{Name: allocation.SandboxName, Namespace: allocation.Namespace}, sandbox); err != nil {
 		if apierrors.IsNotFound(err) {
-			return nil
+			return err
 		}
 		return fmt.Errorf("get sandbox %s/%s for last activity patch: %w", allocation.Namespace, allocation.SandboxName, err)
 	}
@@ -217,7 +231,7 @@ func (a *SandboxClaimRuntimeAllocator) Touch(ctx context.Context, allocation Run
 	sandbox.Annotations[labels.LastActivityAnnotation] = at.UTC().Format(time.RFC3339)
 	if err := a.k8sClient.Patch(ctx, sandbox, sandboxPatch); err != nil {
 		if apierrors.IsNotFound(err) {
-			return nil
+			return err
 		}
 		return fmt.Errorf("patch sandbox %s/%s last activity: %w", allocation.Namespace, allocation.SandboxName, err)
 	}
