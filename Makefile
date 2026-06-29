@@ -78,6 +78,10 @@ codex-skills: ## Generate Codex compatibility skills from plugin slash commands
 .PHONY: install-codex-skills
 install-codex-skills: ## Install ARL Codex skills into ~/.codex/skills
 	cd plugin && ./install-codex-skills.sh
+	
+.PHONY: build-image-locality-scheduler
+build-image-locality-scheduler: ## Build image locality scheduler binary
+	CGO_ENABLED=0 go build -tags=scheduler_plugin -o bin/image-locality-scheduler cmd/image-locality-scheduler/main.go
 
 ##@ Development
 

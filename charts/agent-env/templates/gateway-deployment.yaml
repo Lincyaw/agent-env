@@ -1,4 +1,8 @@
 {{- if .Values.gateway.enabled }}
+{{- $schedulerName := .Values.gateway.scheduler.name }}
+{{- if and (not $schedulerName) .Values.imageLocalityScheduler.enabled }}
+{{- $schedulerName = .Values.imageLocalityScheduler.schedulerName }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -71,6 +75,50 @@ spec:
               value: "{{ .Values.gateway.sweepInterval }}"
             - name: GATEWAY_WRITE_TIMEOUT
               value: "{{ .Values.gateway.writeTimeout }}"
+            - name: ADMISSION_DISABLE_COLD_START
+              value: "{{ .Values.gateway.admission.disableColdStart }}"
+            - name: ADMISSION_QUEUE_TIMEOUT
+              value: "{{ .Values.gateway.admission.queueTimeout }}"
+            - name: ADMISSION_QUEUE_POLL_INTERVAL
+              value: "{{ .Values.gateway.admission.queuePollInterval }}"
+            - name: POOL_AUTOSCALER_ENABLED
+              value: "{{ .Values.gateway.autoscaler.enabled }}"
+            - name: POOL_AUTOSCALER_INTERVAL
+              value: "{{ .Values.gateway.autoscaler.interval }}"
+            - name: POOL_AUTOSCALER_BUFFER
+              value: "{{ .Values.gateway.autoscaler.buffer }}"
+            - name: POOL_AUTOSCALER_MIN_REPLICAS
+              value: "{{ .Values.gateway.autoscaler.minReplicas }}"
+            - name: POOL_AUTOSCALER_MAX_REPLICAS
+              value: "{{ .Values.gateway.autoscaler.maxReplicas }}"
+            {{- if $schedulerName }}
+            - name: SCHEDULER_NAME
+              value: "{{ $schedulerName }}"
+            {{- end }}
+            - name: IMAGE_LOCALITY_ENABLED
+              value: "{{ .Values.gateway.scheduler.imageLocality.enabled }}"
+            - name: SANDBOX_NETWORK_POLICY_MANAGEMENT
+              value: "{{ .Values.gateway.sandboxSecurity.networkPolicyManagement }}"
+            {{- if .Values.gateway.sandboxSecurity.runtimeClassName }}
+            - name: SANDBOX_RUNTIME_CLASS_NAME
+              value: "{{ .Values.gateway.sandboxSecurity.runtimeClassName }}"
+            {{- end }}
+            - name: SANDBOX_SECCOMP_PROFILE_TYPE
+              value: "{{ .Values.gateway.sandboxSecurity.seccompProfile.type }}"
+            {{- if .Values.gateway.sandboxSecurity.seccompProfile.localhostProfile }}
+            - name: SANDBOX_SECCOMP_LOCALHOST_PROFILE
+              value: "{{ .Values.gateway.sandboxSecurity.seccompProfile.localhostProfile }}"
+            {{- end }}
+            - name: SANDBOX_ALLOW_PRIVILEGE_ESCALATION
+              value: "{{ .Values.gateway.sandboxSecurity.allowPrivilegeEscalation }}"
+            {{- if .Values.proxy.url }}
+            - name: POD_HTTP_PROXY
+              value: "{{ .Values.proxy.url }}"
+            {{- if .Values.proxy.noProxy }}
+            - name: POD_NO_PROXY
+              value: "{{ .Values.proxy.noProxy }}"
+            {{- end }}
+            {{- end }}
             {{- if .Values.clickhouse.enabled }}
             - name: CLICKHOUSE_ENABLED
               value: "true"

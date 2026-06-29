@@ -1,0 +1,162 @@
+{{- if .Values.imageLocalityScheduler.enabled }}
+{{- $name := printf "%s-image-locality-scheduler" (include "agent-env.fullname" .) }}
+{{- $serviceAccountName := .Values.imageLocalityScheduler.serviceAccount.name | default $name }}
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ $serviceAccountName }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "agent-env.labels" . | nindent 4 }}
+    app.kubernetes.io/component: image-locality-scheduler
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "agent-env.labels" . | nindent 4 }}
+    app.kubernetes.io/component: image-locality-scheduler
+data:
+  scheduler-config.yaml: |
+    apiVersion: kubescheduler.config.k8s.io/v1
+    kind: KubeSchedulerConfiguration
+    leaderElection:
+      leaderElect: {{ .Values.imageLocalityScheduler.leaderElection.enabled }}
+      resourceName: {{ .Values.imageLocalityScheduler.leaderElection.resourceName | default $name | quote }}
+      resourceNamespace: {{ .Release.Namespace | quote }}
+    profiles:
+      - schedulerName: {{ .Values.imageLocalityScheduler.schedulerName | quote }}
+        plugins:
+          score:
+            enabled:
+              - name: AgentEnvImageLocality
+                weight: {{ .Values.imageLocalityScheduler.pluginWeight }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "agent-env.labels" . | nindent 4 }}
+    app.kubernetes.io/component: image-locality-scheduler
+rules:
+  - apiGroups:
+      - coordination.k8s.io
+    resources:
+      - leases
+    verbs:
+      - create
+      - get
+      - list
+      - watch
+  - apiGroups:
+      - coordination.k8s.io
+    resources:
+      - leases
+    resourceNames:
+      - {{ .Values.imageLocalityScheduler.leaderElection.resourceName | default $name | quote }}
+    verbs:
+      - get
+      - patch
+      - update
+      - watch
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "agent-env.labels" . | nindent 4 }}
+    app.kubernetes.io/component: image-locality-scheduler
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: {{ $name }}
+subjects:
+  - kind: ServiceAccount
+    name: {{ $serviceAccountName }}
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $name }}-scheduler
+  labels:
+    {{- include "agent-env.labels" . | nindent 4 }}
+    app.kubernetes.io/component: image-locality-scheduler
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:kube-scheduler
+subjects:
+  - kind: ServiceAccount
+    name: {{ $serviceAccountName }}
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ $name }}-volume-scheduler
+  labels:
+    {{- include "agent-env.labels" . | nindent 4 }}
+    app.kubernetes.io/component: image-locality-scheduler
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:volume-scheduler
+subjects:
+  - kind: ServiceAccount
+    name: {{ $serviceAccountName }}
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "agent-env.labels" . | nindent 4 }}
+    app.kubernetes.io/component: image-locality-scheduler
+spec:
+  replicas: {{ .Values.imageLocalityScheduler.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "agent-env.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: image-locality-scheduler
+  template:
+    metadata:
+      labels:
+        {{- include "agent-env.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: image-locality-scheduler
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ $serviceAccountName }}
+      containers:
+        - name: image-locality-scheduler
+          image: "{{ .Values.imageLocalityScheduler.image.repository }}:{{ .Values.imageLocalityScheduler.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.imageLocalityScheduler.image.pullPolicy }}
+          args:
+            - --config=/etc/agent-env/scheduler-config.yaml
+            - --v={{ .Values.imageLocalityScheduler.logLevel }}
+          ports:
+            - name: https
+              containerPort: 10259
+              protocol: TCP
+          volumeMounts:
+            - name: config
+              mountPath: /etc/agent-env
+              readOnly: true
+          resources:
+            {{- toYaml .Values.imageLocalityScheduler.resources | nindent 12 }}
+      volumes:
+        - name: config
+          configMap:
+            name: {{ $name }}
+{{- end }}

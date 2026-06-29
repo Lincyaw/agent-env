@@ -66,6 +66,36 @@ func TestImageLocalityPluginOnlyScoresOptedInPods(t *testing.T) {
 	}
 }
 
+func TestColdStartSpreadPrefersNodesWithFewerCachedImages(t *testing.T) {
+	lightCacheScore := inverseRangeScore(2, 2, 10)
+	heavyCacheScore := inverseRangeScore(10, 2, 10)
+
+	if lightCacheScore <= heavyCacheScore {
+		t.Fatalf("lightCacheScore = %d, heavyCacheScore = %d, want light cache preferred", lightCacheScore, heavyCacheScore)
+	}
+}
+
+func TestNodeLoadScorePrefersMoreFreeCapacity(t *testing.T) {
+	lowLoadScore := freeResourceScore(250, 1000)
+	highLoadScore := freeResourceScore(900, 1000)
+
+	if lowLoadScore <= highLoadScore {
+		t.Fatalf("lowLoadScore = %d, highLoadScore = %d, want lower load preferred", lowLoadScore, highLoadScore)
+	}
+}
+
+func TestComposedWeightsShiftWhenAllRequestedImagesAreCold(t *testing.T) {
+	imageWeight, spreadWeight, loadWeight := composedWeights(ScoreOptions{}, false)
+	if imageWeight != 0 || spreadWeight == 0 || loadWeight == 0 {
+		t.Fatalf("cold weights = image:%d spread:%d load:%d, want spread/load only", imageWeight, spreadWeight, loadWeight)
+	}
+
+	imageWeight, spreadWeight, loadWeight = composedWeights(ScoreOptions{}, true)
+	if imageWeight <= spreadWeight || imageWeight <= loadWeight {
+		t.Fatalf("warm weights = image:%d spread:%d load:%d, want image locality dominant", imageWeight, spreadWeight, loadWeight)
+	}
+}
+
 func nodeWithImages(name string, images ...string) *corev1.Node {
 	node := &corev1.Node{}
 	node.Name = name

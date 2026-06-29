@@ -14,6 +14,9 @@ build:
     - image: arl-executor-agent
       docker:
         dockerfile: Dockerfile.executor-agent
+    - image: arl-image-locality-scheduler
+      docker:
+        dockerfile: Dockerfile.image-locality-scheduler
   tagPolicy:
     gitCommit: {}
 
@@ -31,6 +34,8 @@ manifests:
           gateway.image.tag: "{{.IMAGE_TAG_arl_gateway}}"
           executorAgent.image.repository: "{{.IMAGE_REPO_arl_executor_agent}}"
           executorAgent.image.tag: "{{.IMAGE_TAG_arl_executor_agent}}"
+          imageLocalityScheduler.image.repository: "{{.IMAGE_REPO_arl_image_locality_scheduler}}"
+          imageLocalityScheduler.image.tag: "{{.IMAGE_TAG_arl_image_locality_scheduler}}"
 
 deploy:
   kubectl:
@@ -70,6 +75,9 @@ profiles:
             manual:
               - src: "cmd/executor-agent/**/*.go"
                 dest: /app
+        - image: arl-image-locality-scheduler
+          docker:
+            dockerfile: Dockerfile.image-locality-scheduler
     manifests:
       helm:
         releases:
@@ -81,6 +89,7 @@ profiles:
               sidecar.image.tag: "{{.IMAGE_TAG}}"
               gateway.image.tag: "{{.IMAGE_TAG2}}"
               executorAgent.image.tag: "{{.IMAGE_TAG3}}"
+              imageLocalityScheduler.image.tag: "{{.IMAGE_TAG4}}"
     deploy:
       kubectl:
         flags:
