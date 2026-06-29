@@ -6,8 +6,11 @@ import (
 	"testing"
 
 	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
 	"github.com/Lincyaw/agent-env/pkg/scheduling"
@@ -213,6 +216,52 @@ func TestCreatePoolAppliesSchedulerNameAndImageLocalityHints(t *testing.T) {
 	}
 	if got := template.Spec.PodTemplate.ObjectMeta.Annotations[scheduling.ExecutorImageAnnotation]; got != "python:3.12" {
 		t.Fatalf("pod executor image annotation = %q, want python:3.12", got)
+	}
+}
+
+func TestDeletePoolDeletesBoundSandboxClaims(t *testing.T) {
+	scheme := newGatewayTestScheme(t)
+	pool := &extensionsv1beta1.SandboxWarmPool{
+		ObjectMeta: metav1.ObjectMeta{Name: "pool", Namespace: "default"},
+	}
+	template := &extensionsv1beta1.SandboxTemplate{
+		ObjectMeta: metav1.ObjectMeta{Name: "pool-template", Namespace: "default"},
+	}
+	boundClaim := &extensionsv1beta1.SandboxClaim{
+		ObjectMeta: metav1.ObjectMeta{Name: "claim-bound", Namespace: "default"},
+		Spec: extensionsv1beta1.SandboxClaimSpec{
+			WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: "pool"},
+		},
+	}
+	otherClaim := &extensionsv1beta1.SandboxClaim{
+		ObjectMeta: metav1.ObjectMeta{Name: "claim-other", Namespace: "default"},
+		Spec: extensionsv1beta1.SandboxClaimSpec{
+			WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: "other"},
+		},
+	}
+	k8sClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(pool, template, boundClaim, otherClaim).Build()
+	gw := &Gateway{k8sClient: k8sClient}
+
+	if err := gw.DeletePool(context.Background(), "pool", "default"); err != nil {
+		t.Fatalf("DeletePool returned error: %v", err)
+	}
+
+	for _, obj := range []struct {
+		name string
+		obj  client.Object
+	}{
+		{name: "pool", obj: &extensionsv1beta1.SandboxWarmPool{}},
+		{name: "pool-template", obj: &extensionsv1beta1.SandboxTemplate{}},
+		{name: "claim-bound", obj: &extensionsv1beta1.SandboxClaim{}},
+	} {
+		err := k8sClient.Get(context.Background(), types.NamespacedName{Name: obj.name, Namespace: "default"}, obj.obj)
+		if !apierrors.IsNotFound(err) {
+			t.Fatalf("get %s error = %v, want not found", obj.name, err)
+		}
+	}
+
+	if err := k8sClient.Get(context.Background(), types.NamespacedName{Name: "claim-other", Namespace: "default"}, &extensionsv1beta1.SandboxClaim{}); err != nil {
+		t.Fatalf("get unrelated claim: %v", err)
 	}
 }
 

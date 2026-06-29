@@ -1362,11 +1362,26 @@ func (g *Gateway) ScalePool(ctx context.Context, name string, req ScalePoolReque
 	return g.GetPool(ctx, name, ns)
 }
 
-// DeletePool deletes a SandboxWarmPool and the default SandboxTemplate created by CreatePool.
+// DeletePool deletes SandboxClaims bound to the pool, the SandboxWarmPool, and
+// the default SandboxTemplate created by CreatePool.
 func (g *Gateway) DeletePool(ctx context.Context, name, namespace string) error {
 	namespace, err := g.resolveNamespace(namespace)
 	if err != nil {
 		return err
+	}
+
+	var claims extensionsv1beta1.SandboxClaimList
+	if err := g.k8sClient.List(ctx, &claims, client.InNamespace(namespace)); err != nil {
+		return fmt.Errorf("list sandbox claims for pool delete: %w", err)
+	}
+	for i := range claims.Items {
+		claim := &claims.Items[i]
+		if claim.Spec.WarmPoolRef.Name != name {
+			continue
+		}
+		if err := g.k8sClient.Delete(ctx, claim); err != nil && !errors.IsNotFound(err) {
+			return fmt.Errorf("delete sandbox claim %s/%s for pool %s: %w", namespace, claim.Name, name, err)
+		}
 	}
 
 	pool := &extensionsv1beta1.SandboxWarmPool{
