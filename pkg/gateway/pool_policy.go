@@ -2,9 +2,11 @@ package gateway
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	k8serrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -216,7 +218,7 @@ func (g *Gateway) resourceIntentFromCreateSession(ctx context.Context, req Creat
 		PinnedPoolName:   req.PoolName,
 		Managed:          req.Managed,
 		ExperimentID:     req.ExperimentID,
-		ColdStartAllowed: true,
+		ColdStartAllowed: !g.gwConfig.AdmissionDisableColdStart,
 	}
 }
 
@@ -261,6 +263,88 @@ func (g *Gateway) ensureImageBackedSessionPool(ctx context.Context, req CreateSe
 }
 
 func (g *Gateway) planSessionAllocation(ctx context.Context, intent ResourceIntent) (PoolSelection, AdmissionDecision, error) {
+	selection, decision, err := g.tryPlanSessionAllocation(ctx, intent)
+	if err == nil || g.gwConfig.AdmissionQueueTimeout <= 0 || ctx.Err() != nil {
+		return selection, decision, err
+	}
+	if !errors.Is(err, ErrPoolAtCapacity) {
+		return selection, decision, err
+	}
+
+	queueKey := types.NamespacedName{Name: selection.PoolName, Namespace: selection.Namespace}
+	g.incrementAdmissionQueue(queueKey)
+	defer g.decrementAdmissionQueue(queueKey)
+
+	timeout := g.gwConfig.AdmissionQueueTimeout
+	poll := g.gwConfig.AdmissionQueuePollInterval
+	if poll <= 0 {
+		poll = 500 * time.Millisecond
+	}
+	waitCtx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	ticker := time.NewTicker(poll)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-waitCtx.Done():
+			if waitCtx.Err() == context.DeadlineExceeded {
+				return selection, decision, fmt.Errorf("%w: queued for %s waiting for warm capacity", ErrPoolAtCapacity, timeout)
+			}
+			return selection, decision, waitCtx.Err()
+		case <-ticker.C:
+			nextSelection, nextDecision, nextErr := g.tryPlanSessionAllocation(waitCtx, intent)
+			if nextErr == nil {
+				return nextSelection, nextDecision, nil
+			}
+			selection, decision = nextSelection, nextDecision
+			if !errors.Is(nextErr, ErrPoolAtCapacity) {
+				return nextSelection, nextDecision, nextErr
+			}
+		}
+	}
+}
+
+func (g *Gateway) incrementAdmissionQueue(key types.NamespacedName) {
+	if key.Name == "" {
+		return
+	}
+	g.admissionQueueMu.Lock()
+	defer g.admissionQueueMu.Unlock()
+	if g.admissionQueueDepth == nil {
+		g.admissionQueueDepth = make(map[types.NamespacedName]int32)
+	}
+	g.admissionQueueDepth[key]++
+}
+
+func (g *Gateway) decrementAdmissionQueue(key types.NamespacedName) {
+	if key.Name == "" {
+		return
+	}
+	g.admissionQueueMu.Lock()
+	defer g.admissionQueueMu.Unlock()
+	if g.admissionQueueDepth == nil {
+		return
+	}
+	next := g.admissionQueueDepth[key] - 1
+	if next <= 0 {
+		delete(g.admissionQueueDepth, key)
+		return
+	}
+	g.admissionQueueDepth[key] = next
+}
+
+func (g *Gateway) admissionQueueSnapshot() map[types.NamespacedName]int32 {
+	g.admissionQueueMu.Lock()
+	defer g.admissionQueueMu.Unlock()
+	result := make(map[types.NamespacedName]int32, len(g.admissionQueueDepth))
+	for key, value := range g.admissionQueueDepth {
+		result[key] = value
+	}
+	return result
+}
+
+func (g *Gateway) tryPlanSessionAllocation(ctx context.Context, intent ResourceIntent) (PoolSelection, AdmissionDecision, error) {
 	snapshots, err := g.snapshotPools(ctx, intent.Scope.normalized().Namespace)
 	if err != nil {
 		return PoolSelection{}, AdmissionDecision{}, err

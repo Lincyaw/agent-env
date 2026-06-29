@@ -219,7 +219,41 @@ func (a *SandboxClaimRuntimeAllocator) Touch(ctx context.Context, allocation Run
 }
 
 func (a *SandboxClaimRuntimeAllocator) DiagnosticStats() map[string]AllocatorPoolStats {
-	return nil
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	var pools extensionsv1beta1.SandboxWarmPoolList
+	if err := a.k8sClient.List(ctx, &pools); err != nil {
+		return map[string]AllocatorPoolStats{}
+	}
+	var claims extensionsv1beta1.SandboxClaimList
+	if err := a.k8sClient.List(ctx, &claims); err != nil {
+		return map[string]AllocatorPoolStats{}
+	}
+
+	claimCounts := make(map[types.NamespacedName]int32)
+	for i := range claims.Items {
+		claim := &claims.Items[i]
+		if claim.DeletionTimestamp != nil || claim.Spec.WarmPoolRef.Name == "" {
+			continue
+		}
+		key := types.NamespacedName{Name: claim.Spec.WarmPoolRef.Name, Namespace: claim.Namespace}
+		claimCounts[key]++
+	}
+
+	stats := make(map[string]AllocatorPoolStats, len(pools.Items))
+	for i := range pools.Items {
+		pool := &pools.Items[i]
+		key := types.NamespacedName{Name: pool.Name, Namespace: pool.Namespace}
+		idle := pool.Status.ReadyReplicas - claimCounts[key]
+		if idle < 0 {
+			idle = 0
+		}
+		stats[poolMetricLabel(pool.Namespace, pool.Name)] = AllocatorPoolStats{
+			IdleCount: int(idle),
+		}
+	}
+	return stats
 }
 
 func (a *SandboxClaimRuntimeAllocator) allocationFromClaim(ctx context.Context, poolRef string, claim *extensionsv1beta1.SandboxClaim) (*RuntimeAllocation, bool, error) {

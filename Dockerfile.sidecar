@@ -25,15 +25,11 @@ COPY cmd/sidecar/ cmd/sidecar/
 RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} GOMAXPROCS=8 go build -p 8 -a -o sidecar cmd/sidecar/main.go
 
 # Final stage
-FROM alpine:latest
-
-RUN apk --no-cache add ca-certificates python3 py3-pip bash
+FROM gcr.io/distroless/static:nonroot
 
 WORKDIR /app
 
-COPY --from=builder /workspace/sidecar .
-
-RUN mkdir -p /workspace
+COPY --from=builder /workspace/sidecar /app/sidecar
 
 EXPOSE 8080 9090
 

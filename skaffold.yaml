@@ -24,11 +24,13 @@ manifests:
         chartPath: charts/agent-env
         namespace: arl
         createNamespace: true
-        skipBuildDependencies: true
         setValueTemplates:
-          sidecar.image.tag: "{{.IMAGE_TAG}}"
-          gateway.image.tag: "{{.IMAGE_TAG2}}"
-          executorAgent.image.tag: "{{.IMAGE_TAG3}}"
+          sidecar.image.repository: "{{.IMAGE_REPO_arl_sidecar}}"
+          sidecar.image.tag: "{{.IMAGE_TAG_arl_sidecar}}"
+          gateway.image.repository: "{{.IMAGE_REPO_arl_gateway}}"
+          gateway.image.tag: "{{.IMAGE_TAG_arl_gateway}}"
+          executorAgent.image.repository: "{{.IMAGE_REPO_arl_executor_agent}}"
+          executorAgent.image.tag: "{{.IMAGE_TAG_arl_executor_agent}}"
 
 deploy:
   kubectl:
@@ -38,105 +40,6 @@ deploy:
         - --force-conflicts=true
 
 profiles:
-  - name: k8s
-    build:
-      artifacts:
-        - image: opspai/arl-sidecar
-          docker:
-            dockerfile: Dockerfile.sidecar
-        - image: opspai/arl-gateway
-          docker:
-            dockerfile: Dockerfile.gateway
-        - image: opspai/arl-executor-agent
-          docker:
-            dockerfile: Dockerfile.executor-agent
-      tagPolicy:
-        sha256: {}
-    manifests:
-      helm:
-        releases:
-          - name: agent-env
-            chartPath: charts/agent-env
-            namespace: arl
-            createNamespace: true
-            valuesFiles:
-              - auth-values.yaml
-            setValues:
-              sidecar.image.repository: opspai/arl-sidecar
-              gateway.image.repository: opspai/arl-gateway
-              executorAgent.image.repository: opspai/arl-executor-agent
-              metrics.serviceMonitor.enabled: "false"
-              gateway.service.type: NodePort
-              gateway.service.nodePort: "30076"
-              redis.enabled: "true"
-              prometheus.enabled: "true"
-              grafana.enabled: "true"
-              proxy.url: "http://mihomo.arl.svc:7890"
-            setValueTemplates:
-              sidecar.image.tag: "{{.IMAGE_TAG}}"
-              gateway.image.tag: "{{.IMAGE_TAG2}}"
-              executorAgent.image.tag: "{{.IMAGE_TAG3}}"
-    deploy:
-      kubectl:
-        flags:
-          apply:
-            - --server-side=true
-            - --force-conflicts=true
-
-  - name: prod
-    build:
-      artifacts:
-        - image: arl-sidecar
-          docker:
-            dockerfile: Dockerfile.sidecar
-        - image: arl-gateway
-          docker:
-            dockerfile: Dockerfile.gateway
-        - image: arl-executor-agent
-          docker:
-            dockerfile: Dockerfile.executor-agent
-      tagPolicy:
-        gitCommit: {}
-    manifests:
-      helm:
-        releases:
-          - name: agent-env
-            chartPath: charts/agent-env
-            namespace: arl
-            createNamespace: true
-            skipBuildDependencies: true
-            valuesFiles:
-              - auth-values.yaml
-            setValues:
-              redis.enabled: true
-              clickhouse.enabled: true
-              clickhouse.storageClassName: ebs-ssd
-              prometheus.enabled: true
-              prometheus.persistence.enabled: true
-              prometheus.persistence.storageClass: ebs-ssd
-              prometheus.persistence.size: 50Gi
-              gateway.service.type: LoadBalancer
-              gateway.service.port: "80"
-              grafana.enabled: true
-              grafana.service.type: NodePort
-              grafana.persistence.enabled: true
-              grafana.persistence.storageClass: ebs-ssd
-              grafana.persistence.size: 20Gi
-              proxy.url: "http://mihomo.arl.svc:7890"
-            setValueTemplates:
-              sidecar.image.repository: "{{.IMAGE_REPO_arl_sidecar}}"
-              sidecar.image.tag: "{{.IMAGE_TAG_arl_sidecar}}"
-              gateway.image.repository: "{{.IMAGE_REPO_arl_gateway}}"
-              gateway.image.tag: "{{.IMAGE_TAG_arl_gateway}}"
-              executorAgent.image.repository: "{{.IMAGE_REPO_arl_executor_agent}}"
-              executorAgent.image.tag: "{{.IMAGE_TAG_arl_executor_agent}}"
-    deploy:
-      kubectl:
-        flags:
-          apply:
-            - --server-side=true
-            - --force-conflicts=true
-
   - name: dev
     activation:
       - command: dev

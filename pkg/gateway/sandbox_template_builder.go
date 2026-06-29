@@ -157,6 +157,9 @@ func (g *Gateway) sandboxPodSpec(image, workspaceDir string, resources corev1.Re
 			{Name: "arl-socket", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
 		},
 	}
+	if schedulerName := strings.TrimSpace(g.gwConfig.SchedulerName); schedulerName != "" {
+		pod.SchedulerName = schedulerName
+	}
 	g.injectProxyEnv(&pod)
 	return pod
 }

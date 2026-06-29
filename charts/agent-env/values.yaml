@@ -1,6 +1,22 @@
 # Default values for the agent-env gateway stack.
 # This is a YAML-formatted file.
 
+agentSandbox:
+  # Installs the upstream agent-sandbox chart as a dependency.
+  # Leave this disabled when the cluster already has a shared controller.
+  enabled: false
+  namespace:
+    create: true
+    # The upstream CRDs currently reference this namespace for conversion
+    # webhooks, so bundled installs should keep the controller here.
+    name: agent-sandbox-system
+  image:
+    repository: registry.k8s.io/agent-sandbox/agent-sandbox-controller
+    tag: ""
+    pullPolicy: IfNotPresent
+  controller:
+    extensions: true
+
 image:
   # ImagePullPolicy applied to gateway-INJECTED containers (the sidecar and
   # the copy-executor-agent init container) in every sandbox pod.
@@ -40,6 +56,24 @@ gateway:
     type: ClusterIP
     port: ""      # external service port; defaults to gateway.port (8080) if empty
     nodePort: ""  # e.g. 30080, only used when type is NodePort
+  ingress:
+    enabled: false
+    className: ""
+    annotations: {}
+    hosts:
+      - host: agent-env.example.com
+        paths:
+          - path: /
+            pathType: Prefix
+    tls: []
+    tinyauth:
+      # Adds ingress-nginx auth annotations that call Tinyauth before requests
+      # reach the gateway. For Traefik or other ingress controllers, keep this
+      # false and provide controller-specific annotations manually.
+      enabled: false
+      authURL: ""     # defaults to the in-cluster Tinyauth service /api/auth/nginx
+      signinURL: ""   # defaults to <tinyauth.appURL>/login
+      signinRedirectParam: redirect_uri
   serviceAccount:
     name: ""
   resources:
@@ -58,9 +92,8 @@ gateway:
 # Authentication & security
 auth:
   # Authentication is enabled by default (fail-closed). When enabled, apiKeys
-  # MUST be set or the install fails. Set to false only for trusted,
-  # network-isolated deployments where every endpoint may be reached without
-  # credentials.
+  # or forwardHeaders must be configured. Set to false only for trusted,
+  # network-isolated deployments where every endpoint may be reached without credentials.
   enabled: true
   # API keys in "key:role" format, one per line. Stored in a K8s Secret.
   # Roles: "admin" (pool/experiment management) or "user" (session/exec only).
@@ -75,10 +108,57 @@ auth:
   # Allowed WebSocket origins (comma-separated host:port). Empty = reject
   # browser origins when auth is enabled.
   allowedOrigins: ""
+  # Optional trust boundary for auth proxies such as Tinyauth. When enabled,
+  # gateway accepts the configured user header only from trusted proxy IPs/CIDRs.
+  forwardHeaders:
+    enabled: false
+    userHeader: Remote-User
+    trustedProxies: "" # e.g. "10.0.0.0/8,172.16.0.0/12"
+    adminUsers: ""     # comma-separated forwarded users that map to gateway admin
   # gRPC shared token for gateway ↔ sidecar authentication. Mandatory: the
   # sidecar refuses to start without it. Leave empty to auto-generate a random
   # token (preserved across upgrades); set explicitly to pin a known value.
   grpcToken: ""
+
+# Tinyauth edge authentication. This deploys Tinyauth as an optional external
+# auth server; wire it to gateway.ingress.tinyauth or to your ingress controller.
+tinyauth:
+  enabled: false
+  replicaCount: 1
+  image:
+    repository: ghcr.io/tinyauthapp/tinyauth
+    tag: v5
+    pullPolicy: IfNotPresent
+  appURL: "" # e.g. "https://auth.example.com"
+  users: "" # comma-separated "username:bcrypt_hash" entries; stored in a Secret
+  usersExistingSecret: ""
+  usersSecretKey: users
+  secureCookie: false
+  trustedProxies: ""
+  sessionExpiry: 86400
+  analyticsEnabled: false
+  logLevel: info
+  service:
+    type: ClusterIP
+    port: 3000
+  ingress:
+    enabled: false
+    className: ""
+    annotations: {}
+    host: auth.example.com
+    tls: []
+  persistence:
+    enabled: false
+    storageClassName: ""
+    size: 1Gi
+  resources:
+    requests:
+      cpu: "50m"
+      memory: 64Mi
+    limits:
+      cpu: "500m"
+      memory: 512Mi
+  extraEnv: []
 
 # Redis configuration (for HA session state persistence across gateway replicas)
 redis:

@@ -11,6 +11,7 @@ import (
 // PrometheusCollector implements interfaces.MetricsCollector using Prometheus.
 type PrometheusCollector struct {
 	sessionAllocationDuration *prometheus.HistogramVec
+	sandboxReadyDuration     *prometheus.HistogramVec
 
 	activeSessions      prometheus.Gauge
 	gatewayStepDuration *prometheus.HistogramVec
@@ -23,6 +24,11 @@ type PrometheusCollector struct {
 	gatewaySessionsTotal prometheus.Gauge
 	idleQueueDepth       *prometheus.GaugeVec
 	pendingWaiters       *prometheus.GaugeVec
+	admissionQueueDepth  *prometheus.GaugeVec
+	poolSaturation       *prometheus.GaugeVec
+	poolDesiredReplicas  *prometheus.GaugeVec
+	poolReadyReplicas    *prometheus.GaugeVec
+	poolAllocatedReplicas *prometheus.GaugeVec
 }
 
 // NewPrometheusCollector creates a new Prometheus metrics collector.
@@ -33,6 +39,14 @@ func NewPrometheusCollector() interfaces.MetricsCollector {
 				Name:    "arl_session_allocation_seconds",
 				Help:    "End-to-end time from session creation request to sandbox allocation.",
 				Buckets: []float64{0.5, 1, 2, 5, 10, 15, 20, 30, 60},
+			},
+			[]string{"pool"},
+		),
+		sandboxReadyDuration: prometheus.NewHistogramVec(
+			prometheus.HistogramOpts{
+				Name:    "arl_sandbox_ready_seconds",
+				Help:    "Time from SandboxClaim creation to a ready sandbox allocation.",
+				Buckets: []float64{0.5, 1, 2, 5, 10, 15, 20, 30, 60, 120, 300},
 			},
 			[]string{"pool"},
 		),
@@ -105,10 +119,46 @@ func NewPrometheusCollector() interfaces.MetricsCollector {
 			},
 			[]string{"pool"},
 		),
+		admissionQueueDepth: prometheus.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "arl_gateway_admission_queue_depth",
+				Help: "Number of session requests waiting for warm capacity, by pool.",
+			},
+			[]string{"pool"},
+		),
+		poolSaturation: prometheus.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "arl_sandbox_pool_saturation",
+				Help: "Allocated replicas divided by desired replicas, by pool.",
+			},
+			[]string{"pool"},
+		),
+		poolDesiredReplicas: prometheus.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "arl_sandbox_pool_desired_replicas",
+				Help: "Desired SandboxWarmPool replicas, by pool.",
+			},
+			[]string{"pool"},
+		),
+		poolReadyReplicas: prometheus.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "arl_sandbox_pool_ready_replicas",
+				Help: "Ready SandboxWarmPool replicas, by pool.",
+			},
+			[]string{"pool"},
+		),
+		poolAllocatedReplicas: prometheus.NewGaugeVec(
+			prometheus.GaugeOpts{
+				Name: "arl_sandbox_pool_allocated_replicas",
+				Help: "Active SandboxClaims attached to a SandboxWarmPool, by pool.",
+			},
+			[]string{"pool"},
+		),
 	}
 
 	metrics.Registry.MustRegister(
 		c.sessionAllocationDuration,
+		c.sandboxReadyDuration,
 		c.activeSessions,
 		c.gatewayStepDuration,
 		c.gatewayStepResult,
@@ -119,6 +169,11 @@ func NewPrometheusCollector() interfaces.MetricsCollector {
 		c.gatewaySessionsTotal,
 		c.idleQueueDepth,
 		c.pendingWaiters,
+		c.admissionQueueDepth,
+		c.poolSaturation,
+		c.poolDesiredReplicas,
+		c.poolReadyReplicas,
+		c.poolAllocatedReplicas,
 	)
 
 	return c
@@ -126,6 +181,10 @@ func NewPrometheusCollector() interfaces.MetricsCollector {
 
 func (c *PrometheusCollector) RecordSessionAllocationDuration(poolName string, duration time.Duration) {
 	c.sessionAllocationDuration.WithLabelValues(poolName).Observe(duration.Seconds())
+}
+
+func (c *PrometheusCollector) RecordSandboxReadyDuration(poolName string, duration time.Duration) {
+	c.sandboxReadyDuration.WithLabelValues(poolName).Observe(duration.Seconds())
 }
 
 func (c *PrometheusCollector) SetActiveSessions(count int64) {
@@ -166,4 +225,24 @@ func (c *PrometheusCollector) SetIdleQueueDepth(pool string, count int) {
 
 func (c *PrometheusCollector) SetPendingWaiters(pool string, count int) {
 	c.pendingWaiters.WithLabelValues(pool).Set(float64(count))
+}
+
+func (c *PrometheusCollector) SetAdmissionQueueDepth(pool string, count int) {
+	c.admissionQueueDepth.WithLabelValues(pool).Set(float64(count))
+}
+
+func (c *PrometheusCollector) SetPoolSaturation(pool string, saturation float64) {
+	c.poolSaturation.WithLabelValues(pool).Set(saturation)
+}
+
+func (c *PrometheusCollector) SetPoolDesiredReplicas(pool string, count int) {
+	c.poolDesiredReplicas.WithLabelValues(pool).Set(float64(count))
+}
+
+func (c *PrometheusCollector) SetPoolReadyReplicas(pool string, count int) {
+	c.poolReadyReplicas.WithLabelValues(pool).Set(float64(count))
+}
+
+func (c *PrometheusCollector) SetPoolAllocatedReplicas(pool string, count int) {
+	c.poolAllocatedReplicas.WithLabelValues(pool).Set(float64(count))
 }

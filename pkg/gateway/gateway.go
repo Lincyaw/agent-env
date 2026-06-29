@@ -29,6 +29,7 @@ import (
 
 	"github.com/Lincyaw/agent-env/pkg/audit"
 	"github.com/Lincyaw/agent-env/pkg/interfaces"
+	"github.com/Lincyaw/agent-env/pkg/scheduling"
 	"github.com/Lincyaw/agent-env/pkg/sidecar"
 )
 
@@ -47,6 +48,18 @@ type GatewayConfig struct {
 	GRPCAuthSecretName string
 	PodHTTPProxy       string
 	PodNoProxy         string
+	// AdmissionDisableColdStart forces requests to wait/reject when a selected
+	// pool has no warm capacity instead of relying on agent-sandbox cold create.
+	AdmissionDisableColdStart  bool
+	AdmissionQueueTimeout      time.Duration
+	AdmissionQueuePollInterval time.Duration
+	PoolAutoscalerEnabled      bool
+	PoolAutoscalerInterval     time.Duration
+	PoolAutoscalerBuffer       int32
+	PoolAutoscalerMinReplicas  int32
+	PoolAutoscalerMaxReplicas  int32
+	SchedulerName              string
+	ImageLocalityEnabled       bool
 }
 
 // session holds internal session state.
@@ -103,6 +116,11 @@ type Gateway struct {
 	gwConfig            GatewayConfig
 	sweepStopCh         chan struct{}
 	sweepWg             sync.WaitGroup
+	autoscaleStopCh     chan struct{}
+	autoscaleStopOnce   sync.Once
+	autoscaleWg         sync.WaitGroup
+	admissionQueueMu    sync.Mutex
+	admissionQueueDepth map[types.NamespacedName]int32
 	trajMu              sync.RWMutex
 	trajCh              chan audit.TrajectoryEntry
 	trajWg              sync.WaitGroup
@@ -125,6 +143,8 @@ func New(k8sClient client.Client, runtimeAllocator RuntimeAllocator, sidecarClie
 		store:               store,
 		gwConfig:            gwConfig,
 		sweepStopCh:         make(chan struct{}),
+		autoscaleStopCh:     make(chan struct{}),
+		admissionQueueDepth: make(map[types.NamespacedName]int32),
 	}
 	return gw
 }
@@ -301,7 +321,9 @@ func (g *Gateway) CreateSession(ctx context.Context, req CreateSessionRequest) (
 
 	if g.metrics != nil {
 		g.metrics.SetActiveSessions(g.store.IncrCount(1))
-		g.metrics.RecordSessionAllocationDuration(poolRef, time.Since(allocStart))
+		allocationDuration := time.Since(allocStart)
+		g.metrics.RecordSessionAllocationDuration(poolRef, allocationDuration)
+		g.metrics.RecordSandboxReadyDuration(poolRef, allocationDuration)
 	}
 
 	return &info, nil
@@ -942,9 +964,6 @@ func (g *Gateway) CreatePool(ctx context.Context, req CreatePoolRequest) error {
 	if hasJSONPayload(req.Tools) {
 		return fmt.Errorf("tools are not supported by SandboxWarmPool-backed pools yet")
 	}
-	if hasJSONPayload(req.ImageLocality) {
-		return fmt.Errorf("imageLocality is owned by agent-sandbox/scheduler in sandbox-backed pools")
-	}
 	if err := g.ensureSandboxRuntimeSecret(ctx, ns); err != nil {
 		return err
 	}
@@ -958,9 +977,32 @@ func (g *Gateway) CreatePool(ctx context.Context, req CreatePoolRequest) error {
 		Name:      req.Name,
 		Namespace: ns,
 	}
-	if strings.TrimSpace(req.Profile) != "" {
-		templateMeta.Annotations = map[string]string{poolProfileAnnotation: strings.TrimSpace(req.Profile)}
-		poolMeta.Annotations = map[string]string{poolProfileAnnotation: strings.TrimSpace(req.Profile)}
+	templateAnnotations := map[string]string{}
+	poolAnnotations := map[string]string{}
+	podAnnotations := map[string]string{}
+	if profile := strings.TrimSpace(req.Profile); profile != "" {
+		templateAnnotations[poolProfileAnnotation] = profile
+		poolAnnotations[poolProfileAnnotation] = profile
+	}
+	imageLocalityEnabled := g.gwConfig.ImageLocalityEnabled || hasJSONPayload(req.ImageLocality)
+	if imageLocalityEnabled {
+		templateAnnotations[scheduling.ImageLocalityAnnotation] = scheduling.ImageLocalityEnabledValue
+		poolAnnotations[scheduling.ImageLocalityAnnotation] = scheduling.ImageLocalityEnabledValue
+		podAnnotations[scheduling.ImageLocalityAnnotation] = scheduling.ImageLocalityEnabledValue
+	}
+	if req.Image != "" && (imageLocalityEnabled || strings.TrimSpace(g.gwConfig.SchedulerName) != "") {
+		templateAnnotations[scheduling.ExecutorImageAnnotation] = req.Image
+		podAnnotations[scheduling.ExecutorImageAnnotation] = req.Image
+	}
+	if len(templateAnnotations) > 0 {
+		templateMeta.Annotations = templateAnnotations
+	}
+	if len(poolAnnotations) > 0 {
+		poolMeta.Annotations = poolAnnotations
+	}
+	podMetadata := sandboxv1beta1.PodMetadata{}
+	if len(podAnnotations) > 0 {
+		podMetadata.Annotations = podAnnotations
 	}
 	template := &extensionsv1beta1.SandboxTemplate{
 		ObjectMeta: templateMeta,
@@ -968,7 +1010,8 @@ func (g *Gateway) CreatePool(ctx context.Context, req CreatePoolRequest) error {
 			NetworkPolicyManagement: extensionsv1beta1.NetworkPolicyManagementUnmanaged,
 			Service:                 boolPtr(false),
 			PodTemplate: sandboxv1beta1.PodTemplate{
-				Spec: g.sandboxPodSpec(req.Image, workspaceDir, *resources),
+				ObjectMeta: podMetadata,
+				Spec:       g.sandboxPodSpec(req.Image, workspaceDir, *resources),
 			},
 		},
 	}

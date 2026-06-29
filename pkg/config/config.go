@@ -62,17 +62,35 @@ type Config struct {
 	RedisDB       int
 
 	// Authentication configuration
-	AuthEnabled    bool
-	AuthAPIKeys    string
-	InternalPort   int
-	RateLimitRPS   float64
-	RateLimitBurst int
-	AllowedOrigins string
+	AuthEnabled               bool
+	AuthAPIKeys               string
+	AuthForwardHeadersEnabled bool
+	AuthForwardUserHeader     string
+	AuthForwardTrustedProxies string
+	AuthForwardAdminUsers     string
+	InternalPort              int
+	RateLimitRPS              float64
+	RateLimitBurst            int
+	AllowedOrigins            string
 
 	// HTTP proxy injected into warm pool pods (all containers).
 	// When non-empty, HTTP_PROXY/HTTPS_PROXY/NO_PROXY env vars are set.
 	PodHTTPProxy string
 	PodNoProxy   string
+
+	// Admission control and warm-pool autoscaling.
+	AdmissionDisableColdStart  bool
+	AdmissionQueueTimeout      time.Duration
+	AdmissionQueuePollInterval time.Duration
+	PoolAutoscalerEnabled      bool
+	PoolAutoscalerInterval     time.Duration
+	PoolAutoscalerBuffer       int32
+	PoolAutoscalerMinReplicas  int32
+	PoolAutoscalerMaxReplicas  int32
+
+	// Scheduler integration.
+	SchedulerName        string
+	ImageLocalityEnabled bool
 }
 
 // DefaultConfig returns the default configuration
@@ -108,12 +126,27 @@ func DefaultConfig() *Config {
 		RedisPassword: "",
 		RedisDB:       0,
 
-		AuthEnabled:    true,
-		AuthAPIKeys:    "",
-		InternalPort:   9091,
-		RateLimitRPS:   2048,
-		RateLimitBurst: 4096,
-		AllowedOrigins: "",
+		AuthEnabled:               true,
+		AuthAPIKeys:               "",
+		AuthForwardHeadersEnabled: false,
+		AuthForwardUserHeader:     "Remote-User",
+		AuthForwardTrustedProxies: "",
+		AuthForwardAdminUsers:     "",
+		InternalPort:              9091,
+		RateLimitRPS:              2048,
+		RateLimitBurst:            4096,
+		AllowedOrigins:            "",
+
+		AdmissionDisableColdStart:  false,
+		AdmissionQueueTimeout:      0,
+		AdmissionQueuePollInterval: 500 * time.Millisecond,
+		PoolAutoscalerEnabled:      false,
+		PoolAutoscalerInterval:     30 * time.Second,
+		PoolAutoscalerBuffer:       1,
+		PoolAutoscalerMinReplicas:  0,
+		PoolAutoscalerMaxReplicas:  0,
+		SchedulerName:              "",
+		ImageLocalityEnabled:       false,
 	}
 }
 
@@ -269,6 +302,24 @@ func LoadFromEnv() *Config {
 		cfg.AuthAPIKeys = v
 	}
 
+	if v := os.Getenv("AUTH_FORWARD_HEADERS_ENABLED"); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			cfg.AuthForwardHeadersEnabled = b
+		}
+	}
+
+	if v := os.Getenv("AUTH_FORWARD_USER_HEADER"); v != "" {
+		cfg.AuthForwardUserHeader = v
+	}
+
+	if v := os.Getenv("AUTH_FORWARD_TRUSTED_PROXIES"); v != "" {
+		cfg.AuthForwardTrustedProxies = v
+	}
+
+	if v := os.Getenv("AUTH_FORWARD_ADMIN_USERS"); v != "" {
+		cfg.AuthForwardAdminUsers = v
+	}
+
 	if v := os.Getenv("INTERNAL_PORT"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
 			cfg.InternalPort = n
@@ -296,6 +347,55 @@ func LoadFromEnv() *Config {
 	}
 	if v := os.Getenv("POD_NO_PROXY"); v != "" {
 		cfg.PodNoProxy = v
+	}
+
+	if v := os.Getenv("ADMISSION_DISABLE_COLD_START"); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			cfg.AdmissionDisableColdStart = b
+		}
+	}
+	if v := os.Getenv("ADMISSION_QUEUE_TIMEOUT"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			cfg.AdmissionQueueTimeout = d
+		}
+	}
+	if v := os.Getenv("ADMISSION_QUEUE_POLL_INTERVAL"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			cfg.AdmissionQueuePollInterval = d
+		}
+	}
+	if v := os.Getenv("POOL_AUTOSCALER_ENABLED"); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			cfg.PoolAutoscalerEnabled = b
+		}
+	}
+	if v := os.Getenv("POOL_AUTOSCALER_INTERVAL"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			cfg.PoolAutoscalerInterval = d
+		}
+	}
+	if v := os.Getenv("POOL_AUTOSCALER_BUFFER"); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 32); err == nil {
+			cfg.PoolAutoscalerBuffer = int32(n)
+		}
+	}
+	if v := os.Getenv("POOL_AUTOSCALER_MIN_REPLICAS"); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 32); err == nil {
+			cfg.PoolAutoscalerMinReplicas = int32(n)
+		}
+	}
+	if v := os.Getenv("POOL_AUTOSCALER_MAX_REPLICAS"); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 32); err == nil {
+			cfg.PoolAutoscalerMaxReplicas = int32(n)
+		}
+	}
+	if v := os.Getenv("SCHEDULER_NAME"); v != "" {
+		cfg.SchedulerName = v
+	}
+	if v := os.Getenv("IMAGE_LOCALITY_ENABLED"); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			cfg.ImageLocalityEnabled = b
+		}
 	}
 
 	return cfg
@@ -368,6 +468,14 @@ func (c *Config) Validate() error {
 
 	// Auth key validation is deferred to cmd/gateway/main.go which checks
 	// both AUTH_API_KEYS and AUTH_KEY_FILE before starting.
+	if c.AuthForwardHeadersEnabled {
+		if c.AuthForwardUserHeader == "" {
+			return fmt.Errorf("auth forward user header is required when forward-header auth is enabled")
+		}
+		if c.AuthForwardTrustedProxies == "" {
+			return fmt.Errorf("auth forward trusted proxies are required when forward-header auth is enabled")
+		}
+	}
 
 	if c.InternalPort < 1 || c.InternalPort > 65535 {
 		return fmt.Errorf("invalid internal port: %d (must be 1-65535)", c.InternalPort)
@@ -383,6 +491,28 @@ func (c *Config) Validate() error {
 
 	if c.RateLimitBurst < 1 {
 		return fmt.Errorf("rate limit burst must be >= 1: %d", c.RateLimitBurst)
+	}
+
+	if c.AdmissionQueueTimeout < 0 {
+		return fmt.Errorf("admission queue timeout cannot be negative: %v", c.AdmissionQueueTimeout)
+	}
+	if c.AdmissionQueuePollInterval <= 0 {
+		return fmt.Errorf("admission queue poll interval must be positive: %v", c.AdmissionQueuePollInterval)
+	}
+	if c.PoolAutoscalerInterval <= 0 {
+		return fmt.Errorf("pool autoscaler interval must be positive: %v", c.PoolAutoscalerInterval)
+	}
+	if c.PoolAutoscalerBuffer < 0 {
+		return fmt.Errorf("pool autoscaler buffer cannot be negative: %d", c.PoolAutoscalerBuffer)
+	}
+	if c.PoolAutoscalerMinReplicas < 0 {
+		return fmt.Errorf("pool autoscaler min replicas cannot be negative: %d", c.PoolAutoscalerMinReplicas)
+	}
+	if c.PoolAutoscalerMaxReplicas < 0 {
+		return fmt.Errorf("pool autoscaler max replicas cannot be negative: %d", c.PoolAutoscalerMaxReplicas)
+	}
+	if c.PoolAutoscalerMaxReplicas > 0 && c.PoolAutoscalerMaxReplicas < c.PoolAutoscalerMinReplicas {
+		return fmt.Errorf("pool autoscaler max replicas (%d) must be >= min replicas (%d)", c.PoolAutoscalerMaxReplicas, c.PoolAutoscalerMinReplicas)
 	}
 
 	return nil
