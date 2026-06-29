@@ -94,6 +94,16 @@ make logs
 
 See [Development Guide](https://lincyaw.github.io/agent-env/developer-guide/development/) for details.
 
+## Agent Plugin
+
+Install the ARL Codex skills from the pushed repository:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/Lincyaw/agent-env/main/plugin/install.sh | bash
+```
+
+See `plugin/README.md` for branch/tag install examples and local development commands.
+
 ## License
 
 This project is open source. See the [LICENSE](LICENSE) file for details

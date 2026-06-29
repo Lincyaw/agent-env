@@ -83,6 +83,14 @@ build-operator: ## Build operator binary
 build-cli: ## Build arl CLI binary
 	CGO_ENABLED=0 go build -o bin/arl cmd/arl/main.go
 
+.PHONY: codex-skills
+codex-skills: ## Generate Codex compatibility skills from plugin slash commands
+	cd plugin && python3 scripts/build_codex_compat_skills.py --repo-root . --out-dir .codex-generated-skills --clean
+
+.PHONY: install-codex-skills
+install-codex-skills: ## Install ARL Codex skills into ~/.codex/skills
+	cd plugin && ./install-codex-skills.sh
+
 ##@ Development
 
 .PHONY: fmt
@@ -155,4 +163,3 @@ arch-check: ## Validate architecture documentation
 .PHONY: logs
 logs: ## Show operator logs
 	kubectl logs -n arl -l app=arl-operator --tail=100 -f
-

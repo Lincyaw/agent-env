@@ -1,0 +1,40 @@
+{
+  "name": "arl",
+  "version": "0.13.0",
+  "description": "ARL runtime CLI and operations for Codex: manage experiments, warm pools, sessions, logs, and metrics.",
+  "author": {
+    "name": "lincyaw",
+    "url": "https://github.com/Lincyaw"
+  },
+  "repository": "https://github.com/Lincyaw/agent-env",
+  "homepage": "https://lincyaw.github.io/agent-env/",
+  "license": "Apache-2.0",
+  "keywords": [
+    "arl",
+    "codex",
+    "kubernetes",
+    "warm-pool",
+    "agentic-rl",
+    "sandbox",
+    "experiment"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "ARL",
+    "shortDescription": "Operate ARL experiments, pools, sessions, logs, and metrics.",
+    "longDescription": "Use ARL skills to inspect, debug, and manage the Agentic RL runtime from Codex, including warm pools, managed sessions, experiment trajectories, gateway health, and runtime metrics.",
+    "developerName": "lincyaw",
+    "category": "Developer Tools",
+    "capabilities": [
+      "Read",
+      "Write"
+    ],
+    "websiteURL": "https://lincyaw.github.io/agent-env/",
+    "defaultPrompt": [
+      "Use $arl-cli to inspect ARL pools and sessions.",
+      "Help me debug an ARL session or experiment.",
+      "Show me how to export ARL trajectories."
+    ],
+    "brandColor": "#0F766E"
+  }
+}

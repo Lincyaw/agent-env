@@ -75,3 +75,6 @@ auth-values.yaml
 site/
 *.parquet
 *.jsonl
+
+# Codex compatibility artifacts generated from Claude Code commands
+plugin/.codex-generated-skills/
