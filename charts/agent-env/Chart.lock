@@ -1,0 +1,6 @@
+dependencies:
+- name: agent-sandbox
+  repository: oci://pair-diag-cn-guangzhou.cr.volces.com/pair
+  version: 0.1.0
+digest: sha256:21041ade1aefde604c4328825bd86bb3c852c5e6df8987ec03bb1b7898416e80
+generated: "2026-06-29T19:48:08.699457+03:00"

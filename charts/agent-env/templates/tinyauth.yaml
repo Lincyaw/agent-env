@@ -1,0 +1,166 @@
+{{- if .Values.tinyauth.enabled }}
+{{- $name := printf "%s-tinyauth" (include "agent-env.fullname" .) -}}
+{{- $usersSecretName := .Values.tinyauth.usersExistingSecret | default $name -}}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "agent-env.labels" . | nindent 4 }}
+    app.kubernetes.io/component: tinyauth
+spec:
+  replicas: {{ .Values.tinyauth.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "agent-env.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: tinyauth
+  template:
+    metadata:
+      labels:
+        {{- include "agent-env.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: tinyauth
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: tinyauth
+          image: "{{ .Values.tinyauth.image.repository }}:{{ .Values.tinyauth.image.tag }}"
+          imagePullPolicy: {{ .Values.tinyauth.image.pullPolicy }}
+          env:
+            - name: TINYAUTH_APPURL
+              value: {{ required "tinyauth.enabled is true but tinyauth.appURL is empty" .Values.tinyauth.appURL | quote }}
+            - name: TINYAUTH_SERVER_PORT
+              value: "{{ .Values.tinyauth.service.port }}"
+            - name: TINYAUTH_DATABASE_DRIVER
+              value: "sqlite"
+            - name: TINYAUTH_DATABASE_PATH
+              value: "/data/tinyauth.db"
+            - name: TINYAUTH_AUTH_USERS
+              valueFrom:
+                secretKeyRef:
+                  name: {{ $usersSecretName }}
+                  key: {{ .Values.tinyauth.usersSecretKey }}
+                  optional: false
+            - name: TINYAUTH_AUTH_SECURECOOKIE
+              value: {{ .Values.tinyauth.secureCookie | quote }}
+            - name: TINYAUTH_AUTH_SESSIONEXPIRY
+              value: "{{ .Values.tinyauth.sessionExpiry }}"
+            - name: TINYAUTH_ANALYTICS_ENABLED
+              value: {{ .Values.tinyauth.analyticsEnabled | quote }}
+            - name: TINYAUTH_LOG_LEVEL
+              value: {{ .Values.tinyauth.logLevel | quote }}
+            {{- if .Values.tinyauth.trustedProxies }}
+            - name: TINYAUTH_AUTH_TRUSTEDPROXIES
+              value: {{ .Values.tinyauth.trustedProxies | quote }}
+            {{- end }}
+            {{- with .Values.tinyauth.extraEnv }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.tinyauth.service.port }}
+              protocol: TCP
+          volumeMounts:
+            - name: data
+              mountPath: /data
+          livenessProbe:
+            exec:
+              command:
+                - tinyauth
+                - healthcheck
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            exec:
+              command:
+                - tinyauth
+                - healthcheck
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.tinyauth.resources | nindent 12 }}
+      volumes:
+        - name: data
+          {{- if .Values.tinyauth.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ $name }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "agent-env.labels" . | nindent 4 }}
+    app.kubernetes.io/component: tinyauth
+spec:
+  type: {{ .Values.tinyauth.service.type }}
+  ports:
+    - port: {{ .Values.tinyauth.service.port }}
+      targetPort: http
+      protocol: TCP
+      name: http
+  selector:
+    {{- include "agent-env.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: tinyauth
+{{- if .Values.tinyauth.persistence.enabled }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "agent-env.labels" . | nindent 4 }}
+    app.kubernetes.io/component: tinyauth
+spec:
+  accessModes:
+    - ReadWriteOnce
+  {{- if .Values.tinyauth.persistence.storageClassName }}
+  storageClassName: {{ .Values.tinyauth.persistence.storageClassName | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.tinyauth.persistence.size | quote }}
+{{- end }}
+{{- if .Values.tinyauth.ingress.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ $name }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "agent-env.labels" . | nindent 4 }}
+    app.kubernetes.io/component: tinyauth
+  {{- with .Values.tinyauth.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- if .Values.tinyauth.ingress.className }}
+  ingressClassName: {{ .Values.tinyauth.ingress.className | quote }}
+  {{- end }}
+  {{- with .Values.tinyauth.ingress.tls }}
+  tls:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    - host: {{ required "tinyauth.ingress.enabled is true but tinyauth.ingress.host is empty" .Values.tinyauth.ingress.host | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: {{ $name }}
+                port:
+                  number: {{ .Values.tinyauth.service.port }}
+{{- end }}
+{{- end }}

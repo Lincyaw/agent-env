@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -115,6 +116,33 @@ func TestSnapshotPoolsIncludesProfileImageAndClaims(t *testing.T) {
 	}
 	if got.WarmAvailable() != 1 {
 		t.Fatalf("WarmAvailable = %d, want 1", got.WarmAvailable())
+	}
+}
+
+func TestPlanSessionAllocationQueuesThenRejectsWhenWarmCapacityDoesNotFree(t *testing.T) {
+	scheme := newGatewayTestScheme(t)
+	pool := testSandboxWarmPool("code", "default", "code-template", 1, 1, "code")
+	template := testSandboxTemplate("code-template", "default", "python:3.12", "code")
+	claim := &extensionsv1beta1.SandboxClaim{
+		ObjectMeta: metav1.ObjectMeta{Name: "claim-1", Namespace: "default"},
+		Spec: extensionsv1beta1.SandboxClaimSpec{
+			WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: "code"},
+		},
+	}
+	k8sClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(pool, template, claim).Build()
+	gw := New(k8sClient, &recordingRuntimeAllocator{}, nil, nil, nil, GatewayConfig{
+		AdmissionDisableColdStart:  true,
+		AdmissionQueueTimeout:      time.Millisecond,
+		AdmissionQueuePollInterval: time.Millisecond,
+	}, NewMemoryStore())
+
+	_, _, err := gw.planSessionAllocation(context.Background(), ResourceIntent{
+		Scope:            RequestScope{Namespace: "default"},
+		Profile:          "code",
+		ColdStartAllowed: false,
+	})
+	if !errors.Is(err, ErrPoolAtCapacity) {
+		t.Fatalf("planSessionAllocation error = %v, want ErrPoolAtCapacity", err)
 	}
 }
 

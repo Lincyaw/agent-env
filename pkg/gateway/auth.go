@@ -7,6 +7,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"strings"
@@ -27,6 +28,14 @@ type AuthConfig struct {
 	Enabled        bool
 	Keys           map[string]Role
 	AllowedOrigins []string
+
+	// ForwardAuthEnabled allows a trusted external auth proxy (for example
+	// Tinyauth behind an ingress controller) to authenticate requests by
+	// forwarding an identity header.
+	ForwardAuthEnabled bool
+	ForwardUserHeader  string
+	ForwardAdminUsers  map[string]struct{}
+	ForwardTrustedNets []*net.IPNet
 
 	// KeyFile is an optional path to a file containing API keys (same
 	// "key:role" format, one per line). When set, the file is watched and
@@ -67,29 +76,87 @@ func KeyHashFromContext(ctx context.Context) (string, bool) {
 func requireAuth(authCfg *AuthConfig, minRole Role, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		token := extractBearerToken(r)
-		if token == "" {
-			w.Header().Set("WWW-Authenticate", `Bearer realm="arl-gateway"`)
-			writeError(w, http.StatusUnauthorized, "missing or invalid Authorization header")
+		if token != "" {
+			keys := authCfg.GetKeys()
+			role, ok := matchAPIKey(keys, token)
+			if !ok {
+				writeError(w, http.StatusUnauthorized, "invalid API key")
+				return
+			}
+			if !authorizeRole(w, minRole, role) {
+				return
+			}
+			hash := sha256.Sum256([]byte(token))
+			next.ServeHTTP(w, r.WithContext(authContext(r.Context(), role, hex.EncodeToString(hash[:]))))
 			return
 		}
 
-		keys := authCfg.GetKeys()
-		role, ok := matchAPIKey(keys, token)
-		if !ok {
-			writeError(w, http.StatusUnauthorized, "invalid API key")
+		if role, identity, ok := matchForwardAuth(authCfg, r); ok {
+			if !authorizeRole(w, minRole, role) {
+				return
+			}
+			hash := sha256.Sum256([]byte("forward-auth:" + identity))
+			next.ServeHTTP(w, r.WithContext(authContext(r.Context(), role, hex.EncodeToString(hash[:]))))
 			return
 		}
 
-		if minRole == RoleAdmin && role != RoleAdmin {
-			writeError(w, http.StatusForbidden, "admin access required")
-			return
-		}
-
-		hash := sha256.Sum256([]byte(token))
-		ctx := context.WithValue(r.Context(), roleCtxKey, role)
-		ctx = context.WithValue(ctx, keyHashCtxKey, hex.EncodeToString(hash[:]))
-		next.ServeHTTP(w, r.WithContext(ctx))
+		w.Header().Set("WWW-Authenticate", `Bearer realm="arl-gateway"`)
+		writeError(w, http.StatusUnauthorized, "missing or invalid Authorization header")
 	}
+}
+
+func authorizeRole(w http.ResponseWriter, minRole Role, role Role) bool {
+	if minRole == RoleAdmin && role != RoleAdmin {
+		writeError(w, http.StatusForbidden, "admin access required")
+		return false
+	}
+	return true
+}
+
+func authContext(ctx context.Context, role Role, keyHash string) context.Context {
+	ctx = context.WithValue(ctx, roleCtxKey, role)
+	return context.WithValue(ctx, keyHashCtxKey, keyHash)
+}
+
+func matchForwardAuth(authCfg *AuthConfig, r *http.Request) (Role, string, bool) {
+	if authCfg == nil || !authCfg.ForwardAuthEnabled {
+		return "", "", false
+	}
+	if !isTrustedForwardProxy(authCfg.ForwardTrustedNets, r.RemoteAddr) {
+		return "", "", false
+	}
+	header := authCfg.ForwardUserHeader
+	if header == "" {
+		header = "Remote-User"
+	}
+	user := strings.TrimSpace(r.Header.Get(header))
+	if user == "" {
+		return "", "", false
+	}
+	if _, ok := authCfg.ForwardAdminUsers[user]; ok {
+		return RoleAdmin, user, true
+	}
+	return RoleUser, user, true
+}
+
+func isTrustedForwardProxy(trustedNets []*net.IPNet, remoteAddr string) bool {
+	if len(trustedNets) == 0 || remoteAddr == "" {
+		return false
+	}
+	host, _, err := net.SplitHostPort(remoteAddr)
+	if err != nil {
+		host = remoteAddr
+	}
+	ip := net.ParseIP(host)
+	if ip == nil {
+		return false
+	}
+	for _, trustedNet := range trustedNets {
+		if trustedNet.Contains(ip) {
+			return true
+		}
+	}
+	return false
 }
 
 // CheckSessionOwnership returns an error if the caller is not the session owner
@@ -166,6 +233,54 @@ func ParseAPIKeys(raw string) map[string]Role {
 		}
 	}
 	return keys
+}
+
+// ParseForwardAdminUsers parses a comma-separated list of forwarded user
+// identities that should receive the admin role.
+func ParseForwardAdminUsers(raw string) map[string]struct{} {
+	users := make(map[string]struct{})
+	for _, entry := range strings.Split(raw, ",") {
+		user := strings.TrimSpace(entry)
+		if user == "" {
+			continue
+		}
+		users[user] = struct{}{}
+	}
+	return users
+}
+
+// ParseTrustedProxies parses comma-separated IPs or CIDRs that may supply
+// trusted forward-auth headers.
+func ParseTrustedProxies(raw string) ([]*net.IPNet, error) {
+	var trustedNets []*net.IPNet
+	for _, entry := range strings.Split(raw, ",") {
+		entry = strings.TrimSpace(entry)
+		if entry == "" {
+			continue
+		}
+		if strings.Contains(entry, "/") {
+			_, ipNet, err := net.ParseCIDR(entry)
+			if err != nil {
+				return nil, fmt.Errorf("invalid trusted proxy CIDR %q: %w", entry, err)
+			}
+			trustedNets = append(trustedNets, ipNet)
+			continue
+		}
+		ip := net.ParseIP(entry)
+		if ip == nil {
+			return nil, fmt.Errorf("invalid trusted proxy IP %q", entry)
+		}
+		bits := 32
+		if ip.To4() == nil {
+			bits = 128
+		}
+		_, ipNet, err := net.ParseCIDR(fmt.Sprintf("%s/%d", ip.String(), bits))
+		if err != nil {
+			return nil, fmt.Errorf("invalid trusted proxy IP %q: %w", entry, err)
+		}
+		trustedNets = append(trustedNets, ipNet)
+	}
+	return trustedNets, nil
 }
 
 // ParseAPIKeysFile reads a key file (one "key:role" per line, # comments allowed)

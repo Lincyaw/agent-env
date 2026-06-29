@@ -123,19 +123,29 @@ func main() {
 	}
 
 	gw := gateway.New(k8sClient, runtimeAllocator, sidecarClient, metricsCollector, nil, gateway.GatewayConfig{
-		IdleTimeout:        cfg.GatewayIdleTimeout,
-		MaxLifetime:        cfg.GatewayMaxLifetime,
-		SweepInterval:      cfg.GatewaySweepInterval,
-		SidecarImage:       cfg.SidecarImage,
-		SidecarHTTPPort:    cfg.SidecarHTTPPort,
-		SidecarGRPCPort:    cfg.SidecarGRPCPort,
-		WorkspaceDir:       cfg.WorkspaceDir,
-		ExecutorAgentImage: cfg.ExecutorAgentImage,
-		ImagePullPolicy:    cfg.ImagePullPolicy,
-		GRPCAuthToken:      cfg.GRPCAuthToken,
-		GRPCAuthSecretName: cfg.GRPCAuthSecretName,
-		PodHTTPProxy:       cfg.PodHTTPProxy,
-		PodNoProxy:         cfg.PodNoProxy,
+		IdleTimeout:                cfg.GatewayIdleTimeout,
+		MaxLifetime:                cfg.GatewayMaxLifetime,
+		SweepInterval:              cfg.GatewaySweepInterval,
+		SidecarImage:               cfg.SidecarImage,
+		SidecarHTTPPort:            cfg.SidecarHTTPPort,
+		SidecarGRPCPort:            cfg.SidecarGRPCPort,
+		WorkspaceDir:               cfg.WorkspaceDir,
+		ExecutorAgentImage:         cfg.ExecutorAgentImage,
+		ImagePullPolicy:            cfg.ImagePullPolicy,
+		GRPCAuthToken:              cfg.GRPCAuthToken,
+		GRPCAuthSecretName:         cfg.GRPCAuthSecretName,
+		PodHTTPProxy:               cfg.PodHTTPProxy,
+		PodNoProxy:                 cfg.PodNoProxy,
+		AdmissionDisableColdStart:  cfg.AdmissionDisableColdStart,
+		AdmissionQueueTimeout:      cfg.AdmissionQueueTimeout,
+		AdmissionQueuePollInterval: cfg.AdmissionQueuePollInterval,
+		PoolAutoscalerEnabled:      cfg.PoolAutoscalerEnabled,
+		PoolAutoscalerInterval:     cfg.PoolAutoscalerInterval,
+		PoolAutoscalerBuffer:       cfg.PoolAutoscalerBuffer,
+		PoolAutoscalerMinReplicas:  cfg.PoolAutoscalerMinReplicas,
+		PoolAutoscalerMaxReplicas:  cfg.PoolAutoscalerMaxReplicas,
+		SchedulerName:              cfg.SchedulerName,
+		ImageLocalityEnabled:       cfg.ImageLocalityEnabled,
 	}, sessionStore)
 
 	// Start runtime allocator cache and event handlers.
@@ -147,6 +157,7 @@ func main() {
 
 	// Start session sweep (idle timeout / max lifetime reaper)
 	gw.StartSessionSweep()
+	gw.StartPoolAutoscaler()
 	if trajectoryConfig != nil {
 		startTrajectoryConnector(ctx, gw, *trajectoryConfig)
 	}
@@ -174,8 +185,17 @@ func main() {
 			}
 		}
 
-		if len(keys) == 0 {
+		forwardTrustedNets, err := gateway.ParseTrustedProxies(cfg.AuthForwardTrustedProxies)
+		if err != nil {
+			log.Fatalf("Invalid AUTH_FORWARD_TRUSTED_PROXIES: %v", err)
+		}
+		if cfg.AuthForwardHeadersEnabled && len(forwardTrustedNets) == 0 {
+			log.Fatalf("AUTH_FORWARD_TRUSTED_PROXIES must include at least one IP or CIDR when forward-header auth is enabled")
+		}
+
+		if len(keys) == 0 && !cfg.AuthForwardHeadersEnabled {
 			log.Fatalf("authentication is enabled but no API keys were provided: set AUTH_API_KEYS (key:role,...) or AUTH_KEY_FILE, " +
+				"configure AUTH_FORWARD_HEADERS_ENABLED=true with AUTH_FORWARD_TRUSTED_PROXIES, " +
 				"or explicitly opt out of authentication with AUTH_ENABLED=false")
 		}
 		var origins []string
@@ -188,12 +208,17 @@ func main() {
 			}
 		}
 		authCfg = &gateway.AuthConfig{
-			Enabled:        true,
-			Keys:           keys,
-			AllowedOrigins: origins,
-			KeyFile:        keyFile,
+			Enabled:            true,
+			Keys:               keys,
+			AllowedOrigins:     origins,
+			ForwardAuthEnabled: cfg.AuthForwardHeadersEnabled,
+			ForwardUserHeader:  cfg.AuthForwardUserHeader,
+			ForwardAdminUsers:  gateway.ParseForwardAdminUsers(cfg.AuthForwardAdminUsers),
+			ForwardTrustedNets: forwardTrustedNets,
+			KeyFile:            keyFile,
 		}
-		log.Printf("Authentication enabled: %d API key(s) registered", len(keys))
+		log.Printf("Authentication enabled: %d API key(s) registered, forward-header auth enabled=%t",
+			len(keys), cfg.AuthForwardHeadersEnabled)
 
 		stopKeyWatcher = gateway.StartKeyFileWatcher(authCfg)
 	} else {
@@ -263,6 +288,7 @@ func main() {
 		stopKeyWatcher()
 	}
 	healthChecker.Stop()
+	gw.StopPoolAutoscaler()
 	gw.StopSessionSweep()
 	allocCancel() // Stop runtime allocator cache
 	runtimeAllocator.Stop()

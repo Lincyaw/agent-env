@@ -10,6 +10,8 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
+	"github.com/Lincyaw/agent-env/pkg/scheduling"
+
 	sandboxv1beta1 "sigs.k8s.io/agent-sandbox/api/v1beta1"
 	extensionsv1beta1 "sigs.k8s.io/agent-sandbox/extensions/api/v1beta1"
 )
@@ -134,6 +136,43 @@ func TestCreatePoolCreatesSandboxWarmPoolAndExecutableTemplate(t *testing.T) {
 	}
 	if string(secret.Data["token"]) != "test-token" {
 		t.Fatalf("secret token = %q, want test-token", string(secret.Data["token"]))
+	}
+}
+
+func TestCreatePoolAppliesSchedulerNameAndImageLocalityHints(t *testing.T) {
+	scheme := newGatewayTestScheme(t)
+	k8sClient := fake.NewClientBuilder().WithScheme(scheme).Build()
+	gw := &Gateway{
+		k8sClient: k8sClient,
+		gwConfig: GatewayConfig{
+			SchedulerName:        "agent-env-image-locality",
+			ImageLocalityEnabled: true,
+			GRPCAuthToken:        "test-token",
+		},
+	}
+
+	if err := gw.CreatePool(context.Background(), CreatePoolRequest{
+		Name:      "pool",
+		Namespace: "default",
+		Image:     "python:3.12",
+		Replicas:  1,
+		Profile:   "code",
+	}); err != nil {
+		t.Fatalf("CreatePool returned error: %v", err)
+	}
+
+	template := &extensionsv1beta1.SandboxTemplate{}
+	if err := k8sClient.Get(context.Background(), types.NamespacedName{Name: "pool-template", Namespace: "default"}, template); err != nil {
+		t.Fatalf("get sandbox template: %v", err)
+	}
+	if got := template.Spec.PodTemplate.Spec.SchedulerName; got != "agent-env-image-locality" {
+		t.Fatalf("SchedulerName = %q, want agent-env-image-locality", got)
+	}
+	if got := template.Annotations[scheduling.ImageLocalityAnnotation]; got != scheduling.ImageLocalityEnabledValue {
+		t.Fatalf("template image locality annotation = %q, want enabled", got)
+	}
+	if got := template.Spec.PodTemplate.ObjectMeta.Annotations[scheduling.ExecutorImageAnnotation]; got != "python:3.12" {
+		t.Fatalf("pod executor image annotation = %q, want python:3.12", got)
 	}
 }
 

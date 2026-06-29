@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -114,6 +115,13 @@ func (hc *HealthChecker) collect() {
 				hc.metrics.SetPendingWaiters(pool, stats.WaiterCount)
 			}
 		}
+	}
+	if hc.metrics != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		if err := hc.gw.publishCurrentPoolMetrics(ctx); err != nil {
+			log.Printf("Warning: failed to publish pool metrics: %v", err)
+		}
+		cancel()
 	}
 
 	// 4. Cleanup stale gRPC connections (Shutdown/TransientFailure)

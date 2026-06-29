@@ -59,4 +59,6 @@ helm upgrade --install agent-env charts/agent-env \
   --set image.injectedPullPolicy=IfNotPresent
 ```
 
-For production, keep authentication enabled and provide API keys.
+For production, keep authentication enabled and provide API keys, or enable the
+Tinyauth ingress authentication path documented in
+`docs/developer-guide/deployment.md`.

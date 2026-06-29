@@ -1,0 +1,59 @@
+{{- if and .Values.gateway.enabled .Values.gateway.ingress.enabled }}
+{{- $annotations := dict -}}
+{{- if .Values.gateway.ingress.tinyauth.enabled -}}
+{{- $authURL := .Values.gateway.ingress.tinyauth.authURL -}}
+{{- if not $authURL -}}
+{{- if not .Values.tinyauth.enabled -}}
+{{- required "gateway.ingress.tinyauth.enabled is true but tinyauth.enabled is false and gateway.ingress.tinyauth.authURL is empty" .Values.gateway.ingress.tinyauth.authURL -}}
+{{- end -}}
+{{- $authURL = printf "http://%s-tinyauth.%s.svc.cluster.local:%v/api/auth/nginx" (include "agent-env.fullname" .) .Release.Namespace .Values.tinyauth.service.port -}}
+{{- end -}}
+{{- $signinURL := .Values.gateway.ingress.tinyauth.signinURL -}}
+{{- if not $signinURL -}}
+{{- $appURL := required "gateway.ingress.tinyauth.enabled is true but neither gateway.ingress.tinyauth.signinURL nor tinyauth.appURL is set" .Values.tinyauth.appURL -}}
+{{- $signinURL = printf "%s/login" (trimSuffix "/" $appURL) -}}
+{{- end -}}
+{{- $_ := set $annotations "nginx.ingress.kubernetes.io/auth-url" $authURL -}}
+{{- $_ := set $annotations "nginx.ingress.kubernetes.io/auth-signin" $signinURL -}}
+{{- $_ := set $annotations "nginx.ingress.kubernetes.io/auth-signin-redirect-param" .Values.gateway.ingress.tinyauth.signinRedirectParam -}}
+{{- $_ := set $annotations "nginx.ingress.kubernetes.io/auth-response-headers" "Remote-User,Remote-Email,Remote-Name,Remote-Groups" -}}
+{{- end -}}
+{{- range $key, $value := .Values.gateway.ingress.annotations -}}
+{{- $_ := set $annotations $key $value -}}
+{{- end -}}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: {{ include "agent-env.fullname" . }}-gateway
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "agent-env.labels" . | nindent 4 }}
+    app.kubernetes.io/component: gateway
+  {{- if $annotations }}
+  annotations:
+    {{- toYaml $annotations | nindent 4 }}
+  {{- end }}
+spec:
+  {{- if .Values.gateway.ingress.className }}
+  ingressClassName: {{ .Values.gateway.ingress.className | quote }}
+  {{- end }}
+  {{- with .Values.gateway.ingress.tls }}
+  tls:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  rules:
+    {{- range .Values.gateway.ingress.hosts }}
+    - host: {{ .host | quote }}
+      http:
+        paths:
+          {{- range .paths }}
+          - path: {{ .path | quote }}
+            pathType: {{ .pathType }}
+            backend:
+              service:
+                name: {{ include "agent-env.fullname" $ }}-gateway
+                port:
+                  number: {{ $.Values.gateway.service.port | default $.Values.gateway.port }}
+          {{- end }}
+    {{- end }}
+{{- end }}
