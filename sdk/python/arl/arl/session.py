@@ -406,6 +406,8 @@ class ManagedSession(SandboxSession):
         max_replicas: int | None = None,
         min_replicas: int | None = None,
         scale_up_step: int | None = None,
+        idle_timeout_seconds: int | None = None,
+        max_lifetime_seconds: int | None = None,
         config_env: ConfigEnvSpec | dict[str, Any] | None = None,
         api_key: str | None = None,
     ) -> None:
@@ -426,6 +428,8 @@ class ManagedSession(SandboxSession):
         self._max_replicas = max_replicas
         self._min_replicas = min_replicas
         self._scale_up_step = scale_up_step
+        self._idle_timeout_seconds = idle_timeout_seconds
+        self._max_lifetime_seconds = max_lifetime_seconds
 
     @property
     def experiment_id(self) -> str:
@@ -450,6 +454,8 @@ class ManagedSession(SandboxSession):
             max_replicas=self._max_replicas,
             min_replicas=self._min_replicas,
             scale_up_step=self._scale_up_step,
+            idle_timeout_seconds=self._idle_timeout_seconds,
+            max_lifetime_seconds=self._max_lifetime_seconds,
         )
         self._session_id = info.id
         self._session_info = info

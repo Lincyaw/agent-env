@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import os
 from collections.abc import Callable
-from typing import Any
+from typing import Any, cast
 
 import httpx
 
@@ -216,10 +216,12 @@ class GatewayClient:
                 self._handle_sse_event(event_type, data_buf, results, on_output)
 
         total_ms = sum(r.duration_ms for r in results)
-        return ExecuteResponse(
-            sessionID=session_id,
-            results=results,
-            totalDurationMs=total_ms,
+        return ExecuteResponse.model_validate(
+            {
+                "sessionID": session_id,
+                "results": results,
+                "totalDurationMs": total_ms,
+            }
         )
 
     @staticmethod
@@ -269,13 +271,13 @@ class GatewayClient:
         session_id: str,
         source_session_id: str,
         up_to_step: int | None = None,
-    ) -> dict:
-        body: dict = {"sourceSessionID": source_session_id}
+    ) -> dict[Any, Any]:
+        body: dict[str, Any] = {"sourceSessionID": source_session_id}
         if up_to_step is not None:
             body["upToStep"] = up_to_step
         resp = self._client.post(f"/v1/sessions/{session_id}/replay", json=body)
         self._handle_error(resp)
-        return resp.json()
+        return cast(dict[Any, Any], resp.json())
 
     def restore(self, session_id: str, snapshot_id: str) -> None:
         resp = self._client.post(
@@ -382,6 +384,8 @@ class GatewayClient:
         max_replicas: int | None = None,
         min_replicas: int | None = None,
         scale_up_step: int | None = None,
+        idle_timeout_seconds: int | None = None,
+        max_lifetime_seconds: int | None = None,
         config_env: ConfigEnvSpec | dict[str, Any] | None = None,
     ) -> ManagedSessionInfo:
         """Create a managed session with automatic pool management.
@@ -396,12 +400,14 @@ class GatewayClient:
             resources: Optional CPU/memory requirements (used on first pool creation).
             tools: Optional tools specification (used on first pool creation).
             workspace_dir: Workspace mount path.
-            max_replicas: Per-pool scale ceiling hint. The server scales eagerly
-                up to this value instead of scaling incrementally.
+            max_replicas: Per-pool scale ceiling hint.
             min_replicas: Per-pool scale floor hint. The server will not scale
                 below this value during scale-down (0 = use server default).
             scale_up_step: Max replicas to add per scale-up event
                 (0 = use server default).
+            idle_timeout_seconds: Per-session idle TTL. The gateway deletes the
+                session after this many seconds without execute/file activity.
+            max_lifetime_seconds: Per-session maximum lifetime.
 
         Returns:
             ManagedSessionInfo with session details and experiment metadata.
@@ -425,6 +431,10 @@ class GatewayClient:
             body["minReplicas"] = min_replicas
         if scale_up_step is not None:
             body["scaleUpStep"] = scale_up_step
+        if idle_timeout_seconds is not None:
+            body["idleTimeoutSeconds"] = idle_timeout_seconds
+        if max_lifetime_seconds is not None:
+            body["maxLifetimeSeconds"] = max_lifetime_seconds
         resp = self._client.post("/v1/managed/sessions", json=body)
         self._handle_error(resp)
         return ManagedSessionInfo.model_validate(resp.json())

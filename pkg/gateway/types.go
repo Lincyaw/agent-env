@@ -51,16 +51,18 @@ func decodeConfigEnv(configEnv json.RawMessage) (*arlv1alpha1.ConfigEnvSpec, err
 
 // CreateManagedSessionRequest is the body for POST /v1/managed/sessions
 type CreateManagedSessionRequest struct {
-	Image        string                       `json:"image"`
-	ExperimentID string                       `json:"experimentId"`
-	Namespace    string                       `json:"namespace,omitempty"`
-	ConfigEnv    json.RawMessage              `json:"configEnv,omitempty"`
-	Resources    *corev1.ResourceRequirements `json:"resources,omitempty"`
-	Tools        *arlv1alpha1.ToolsSpec       `json:"tools,omitempty"`
-	WorkspaceDir string                       `json:"workspaceDir,omitempty"`
-	MaxReplicas  int32                        `json:"maxReplicas,omitempty"`  // per-pool scale ceiling hint; server scales up eagerly to this value
-	MinReplicas  int32                        `json:"minReplicas,omitempty"`  // per-pool scale floor hint (0 = use global default)
-	ScaleUpStep  int32                        `json:"scaleUpStep,omitempty"`  // per-pool max replicas to add per scale-up event (0 = use global default)
+	Image              string                       `json:"image"`
+	ExperimentID       string                       `json:"experimentId"`
+	Namespace          string                       `json:"namespace,omitempty"`
+	ConfigEnv          json.RawMessage              `json:"configEnv,omitempty"`
+	Resources          *corev1.ResourceRequirements `json:"resources,omitempty"`
+	Tools              *arlv1alpha1.ToolsSpec       `json:"tools,omitempty"`
+	WorkspaceDir       string                       `json:"workspaceDir,omitempty"`
+	IdleTimeoutSeconds int                          `json:"idleTimeoutSeconds,omitempty"`
+	MaxLifetimeSeconds int                          `json:"maxLifetimeSeconds,omitempty"`
+	MaxReplicas        int32                        `json:"maxReplicas,omitempty"` // per-pool scale ceiling hint (0 = use global default)
+	MinReplicas        int32                        `json:"minReplicas,omitempty"` // per-pool scale floor hint (0 = use global default)
+	ScaleUpStep        int32                        `json:"scaleUpStep,omitempty"` // per-pool max replicas to add per scale-up event (0 = use global default)
 }
 
 // ExecuteRequest is the body for POST /v1/sessions/{id}/execute

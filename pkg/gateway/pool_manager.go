@@ -92,6 +92,13 @@ func (s *poolState) effectiveMinReplicas(global int32) int32 {
 	return global
 }
 
+func (s *poolState) effectiveMaxReplicas(global int32) int32 {
+	if v := s.maxReplicas.Load(); v > 0 {
+		return v
+	}
+	return global
+}
+
 func (s *poolState) effectiveScaleUpStep(global int32) int32 {
 	if v := s.scaleUpStep.Load(); v > 0 {
 		return v
@@ -321,10 +328,11 @@ func (pm *PoolManager) AcquireSession(ctx context.Context, req CreateManagedSess
 	// Fast-fail: if total sessions exceed MaxReplicas, this session can never
 	// get a pod — the pool is at capacity and won't scale further.
 	// We check AFTER ensureCapacity so the pool is already scaled to its max.
-	if state.sessionCount.Load() > pm.config.MaxReplicas {
+	maxR := state.effectiveMaxReplicas(pm.config.MaxReplicas)
+	if maxR > 0 && state.sessionCount.Load() > maxR {
 		state.sessionCount.Add(-1)
 		return "", fmt.Errorf("%w: pool %s has %d/%d max replicas, %d sessions active",
-			ErrPoolAtCapacity, state.poolName, pm.config.MaxReplicas, pm.config.MaxReplicas, state.sessionCount.Load()+1)
+			ErrPoolAtCapacity, state.poolName, maxR, maxR, state.sessionCount.Load()+1)
 	}
 
 	return poolName, nil
@@ -542,20 +550,15 @@ func (pm *PoolManager) doScaleUp(state *poolState) error {
 		// Calculate demand: sessionCount reflects all concurrent callers
 		demand := state.sessionCount.Load() + 1 // +1 spare
 
-		// If the client specified a maxReplicas hint, scale eagerly to that value.
-		// This avoids incremental scale-ups when the client knows the final target.
-		// NOTE: maxReplicas is an eager target, NOT a hard ceiling.
-		// If actual demand exceeds maxReplicas, we still scale to meet demand.
 		clientMax := state.maxReplicas.Load()
-		if clientMax > 0 && clientMax > demand {
-			demand = clientMax
-		}
-
+		maxR := state.effectiveMaxReplicas(pm.config.MaxReplicas)
 		minR := state.effectiveMinReplicas(pm.config.MinReplicas)
 		stepR := state.effectiveScaleUpStep(pm.config.ScaleUpStep)
 
 		desired := max(demand, minR)
-		desired = min(desired, pm.config.MaxReplicas)
+		if maxR > 0 {
+			desired = min(desired, maxR)
+		}
 
 		if pool.Spec.Replicas >= desired {
 			return nil // Already at or above desired capacity

@@ -1420,10 +1420,12 @@ func (g *Gateway) CreateManagedSession(ctx context.Context, req CreateManagedSes
 	span.SetAttributes(attribute.String("pool.name", poolName))
 
 	info, err := g.CreateSession(ctx, CreateSessionRequest{
-		PoolRef:      poolName,
-		Namespace:    ns,
-		Managed:      true,
-		ExperimentID: req.ExperimentID,
+		PoolRef:            poolName,
+		Namespace:          ns,
+		IdleTimeoutSeconds: req.IdleTimeoutSeconds,
+		MaxLifetimeSeconds: req.MaxLifetimeSeconds,
+		Managed:            true,
+		ExperimentID:       req.ExperimentID,
 	})
 	if err != nil {
 		g.poolManager.ReleaseSession(poolName)
