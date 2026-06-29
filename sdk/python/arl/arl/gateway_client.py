@@ -6,25 +6,32 @@ import json
 import os
 from collections.abc import Callable, Iterable, Iterator
 from pathlib import Path
-from typing import Any, BinaryIO, cast
+from typing import Any, BinaryIO, TypeVar, cast
 from urllib.parse import quote
 
 import httpx
+from pydantic import BaseModel
 
 from arl.auth import resolve_auth
 from arl.configenv import ConfigEnvSpec
 from arl.types import (
     ErrorResponse,
     ExecuteResponse,
+    ExperimentSummary,
+    LogEntry,
     ManagedSessionInfo,
     PoolCondition,
     PoolInfo,
+    PoolLogEntry,
     ResourceRequirements,
     SessionInfo,
+    SessionListItem,
     StepResult,
     ToolsSpec,
     UploadFileResponse,
 )
+
+_ModelT = TypeVar("_ModelT", bound=BaseModel)
 
 
 def _serialize_config_env(
@@ -225,9 +232,7 @@ class GatewayClient:
                 elif line == "":
                     # Empty line = end of event
                     if event_type and data_buf:
-                        self._handle_sse_event(
-                            event_type, data_buf, results, on_output
-                        )
+                        self._handle_sse_event(event_type, data_buf, results, on_output)
                     event_type = ""
                     data_buf = ""
 
@@ -264,6 +269,17 @@ class GatewayClient:
                 results.append(result)
             except (json.JSONDecodeError, ValueError):
                 pass
+
+    @staticmethod
+    def _iter_ndjson_models(
+        response: httpx.Response,
+        model: type[_ModelT],
+    ) -> Iterator[_ModelT]:
+        for line in response.iter_lines():
+            line = line.strip()
+            if not line:
+                continue
+            yield model.model_validate(json.loads(line))
 
     def upload_file(
         self,
@@ -362,6 +378,40 @@ class GatewayClient:
         self._handle_error(resp)
         return resp.text
 
+    def list_sessions(self) -> list[SessionListItem]:
+        resp = self._client.get("/v1/sessions")
+        self._handle_error(resp)
+        data = resp.json()
+        if isinstance(data, list):
+            return [SessionListItem.model_validate(item) for item in data]
+        return []
+
+    def iter_session_logs(
+        self,
+        session_id: str,
+        *,
+        follow: bool = False,
+        tail: int = 100,
+    ) -> Iterator[LogEntry]:
+        params = {"follow": str(follow).lower(), "tail": str(tail)}
+        with self._client.stream(
+            "GET",
+            f"/v1/sessions/{session_id}/logs",
+            params=params,
+        ) as resp:
+            if resp.status_code >= 400:
+                resp.read()
+                self._handle_error(resp)
+            yield from self._iter_ndjson_models(resp, LogEntry)
+
+    def list_session_logs(
+        self,
+        session_id: str,
+        *,
+        tail: int = 100,
+    ) -> list[LogEntry]:
+        return list(self.iter_session_logs(session_id, follow=False, tail=tail))
+
     # --- Pool APIs ---
 
     def create_pool(
@@ -375,6 +425,7 @@ class GatewayClient:
         resources: ResourceRequirements | None = None,
         workspace_dir: str = "/workspace",
         config_env: ConfigEnvSpec | dict[str, Any] | None = None,
+        image_locality: dict[str, Any] | bool | None = None,
     ) -> None:
         body: dict[str, Any] = {
             "name": name,
@@ -391,8 +442,21 @@ class GatewayClient:
             body["tools"] = tools.model_dump(by_alias=True, exclude_none=True)
         if resources is not None:
             body["resources"] = resources.model_dump(exclude_none=True)
+        if image_locality is not None:
+            body["imageLocality"] = image_locality
         resp = self._client.post("/v1/pools", json=body)
         self._handle_error(resp)
+
+    def list_pools(self, namespace: str = "") -> list[PoolInfo]:
+        params = {}
+        if namespace:
+            params["namespace"] = namespace
+        resp = self._client.get("/v1/pools", params=params)
+        self._handle_error(resp)
+        data = resp.json()
+        if isinstance(data, list):
+            return [PoolInfo.model_validate(item) for item in data]
+        return []
 
     def get_pool(self, name: str, namespace: str = "") -> PoolInfo:
         params = {}
@@ -435,6 +499,36 @@ class GatewayClient:
         resp = self._client.patch(f"/v1/pools/{name}", json=body)
         self._handle_error(resp)
         return PoolInfo.model_validate(resp.json())
+
+    def iter_pool_logs(
+        self,
+        name: str,
+        *,
+        namespace: str = "",
+        follow: bool = False,
+        tail: int = 100,
+    ) -> Iterator[PoolLogEntry]:
+        params = {"follow": str(follow).lower(), "tail": str(tail)}
+        if namespace:
+            params["namespace"] = namespace
+        with self._client.stream(
+            "GET",
+            f"/v1/pools/{name}/logs",
+            params=params,
+        ) as resp:
+            if resp.status_code >= 400:
+                resp.read()
+                self._handle_error(resp)
+            yield from self._iter_ndjson_models(resp, PoolLogEntry)
+
+    def list_pool_logs(
+        self,
+        name: str,
+        *,
+        namespace: str = "",
+        tail: int = 100,
+    ) -> list[PoolLogEntry]:
+        return list(self.iter_pool_logs(name, namespace=namespace, follow=False, tail=tail))
 
     # --- Managed Session APIs ---
 
@@ -510,6 +604,15 @@ class GatewayClient:
         data = resp.json()
         if isinstance(data, list):
             return [ManagedSessionInfo.model_validate(item) for item in data]
+        return []
+
+    def list_experiments(self) -> list[ExperimentSummary]:
+        """List managed-session experiment summaries."""
+        resp = self._client.get("/v1/managed/experiments")
+        self._handle_error(resp)
+        data = resp.json()
+        if isinstance(data, list):
+            return [ExperimentSummary.model_validate(item) for item in data]
         return []
 
     def delete_experiment(

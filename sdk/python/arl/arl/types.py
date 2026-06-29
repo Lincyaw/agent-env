@@ -83,6 +83,13 @@ class ManagedSessionInfo(SessionInfo):
     managed: bool = False
 
 
+class SessionListItem(SessionInfo):
+    """Session info returned by the admin session-list endpoint."""
+
+    experiment_id: str = Field("", alias="experimentId")
+    managed: bool = False
+
+
 class ExecuteResponse(BaseModel):
     """Response from executing steps."""
 
@@ -139,6 +146,35 @@ class PoolInfo(BaseModel):
     ready_replicas: Annotated[int, Field(ge=0)] = Field(0, alias="readyReplicas")
     allocated_replicas: Annotated[int, Field(ge=0)] = Field(0, alias="allocatedReplicas")
     conditions: list[PoolCondition] = []
+
+    model_config = {"populate_by_name": True}
+
+
+class ExperimentSummary(BaseModel):
+    """Aggregate information for a managed-session experiment."""
+
+    experiment_id: str = Field(alias="experimentId")
+    session_count: Annotated[int, Field(ge=0)] = Field(alias="sessionCount")
+    image: str = ""
+    profile: str = ""
+    namespace: str = ""
+
+    model_config = {"populate_by_name": True}
+
+
+class LogEntry(BaseModel):
+    """A single NDJSON log entry from a session sidecar."""
+
+    timestamp: str = ""
+    level: str = ""
+    message: str = ""
+    source: str = ""
+
+
+class PoolLogEntry(LogEntry):
+    """A log entry returned by the pool log fan-out endpoint."""
+
+    pod_name: str = Field(alias="podName")
 
     model_config = {"populate_by_name": True}
 
@@ -239,9 +275,7 @@ class InlineToolSpec(BaseModel):
     def validate_entrypoint_in_files(self) -> InlineToolSpec:
         """Ensure entrypoint exists in files dict."""
         if self.files and self.entrypoint not in self.files:
-            raise ValueError(
-                f"entrypoint '{self.entrypoint}' must be a key in files"
-            )
+            raise ValueError(f"entrypoint '{self.entrypoint}' must be a key in files")
         return self
 
 
