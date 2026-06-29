@@ -11,7 +11,12 @@ agentSandbox:
     # webhooks, so bundled installs should keep the controller here.
     name: agent-sandbox-system
   image:
-    repository: registry.k8s.io/agent-sandbox/agent-sandbox-controller
+    # Must be reachable from the target cluster. The upstream default is
+    # registry.k8s.io/agent-sandbox/agent-sandbox-controller, but production
+    # clusters should use the colocated registry to avoid external pulls.
+    repository: pair-diag-cn-guangzhou.cr.volces.com/pair/agent-sandbox-controller
+    # Required when agentSandbox.enabled=true. Use the same immutable tag as
+    # the other deployment images, or a published upstream-compatible tag.
     tag: ""
     pullPolicy: IfNotPresent
   controller:
