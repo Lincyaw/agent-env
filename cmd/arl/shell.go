@@ -19,18 +19,19 @@ func runShell(sessionID string) error {
 	wsURL = strings.Replace(wsURL, "https://", "wss://", 1)
 	wsURL = strings.TrimRight(wsURL, "/") + "/v1/sessions/" + sessionID + "/shell"
 
+	apiKey := effectiveAPIKey()
 	header := http.Header{}
-	if flagAPIKey != "" {
-		header.Set("Authorization", "Bearer "+flagAPIKey)
+	if apiKey != "" {
+		header.Set("Authorization", "Bearer "+apiKey)
 	}
 
 	u, err := url.Parse(wsURL)
 	if err != nil {
 		return fmt.Errorf("parse WebSocket URL: %w", err)
 	}
-	if flagAPIKey != "" {
+	if apiKey != "" {
 		q := u.Query()
-		q.Set("token", flagAPIKey)
+		q.Set("token", apiKey)
 		u.RawQuery = q.Encode()
 	}
 

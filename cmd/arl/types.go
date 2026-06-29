@@ -22,6 +22,14 @@ type SessionListItem struct {
 	ExperimentID string `json:"experimentId,omitempty"`
 }
 
+type CreateSessionRequest struct {
+	Image              string `json:"image,omitempty"`
+	Profile            string `json:"profile,omitempty"`
+	Namespace          string `json:"namespace,omitempty"`
+	IdleTimeoutSeconds int    `json:"idleTimeoutSeconds,omitempty"`
+	MaxLifetimeSeconds int    `json:"maxLifetimeSeconds,omitempty"`
+}
+
 type ManagedSessionInfo struct {
 	SessionInfo
 	ExperimentID string `json:"experimentId"`
@@ -70,6 +78,12 @@ type StepOutput struct {
 	ExitCode int32  `json:"exit_code"`
 }
 
+type UploadFileResponse struct {
+	Path         string `json:"path"`
+	BytesWritten int    `json:"bytesWritten"`
+	SHA256       string `json:"sha256,omitempty"`
+}
+
 type ExecuteRequest struct {
 	Steps []StepRequest `json:"steps"`
 }
@@ -97,24 +111,42 @@ type StepResult struct {
 	Input      json.RawMessage `json:"input"`
 }
 
+type RestoreRequest struct {
+	SnapshotID string `json:"snapshotID"`
+}
+
+type ReplayRequest struct {
+	SourceSessionID string `json:"sourceSessionID"`
+	UpToStep        *int   `json:"upToStep,omitempty"`
+}
+
+type ReplayResponse struct {
+	StepsReplayed int `json:"stepsReplayed"`
+	Errors        int `json:"errors"`
+}
+
 type ScalePoolRequest struct {
 	Replicas  int32  `json:"replicas"`
 	Namespace string `json:"namespace,omitempty"`
 }
 
 type CreatePoolRequest struct {
-	Name      string `json:"name"`
-	Image     string `json:"image"`
-	Profile   string `json:"profile,omitempty"`
-	Replicas  int32  `json:"replicas,omitempty"`
-	Namespace string `json:"namespace,omitempty"`
+	Name         string `json:"name"`
+	Image        string `json:"image"`
+	Profile      string `json:"profile,omitempty"`
+	Replicas     int32  `json:"replicas,omitempty"`
+	Namespace    string `json:"namespace,omitempty"`
+	WorkspaceDir string `json:"workspaceDir,omitempty"`
 }
 
 type CreateManagedSessionRequest struct {
-	Image        string `json:"image"`
-	Profile      string `json:"profile,omitempty"`
-	ExperimentID string `json:"experimentId"`
-	Namespace    string `json:"namespace,omitempty"`
+	Image              string `json:"image"`
+	Profile            string `json:"profile,omitempty"`
+	ExperimentID       string `json:"experimentId"`
+	Namespace          string `json:"namespace,omitempty"`
+	WorkspaceDir       string `json:"workspaceDir,omitempty"`
+	IdleTimeoutSeconds int    `json:"idleTimeoutSeconds,omitempty"`
+	MaxLifetimeSeconds int    `json:"maxLifetimeSeconds,omitempty"`
 }
 
 type ErrorResponse struct {

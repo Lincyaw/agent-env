@@ -10,7 +10,7 @@ Export all session trajectories from experiment `$ARGS` as JSONL files for downs
 EXPERIMENT_ID="$ARGS"
 
 # List sessions
-arl exp sessions "$EXPERIMENT_ID" -o json
+arl exp sessions "$EXPERIMENT_ID" --format json
 ```
 
 Parse the session IDs from the JSON output, then for each session:

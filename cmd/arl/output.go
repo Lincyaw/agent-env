@@ -7,6 +7,8 @@ import (
 	"strings"
 	"text/tabwriter"
 	"time"
+
+	"golang.org/x/term"
 )
 
 func printJSON(v any) {
@@ -17,6 +19,10 @@ func printJSON(v any) {
 
 func newTabWriter() *tabwriter.Writer {
 	return tabwriter.NewWriter(os.Stdout, 0, 4, 2, ' ', 0)
+}
+
+func colorEnabled() bool {
+	return !flagNoColor && term.IsTerminal(int(os.Stdout.Fd()))
 }
 
 func age(t time.Time) string {

@@ -1,156 +1,210 @@
-# ARL Wrapper
+# arl-env Python SDK
 
-High-level Python wrapper for the ARL (Agent Runtime Layer) client providing simplified sandbox session management.
-
-## Features
-
-- **Context Manager Support**: Automatic sandbox lifecycle management
-- **Type-Safe API**: Full type hints with Pydantic models
-- **Kubernetes Integration**: Gateway-backed allocation on agent-sandbox resources
-- **Error Handling**: Comprehensive error reporting and retry logic
+High-level Python SDK for the `agent-env` Gateway API. The SDK creates sandbox
+sessions, runs commands, streams output, transfers files, opens interactive
+shells, and manages SandboxWarmPool resources through the gateway.
 
 ## Installation
 
 ```bash
-uv add arl-wrapper
+pip install arl-env
+# or
+uv add arl-env
 ```
 
-## Quick Start
+Interactive shell support needs the optional dependency:
 
-### Prerequisites
+```bash
+pip install "arl-env[shell]"
+```
 
-Ensure you have a WarmPool created. You can create one programmatically:
+## Authentication
+
+If gateway authentication is enabled, provide a bearer API key through the
+environment or constructor:
+
+```bash
+export ARL_API_KEY="your-api-key"
+```
 
 ```python
-from arl import WarmPoolManager
+from arl import SandboxSession
 
-# Create WarmPool (one-time setup)
-warmpool_mgr = WarmPoolManager(namespace="default")
-warmpool_mgr.create_warmpool(
-    name="python-39-std",
-    image="python:3.9-slim",
-    replicas=2  # Number of pre-warmed pods
+session = SandboxSession(
+    image="python:3.12",
+    profile="python-pool",
+    gateway_url="http://localhost:8080",
+    api_key="your-api-key",
 )
-warmpool_mgr.wait_for_warmpool_ready("python-39-std")
-print("✓ WarmPool ready!")
 ```
 
-### Basic Usage
+## Basic Usage
 
 ```python
 from arl import SandboxSession
 
-# Using context manager (recommended)
-with SandboxSession(image="python:3.9-slim", profile="python-39-std", namespace="default") as session:
+with SandboxSession(
+    image="python:3.12",
+    profile="python-pool",
+    namespace="default",
+    gateway_url="http://localhost:8080",
+) as session:
     result = session.execute([
-        {
-            "name": "hello",
-            "type": "Command",
-            "command": ["echo", "Hello, World!"],
-        }
+        {"name": "hello", "command": ["echo", "Hello, World!"]},
     ])
-    
-    # Access results
-    status = result["status"]
-    print(f"Task State: {status.get('state')}")
-    print(f"Output: {status.get('stdout')}")
+    print(result.results[0].output.stdout)
 ```
 
-## Manual Lifecycle Management
+Commands run in the executor container, which uses the requested image. The
+sidecar only exposes the gRPC control plane and proxies execution to the
+executor-agent over a Unix socket.
 
-For long-running operations or sandbox reuse:
+## Persistent Sessions
+
+Use `keep_alive=True` when several operations should share the same workspace.
+Always delete the session when finished.
 
 ```python
 from arl import SandboxSession
 
-session = SandboxSession(image="python:3.9-slim", profile="python-39-std", namespace="default", keep_alive=True)
+session = SandboxSession(
+    image="python:3.12",
+    profile="python-pool",
+    gateway_url="http://localhost:8080",
+    keep_alive=True,
+)
 
 try:
     session.create_sandbox()
-    print("✓ Sandbox allocated")
-    
-    # Task 1: Initialize workspace
-    result1 = session.execute([
-        {"name": "init", "type": "Command", "command": ["mkdir", "-p", "/workspace"]}
+    session.execute([
+        {"name": "init", "command": ["sh", "-c", "echo 0 > /workspace/count.txt"]},
     ])
-    
-    # Task 2: Reuses same sandbox (fast!)
-    result2 = session.execute([
-        {"name": "work", "type": "Command", "command": ["ls", "/workspace"]}
+    result = session.execute([
+        {"name": "read", "command": ["cat", "/workspace/count.txt"]},
     ])
-    
+    print(result.results[0].output.stdout)
 finally:
     session.delete_sandbox()
-    print("✓ Sandbox cleaned up")
+    session.close()
+```
+
+Attach to an existing session:
+
+```python
+from arl import SandboxSession
+
+session = SandboxSession.attach("gw-12345", gateway_url="http://localhost:8080")
+result = session.execute([{"name": "pwd", "command": ["pwd"]}])
+session.close()
+```
+
+## Streaming Output
+
+`execute()` uses the gateway SSE endpoint when available. Pass `on_output` to
+receive stdout/stderr chunks while the step is still running.
+
+```python
+def on_output(stdout: str, stderr: str) -> None:
+    if stdout:
+        print(stdout, end="")
+    if stderr:
+        print(stderr, end="")
+
+result = session.execute(
+    [{"name": "loop", "command": ["sh", "-c", "for i in 1 2 3; do echo $i; sleep 1; done"]}],
+    on_output=on_output,
+)
+```
+
+## File Transfer
+
+Paths are relative to the session workspace.
+
+```python
+session.upload_file("input.txt", "hello\n")
+data = session.download_file("input.txt")
+
+session.upload_path("local.bin", "data/local.bin")
+session.download_path("data/local.bin", "out/local.bin")
+```
+
+## History, Restore, and Trajectory
+
+Each executed step is recorded in session history. Snapshot IDs are step-index
+strings used by the gateway's replay-based restore implementation.
+
+```python
+r1 = session.execute([{"name": "write", "command": ["sh", "-c", "echo one > /workspace/x"]}])
+snapshot_id = r1.results[0].snapshot_id
+
+session.execute([{"name": "change", "command": ["sh", "-c", "echo two > /workspace/x"]}])
+session.restore(snapshot_id)
+
+history = session.get_history()
+jsonl = session.export_trajectory()
 ```
 
 ## WarmPool Management
 
-WarmPools pre-create pods to eliminate cold-start delays:
+`WarmPoolManager` uses the gateway pool endpoints. Pool creation is an admin
+operation when gateway auth is enabled.
 
 ```python
-from arl import WarmPoolManager
+from arl import ResourceRequirements, WarmPoolManager
 
-warmpool_mgr = WarmPoolManager(namespace="default")
-
-# Create a new pool
-warmpool_mgr.create_warmpool(
-    name="python-39-std",
-    image="python:3.9-slim",
-    sidecar_image="your-registry/arl-sidecar:latest",  # Optional
-    replicas=3,
-    resources={  # Optional
-        "requests": {"cpu": "500m", "memory": "512Mi"},
-        "limits": {"cpu": "1", "memory": "1Gi"}
-    }
+manager = WarmPoolManager(namespace="default", gateway_url="http://localhost:8080")
+manager.create_warmpool(
+    name="python-pool",
+    image="python:3.12",
+    profile="python-pool",
+    replicas=2,
+    resources=ResourceRequirements(
+        requests={"cpu": "500m", "memory": "512Mi"},
+        limits={"cpu": "1", "memory": "1Gi"},
+    ),
 )
-
-# Wait for readiness
-warmpool_mgr.wait_for_warmpool_ready("python-39-std", timeout=300)
-
-# List all pools
-pools = warmpool_mgr.list_warmpools()
-for pool in pools:
-    print(f"Pool: {pool['metadata']['name']}, Status: {pool['status']['phase']}")
-
-# Delete a pool
-warmpool_mgr.delete_warmpool("python-39-std")
+info = manager.wait_for_ready("python-pool", min_ready=1)
+print(info.ready_replicas)
+manager.scale_warmpool("python-pool", replicas=3)
 ```
 
-## Task Step Types
+Current sandbox-backed pools reject `tools` and `config_env` provisioning
+requests. `list_tools()` and `call_tool()` only work when the executor image
+already contains `/opt/arl/tools/registry.json` and matching tool files.
 
-### Command Step
+## Managed Sessions
+
+`ManagedSession` creates or reuses a server-side managed pool for an image and
+groups sessions by experiment ID.
 
 ```python
-{
-    "name": "run_script",
-    "type": "Command",
-    "command": ["python", "script.py"],
-    "env": {"DEBUG": "1"},  # optional
-    "workDir": "/workspace",  # optional
-}
+from arl import ManagedSession
+
+with ManagedSession(
+    image="python:3.12",
+    experiment_id="exp-1",
+    profile="default",
+    gateway_url="http://localhost:8080",
+) as session:
+    result = session.execute([
+        {"name": "hello", "command": ["python", "-c", "print('ok')"]},
+    ])
+    print(result.results[0].output.stdout)
 ```
 
-### FilePatch Step
+Clean up an experiment:
 
 ```python
-{
-    "name": "create_config",
-    "type": "FilePatch",
-    "path": "/workspace/config.yaml",
-    "content": "key: value",
-}
+from arl import GatewayClient
+
+client = GatewayClient(base_url="http://localhost:8080")
+deleted = client.delete_experiment("exp-1")
 ```
 
-## Architecture
+## Core Classes
 
-- **SandboxSession**: High-level API over the Gateway REST API.
-- **Gateway API**: Creates sessions, allocates `SandboxClaim` resources, and sends execution requests to the sandbox sidecar.
-- **agent-sandbox**: Reconciles `SandboxTemplate`, `SandboxWarmPool`, `SandboxClaim`, and `Sandbox` resources.
-
-Task execution flow:
-
-1. The SDK asks the Gateway to create a session.
-2. The Gateway selects or creates a matching pool and creates a `SandboxClaim`.
-3. agent-sandbox binds the claim to a ready sandbox.
-4. The Gateway executes steps through the sidecar and returns results to the SDK.
+- `SandboxSession`: session lifecycle, execute, replay, restore, files, logs, history, trajectory.
+- `ManagedSession`: image + experiment session flow with server-side pool creation.
+- `GatewayClient`: low-level HTTP client for all public gateway REST endpoints.
+- `WarmPoolManager`: pool create/list/get/wait/scale/logs/delete helpers.
+- `InteractiveShellClient`: WebSocket shell client.

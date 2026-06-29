@@ -103,9 +103,10 @@ var poolCreateCmd = &cobra.Command{
 		image, _ := cmd.Flags().GetString("image")
 		profile, _ := cmd.Flags().GetString("profile")
 		replicas, _ := cmd.Flags().GetInt32("replicas")
+		workspaceDir, _ := cmd.Flags().GetString("workspace-dir")
 
 		if image == "" {
-			return fmt.Errorf("--image is required")
+			return usageError("--image is required")
 		}
 		if profile == "" {
 			profile = args[0]
@@ -113,11 +114,12 @@ var poolCreateCmd = &cobra.Command{
 
 		c := newClient()
 		if err := c.CreatePool(CreatePoolRequest{
-			Name:      args[0],
-			Image:     image,
-			Profile:   profile,
-			Replicas:  replicas,
-			Namespace: flagNamespace,
+			Name:         args[0],
+			Image:        image,
+			Profile:      profile,
+			Replicas:     replicas,
+			Namespace:    flagNamespace,
+			WorkspaceDir: workspaceDir,
 		}); err != nil {
 			return err
 		}
@@ -185,7 +187,7 @@ var poolExecCmd = &cobra.Command{
 			cmdArgs = args[dash:]
 		}
 		if len(cmdArgs) == 0 {
-			return fmt.Errorf("no command specified; use: arl pool exec <pool> -- <cmd>")
+			return usageError("no command specified; use: arl pool exec <pool> -- <cmd>")
 		}
 
 		c := newClient()
@@ -198,13 +200,12 @@ var poolExecCmd = &cobra.Command{
 			profile = poolName
 		}
 
-		// Create a temporary session from the pool
-		var sessInfo SessionInfo
-		if err := c.do("POST", "/v1/sessions", map[string]string{
-			"image":     pool.Image,
-			"profile":   profile,
-			"namespace": flagNamespace,
-		}, &sessInfo); err != nil {
+		sessInfo, err := c.CreateSession(CreateSessionRequest{
+			Image:     pool.Image,
+			Profile:   profile,
+			Namespace: flagNamespace,
+		})
+		if err != nil {
 			return fmt.Errorf("create temporary session: %w", err)
 		}
 
@@ -255,6 +256,7 @@ func init() {
 	poolCreateCmd.Flags().String("image", "", "Container image (required)")
 	poolCreateCmd.Flags().String("profile", "", "Pool selection profile (default: pool name)")
 	poolCreateCmd.Flags().Int32("replicas", 2, "Number of warm replicas")
+	poolCreateCmd.Flags().String("workspace-dir", "", "Workspace directory inside each sandbox")
 
 	poolScaleCmd.Flags().Int32("replicas", 0, "Target replica count")
 	poolScaleCmd.MarkFlagRequired("replicas")

@@ -22,9 +22,15 @@ var expCreateCmd = &cobra.Command{
 		image, _ := cmd.Flags().GetString("image")
 		profile, _ := cmd.Flags().GetString("profile")
 		count, _ := cmd.Flags().GetInt("sessions")
+		workspaceDir, _ := cmd.Flags().GetString("workspace-dir")
+		idleTimeout, _ := cmd.Flags().GetInt("idle-timeout")
+		maxLifetime, _ := cmd.Flags().GetInt("max-lifetime")
 
 		if image == "" {
-			return fmt.Errorf("--image is required")
+			return usageError("--image is required")
+		}
+		if count < 1 {
+			return usageError("--sessions must be positive")
 		}
 
 		c := newClient()
@@ -32,10 +38,13 @@ var expCreateCmd = &cobra.Command{
 
 		for i := 0; i < count; i++ {
 			info, err := c.CreateManagedSession(CreateManagedSessionRequest{
-				Image:        image,
-				Profile:      profile,
-				ExperimentID: args[0],
-				Namespace:    flagNamespace,
+				Image:              image,
+				Profile:            profile,
+				ExperimentID:       args[0],
+				Namespace:          flagNamespace,
+				WorkspaceDir:       workspaceDir,
+				IdleTimeoutSeconds: idleTimeout,
+				MaxLifetimeSeconds: maxLifetime,
 			})
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Session %d/%d failed: %v\n", i+1, count, err)
@@ -190,6 +199,9 @@ func init() {
 	expCreateCmd.Flags().String("image", "", "Container image (required)")
 	expCreateCmd.Flags().String("profile", "default", "Resource profile")
 	expCreateCmd.Flags().Int("sessions", 1, "Number of sessions to create")
+	expCreateCmd.Flags().String("workspace-dir", "", "Workspace directory inside each sandbox")
+	expCreateCmd.Flags().Int("idle-timeout", 0, "Idle timeout in seconds (0 uses gateway default)")
+	expCreateCmd.Flags().Int("max-lifetime", 0, "Maximum lifetime in seconds (0 uses gateway default)")
 
 	expDeleteCmd.Flags().Bool("force", false, "Skip confirmation")
 

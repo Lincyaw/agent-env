@@ -50,6 +50,7 @@ docker build -f Dockerfile.executor-agent -t arl-executor-agent:dev .
 Install the chart:
 
 ```bash
+helm dependency build charts/agent-env
 helm upgrade --install agent-env charts/agent-env \
   -n arl --create-namespace \
   --set auth.enabled=false \
@@ -59,4 +60,4 @@ helm upgrade --install agent-env charts/agent-env \
   --set image.injectedPullPolicy=IfNotPresent
 ```
 
-For production, keep authentication enabled and provide API keys.
+For production, keep authentication enabled and provide `auth.apiKeys`.

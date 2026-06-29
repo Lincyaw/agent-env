@@ -1,93 +1,62 @@
 # Python Examples
 
-This directory contains examples demonstrating various features of the ARL Python SDK.
+This directory contains runnable examples for the current `arl-env` SDK.
 
-## Running Examples
+## Files
+
+| File | Purpose |
+| --- | --- |
+| `test_arl_sdk.py` | Integration smoke suite for gateway health, pool lifecycle, execution, file transfer, restore, replay, logs, shell, keep-alive attach, managed sessions, and optional observability endpoints. |
+| `shell.py` | Interactive terminal client for a sandbox session over the gateway WebSocket shell endpoint. |
+| `bench_gateway.py` | Gateway benchmark helper. |
+
+The older numbered examples (`01_basic_execution.py`, `run_all_examples.py`,
+and similar names) are not present in this checkout.
+
+## Run the Integration Suite
+
+Start a gateway port-forward first:
 
 ```bash
-# Run individual example
+kubectl -n arl port-forward svc/agent-env-gateway 8080:8080
+```
+
+Then run:
+
+```bash
 cd examples/python
-uv run python 01_basic_execution.py
-
-# Run all examples
-uv run python run_all_examples.py
+uv run python test_arl_sdk.py \
+  --gateway-url http://127.0.0.1:8080 \
+  --namespace arl \
+  --pool-image busybox:latest
 ```
 
-## Examples
-
-### Basic Features
-
-1. **01_basic_execution.py** - Basic command execution
-2. **02_multi_step_pipeline.py** - Multi-step workflows
-3. **03_environment_variables.py** - Environment variables
-4. **04_working_directory.py** - Working directories
-5. **05_error_handling.py** - Error handling
-6. **06_long_running_task.py** - Long-running tasks
-7. **07_sandbox_reuse.py** - Sandbox reuse
-8. **08_callback_hooks.py** - Callback hooks
-
-### Advanced Features
-
-9. **09_executor_container.py** - Executor container execution ⭐ **NEW**
-   - Mixed execution modes (sidecar + executor)
-   - Using executor-specific tools (pip, npm, etc.)
-   - Performance comparison
-
-## Executor Container Execution
-
-Commands can be executed in either:
-- **Sidecar (default)**: Fast (1-5ms)
-- **Executor**: Slower (10-50ms), but has executor tools
-
-```python
-result = session.execute([
-    # Fast: sidecar
-    {"name": "list", "type": "Command", "command": ["ls", "-la"]},
-    
-    # Has executor tools
-    {"name": "install", "type": "Command",
-     "command": ["pip", "install", "requests"],
-     "container": "executor"},
-])
-```
-
-## Integration Tests
-
-**test_arl_sdk.py** - Comprehensive test suite with beautiful output
-
-Run all integration tests to verify your ARL setup:
+Useful options:
 
 ```bash
-# Basic run with summary
-uv run python test_arl_sdk.py
-
-# Verbose output with detailed steps
 uv run python test_arl_sdk.py --verbose
-
-# Custom gateway URL
-uv run python test_arl_sdk.py --gateway-url http://localhost:8080
-
-# Keep pool for debugging
 uv run python test_arl_sdk.py --skip-cleanup
+uv run python test_arl_sdk.py --metrics-url http://127.0.0.1:9091
 ```
 
-Tests include:
-- Health check and pool management
-- Command execution and multi-step workflows
-- Snapshot & restore mechanism
-- Session history and trajectory export
-- Tool provisioning and calling
-- Interactive WebSocket shell
+If gateway auth is enabled, set `ARL_API_KEY` before running the examples.
 
-**test_interactive_shell.py** - Interactive terminal for manual exploration
+## Interactive Shell
 
 ```bash
-# Connect to an interactive shell
-uv run python test_interactive_shell.py
+cd examples/python
+uv run python shell.py \
+  --gateway-url http://127.0.0.1:8080 \
+  --namespace arl \
+  --pool numpy
 ```
 
-## More Information
+The shell example ensures a pool exists, creates a session, then connects to
+`/v1/sessions/{id}/shell`.
 
-- [Full Documentation](https://lincyaw.github.io/agent-env/)
-- [IMPLEMENTATION_SUMMARY.md](../../IMPLEMENTATION_SUMMARY.md)
-- [TEST_REPORT.md](../../TEST_REPORT.md)
+## Execution Model
+
+Commands execute in the executor container, which is the requested user image.
+The sidecar exposes the gRPC/WebSocket control plane and forwards work to the
+executor-agent over a Unix socket. There is no supported `container` step field
+for choosing sidecar versus executor execution in the current gateway API.

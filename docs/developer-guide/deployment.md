@@ -7,8 +7,9 @@ agent-sandbox-controller
 agent-env gateway
 Redis       optional session persistence
 ClickHouse  optional trajectory storage
-Prometheus  optional metrics collection
-Grafana     optional dashboards
+Prometheus  metrics collection, enabled by chart defaults
+Grafana     dashboards, enabled by chart defaults
+Alertmanager optional alerting, enabled by chart defaults
 ```
 
 The legacy in-tree WarmPool controller is no longer deployed.
@@ -38,6 +39,9 @@ helm upgrade --install agent-env charts/agent-env \
   --set prometheus.enabled=true \
   --set grafana.enabled=true
 ```
+
+For production, keep authentication enabled and set `auth.apiKeys` with one or
+more `key:role` lines. Roles are `admin` and `user`.
 
 ## Required RBAC
 

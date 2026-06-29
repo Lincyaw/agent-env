@@ -148,7 +148,7 @@ session = SandboxSession(
     namespace="default",             # Kubernetes namespace
     gateway_url="http://localhost:8080",  # Gateway API URL
     keep_alive=False,                # Delete sandbox after use (default)
-    timeout="30s",                   # Default execution timeout
+    timeout=300.0,                   # HTTP request timeout in seconds
 )
 ```
 
@@ -161,7 +161,7 @@ session = SandboxSession(
 | `namespace` | str | `"default"` | Kubernetes namespace |
 | `gateway_url` | str | Required | URL of the Gateway API |
 | `keep_alive` | bool | `False` | Keep sandbox after use |
-| `timeout` | str | `"30s"` | Default timeout for executions |
+| `timeout` | float | `300.0` | HTTP request timeout in seconds |
 | `api_key` | str \| None | `None` | API key for authentication. Falls back to `ARL_API_KEY` env var |
 
 **Methods:**
@@ -171,7 +171,9 @@ session = SandboxSession(
 | `create_sandbox()` | Allocate a sandbox from the pool |
 | `delete_sandbox()` | Release the sandbox |
 | `execute(steps)` | Execute steps in the sandbox |
-| `restore()` | Restore sandbox to initial state |
+| `replay_from(source_session_id)` | Replay another session's history into this sandbox |
+| `restore(snapshot_id)` | Restore by replaying history up to a previous step snapshot |
+| `get_logs()` / `iter_logs()` | Read or stream session sidecar logs |
 | `export_trajectory()` | Export execution trajectory |
 
 ### WarmPoolManager
@@ -187,12 +189,12 @@ manager = WarmPoolManager(namespace="default")
 manager.create_warmpool(
     name="my-pool",
     image="python:3.9-slim",
-    sidecar_image="arl-sidecar:latest",
+    profile="my-pool",
     replicas=3,
 )
 
 # Wait for pool to be ready
-manager.wait_for_warmpool_ready("my-pool")
+manager.wait_for_ready("my-pool")
 
 # Get WarmPool status
 pool = manager.get_warmpool("my-pool")
@@ -308,7 +310,7 @@ session = SandboxSession(
     image="python:3.12",
     profile="python-pool",
     gateway_url="http://localhost:8080",
-    timeout="5m",  # 5 minutes
+    timeout=300.0,  # 5 minutes
 )
 ```
 

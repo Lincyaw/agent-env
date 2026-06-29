@@ -1,287 +1,246 @@
 ---
 name: arl-cli
 description: |
-  Guide for using the `arl` CLI to inspect, debug, and manage the ARL (Agentic RL) runtime — experiments, warm pools, sessions, logs, and metrics. Use this skill whenever the user asks about checking pool status, viewing experiment sessions, debugging pods, streaming logs, executing commands in a sandbox, exporting trajectories, or any operational task involving the ARL system. Also trigger when the user mentions `arl` CLI commands, asks "how do I see what's running", "show me the pools", "check experiment X", "debug this session", "看看 pool 状态", "查看实验", "导出 trajectory", or wants to combine multiple arl operations into a workflow. Even if the user doesn't say "arl" explicitly, trigger when the question is about inspecting or controlling ARL runtime resources.
+  Guide for using the `arl` CLI to inspect, debug, and manage the ARL (Agentic RL) runtime: experiments, warm pools, sessions, files, snapshots, replay, logs, and metrics. Use this skill whenever the user asks about checking pool status, viewing experiment sessions, creating or debugging sessions, transferring files, restoring snapshots, replaying trajectories, streaming logs, exporting trajectories, or any operational task involving the ARL system. Also trigger when the user mentions `arl` CLI commands, asks "how do I see what's running", "show me the pools", "check experiment X", "debug this session", "看看 pool 状态", "查看实验", "导出 trajectory", or wants to combine multiple arl operations into a workflow.
 ---
 
 # ARL CLI
 
-`arl` is the command-line tool for the ARL runtime. It talks to the Gateway REST API (and through it, to sidecar gRPC in every pod) to give you a single pane of glass over experiments, pools, sessions, and logs.
+`arl` is the command-line tool for the ARL runtime. It talks to the Gateway REST
+API, which allocates sandbox-backed sessions and reaches sidecars inside pods.
 
 ## Setup
 
 ```bash
-# Build
 make build-cli          # produces bin/arl
 
-# Configure (pick one)
-export ARL_GATEWAY_URL=http://localhost:8080   # or your gateway address
-export ARL_API_KEY=your-admin-token            # required if auth is enabled
-export ARL_NAMESPACE=default                   # default namespace for pool operations
-
-# Or pass per-command
-arl --gateway-url http://gw:8080 --api-key xxx pool list
+export ARL_GATEWAY_URL=http://localhost:8080
+export ARL_API_KEY=your-token
+export ARL_NAMESPACE=default
+export ARL_FORMAT=json        # optional: table, json, or wide
 ```
 
-Global flags available on every command:
+Global flags:
 
 | Flag | Short | Env var | Default | Purpose |
-|------|-------|---------|---------|---------|
+| --- | --- | --- | --- | --- |
 | `--gateway-url` | `-g` | `ARL_GATEWAY_URL` | `http://localhost:8080` | Gateway base URL |
-| `--api-key` | `-k` | `ARL_API_KEY` | (none) | Bearer token for auth |
-| `--namespace` | `-n` | `ARL_NAMESPACE` | `default` | K8s namespace |
-| `--output` | `-o` | — | `table` | Output format: `table`, `json`, `wide` |
+| `--api-key-file` | none | none | empty | Read bearer token from a file |
+| `--api-key` | `-k` | `ARL_API_KEY` | empty | Bearer token; prefer env or file for automation |
+| `--namespace` | `-n` | `ARL_NAMESPACE` | `default` | Namespace for session, pool, and experiment creation |
+| `--format` | none | `ARL_FORMAT` / `ARL_OUTPUT_FORMAT` | `table` | `table`, `json`, or `wide` |
+| `--output` | `-o` | none | same as `--format` | Legacy alias for `--format` |
+| `--no-color` | none | `NO_COLOR` | false | Disable ANSI color |
 
-## Command Reference
+Use `--format json` for scripts and automation. Do not use JSON format with
+`arl session download <id> <remote> -`, because stdout is reserved for the file
+bytes.
+
+Agent-facing introspection:
+
+```bash
+arl --dump-schema
+```
+
+Exit codes:
+
+| Code | Meaning |
+| --- | --- |
+| `0` | Success |
+| `1` | Generic error |
+| `2` | Argument or syntax error |
+| `3` | Resource not found |
+| `4` | Authentication or permission failure |
+| `5` | Conflict or already exists |
+| `6` | User cancelled or interrupted |
+| `7` | Missing dependency or environment error |
+
+## Commands
 
 ### Experiments
 
-Experiments group managed sessions that share an image and auto-scaled pool.
-
 ```bash
-arl exp list                           # list all experiments with session counts
-arl exp sessions <experiment-id>       # list sessions under an experiment
-arl exp stats <experiment-id>          # show summary (session count, pool, namespace)
-arl exp delete <experiment-id> --force # delete ALL sessions + release pool capacity
+arl exp create <experiment-id> --image python:3.12 --sessions 1
+arl exp create <experiment-id> --image python:3.12 --profile gpu --sessions 4 \
+  --workspace-dir /workspace --idle-timeout 1800 --max-lifetime 7200
+arl exp list
+arl exp sessions <experiment-id>
+arl exp stats <experiment-id>
+arl exp delete <experiment-id> --force
 ```
+
+Use experiments when sessions should be grouped for later listing, statistics,
+trajectory export, or bulk deletion.
 
 ### Pools
 
-Pools are WarmPool CRDs — pre-warmed pod groups ready for instant session allocation.
-
 ```bash
-arl pool list                          # list pools in current namespace
-arl pool list -A                       # list across ALL namespaces
-arl pool list -o wide                  # include image name, namespace, age
-arl pool get <name>                    # detailed view: replicas, conditions, image
-arl pool create <name> --image python:3.11 --replicas 3
-arl pool scale <name> --replicas 10
+arl pool list
+arl pool list -A
+arl pool list --format wide
+arl pool get <name>
+arl pool create <name> --image python:3.12 --profile <profile> --replicas 2
+arl pool create <name> --image python:3.12 --workspace-dir /workspace
+arl pool scale <name> --replicas 5
 arl pool delete <name> --force
 
-# Execute a command inside a pool pod (creates temp session, runs, cleans up)
-arl pool exec <name> -- python -c "import torch; print(torch.cuda.is_available())"
-arl pool exec <name> -- ls /workspace
-arl pool exec <name> -- nvidia-smi
+# Creates a temporary session, runs the command, then deletes the session.
+arl pool exec <name> -- python -c "print('ok')"
 
-# Stream logs from ALL pods in the pool
-arl pool logs <name>                   # last 100 lines
-arl pool logs <name> -f                # follow mode (like tail -f)
-arl pool logs <name> --tail 50 -f      # last 50 then follow
+arl pool logs <name>
+arl pool logs <name> --tail 50 -f
 ```
+
+Current CLI defaults `arl pool create` to `--replicas 2`. Gateway-created
+image-backed pools use one replica unless the caller provides another value.
 
 ### Sessions
 
-Sessions are allocated pod slots with execution history and snapshot/restore.
-
 ```bash
-arl session list                               # all active sessions
-arl session list --pool my-pool                # filter by pool
-arl session list --experiment exp-42           # filter by experiment
-arl session list -o wide                       # include pod IP, namespace
-arl session get <id>                           # session detail (pod, pool, age)
-arl session delete <id>                        # terminate and release pod
+arl session create --image python:3.12
+arl session create --profile default
+arl session create --image python:3.12 --profile cpu \
+  --idle-timeout 1800 --max-lifetime 7200
 
-# Execution
-arl session exec <id> -- echo hello            # run a command
-arl session shell <id>                         # interactive terminal (WebSocket)
+arl session list
+arl session list --profile <profile>
+arl session list --experiment <experiment-id>
+arl session list --format wide
+arl session get <id>
+arl session delete <id>
 
-# History and trajectory
-arl session history <id>                       # step table (index, name, exit, duration)
-arl session history <id> -v                    # include stdout/stderr output
-arl session trajectory <id>                    # JSONL to stdout
-arl session trajectory <id> -f out.jsonl       # write to file
+arl session exec <id> -- echo hello
+arl session shell <id>
 
-# Logs
-arl session logs <id>                          # sidecar ring buffer (last 100)
-arl session logs <id> -f                       # follow mode
+arl session upload <id> ./local.txt data/local.txt
+arl session upload <id> ./local.txt data/local.txt --verify
+arl session upload <id> - data/stdin.txt --sha256 <expected-sha256>
+arl session download <id> data/local.txt ./local-copy.txt
+arl session download <id> data/local.txt -
+
+arl session restore <id> <snapshot-id>
+arl session replay <target-id> --source <source-id>
+arl session replay <target-id> --source <source-id> --up-to-step 3
+
+arl session history <id>
+arl session history <id> -v
+arl session trajectory <id>
+arl session trajectory <id> -f out.jsonl
+
+arl session logs <id>
+arl session logs <id> --tail 50 -f
 ```
+
+File paths are workspace-relative. Upload with `--verify` when the local input
+is a file and you want the CLI to compute SHA256 and ask the gateway to verify
+the write. When uploading from stdin, pass `--sha256` yourself if verification
+is required.
+
+`restore` uses snapshot IDs returned by `session exec` results. `replay` copies
+recorded steps from a source session into an existing target session; use
+`--up-to-step` to stop after a specific zero-based step index.
+
+There is no current `arl session list --pool` flag. Filter by `--profile` or
+`--experiment`, or use `--format json` with `jq`.
 
 ### Diagnostics
 
 ```bash
-arl status                 # gateway health + session/pool/experiment counts
-arl metrics                # ARL-prefixed Prometheus metrics
-arl metrics --filter pool  # filter by substring
-arl metrics --raw          # full Prometheus exposition format
-arl config                 # show current CLI configuration
+arl status
+arl metrics
+arl metrics --filter pool
+arl metrics --raw
+arl config
 ```
+
+The gateway exposes metrics on the internal port. If `arl metrics` fails
+against the public gateway URL, port-forward the metrics service and point
+`--gateway-url` at that internal endpoint.
 
 ## Common Workflows
 
-### 1. "What's running right now?"
-
-Quick overview of the entire system state:
+### Runtime Snapshot
 
 ```bash
 arl status
-arl pool list -o wide
-arl session list -o wide
+arl pool list --format wide
+arl session list --format wide
+arl exp list
 ```
 
-### 2. Debug a failing experiment
-
-When sessions in an experiment are failing:
+### Debug a Session
 
 ```bash
-# See which sessions exist and their pods
-arl exp sessions exp-42
-
-# Check the pool health (conditions, ready vs allocated)
-arl pool get <pool-name-from-above>
-
-# Look at execution history for a specific session
+arl session get <session-id>
 arl session history <session-id> -v
-
-# Stream live logs from the session's sidecar
-arl session logs <session-id> -f
-
-# Or stream logs from ALL pods in the pool at once
-arl pool logs <pool-name> -f
+arl session logs <session-id> --tail 50
 ```
 
-### 3. Pre-warm an image (replicas=0)
+Look for non-zero step exit codes, stderr, missing snapshot IDs, and
+sidecar/executor connection errors.
 
-When `replicas=0`, the controller creates a lightweight pre-pull pod to cache the
-image on one node without running actual warm pods. When a session is requested,
-the pool scales up and the ImageLocality scheduler routes the pod to the node that
-already has the cached image — near-instant startup.
+### Debug a Pool
 
 ```bash
-# Pre-warm: create a pool with replicas=0 (image-only, no running pods)
-arl pool create my-pool --image my-registry/my-image:latest --replicas 0
-
-# Check that the pre-pull pod ran (image is cached)
-arl pool get my-pool            # readyReplicas=0, no active pods, image cached
-
-# Later, scale up when needed
-arl pool scale my-pool --replicas 5
+arl pool get <pool-name>
+arl pool logs <pool-name> --tail 50
+kubectl get sandboxwarmpools,sandboxclaims,sandboxes -A
 ```
 
-This is the **default behavior** — `DefaultPoolReplicas=0` and
-`ManagedPoolInitialReplicas=0`. All new pools (including managed pools created
-via `POST /v1/managed/sessions`) start with replicas=0 and pre-pull only.
-The pool auto-scales when a session is requested.
+Check conditions for failing pods, image pull errors, zero ready replicas, or
+allocated replicas consuming all warm capacity.
 
-### 4. Quick-test a container image
-
-Before using an image in a large experiment, validate it works:
+### Test an Image
 
 ```bash
-# Create a pool with 1 replica for testing
 arl pool create test-pool --image my-registry/my-image:latest --replicas 1
-
-# Wait for it to be ready, then test
-arl pool get test-pool          # check conditions
-arl pool exec test-pool -- python -c "import mylib; print('ok')"
-arl pool exec test-pool -- cat /etc/os-release
-
-# Clean up
+arl pool get test-pool
+arl pool exec test-pool -- sh -c "uname -a && pwd"
 arl pool delete test-pool --force
 ```
 
-### 5. Export training trajectories
-
-After an experiment completes, export all session trajectories for SFT/RL:
+### Transfer Files
 
 ```bash
-# List sessions
-arl exp sessions exp-42 -o json | jq -r '.[].id' > session_ids.txt
+arl session upload <session-id> ./input.json data/input.json --verify
+arl session exec <session-id> -- python train.py data/input.json
+arl session download <session-id> outputs/result.json ./result.json
+```
 
-# Export each trajectory
-mkdir -p trajectories/
+Use `-` for stdin/stdout only when the surrounding script expects raw bytes.
+
+### Restore and Replay
+
+```bash
+arl session exec <session-id> -- python step.py
+arl session history <session-id> -v
+arl session restore <session-id> <snapshot-id>
+
+arl session create --image python:3.12 --format json
+arl session replay <target-session-id> --source <source-session-id> --up-to-step 3
+```
+
+Restore is for returning one session to a known snapshot. Replay is for
+reconstructing a sequence of recorded steps in another session.
+
+### Export Trajectories
+
+```bash
+arl exp sessions exp-42 --format json | jq -r '.[].id' > session_ids.txt
+mkdir -p trajectories/exp-42
 while read sid; do
-  arl session trajectory "$sid" -f "trajectories/${sid}.jsonl"
+  arl session trajectory "$sid" -f "trajectories/exp-42/${sid}.jsonl"
 done < session_ids.txt
 ```
 
-### 6. Monitor pool utilization
+## Best Practices
 
-Watch pool metrics for capacity planning:
-
-```bash
-# One-shot utilization
-arl pool list -o wide
-
-# Prometheus metrics for deeper analysis
-arl metrics --filter pool_utilization
-arl metrics --filter pod_schedule_seconds
-arl metrics --filter image_pull
-```
-
-### 7. Scale up before a big run
-
-Pre-scale pools before launching many sessions:
-
-```bash
-arl pool scale training-pool --replicas 20
-arl pool get training-pool    # watch ready count climb
-```
-
-### 8. Clean up after experiments
-
-```bash
-# Delete a single experiment (all its sessions)
-arl exp delete exp-old --force
-
-# Or find and delete idle pools
-arl pool list -o json | jq -r '.[] | select(.allocatedReplicas == 0) | .name'
-```
-
-## JSON Output and Scripting
-
-Every command supports `-o json` for machine-readable output. Combine with `jq` for powerful one-liners:
-
-```bash
-# Count sessions per experiment
-arl exp list -o json | jq '.[] | "\(.experimentId): \(.sessionCount) sessions"'
-
-# Find pools with no ready replicas (possible issue)
-arl pool list -o json | jq '.[] | select(.readyReplicas == 0)'
-
-# Get all pod IPs for a pool
-arl session list --pool my-pool -o json | jq -r '.[].podIP'
-
-# Total allocated pods across all pools
-arl pool list -o json | jq '[.[].allocatedReplicas] | add'
-```
-
-## HTTP Proxy (mihomo)
-
-The cluster runs an in-cluster mihomo (Clash Meta) proxy at `mihomo.arl.svc:7890`
-so sandbox pods can access GitHub, PyPI, npm, etc. The operator automatically
-injects `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY` env vars into all warm pool
-containers (except sidecar) when `proxy.url` is set in Helm values.
-
-```bash
-# Verify proxy is running
-kubectl --context=arl get deploy mihomo -n arl
-
-# Test connectivity
-kubectl --context=arl run test-proxy --rm -i --restart=Never -n arl \
-  --image=pair-diag-cn-guangzhou.cr.volces.com/pair/redis:8-alpine \
-  --env="https_proxy=http://mihomo.arl.svc:7890" \
-  -- sh -c 'wget -q -O /dev/null https://github.com && echo OK || echo FAIL'
-
-# Update proxy config (static Clash YAML)
-kubectl --context=arl create configmap mihomo-config -n arl \
-  --from-file=config.yaml=/path/to/config.yaml --dry-run=client -o yaml | \
-  kubectl --context=arl apply -f -
-kubectl --context=arl rollout restart deploy/mihomo -n arl
-```
-
-Helm values controlling proxy injection:
-```yaml
-proxy:
-  url: "http://mihomo.arl.svc:7890"    # injected into all warm pool pods
-  noProxy: ""                           # defaults to K8s internal ranges
-```
-
-## Tips
-
-- `arl pool exec` is the fastest way to test something in a pool — it handles session lifecycle automatically
-- `arl session shell` gives you a full interactive terminal if you need to poke around
-- Use `-o wide` for extra columns (image, namespace, pod IP) without switching to JSON
-- Logs stream from the sidecar's ring buffer (last 2000 lines), not from K8s — works without kubeconfig
-- `arl exp` aliases to `arl experiment`, `arl session` aliases to `arl sess`
-- Default `replicas=0` means new pools only pre-pull the image; pods are created on-demand when sessions are requested
-- The mihomo proxy config is a static Clash YAML in ConfigMap `mihomo-config`; update it and restart the deployment to change proxy nodes
+- Prefer `arl exp create` for benchmark or training runs that need grouping and cleanup; prefer `arl session create` for ad hoc debugging.
+- Use `--format json` for scripts, but keep binary downloads on raw stdout.
+- Capture `snapshot_id` values from exec results if a run may need rollback or replay.
+- Pass workspace-relative file paths to upload/download; avoid absolute paths unless the gateway-side behavior is intentional.
+- Use `--verify` or `--sha256` for file uploads where corruption would invalidate an experiment.
+- Clean up debug sessions and test pools with `arl session delete`, `arl exp delete --force`, and `arl pool delete --force`.
+- Pool management, global session listing, and managed session creation require an admin key when auth is enabled.
+- User keys can create/delete owned sessions, execute commands, transfer files, restore/replay, open shells, and read owned history/trajectory.
+- Gateway auth is enabled by default in Helm. Set `auth.apiKeys` or explicitly set `auth.enabled=false` only for trusted local deployments.

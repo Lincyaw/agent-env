@@ -1,7 +1,7 @@
 # ARL-Infra
 
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
-[![Go Version](https://img.shields.io/badge/go-1.25+-00ADD8.svg)](https://golang.org/)
+[![Go Version](https://img.shields.io/badge/go-1.26+-00ADD8.svg)](https://golang.org/)
 [![Python Version](https://img.shields.io/badge/python-3.10+-3776AB.svg)](https://python.org/)
 
 **Gateway and Python SDK for agent-sandbox-backed Agentic Reinforcement Learning environments with warm pools and sidecar execution.**
@@ -10,7 +10,7 @@
 
 - ⚡ **Ultra-low latency**: Bypasses pod startup time using warm pools
 - 🔒 **Isolation**: Each sandbox runs in an isolated environment
-- 🔄 **Hot code reload**: Update and execute code without pod restarts
+- 🔄 **Stateful workspaces**: Reuse sessions, transfer files, restore by replay, and export trajectories
 - 🌐 **Gateway API**: REST API for session management and execution
 - ☸️ **Kubernetes-native**: CRD-based API, standard K8s tooling
 - 🐍 **Python SDK**: High-level API for seamless integration
@@ -57,12 +57,25 @@ with SandboxSession(
 git clone https://github.com/Lincyaw/agent-env.git
 cd agent-env
 
-# Enter the pinned local toolchain (recommended)
+# Enter the pinned local toolchain (recommended; see go.mod/devbox.json)
 devbox shell
 
-# Setup and deploy
-devbox run -- make k8s-setup
-skaffold run --profile=k8s
+# Install chart dependencies
+helm dependency build charts/agent-env
+
+# Build local runtime images
+docker build -f Dockerfile.gateway -t arl-gateway:dev .
+docker build -f Dockerfile.sidecar -t arl-sidecar:dev .
+docker build -f Dockerfile.executor-agent -t arl-executor-agent:dev .
+
+# Local trusted install. Production should keep auth enabled and set auth.apiKeys.
+helm upgrade --install agent-env charts/agent-env \
+  -n arl --create-namespace \
+  --set auth.enabled=false \
+  --set image.injectedPullPolicy=IfNotPresent \
+  --set gateway.image.tag=dev \
+  --set sidecar.image.tag=dev \
+  --set executorAgent.image.tag=dev
 ```
 
 ## Architecture
