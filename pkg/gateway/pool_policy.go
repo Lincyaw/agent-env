@@ -345,7 +345,8 @@ func (g *Gateway) admissionQueueSnapshot() map[types.NamespacedName]int32 {
 }
 
 func (g *Gateway) tryPlanSessionAllocation(ctx context.Context, intent ResourceIntent) (PoolSelection, AdmissionDecision, error) {
-	snapshots, err := g.snapshotPools(ctx, intent.Scope.normalized().Namespace)
+	scope := intent.Scope.normalized()
+	snapshots, err := g.snapshotPools(ctx, scope.Namespace)
 	if err != nil {
 		return PoolSelection{}, AdmissionDecision{}, err
 	}

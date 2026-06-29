@@ -473,10 +473,11 @@ class GatewayClient:
         body: dict[str, Any] = {
             "image": image,
             "experimentId": experiment_id,
-            "namespace": namespace,
             "profile": profile,
             "workspaceDir": workspace_dir,
         }
+        if namespace:
+            body["namespace"] = namespace
         config_env_payload = _serialize_config_env(config_env)
         if config_env_payload is not None:
             body["configEnv"] = config_env_payload

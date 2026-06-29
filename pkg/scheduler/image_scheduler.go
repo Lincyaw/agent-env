@@ -134,6 +134,12 @@ func (s *ImageScheduler) nodesForImageLocked(image string) []string {
 }
 
 func (s *ImageScheduler) updateNodeImagesLocked(nodeName string, images map[string]struct{}) {
+	if s.nodeImages == nil {
+		s.nodeImages = make(map[string]map[string]struct{})
+	}
+	if s.imageNodes == nil {
+		s.imageNodes = make(map[string]map[string]struct{})
+	}
 	s.removeNodeImagesLocked(nodeName)
 	s.nodeImages[nodeName] = images
 	for image := range images {

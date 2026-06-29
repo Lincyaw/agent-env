@@ -148,3 +148,44 @@ func TestSandboxClaimRuntimeAllocatorAllocate(t *testing.T) {
 		t.Fatalf("pod metadata labels = %#v, want none", claim.Spec.AdditionalPodMetadata.Labels)
 	}
 }
+
+func TestSandboxClaimRuntimeAllocatorDiagnosticStats(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := clientgoscheme.AddToScheme(scheme); err != nil {
+		t.Fatalf("add client-go scheme: %v", err)
+	}
+	if err := sandboxv1beta1.AddToScheme(scheme); err != nil {
+		t.Fatalf("add sandbox scheme: %v", err)
+	}
+	if err := extensionsv1beta1.AddToScheme(scheme); err != nil {
+		t.Fatalf("add sandbox extension scheme: %v", err)
+	}
+
+	replicas := int32(3)
+	k8sClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(
+			&extensionsv1beta1.SandboxWarmPool{
+				ObjectMeta: metav1.ObjectMeta{Name: "code", Namespace: "default"},
+				Spec: extensionsv1beta1.SandboxWarmPoolSpec{
+					Replicas: &replicas,
+				},
+				Status: extensionsv1beta1.SandboxWarmPoolStatus{
+					ReadyReplicas: 3,
+				},
+			},
+			&extensionsv1beta1.SandboxClaim{
+				ObjectMeta: metav1.ObjectMeta{Name: "claim-1", Namespace: "default"},
+				Spec: extensionsv1beta1.SandboxClaimSpec{
+					WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: "code"},
+				},
+			},
+		).
+		Build()
+
+	stats := NewSandboxClaimRuntimeAllocator(k8sClient).DiagnosticStats()
+	got := stats["default/code"]
+	if got.IdleCount != 2 {
+		t.Fatalf("IdleCount = %d, want 2", got.IdleCount)
+	}
+}

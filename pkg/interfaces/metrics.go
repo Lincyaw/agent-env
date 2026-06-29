@@ -6,6 +6,7 @@ import "time"
 type MetricsCollector interface {
 	RecordSessionAllocationDuration(poolName string, duration time.Duration)
 	RecordSandboxReadyDuration(poolName string, duration time.Duration)
+	RecordImagePullDuration(image string, duration time.Duration)
 	SetActiveSessions(count int64)
 	RecordGatewayStepDuration(stepType string, duration time.Duration)
 	IncrementGatewayStepResult(stepType, result string)
@@ -29,18 +30,19 @@ type NoOpMetricsCollector struct{}
 func (n *NoOpMetricsCollector) RecordSessionAllocationDuration(poolName string, duration time.Duration) {
 }
 func (n *NoOpMetricsCollector) RecordSandboxReadyDuration(poolName string, duration time.Duration) {}
-func (n *NoOpMetricsCollector) SetActiveSessions(count int64) {}
+func (n *NoOpMetricsCollector) RecordImagePullDuration(image string, duration time.Duration)       {}
+func (n *NoOpMetricsCollector) SetActiveSessions(count int64)                                      {}
 func (n *NoOpMetricsCollector) RecordGatewayStepDuration(stepType string, duration time.Duration) {
 }
 func (n *NoOpMetricsCollector) IncrementGatewayStepResult(stepType, result string) {}
 func (n *NoOpMetricsCollector) RecordSidecarCallDuration(method string, duration time.Duration) {
 }
-func (n *NoOpMetricsCollector) RecordRestoreDuration(duration time.Duration) {}
-func (n *NoOpMetricsCollector) IncrementRestoreResult(result string)         {}
-func (n *NoOpMetricsCollector) SetGatewayGoroutines(count int)               {}
-func (n *NoOpMetricsCollector) SetGatewaySessionsTotal(count int)            {}
-func (n *NoOpMetricsCollector) SetIdleQueueDepth(pool string, count int)     {}
-func (n *NoOpMetricsCollector) SetPendingWaiters(pool string, count int)     {}
+func (n *NoOpMetricsCollector) RecordRestoreDuration(duration time.Duration)  {}
+func (n *NoOpMetricsCollector) IncrementRestoreResult(result string)          {}
+func (n *NoOpMetricsCollector) SetGatewayGoroutines(count int)                {}
+func (n *NoOpMetricsCollector) SetGatewaySessionsTotal(count int)             {}
+func (n *NoOpMetricsCollector) SetIdleQueueDepth(pool string, count int)      {}
+func (n *NoOpMetricsCollector) SetPendingWaiters(pool string, count int)      {}
 func (n *NoOpMetricsCollector) SetAdmissionQueueDepth(pool string, count int) {}
 func (n *NoOpMetricsCollector) SetPoolSaturation(pool string, saturation float64) {
 }

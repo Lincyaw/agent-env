@@ -45,13 +45,3 @@ dependencies:
     to: observability
     type: deploys
     description: Optionally deploys Redis, ClickHouse, Prometheus, Grafana, Alertmanager, and proxy components.
-
-  - from: helm-chart
-    to: tinyauth
-    type: deploys
-    description: Optionally deploys Tinyauth and ingress annotations for edge authentication.
-
-  - from: gateway
-    to: tinyauth
-    type: trusts-forward-auth
-    description: Trusts Remote-User style headers only from configured ingress proxy CIDRs when forward-header auth is enabled.

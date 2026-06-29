@@ -77,13 +77,18 @@ func TestCreatePoolCreatesSandboxWarmPoolAndExecutableTemplate(t *testing.T) {
 	gw := &Gateway{
 		k8sClient: k8sClient,
 		gwConfig: GatewayConfig{
-			SidecarImage:       "arl-sidecar:orbstack",
-			ExecutorAgentImage: "arl-executor-agent:orbstack",
-			ImagePullPolicy:    string(corev1.PullIfNotPresent),
-			SidecarHTTPPort:    8080,
-			SidecarGRPCPort:    9090,
-			WorkspaceDir:       "/workspace",
-			GRPCAuthToken:      "test-token",
+			SidecarImage:                    "arl-sidecar:orbstack",
+			ExecutorAgentImage:              "arl-executor-agent:orbstack",
+			ImagePullPolicy:                 string(corev1.PullIfNotPresent),
+			SidecarHTTPPort:                 8080,
+			SidecarGRPCPort:                 9090,
+			WorkspaceDir:                    "/workspace",
+			GRPCAuthToken:                   "test-token",
+			SandboxNetworkPolicyManagement:  string(extensionsv1beta1.NetworkPolicyManagementManaged),
+			SandboxRuntimeClassName:         "kata",
+			SandboxSeccompProfileType:       string(corev1.SeccompProfileTypeLocalhost),
+			SandboxSeccompLocalhostProfile:  "profiles/agent-env.json",
+			SandboxAllowPrivilegeEscalation: false,
 		},
 	}
 
@@ -117,6 +122,29 @@ func TestCreatePoolCreatesSandboxWarmPoolAndExecutableTemplate(t *testing.T) {
 	sidecar := findContainer(podSpec.Containers, "sidecar")
 	if !hasVolumeMount(sidecar.VolumeMounts, "workspace", "/workspace") {
 		t.Fatalf("sidecar workspace mounts = %#v, want workspace mounted at /workspace", sidecar.VolumeMounts)
+	}
+	if template.Spec.NetworkPolicyManagement != extensionsv1beta1.NetworkPolicyManagementManaged {
+		t.Fatalf("NetworkPolicyManagement = %q, want Managed", template.Spec.NetworkPolicyManagement)
+	}
+	if podSpec.RuntimeClassName == nil || *podSpec.RuntimeClassName != "kata" {
+		t.Fatalf("RuntimeClassName = %v, want kata", podSpec.RuntimeClassName)
+	}
+	if podSpec.SecurityContext == nil || podSpec.SecurityContext.SeccompProfile == nil {
+		t.Fatal("pod seccomp profile missing")
+	}
+	if podSpec.SecurityContext.SeccompProfile.Type != corev1.SeccompProfileTypeLocalhost {
+		t.Fatalf("SeccompProfile.Type = %q, want Localhost", podSpec.SecurityContext.SeccompProfile.Type)
+	}
+	if podSpec.SecurityContext.SeccompProfile.LocalhostProfile == nil || *podSpec.SecurityContext.SeccompProfile.LocalhostProfile != "profiles/agent-env.json" {
+		t.Fatalf("SeccompProfile.LocalhostProfile = %v, want profiles/agent-env.json", podSpec.SecurityContext.SeccompProfile.LocalhostProfile)
+	}
+	for _, container := range append(podSpec.InitContainers, podSpec.Containers...) {
+		if container.SecurityContext == nil || container.SecurityContext.AllowPrivilegeEscalation == nil {
+			t.Fatalf("container %s missing allowPrivilegeEscalation", container.Name)
+		}
+		if *container.SecurityContext.AllowPrivilegeEscalation {
+			t.Fatalf("container %s allowPrivilegeEscalation = true, want false", container.Name)
+		}
 	}
 
 	pool := &extensionsv1beta1.SandboxWarmPool{}

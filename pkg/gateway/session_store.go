@@ -1,5 +1,7 @@
 package gateway
 
+import "context"
+
 // SessionStore abstracts session storage so the Gateway can use either
 // an in-memory store (default, for dev/testing) or a Redis-backed store
 // (for HA deployments with multiple gateway replicas).
@@ -24,4 +26,16 @@ type SessionStore interface {
 
 	// Close releases any resources held by the store.
 	Close() error
+}
+
+// RecoverableSessionStore can hydrate active sessions from durable storage
+// after a gateway restart. Implemented by RedisStore.
+type RecoverableSessionStore interface {
+	RecoverActiveSessions(ctx context.Context) (map[string]*session, error)
+}
+
+// SessionCountSetter lets recovery repair a durable active-session counter
+// after validating which persisted sessions still have live runtimes.
+type SessionCountSetter interface {
+	SetCount(count int64) int64
 }

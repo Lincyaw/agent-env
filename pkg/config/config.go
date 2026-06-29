@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -62,16 +63,12 @@ type Config struct {
 	RedisDB       int
 
 	// Authentication configuration
-	AuthEnabled               bool
-	AuthAPIKeys               string
-	AuthForwardHeadersEnabled bool
-	AuthForwardUserHeader     string
-	AuthForwardTrustedProxies string
-	AuthForwardAdminUsers     string
-	InternalPort              int
-	RateLimitRPS              float64
-	RateLimitBurst            int
-	AllowedOrigins            string
+	AuthEnabled    bool
+	AuthAPIKeys    string
+	InternalPort   int
+	RateLimitRPS   float64
+	RateLimitBurst int
+	AllowedOrigins string
 
 	// HTTP proxy injected into warm pool pods (all containers).
 	// When non-empty, HTTP_PROXY/HTTPS_PROXY/NO_PROXY env vars are set.
@@ -91,6 +88,13 @@ type Config struct {
 	// Scheduler integration.
 	SchedulerName        string
 	ImageLocalityEnabled bool
+
+	// Sandbox security policy applied to generated SandboxTemplates.
+	SandboxNetworkPolicyManagement  string
+	SandboxRuntimeClassName         string
+	SandboxSeccompProfileType       string
+	SandboxSeccompLocalhostProfile  string
+	SandboxAllowPrivilegeEscalation bool
 }
 
 // DefaultConfig returns the default configuration
@@ -126,27 +130,28 @@ func DefaultConfig() *Config {
 		RedisPassword: "",
 		RedisDB:       0,
 
-		AuthEnabled:               true,
-		AuthAPIKeys:               "",
-		AuthForwardHeadersEnabled: false,
-		AuthForwardUserHeader:     "Remote-User",
-		AuthForwardTrustedProxies: "",
-		AuthForwardAdminUsers:     "",
-		InternalPort:              9091,
-		RateLimitRPS:              2048,
-		RateLimitBurst:            4096,
-		AllowedOrigins:            "",
+		AuthEnabled:    true,
+		AuthAPIKeys:    "",
+		InternalPort:   9091,
+		RateLimitRPS:   2048,
+		RateLimitBurst: 4096,
+		AllowedOrigins: "",
 
-		AdmissionDisableColdStart:  false,
-		AdmissionQueueTimeout:      0,
-		AdmissionQueuePollInterval: 500 * time.Millisecond,
-		PoolAutoscalerEnabled:      false,
-		PoolAutoscalerInterval:     30 * time.Second,
-		PoolAutoscalerBuffer:       1,
-		PoolAutoscalerMinReplicas:  0,
-		PoolAutoscalerMaxReplicas:  0,
-		SchedulerName:              "",
-		ImageLocalityEnabled:       false,
+		AdmissionDisableColdStart:       false,
+		AdmissionQueueTimeout:           0,
+		AdmissionQueuePollInterval:      500 * time.Millisecond,
+		PoolAutoscalerEnabled:           false,
+		PoolAutoscalerInterval:          30 * time.Second,
+		PoolAutoscalerBuffer:            1,
+		PoolAutoscalerMinReplicas:       0,
+		PoolAutoscalerMaxReplicas:       0,
+		SchedulerName:                   "",
+		ImageLocalityEnabled:            false,
+		SandboxNetworkPolicyManagement:  "Unmanaged",
+		SandboxRuntimeClassName:         "",
+		SandboxSeccompProfileType:       "RuntimeDefault",
+		SandboxSeccompLocalhostProfile:  "",
+		SandboxAllowPrivilegeEscalation: false,
 	}
 }
 
@@ -232,7 +237,6 @@ func LoadFromEnv() *Config {
 			cfg.GatewayPort = p
 		}
 	}
-
 	if v := os.Getenv("K8S_CLIENT_QPS"); v != "" {
 		if f, err := strconv.ParseFloat(v, 32); err == nil {
 			cfg.K8sClientQPS = float32(f)
@@ -300,24 +304,6 @@ func LoadFromEnv() *Config {
 
 	if v := os.Getenv("AUTH_API_KEYS"); v != "" {
 		cfg.AuthAPIKeys = v
-	}
-
-	if v := os.Getenv("AUTH_FORWARD_HEADERS_ENABLED"); v != "" {
-		if b, err := strconv.ParseBool(v); err == nil {
-			cfg.AuthForwardHeadersEnabled = b
-		}
-	}
-
-	if v := os.Getenv("AUTH_FORWARD_USER_HEADER"); v != "" {
-		cfg.AuthForwardUserHeader = v
-	}
-
-	if v := os.Getenv("AUTH_FORWARD_TRUSTED_PROXIES"); v != "" {
-		cfg.AuthForwardTrustedProxies = v
-	}
-
-	if v := os.Getenv("AUTH_FORWARD_ADMIN_USERS"); v != "" {
-		cfg.AuthForwardAdminUsers = v
 	}
 
 	if v := os.Getenv("INTERNAL_PORT"); v != "" {
@@ -397,6 +383,23 @@ func LoadFromEnv() *Config {
 			cfg.ImageLocalityEnabled = b
 		}
 	}
+	if v := os.Getenv("SANDBOX_NETWORK_POLICY_MANAGEMENT"); v != "" {
+		cfg.SandboxNetworkPolicyManagement = v
+	}
+	if v := os.Getenv("SANDBOX_RUNTIME_CLASS_NAME"); v != "" {
+		cfg.SandboxRuntimeClassName = v
+	}
+	if v := os.Getenv("SANDBOX_SECCOMP_PROFILE_TYPE"); v != "" {
+		cfg.SandboxSeccompProfileType = v
+	}
+	if v := os.Getenv("SANDBOX_SECCOMP_LOCALHOST_PROFILE"); v != "" {
+		cfg.SandboxSeccompLocalhostProfile = v
+	}
+	if v := os.Getenv("SANDBOX_ALLOW_PRIVILEGE_ESCALATION"); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			cfg.SandboxAllowPrivilegeEscalation = b
+		}
+	}
 
 	return cfg
 }
@@ -440,7 +443,6 @@ func (c *Config) Validate() error {
 	if c.GatewayPort < 1 || c.GatewayPort > 65535 {
 		return fmt.Errorf("invalid gateway port: %d (must be 1-65535)", c.GatewayPort)
 	}
-
 	if c.K8sClientQPS <= 0 {
 		return fmt.Errorf("k8s client QPS must be > 0: %v", c.K8sClientQPS)
 	}
@@ -468,14 +470,6 @@ func (c *Config) Validate() error {
 
 	// Auth key validation is deferred to cmd/gateway/main.go which checks
 	// both AUTH_API_KEYS and AUTH_KEY_FILE before starting.
-	if c.AuthForwardHeadersEnabled {
-		if c.AuthForwardUserHeader == "" {
-			return fmt.Errorf("auth forward user header is required when forward-header auth is enabled")
-		}
-		if c.AuthForwardTrustedProxies == "" {
-			return fmt.Errorf("auth forward trusted proxies are required when forward-header auth is enabled")
-		}
-	}
 
 	if c.InternalPort < 1 || c.InternalPort > 65535 {
 		return fmt.Errorf("invalid internal port: %d (must be 1-65535)", c.InternalPort)
@@ -513,6 +507,19 @@ func (c *Config) Validate() error {
 	}
 	if c.PoolAutoscalerMaxReplicas > 0 && c.PoolAutoscalerMaxReplicas < c.PoolAutoscalerMinReplicas {
 		return fmt.Errorf("pool autoscaler max replicas (%d) must be >= min replicas (%d)", c.PoolAutoscalerMaxReplicas, c.PoolAutoscalerMinReplicas)
+	}
+	switch strings.ToLower(strings.TrimSpace(c.SandboxNetworkPolicyManagement)) {
+	case "", "managed", "unmanaged":
+	default:
+		return fmt.Errorf("sandbox network policy management must be Managed or Unmanaged: %q", c.SandboxNetworkPolicyManagement)
+	}
+	switch strings.ToLower(strings.TrimSpace(c.SandboxSeccompProfileType)) {
+	case "", "runtimedefault", "unconfined", "localhost":
+	default:
+		return fmt.Errorf("sandbox seccomp profile type must be RuntimeDefault, Unconfined, or Localhost: %q", c.SandboxSeccompProfileType)
+	}
+	if strings.EqualFold(strings.TrimSpace(c.SandboxSeccompProfileType), "Localhost") && strings.TrimSpace(c.SandboxSeccompLocalhostProfile) == "" {
+		return fmt.Errorf("sandbox seccomp localhost profile is required when seccomp profile type is Localhost")
 	}
 
 	return nil
