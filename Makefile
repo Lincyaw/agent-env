@@ -71,6 +71,10 @@ build-sidecar: ## Build sidecar binary
 build-cli: ## Build arl CLI binary
 	CGO_ENABLED=0 go build -o bin/arl cmd/arl/main.go
 
+.PHONY: build-image-locality-scheduler
+build-image-locality-scheduler: ## Build image locality scheduler binary
+	CGO_ENABLED=0 go build -tags=scheduler_plugin -o bin/image-locality-scheduler cmd/image-locality-scheduler/main.go
+
 ##@ Development
 
 .PHONY: fmt

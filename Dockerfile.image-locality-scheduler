@@ -1,0 +1,28 @@
+FROM --platform=$BUILDPLATFORM golang:1.26.4 AS builder
+
+ARG TARGETOS
+ARG TARGETARCH
+
+WORKDIR /workspace
+
+ENV GOPROXY=https://goproxy.cn,https://goproxy.io,https://proxy.golang.org,direct
+
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY pkg/scheduler/ pkg/scheduler/
+COPY pkg/scheduling/ pkg/scheduling/
+COPY cmd/image-locality-scheduler/ cmd/image-locality-scheduler/
+
+RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} GOMAXPROCS=8 go build \
+    -p 8 \
+    -tags=scheduler_plugin \
+    -ldflags="-s -w" \
+    -o image-locality-scheduler \
+    ./cmd/image-locality-scheduler
+
+FROM gcr.io/distroless/static:nonroot
+
+COPY --from=builder /workspace/image-locality-scheduler /image-locality-scheduler
+
+ENTRYPOINT ["/image-locality-scheduler"]

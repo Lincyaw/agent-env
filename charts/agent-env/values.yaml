@@ -31,6 +31,32 @@ image:
   # pod gets ImagePullBackOff. Surfaced to the gateway as IMAGE_PULL_POLICY.
   injectedPullPolicy: Always
 
+imageLocalityScheduler:
+  enabled: true
+  # Pods with this schedulerName are handled by the image-locality scheduler.
+  schedulerName: agent-env-image-locality
+  replicaCount: 1
+  image:
+    repository: arl-image-locality-scheduler
+    pullPolicy: IfNotPresent
+    tag: ""
+  serviceAccount:
+    name: ""
+  # Weight added to the scheduler's Score extension point. The plugin still
+  # runs together with the default resource/topology scoring plugins.
+  pluginWeight: 5
+  leaderElection:
+    enabled: true
+    resourceName: ""
+  logLevel: 2
+  resources:
+    requests:
+      cpu: "100m"
+      memory: 128Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
 sidecar:
   image:
     repository: arl-sidecar
@@ -75,6 +101,41 @@ gateway:
   maxLifetime: "3600s"      # Max total session lifetime
   sweepInterval: "30s"      # How often to check for expired sessions
   writeTimeout: "0s"        # Public HTTP write timeout; 0 disables it for long streaming execs
+  # Admission control for managed session allocation.
+  admission:
+    # When true, requests wait/reject instead of creating a cold sandbox when
+    # the selected warm pool has no ready capacity.
+    disableColdStart: false
+    # Max time a request may wait for ready capacity when cold start is
+    # disabled. With disableColdStart=false, requests can still fall back to a
+    # cold sandbox instead of entering this queue.
+    queueTimeout: "30s"
+    queuePollInterval: "500ms"
+  # Warm pool autoscaling policy. When enabled, the gateway adjusts
+  # SandboxWarmPool.spec.replicas from active sessions and admission queue depth.
+  autoscaler:
+    enabled: true
+    interval: "30s"
+    buffer: 1
+    minReplicas: 0
+    maxReplicas: 100
+  # Scheduler and image-locality hints applied to generated sandbox templates.
+  scheduler:
+    # Empty means: use imageLocalityScheduler.schedulerName when
+    # imageLocalityScheduler.enabled=true. Set explicitly to override.
+    name: ""
+    imageLocality:
+      enabled: true
+  # Security policy applied to generated sandbox templates.
+  sandboxSecurity:
+    # Supported values: Managed, Unmanaged.
+    networkPolicyManagement: "Unmanaged"
+    runtimeClassName: ""
+    seccompProfile:
+      # Supported values: RuntimeDefault, Unconfined, Localhost.
+      type: "RuntimeDefault"
+      localhostProfile: ""
+    allowPrivilegeEscalation: false
 
 # Authentication & security
 auth:
