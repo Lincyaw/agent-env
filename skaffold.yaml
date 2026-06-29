@@ -86,10 +86,14 @@ profiles:
             namespace: arl
             createNamespace: true
             setValueTemplates:
-              sidecar.image.tag: "{{.IMAGE_TAG}}"
-              gateway.image.tag: "{{.IMAGE_TAG2}}"
-              executorAgent.image.tag: "{{.IMAGE_TAG3}}"
-              imageLocalityScheduler.image.tag: "{{.IMAGE_TAG4}}"
+              sidecar.image.repository: "{{.IMAGE_REPO_arl_sidecar}}"
+              sidecar.image.tag: "{{.IMAGE_TAG_arl_sidecar}}"
+              gateway.image.repository: "{{.IMAGE_REPO_arl_gateway}}"
+              gateway.image.tag: "{{.IMAGE_TAG_arl_gateway}}"
+              executorAgent.image.repository: "{{.IMAGE_REPO_arl_executor_agent}}"
+              executorAgent.image.tag: "{{.IMAGE_TAG_arl_executor_agent}}"
+              imageLocalityScheduler.image.repository: "{{.IMAGE_REPO_arl_image_locality_scheduler}}"
+              imageLocalityScheduler.image.tag: "{{.IMAGE_TAG_arl_image_locality_scheduler}}"
     deploy:
       kubectl:
         flags:
