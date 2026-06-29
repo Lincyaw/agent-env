@@ -6,6 +6,12 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/Lincyaw/agent-env/pkg/labels"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	sandboxv1beta1 "sigs.k8s.io/agent-sandbox/api/v1beta1"
+	extensionsv1beta1 "sigs.k8s.io/agent-sandbox/extensions/api/v1beta1"
+	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
 func TestGatewayRecoverSessionsValidatesRuntimeBindings(t *testing.T) {
@@ -95,6 +101,108 @@ func TestGatewayRecoverSessionsValidatesRuntimeBindings(t *testing.T) {
 	}
 	if s.Runtime.ClaimName != "claim-ok" || s.Runtime.SandboxName != "sandbox-ok" {
 		t.Fatalf("runtime = %#v, want resolved allocation", s.Runtime)
+	}
+}
+
+func TestGatewayRecoverSessionsFromRuntimeBindingsForMemoryStore(t *testing.T) {
+	scheme := newGatewayTestScheme(t)
+	namespace := "default"
+	sessionID := "gw-recover"
+	claimName := "gw-recover"
+	sandboxName := "sandbox-recover"
+	podName := "pod-recover"
+	podIP := "10.0.0.8"
+	ownerHash := "owner-hash"
+	lastActivity := time.Date(2026, 6, 29, 12, 0, 0, 0, time.UTC)
+	replicas := int32(1)
+
+	k8sClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(
+		&extensionsv1beta1.SandboxTemplate{
+			ObjectMeta: metav1.ObjectMeta{Name: "tmpl", Namespace: namespace},
+		},
+		&extensionsv1beta1.SandboxWarmPool{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      "code",
+				Namespace: namespace,
+				Annotations: map[string]string{
+					poolProfileAnnotation: "default",
+				},
+			},
+			Spec: extensionsv1beta1.SandboxWarmPoolSpec{
+				Replicas:    &replicas,
+				TemplateRef: extensionsv1beta1.SandboxTemplateRef{Name: "tmpl"},
+			},
+			Status: extensionsv1beta1.SandboxWarmPoolStatus{ReadyReplicas: 1},
+		},
+		&extensionsv1beta1.SandboxClaim{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      claimName,
+				Namespace: namespace,
+				Annotations: map[string]string{
+					labels.SessionAnnotation:      sessionID,
+					labels.LastActivityAnnotation: lastActivity.Format(time.RFC3339),
+					labels.OwnerKeyHashAnnotation: ownerHash,
+					labels.ManagedAnnotation:      "true",
+					labels.ExperimentAnnotation:   "exp-1",
+				},
+			},
+			Spec: extensionsv1beta1.SandboxClaimSpec{
+				WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: "code"},
+			},
+			Status: extensionsv1beta1.SandboxClaimStatus{
+				Conditions: []metav1.Condition{{
+					Type:   string(sandboxv1beta1.SandboxConditionReady),
+					Status: metav1.ConditionTrue,
+				}},
+				SandboxStatus: extensionsv1beta1.SandboxStatus{
+					Name:   sandboxName,
+					PodIPs: []string{podIP},
+				},
+			},
+		},
+		&sandboxv1beta1.Sandbox{
+			ObjectMeta: metav1.ObjectMeta{
+				Name:      sandboxName,
+				Namespace: namespace,
+				Annotations: map[string]string{
+					sandboxv1beta1.SandboxPodNameAnnotation: podName,
+				},
+			},
+			Status: sandboxv1beta1.SandboxStatus{
+				PodIPs: []string{podIP},
+				Conditions: []metav1.Condition{{
+					Type:   string(sandboxv1beta1.SandboxConditionReady),
+					Status: metav1.ConditionTrue,
+				}},
+			},
+		},
+	).Build()
+
+	allocator := NewSandboxClaimRuntimeAllocator(k8sClient, namespace)
+	store := NewMemoryStore()
+	gw := New(k8sClient, allocator, nil, nil, nil, GatewayConfig{Namespace: namespace, IdleTimeout: time.Minute}, store)
+
+	recovered, err := gw.RecoverSessions(context.Background())
+	if err != nil {
+		t.Fatalf("RecoverSessions returned error: %v", err)
+	}
+	if recovered != 1 {
+		t.Fatalf("recovered = %d, want 1", recovered)
+	}
+	s, ok := store.Get(sessionID)
+	if !ok {
+		t.Fatal("session was not recovered into memory store")
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if s.ownerKeyHash != ownerHash || !s.managed || s.experimentID != "exp-1" {
+		t.Fatalf("recovered metadata owner=%q managed=%v experiment=%q", s.ownerKeyHash, s.managed, s.experimentID)
+	}
+	if s.Info.PodIP != podIP || s.Info.PodName != podName || s.Info.Status != "active" {
+		t.Fatalf("recovered session info = %#v", s.Info)
+	}
+	if !s.lastTaskTime.Equal(lastActivity) {
+		t.Fatalf("lastTaskTime = %v, want %v", s.lastTaskTime, lastActivity)
 	}
 }
 

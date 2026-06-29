@@ -30,9 +30,7 @@ class ApiKeyAuth(httpx.Auth):
             raise ValueError("api_key must be a non-empty string")
         self._api_key = api_key
 
-    def auth_flow(
-        self, request: httpx.Request
-    ) -> Generator[httpx.Request, httpx.Response, None]:
+    def auth_flow(self, request: httpx.Request) -> Generator[httpx.Request, httpx.Response, None]:
         request.headers["Authorization"] = f"Bearer {self._api_key}"
         yield request
 
@@ -90,9 +88,7 @@ class SsoTokenAuth(httpx.Auth):
         }
         if self._scope:
             data["scope"] = self._scope
-        resp = httpx.post(
-            self._token_url, data=data, timeout=self._timeout, verify=self._verify
-        )
+        resp = httpx.post(self._token_url, data=data, timeout=self._timeout, verify=self._verify)
         resp.raise_for_status()
         payload = resp.json()
         raw_token = payload.get("access_token")
@@ -112,23 +108,17 @@ class SsoTokenAuth(httpx.Auth):
                 return self._fetch_token()
             return self._token
 
-    def auth_flow(
-        self, request: httpx.Request
-    ) -> Generator[httpx.Request, httpx.Response, None]:
+    def auth_flow(self, request: httpx.Request) -> Generator[httpx.Request, httpx.Response, None]:
         request.headers["Authorization"] = f"Bearer {self._valid_token()}"
         response = yield request
         if response.status_code == 401:
             # The cached token may have been revoked or rotated upstream; mint a
             # fresh one and replay the request exactly once.
-            request.headers["Authorization"] = (
-                f"Bearer {self._valid_token(force_refresh=True)}"
-            )
+            request.headers["Authorization"] = f"Bearer {self._valid_token(force_refresh=True)}"
             yield request
 
 
-def resolve_auth(
-    auth: httpx.Auth | None, api_key: str | None
-) -> httpx.Auth | None:
+def resolve_auth(auth: httpx.Auth | None, api_key: str | None) -> httpx.Auth | None:
     """Resolve the auth flow from the explicit ``auth`` or an ``api_key``.
 
     Exactly one source may be provided. Returns ``None`` (unauthenticated) when

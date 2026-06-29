@@ -105,7 +105,7 @@ func DefaultConfig() *Config {
 		SidecarHTTPPort:    8080,
 		SidecarGRPCPort:    9090,
 		WorkspaceDir:       "/workspace",
-		HTTPClientTimeout:  30 * time.Second,
+		HTTPClientTimeout:  5 * time.Minute,
 		ClickHouseEnabled:  false,
 		ClickHouseAddr:     "localhost:9000",
 		ClickHouseDatabase: "arl",

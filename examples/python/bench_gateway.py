@@ -651,22 +651,23 @@ def exec_bench(
 
 @app.command()
 def managed_bench(
-    concurrency: int = typer.Option(
-        32, "--concurrency", "-c", help="Concurrent managed sessions."
-    ),
+    concurrency: int = typer.Option(32, "--concurrency", "-c", help="Concurrent managed sessions."),
     image: str = typer.Option(DEFAULT_IMAGE, "--image", "-i"),
     namespace: str = typer.Option(DEFAULT_NAMESPACE, "--namespace", "-n"),
     gateway_url: str = typer.Option(DEFAULT_GATEWAY, "--gateway", "-g"),
     timeout: float = typer.Option(300.0, "--timeout"),
     execute: bool = typer.Option(
-        True, "--execute/--no-execute",
+        True,
+        "--execute/--no-execute",
         help="Run a command in each session after creation.",
     ),
     cleanup: bool = typer.Option(
-        True, "--cleanup/--no-cleanup",
+        True,
+        "--cleanup/--no-cleanup",
     ),
     port_forward: bool = typer.Option(
-        True, "--port-forward/--no-port-forward",
+        True,
+        "--port-forward/--no-port-forward",
     ),
 ) -> None:
     """Stress-test managed sessions: concurrent creation and execution.
@@ -697,8 +698,7 @@ def managed_bench(
     # Phase 1: Concurrent session creation
     # ------------------------------------------------------------------
     console.print(
-        f"\n[bold cyan]Phase 1:[/bold cyan] "
-        f"Creating {concurrency} managed sessions concurrently..."
+        f"\n[bold cyan]Phase 1:[/bold cyan] Creating {concurrency} managed sessions concurrently..."
     )
 
     create_times: list[float] = []
@@ -721,9 +721,9 @@ def managed_bench(
 
     wall = Timer()
     with wall, ThreadPoolExecutor(max_workers=concurrency) as pool:
-        futures = [pool.submit(_create_one, i) for i in range(concurrency)]
-        for done_count, future in enumerate(as_completed(futures), start=1):
-            idx, elapsed, sid, err = future.result()
+        create_futures = [pool.submit(_create_one, i) for i in range(concurrency)]
+        for done_count, create_future in enumerate(as_completed(create_futures), start=1):
+            idx, elapsed, sid, err = create_future.result()
             with lock:
                 create_times.append(elapsed)
                 if sid:
@@ -736,9 +736,7 @@ def managed_bench(
                 if err:
                     short = err[:80]
                     status = f"[red]ERR: {short}[/red]"
-                console.print(
-                    f"  [{done_count}/{concurrency}] {status}"
-                )
+                console.print(f"  [{done_count}/{concurrency}] {status}")
 
     console.print(
         f"\n  Wall-clock: [bold]{fmt(wall.ms)}[/bold]  "
@@ -754,9 +752,7 @@ def managed_bench(
             key = e[:120]
             unique_errs[key] = unique_errs.get(key, 0) + 1
         console.print("\n  [red]Error summary:[/red]")
-        for msg, count in sorted(
-            unique_errs.items(), key=lambda x: -x[1]
-        ):
+        for msg, count in sorted(unique_errs.items(), key=lambda x: -x[1]):
             console.print(f"    {count}x  {msg}")
 
     # ------------------------------------------------------------------
@@ -789,24 +785,18 @@ def managed_bench(
                 return t.ms, str(exc)
 
         exec_wall = Timer()
-        with exec_wall, ThreadPoolExecutor(
-            max_workers=min(concurrency, 64)
-        ) as pool:
-            futures = [
-                pool.submit(_exec_one, sid) for sid in session_ids
-            ]
+        with exec_wall, ThreadPoolExecutor(max_workers=min(concurrency, 64)) as pool:
+            exec_futures = [pool.submit(_exec_one, sid) for sid in session_ids]
             done_count = 0
-            for future in as_completed(futures):
-                elapsed, err = future.result()
+            for exec_future in as_completed(exec_futures):
+                elapsed, err = exec_future.result()
                 done_count += 1
                 with lock:
                     exec_times.append(elapsed)
                     if err:
                         exec_errors.append(err)
                 if done_count % max(1, len(session_ids) // 10) == 0:
-                    console.print(
-                        f"  [{done_count}/{len(session_ids)}]"
-                    )
+                    console.print(f"  [{done_count}/{len(session_ids)}]")
 
         console.print(
             f"\n  Exec wall-clock: [bold]{fmt(exec_wall.ms)}[/bold]  "
@@ -822,9 +812,7 @@ def managed_bench(
         (f"Session create ({concurrency} concurrent)", create_times),
     ]
     if exec_times:
-        rows.append(
-            (f"Execute ({len(session_ids)} sessions)", exec_times)
-        )
+        rows.append((f"Execute ({len(session_ids)} sessions)", exec_times))
     console.print(stats_table("Managed Session Benchmark", rows))
 
     # Throughput summary
@@ -842,8 +830,7 @@ def managed_bench(
     # ------------------------------------------------------------------
     if cleanup and session_ids:
         console.print(
-            f"\n[dim]Cleaning up experiment {exp_id} "
-            f"({len(session_ids)} sessions)...[/dim]"
+            f"\n[dim]Cleaning up experiment {exp_id} ({len(session_ids)} sessions)...[/dim]"
         )
         try:
             deleted = client.delete_experiment(exp_id)

@@ -67,7 +67,11 @@ func responseError(resp *http.Response) error {
 	data, _ := io.ReadAll(resp.Body)
 	var errResp ErrorResponse
 	if json.Unmarshal(data, &errResp) == nil && errResp.Error != "" {
-		return &HTTPError{StatusCode: resp.StatusCode, Message: errResp.Error}
+		msg := errResp.Error
+		if errResp.Detail != "" {
+			msg += ": " + errResp.Detail
+		}
+		return &HTTPError{StatusCode: resp.StatusCode, Message: msg}
 	}
 	if msg := strings.TrimSpace(string(data)); msg != "" {
 		return &HTTPError{StatusCode: resp.StatusCode, Message: msg}
@@ -122,6 +126,12 @@ func (c *Client) DeleteSession(id string) error {
 func (c *Client) Execute(sessionID string, req ExecuteRequest) (*ExecuteResponse, error) {
 	var resp ExecuteResponse
 	return &resp, c.do("POST", "/v1/sessions/"+sessionID+"/execute", req, &resp)
+}
+
+func (c *Client) GetExecuteOperation(sessionID, operationID string) (*ExecuteOperationInfo, error) {
+	var info ExecuteOperationInfo
+	path := "/v1/sessions/" + url.PathEscape(sessionID) + "/operations/" + url.PathEscape(operationID)
+	return &info, c.do("GET", path, nil, &info)
 }
 
 func (c *Client) UploadFile(sessionID, remotePath string, content io.Reader, sha256 string) (*UploadFileResponse, error) {

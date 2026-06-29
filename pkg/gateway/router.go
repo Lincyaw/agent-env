@@ -7,6 +7,7 @@ import (
 	"path"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	ctrlmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
@@ -36,6 +37,7 @@ func SetupRoutes(mux *http.ServeMux, gw *Gateway, authCfg *AuthConfig) {
 
 	// Execution (user role)
 	mux.HandleFunc("POST /v1/sessions/{id}/execute", user(handleExecute(gw)))
+	mux.HandleFunc("GET /v1/sessions/{id}/operations/{operationID}", user(handleGetExecuteOperation(gw)))
 	mux.HandleFunc("PUT /v1/sessions/{id}/files/{path...}", user(handleUploadFile(gw)))
 	mux.HandleFunc("GET /v1/sessions/{id}/files/{path...}", user(handleDownloadFile(gw)))
 	mux.HandleFunc("POST /v1/sessions/{id}/restore", user(handleRestore(gw)))
@@ -133,16 +135,63 @@ func handleCreateSession(gw *Gateway) http.HandlerFunc {
 func handleGetSession(gw *Gateway) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
-		if checkOwnership(gw, w, r, id) == nil {
+		if s, ok := gw.store.Get(id); ok {
+			s.mu.RLock()
+			ownerHash := s.ownerKeyHash
+			s.mu.RUnlock()
+			if err := CheckSessionOwnership(r.Context(), ownerHash); err != nil {
+				writeError(w, http.StatusForbidden, err.Error())
+				return
+			}
+			info, err := gw.GetSession(id)
+			if err != nil {
+				writeError(w, http.StatusNotFound, err.Error())
+				return
+			}
+			writeJSON(w, http.StatusOK, info)
 			return
 		}
-		info, err := gw.GetSession(id)
-		if err != nil {
-			writeError(w, http.StatusNotFound, err.Error())
+		if historical, ok := gw.GetHistoricalSession(id); ok {
+			historical.mu.RLock()
+			ownerHash := historical.ownerKeyHash
+			info := historical.Info
+			reason := historical.deletionReason
+			if reason == "" {
+				reason = info.DeletionReason
+			}
+			deletedAt := historical.deletedAt
+			historical.mu.RUnlock()
+			if err := CheckSessionOwnership(r.Context(), ownerHash); err != nil {
+				writeError(w, http.StatusForbidden, err.Error())
+				return
+			}
+			if info.Status == "" {
+				info.Status = "deleted"
+			}
+			info.DeletionReason = reason
+			info.DeletedAt = deletedAt
+			writeJSON(w, http.StatusGone, ErrorResponse{
+				Error:  "session " + id + " is no longer active",
+				Detail: sessionDeletionDetail(reason, deletedAt),
+			})
 			return
 		}
-		writeJSON(w, http.StatusOK, info)
+		writeError(w, http.StatusNotFound, "session "+id+" not found")
 	}
+}
+
+func sessionDeletionDetail(reason string, deletedAt *time.Time) string {
+	if reason == "" && deletedAt == nil {
+		return ""
+	}
+	var parts []string
+	if reason != "" {
+		parts = append(parts, "reason="+reason)
+	}
+	if deletedAt != nil {
+		parts = append(parts, "deletedAt="+deletedAt.Format(time.RFC3339))
+	}
+	return strings.Join(parts, " ")
 }
 
 func handleDeleteSession(gw *Gateway) http.HandlerFunc {
@@ -177,7 +226,7 @@ func handleExecute(gw *Gateway) http.HandlerFunc {
 			return
 		}
 
-		if r.Header.Get("Accept") == "text/event-stream" {
+		if r.Header.Get("Accept") == "text/event-stream" && req.OperationID == "" {
 			gw.ExecuteStepsSSE(w, r.Context(), id, req)
 			return
 		}
@@ -189,6 +238,26 @@ func handleExecute(gw *Gateway) http.HandlerFunc {
 		}
 
 		writeJSON(w, http.StatusOK, resp)
+	}
+}
+
+func handleGetExecuteOperation(gw *Gateway) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		if checkOwnership(gw, w, r, id) == nil {
+			return
+		}
+		operationID := r.PathValue("operationID")
+		if operationID == "" {
+			writeError(w, http.StatusBadRequest, "operationID is required")
+			return
+		}
+		info, err := gw.ExecuteOperationStatus(id, operationID)
+		if err != nil {
+			writeError(w, http.StatusNotFound, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, info)
 	}
 }
 

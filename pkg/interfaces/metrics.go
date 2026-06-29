@@ -5,9 +5,12 @@ import "time"
 // MetricsCollector defines the gateway metrics used by the current runtime.
 type MetricsCollector interface {
 	RecordSessionAllocationDuration(poolName string, duration time.Duration)
+	IncrementPodAllocationResult(poolName, result string)
 	RecordSandboxReadyDuration(poolName string, duration time.Duration)
 	RecordImagePullDuration(image string, duration time.Duration)
 	SetActiveSessions(count int64)
+	IncrementSessionDeletion(reason string)
+	IncrementExecuteOperationResult(result string)
 	RecordGatewayStepDuration(stepType string, duration time.Duration)
 	IncrementGatewayStepResult(stepType, result string)
 	RecordSidecarCallDuration(method string, duration time.Duration)
@@ -29,9 +32,12 @@ type NoOpMetricsCollector struct{}
 
 func (n *NoOpMetricsCollector) RecordSessionAllocationDuration(poolName string, duration time.Duration) {
 }
+func (n *NoOpMetricsCollector) IncrementPodAllocationResult(poolName, result string)               {}
 func (n *NoOpMetricsCollector) RecordSandboxReadyDuration(poolName string, duration time.Duration) {}
 func (n *NoOpMetricsCollector) RecordImagePullDuration(image string, duration time.Duration)       {}
 func (n *NoOpMetricsCollector) SetActiveSessions(count int64)                                      {}
+func (n *NoOpMetricsCollector) IncrementSessionDeletion(reason string)                             {}
+func (n *NoOpMetricsCollector) IncrementExecuteOperationResult(result string)                      {}
 func (n *NoOpMetricsCollector) RecordGatewayStepDuration(stepType string, duration time.Duration) {
 }
 func (n *NoOpMetricsCollector) IncrementGatewayStepResult(stepType, result string) {}

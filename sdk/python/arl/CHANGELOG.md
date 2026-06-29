@@ -7,6 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.6] - 2026-06-29
+
+### Added
+- Idempotent non-streaming `execute()` calls with client-generated operation IDs.
+- `GatewayOperationTimeout` and `get_execute_operation()` for recovering the result of long operations after an HTTP timeout.
+
+### Changed
+- Session lookup errors now include deletion status/reason when the gateway still has tombstone metadata.
+
 ## [0.15.5] - 2026-06-29
 
 ### Changed
@@ -84,6 +93,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - MyPy for type checking
 - Hatchling build backend
 
+[0.15.6]: https://github.com/Lincyaw/agent-env/releases/tag/v0.15.6
 [0.15.5]: https://github.com/Lincyaw/agent-env/releases/tag/v0.15.5
 [0.14.1]: https://github.com/Lincyaw/agent-env/releases/tag/v0.14.1
 [0.2.0]: https://github.com/Lincyaw/agent-env/compare/v0.1.0...v0.2.0

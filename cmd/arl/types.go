@@ -85,20 +85,34 @@ type UploadFileResponse struct {
 }
 
 type ExecuteRequest struct {
-	Steps []StepRequest `json:"steps"`
+	Steps       []StepRequest `json:"steps"`
+	OperationID string        `json:"operationID,omitempty"`
 }
 
 type StepRequest struct {
-	Name    string            `json:"name"`
-	Command []string          `json:"command,omitempty"`
-	Env     map[string]string `json:"env,omitempty"`
-	WorkDir string            `json:"workDir,omitempty"`
+	Name           string            `json:"name"`
+	Command        []string          `json:"command,omitempty"`
+	Env            map[string]string `json:"env,omitempty"`
+	WorkDir        string            `json:"workDir,omitempty"`
+	TimeoutSeconds int32             `json:"timeoutSeconds,omitempty"`
 }
 
 type ExecuteResponse struct {
 	SessionID       string       `json:"sessionID"`
 	Results         []StepResult `json:"results"`
 	TotalDurationMs int64        `json:"totalDurationMs"`
+	OperationID     string       `json:"operationID,omitempty"`
+}
+
+type ExecuteOperationInfo struct {
+	OperationID string           `json:"operationID"`
+	SessionID   string           `json:"sessionID"`
+	Status      string           `json:"status"`
+	Result      *ExecuteResponse `json:"result,omitempty"`
+	Error       string           `json:"error,omitempty"`
+	CreatedAt   time.Time        `json:"createdAt"`
+	StartedAt   time.Time        `json:"startedAt,omitempty"`
+	FinishedAt  *time.Time       `json:"finishedAt,omitempty"`
 }
 
 type StepResult struct {
@@ -150,5 +164,6 @@ type CreateManagedSessionRequest struct {
 }
 
 type ErrorResponse struct {
-	Error string `json:"error"`
+	Error  string `json:"error"`
+	Detail string `json:"detail,omitempty"`
 }

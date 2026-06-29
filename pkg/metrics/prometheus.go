@@ -11,10 +11,13 @@ import (
 // PrometheusCollector implements interfaces.MetricsCollector using Prometheus.
 type PrometheusCollector struct {
 	sessionAllocationDuration *prometheus.HistogramVec
+	podAllocationResult       *prometheus.CounterVec
 	sandboxReadyDuration      *prometheus.HistogramVec
 	imagePullDuration         *prometheus.HistogramVec
 
 	activeSessions      prometheus.Gauge
+	sessionDeletion     *prometheus.CounterVec
+	executeOperation    *prometheus.CounterVec
 	gatewayStepDuration *prometheus.HistogramVec
 	gatewayStepResult   *prometheus.CounterVec
 	sidecarCallDuration *prometheus.HistogramVec
@@ -43,6 +46,13 @@ func NewPrometheusCollector() interfaces.MetricsCollector {
 			},
 			[]string{"pool"},
 		),
+		podAllocationResult: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "arl_gateway_pod_allocation_result_total",
+				Help: "Sandbox runtime allocation attempts by pool and result.",
+			},
+			[]string{"pool", "result"},
+		),
 		sandboxReadyDuration: prometheus.NewHistogramVec(
 			prometheus.HistogramOpts{
 				Name:    "arl_sandbox_ready_seconds",
@@ -64,6 +74,20 @@ func NewPrometheusCollector() interfaces.MetricsCollector {
 				Name: "arl_gateway_active_sessions",
 				Help: "Number of currently active gateway sessions.",
 			},
+		),
+		sessionDeletion: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "arl_gateway_session_deletion_total",
+				Help: "Session deletions by reason.",
+			},
+			[]string{"reason"},
+		),
+		executeOperation: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "arl_gateway_execute_operation_result_total",
+				Help: "Idempotent execute operation outcomes.",
+			},
+			[]string{"result"},
 		),
 		gatewayStepDuration: prometheus.NewHistogramVec(
 			prometheus.HistogramOpts{
@@ -167,9 +191,12 @@ func NewPrometheusCollector() interfaces.MetricsCollector {
 
 	metrics.Registry.MustRegister(
 		c.sessionAllocationDuration,
+		c.podAllocationResult,
 		c.sandboxReadyDuration,
 		c.imagePullDuration,
 		c.activeSessions,
+		c.sessionDeletion,
+		c.executeOperation,
 		c.gatewayStepDuration,
 		c.gatewayStepResult,
 		c.sidecarCallDuration,
@@ -193,6 +220,10 @@ func (c *PrometheusCollector) RecordSessionAllocationDuration(poolName string, d
 	c.sessionAllocationDuration.WithLabelValues(poolName).Observe(duration.Seconds())
 }
 
+func (c *PrometheusCollector) IncrementPodAllocationResult(poolName, result string) {
+	c.podAllocationResult.WithLabelValues(poolName, result).Inc()
+}
+
 func (c *PrometheusCollector) RecordSandboxReadyDuration(poolName string, duration time.Duration) {
 	c.sandboxReadyDuration.WithLabelValues(poolName).Observe(duration.Seconds())
 }
@@ -203,6 +234,14 @@ func (c *PrometheusCollector) RecordImagePullDuration(image string, duration tim
 
 func (c *PrometheusCollector) SetActiveSessions(count int64) {
 	c.activeSessions.Set(float64(count))
+}
+
+func (c *PrometheusCollector) IncrementSessionDeletion(reason string) {
+	c.sessionDeletion.WithLabelValues(reason).Inc()
+}
+
+func (c *PrometheusCollector) IncrementExecuteOperationResult(result string) {
+	c.executeOperation.WithLabelValues(result).Inc()
 }
 
 func (c *PrometheusCollector) RecordGatewayStepDuration(stepType string, duration time.Duration) {

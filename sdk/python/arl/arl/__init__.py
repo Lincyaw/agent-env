@@ -9,11 +9,17 @@ from arl.configenv import (
     SecretTemplate,
     VolumeInjection,
 )
-from arl.gateway_client import GatewayClient, GatewayError, PoolNotReadyError
+from arl.gateway_client import (
+    GatewayClient,
+    GatewayError,
+    GatewayOperationTimeout,
+    PoolNotReadyError,
+)
 from arl.interactive_shell_client import InteractiveShellClient, create_websocket_proxy
 from arl.session import ManagedSession, SandboxSession
 from arl.types import (
     ErrorResponse,
+    ExecuteOperationInfo,
     ExecuteResponse,
     ExperimentSummary,
     InlineToolSpec,
@@ -40,16 +46,18 @@ from arl.types import (
 )
 from arl.warmpool import WarmPoolManager
 
-__version__ = "0.15.5"
+__version__ = "0.15.6"
 __all__ = [
     "ApiKeyAuth",
     "ConfigEnvSpec",
     "ConfigMapTemplate",
     "ErrorResponse",
+    "ExecuteOperationInfo",
     "ExecuteResponse",
     "ExperimentSummary",
     "GatewayClient",
     "GatewayError",
+    "GatewayOperationTimeout",
     "InlineToolSpec",
     "InteractiveShellClient",
     "LogEntry",

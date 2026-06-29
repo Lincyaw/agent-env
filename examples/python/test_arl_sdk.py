@@ -155,9 +155,7 @@ def assert_step_success(result: Any, expected_stdout: str | None = None) -> None
     if step.output.exit_code != 0:
         raise AssertionError(f"step exited {step.output.exit_code}: {step.output.stderr}")
     if expected_stdout is not None and expected_stdout not in step.output.stdout:
-        raise AssertionError(
-            f"stdout {step.output.stdout!r} did not contain {expected_stdout!r}"
-        )
+        raise AssertionError(f"stdout {step.output.stdout!r} did not contain {expected_stdout!r}")
 
 
 def http_get_text(url: str, timeout: float = 20.0, **kwargs: Any) -> str:
@@ -337,9 +335,7 @@ def test_snapshot_restore(args: argparse.Namespace) -> None:
                 },
             ]
         )
-        current = session.execute(
-            [{"name": "check_v2", "command": ["cat", "/workspace/data.txt"]}]
-        )
+        current = session.execute([{"name": "check_v2", "command": ["cat", "/workspace/data.txt"]}])
         assert_step_success(current, "version=2")
 
         session.restore(snapshot_id)
@@ -350,17 +346,20 @@ def test_snapshot_restore(args: argparse.Namespace) -> None:
 
 
 def test_replay(client: GatewayClient, args: argparse.Namespace) -> None:
-    with SandboxSession(
-        image=args.pool_image,
-        profile=args.pool_name,
-        namespace=args.namespace,
-        gateway_url=args.gateway_url,
-    ) as source, SandboxSession(
-        image=args.pool_image,
-        profile=args.pool_name,
-        namespace=args.namespace,
-        gateway_url=args.gateway_url,
-    ) as target:
+    with (
+        SandboxSession(
+            image=args.pool_image,
+            profile=args.pool_name,
+            namespace=args.namespace,
+            gateway_url=args.gateway_url,
+        ) as source,
+        SandboxSession(
+            image=args.pool_image,
+            profile=args.pool_name,
+            namespace=args.namespace,
+            gateway_url=args.gateway_url,
+        ) as target,
+    ):
         assert source.session_id is not None
         assert target.session_id is not None
 
@@ -457,9 +456,7 @@ def test_logs(args: argparse.Namespace) -> None:
         if not session_logs:
             raise AssertionError("session logs endpoint returned no entries")
         if args.verbose:
-            console.print(
-                f"  Session logs: {len(session_logs)}, pool logs: {len(pool_logs)}"
-            )
+            console.print(f"  Session logs: {len(session_logs)}, pool logs: {len(pool_logs)}")
 
 
 def test_interactive_shell(args: argparse.Namespace) -> None:

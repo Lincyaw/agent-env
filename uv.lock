@@ -28,6 +28,7 @@ dependencies = [
     { name = "pydantic" },
     { name = "python-dateutil" },
     { name = "pyyaml" },
+    { name = "typer" },
     { name = "urllib3" },
     { name = "websockets" },
 ]
@@ -47,7 +48,6 @@ prefetch = [
     { name = "huggingface-hub" },
     { name = "polars" },
     { name = "pyarrow" },
-    { name = "typer" },
 ]
 
 [package.metadata]
@@ -59,6 +59,7 @@ requires-dist = [
     { name = "pydantic", specifier = ">=2.12.5" },
     { name = "python-dateutil", specifier = ">=2.9.0.post0" },
     { name = "pyyaml", specifier = ">=6.0.3" },
+    { name = "typer", specifier = ">=0.16.0" },
     { name = "urllib3", specifier = ">=2.3.0" },
     { name = "websockets", specifier = ">=16.0" },
 ]
@@ -78,7 +79,6 @@ prefetch = [
     { name = "huggingface-hub", specifier = ">=1.4.1" },
     { name = "polars", specifier = ">=1.38.1" },
     { name = "pyarrow", specifier = ">=23.0.0" },
-    { name = "typer", specifier = ">=0.16.0" },
 ]
 
 [[package]]
@@ -221,7 +221,7 @@ wheels = [
 
 [[package]]
 name = "arl-env"
-version = "0.15.5"
+version = "0.15.6"
 source = { editable = "sdk/python/arl" }
 dependencies = [
     { name = "httpx" },

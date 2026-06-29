@@ -72,6 +72,9 @@ class SessionInfo(BaseModel):
     pod_ip: str = Field("", alias="podIP")
     pod_name: str = Field("", alias="podName")
     created_at: datetime | None = Field(None, alias="createdAt")
+    status: str = ""
+    deleted_at: datetime | None = Field(None, alias="deletedAt")
+    deletion_reason: str = Field("", alias="deletionReason")
 
     model_config = {"populate_by_name": True}
 
@@ -96,6 +99,22 @@ class ExecuteResponse(BaseModel):
     session_id: str = Field(alias="sessionID")
     results: list[StepResult] = []
     total_duration_ms: int = Field(0, alias="totalDurationMs")
+    operation_id: str = Field("", alias="operationID")
+
+    model_config = {"populate_by_name": True}
+
+
+class ExecuteOperationInfo(BaseModel):
+    """Status for an idempotent execute operation."""
+
+    operation_id: str = Field(alias="operationID")
+    session_id: str = Field(alias="sessionID")
+    status: str
+    result: ExecuteResponse | None = None
+    error: str = ""
+    created_at: datetime | None = Field(None, alias="createdAt")
+    started_at: datetime | None = Field(None, alias="startedAt")
+    finished_at: datetime | None = Field(None, alias="finishedAt")
 
     model_config = {"populate_by_name": True}
 

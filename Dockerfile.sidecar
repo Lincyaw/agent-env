@@ -27,11 +27,9 @@ RUN CGO_ENABLED=0 GOOS=${TARGETOS} GOARCH=${TARGETARCH} GOMAXPROCS=8 go build -p
 # Final stage
 FROM gcr.io/distroless/static:nonroot
 
-WORKDIR /app
-
-COPY --from=builder /workspace/sidecar /app/sidecar
+COPY --from=builder /workspace/sidecar /sidecar
 
 EXPOSE 8080 9090
 
-ENTRYPOINT ["/app/sidecar"]
+ENTRYPOINT ["/sidecar"]
 CMD ["--workspace=/workspace", "--http-port=8080", "--grpc-port=9090"]

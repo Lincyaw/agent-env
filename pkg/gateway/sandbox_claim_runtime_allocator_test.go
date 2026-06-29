@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/Lincyaw/agent-env/pkg/labels"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -187,5 +188,27 @@ func TestSandboxClaimRuntimeAllocatorDiagnosticStats(t *testing.T) {
 	got := stats["default/code"]
 	if got.IdleCount != 2 {
 		t.Fatalf("IdleCount = %d, want 2", got.IdleCount)
+	}
+}
+
+func TestSandboxClaimRuntimeAllocatorTouchReturnsNotFound(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := clientgoscheme.AddToScheme(scheme); err != nil {
+		t.Fatalf("add client-go scheme: %v", err)
+	}
+	if err := sandboxv1beta1.AddToScheme(scheme); err != nil {
+		t.Fatalf("add sandbox scheme: %v", err)
+	}
+	if err := extensionsv1beta1.AddToScheme(scheme); err != nil {
+		t.Fatalf("add sandbox extension scheme: %v", err)
+	}
+
+	allocator := NewSandboxClaimRuntimeAllocator(fake.NewClientBuilder().WithScheme(scheme).Build())
+	err := allocator.Touch(context.Background(), RuntimeAllocation{
+		Namespace: "default",
+		ClaimName: "missing-claim",
+	}, "gw-missing", time.Now())
+	if !apierrors.IsNotFound(err) {
+		t.Fatalf("Touch error = %v, want NotFound", err)
 	}
 }

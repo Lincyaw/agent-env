@@ -123,6 +123,7 @@ func (g *Gateway) sandboxPodSpec(image, workspaceDir string, resources corev1.Re
 				Name:            "sidecar",
 				Image:           sidecarImage,
 				ImagePullPolicy: g.injectedPullPolicy(),
+				Command:         []string{"/sidecar"},
 				Args: []string{
 					"--workspace=" + workspaceDir,
 					fmt.Sprintf("--http-port=%d", sidecarHTTPPort),
@@ -134,7 +135,6 @@ func (g *Gateway) sandboxPodSpec(image, workspaceDir string, resources corev1.Re
 					{Name: "grpc", ContainerPort: int32(sidecarGRPCPort), Protocol: corev1.ProtocolTCP},
 				},
 				VolumeMounts: []corev1.VolumeMount{
-					{Name: "workspace", MountPath: workspaceDir},
 					{Name: "arl-socket", MountPath: "/var/run/arl"},
 				},
 				StartupProbe: &corev1.Probe{

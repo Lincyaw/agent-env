@@ -9,12 +9,15 @@
 // Key metrics:
 //
 //   - arl_session_allocation_seconds: SandboxClaim allocation latency.
+//   - arl_gateway_pod_allocation_result_total: SandboxClaim allocation outcomes.
 //   - arl_sandbox_ready_seconds: SandboxClaim-to-ready sandbox latency.
 //   - arl_image_pull_seconds: Image pull latency from Kubernetes events.
+//   - arl_gateway_execute_operation_result_total: Idempotent execute operation outcomes.
 //   - arl_gateway_step_duration_seconds: Execute step latency.
 //   - arl_gateway_step_result_total: Execute step result counter.
 //   - arl_gateway_sidecar_call_seconds: Sidecar gRPC call latency.
 //   - arl_gateway_active_sessions: Current session count.
+//   - arl_gateway_session_deletion_total: Session tombstones by deletion reason.
 //   - arl_sandbox_pool_saturation: Warm pool allocated/desired ratio.
 //   - arl_gateway_admission_queue_depth: Requests waiting for warm capacity.
 //

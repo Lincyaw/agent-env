@@ -46,7 +46,7 @@ jobs:
 
       - name: Update chart version
         run: |
-          cd charts/arl-operator
+          cd charts/agent-env
           sed -i "s/^version:.*/version: ${{ steps.version.outputs.version }}/" Chart.yaml
           sed -i "s/^appVersion:.*/appVersion: \"${{ steps.version.outputs.version }}\"/" Chart.yaml
           echo "📝 Updated Chart.yaml:"
@@ -54,13 +54,13 @@ jobs:
 
       - name: Update Helm dependencies
         run: |
-          cd charts/arl-operator
+          cd charts/agent-env
           helm dependency update
 
       - name: Package Helm chart
         run: |
           mkdir -p .deploy
-          helm package charts/arl-operator -d .deploy
+          helm package charts/agent-env -d .deploy
           echo "📦 Packaged chart:"
           ls -la .deploy/
 

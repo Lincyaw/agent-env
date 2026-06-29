@@ -7,6 +7,7 @@ import httpx
 
 from arl import (
     GatewayClient,
+    GatewayOperationTimeout,
     InteractiveShellClient,
     SandboxSession,
     WarmPoolManager,
@@ -29,6 +30,7 @@ def test_gateway_public_routes_have_python_sdk_entrypoints() -> None:
         (GatewayClient, "get_session"),
         (GatewayClient, "delete_session"),
         (GatewayClient, "execute"),
+        (GatewayClient, "get_execute_operation"),
         (GatewayClient, "upload_file"),
         (GatewayClient, "download_file"),
         (GatewayClient, "restore"),
@@ -185,3 +187,43 @@ def test_create_pool_exposes_image_locality_payload() -> None:
             image="python:3.12",
             image_locality=True,
         )
+
+
+def test_execute_uses_operation_id_without_sse_by_default() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "POST"
+        assert request.url.path == "/v1/sessions/gw-1/execute"
+        assert request.headers.get("accept") != "text/event-stream"
+        body = json.loads(request.content)
+        assert body["operationID"]
+        return httpx.Response(
+            200,
+            json={
+                "sessionID": "gw-1",
+                "operationID": body["operationID"],
+                "results": [],
+                "totalDurationMs": 0,
+            },
+        )
+
+    with _client_with_handler(handler) as client:
+        result = client.execute("gw-1", [{"name": "noop", "command": ["true"]}])
+        assert result.operation_id
+
+
+def test_execute_timeout_surfaces_operation_id_without_retry() -> None:
+    calls = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        raise httpx.ReadTimeout("timed out", request=request)
+
+    with _client_with_handler(handler) as client:
+        try:
+            client.execute("gw-1", [{"name": "sleep", "command": ["sleep", "60"]}])
+        except GatewayOperationTimeout as exc:
+            assert exc.operation_id
+        else:
+            raise AssertionError("expected GatewayOperationTimeout")
+    assert calls == 1
