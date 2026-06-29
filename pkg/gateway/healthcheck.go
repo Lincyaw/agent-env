@@ -24,17 +24,10 @@ type CheckResult struct {
 
 // HealthReport is the JSON response for /debug/health.
 type HealthReport struct {
-	Goroutines   int                           `json:"goroutines"`
-	Sessions     int                           `json:"sessions"`
-	Allocator    map[string]AllocatorPoolStats `json:"allocator"`
-	ManagedPools ManagedPoolDiag               `json:"managed_pools"`
-	Checks       []CheckResult                 `json:"checks"`
-}
-
-// ManagedPoolDiag holds managed pool diagnostic info.
-type ManagedPoolDiag struct {
-	Count int              `json:"count"`
-	Pools map[string]int32 `json:"pools"`
+	Goroutines int                           `json:"goroutines"`
+	Sessions   int                           `json:"sessions"`
+	Allocator  map[string]AllocatorPoolStats `json:"allocator"`
+	Checks     []CheckResult                 `json:"checks"`
 }
 
 // HealthChecker performs periodic health inspections of the gateway.
@@ -112,9 +105,9 @@ func (hc *HealthChecker) collect() {
 		hc.metrics.SetGatewaySessionsTotal(sessionCount)
 	}
 
-	// 3. PodAllocator stats
-	if hc.gw.podAllocator != nil {
-		allocStats := hc.gw.podAllocator.DiagnosticStats()
+	// 3. Runtime allocator stats
+	if hc.gw.runtimeAllocator != nil {
+		allocStats := hc.gw.runtimeAllocator.DiagnosticStats()
 		for pool, stats := range allocStats {
 			if hc.metrics != nil {
 				hc.metrics.SetIdleQueueDepth(pool, stats.IdleCount)
@@ -123,18 +116,7 @@ func (hc *HealthChecker) collect() {
 		}
 	}
 
-	// 4. PoolManager stats
-	if hc.gw.poolManager != nil {
-		poolCount, perPool := hc.gw.poolManager.DiagnosticStats()
-		if hc.metrics != nil {
-			hc.metrics.SetManagedPools(poolCount)
-			for pool, sessions := range perPool {
-				hc.metrics.SetPoolSessions(pool, sessions)
-			}
-		}
-	}
-
-	// 5. Cleanup stale gRPC connections (Shutdown/TransientFailure)
+	// 4. Cleanup stale gRPC connections (Shutdown/TransientFailure)
 	if cleaned := hc.gw.CleanupStaleConnections(); cleaned > 0 {
 		log.Printf("Cleaned up %d stale sidecar connections", cleaned)
 	}
@@ -151,23 +133,17 @@ func (hc *HealthChecker) BuildReport() HealthReport {
 	})
 
 	var allocStats map[string]AllocatorPoolStats
-	if hc.gw.podAllocator != nil {
-		allocStats = hc.gw.podAllocator.DiagnosticStats()
-	}
-
-	managedDiag := ManagedPoolDiag{Pools: make(map[string]int32)}
-	if hc.gw.poolManager != nil {
-		managedDiag.Count, managedDiag.Pools = hc.gw.poolManager.DiagnosticStats()
+	if hc.gw.runtimeAllocator != nil {
+		allocStats = hc.gw.runtimeAllocator.DiagnosticStats()
 	}
 
 	checks := hc.runChecks(sessionCount)
 
 	return HealthReport{
-		Goroutines:   goroutines,
-		Sessions:     sessionCount,
-		Allocator:    allocStats,
-		ManagedPools: managedDiag,
-		Checks:       checks,
+		Goroutines: goroutines,
+		Sessions:   sessionCount,
+		Allocator:  allocStats,
+		Checks:     checks,
 	}
 }
 

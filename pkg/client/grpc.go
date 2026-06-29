@@ -2,6 +2,8 @@ package client
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"strings"
@@ -18,6 +20,8 @@ import (
 	"github.com/Lincyaw/agent-env/pkg/pb"
 	"github.com/Lincyaw/agent-env/pkg/sidecar"
 )
+
+const fileChunkSize = 1024 * 1024
 
 // GRPCSidecarClient is a gRPC-based implementation of SidecarClient
 type GRPCSidecarClient struct {
@@ -310,40 +314,124 @@ func (s *grpcShellStream) Close() error {
 	return s.stream.CloseSend()
 }
 
-// WriteFile writes one file into the workspace via sidecar gRPC.
-func (c *GRPCSidecarClient) WriteFile(ctx context.Context, podIP string, path string, content []byte) (int64, error) {
-	conn, err := c.getOrCreateConn(podIP)
-	if err != nil {
-		return 0, err
-	}
-
-	client := pb.NewAgentServiceClient(conn)
-	resp, err := client.WriteFile(ctx, &pb.WriteFileRequest{
-		Path:    path,
-		Content: content,
-	})
-	if err != nil {
-		_ = c.CloseConnection(podIP)
-		return 0, fmt.Errorf("gRPC WriteFile failed: %w", err)
-	}
-	return resp.GetBytesWritten(), nil
-}
-
-func (c *GRPCSidecarClient) ReadFile(ctx context.Context, podIP string, path string) ([]byte, error) {
+// WriteFile streams one file into the workspace via sidecar gRPC.
+func (c *GRPCSidecarClient) WriteFile(ctx context.Context, podIP string, path string, content io.Reader, expectedSHA256 string) (*interfaces.FileWriteResult, error) {
 	conn, err := c.getOrCreateConn(podIP)
 	if err != nil {
 		return nil, err
 	}
 
 	client := pb.NewAgentServiceClient(conn)
-	resp, err := client.ReadFile(ctx, &pb.ReadFileRequest{
+	stream, err := client.WriteFile(ctx)
+	if err != nil {
+		_ = c.CloseConnection(podIP)
+		return nil, fmt.Errorf("gRPC WriteFile failed: %w", err)
+	}
+
+	buf := make([]byte, fileChunkSize)
+	sum := sha256.New()
+	var sent int64
+	first := true
+	for {
+		n, readErr := content.Read(buf)
+		if n > 0 {
+			chunk := &pb.WriteFileChunk{
+				Data: append([]byte(nil), buf[:n]...),
+			}
+			if first {
+				chunk.Path = path
+				chunk.ExpectedSha256 = expectedSHA256
+				first = false
+			}
+			if _, err := sum.Write(buf[:n]); err != nil {
+				return nil, fmt.Errorf("hash write file chunk: %w", err)
+			}
+			if err := stream.Send(chunk); err != nil {
+				_ = c.CloseConnection(podIP)
+				return nil, fmt.Errorf("gRPC WriteFile send failed: %w", err)
+			}
+			sent += int64(n)
+		}
+		if readErr == io.EOF {
+			break
+		}
+		if readErr != nil {
+			_ = stream.CloseSend()
+			return nil, fmt.Errorf("read upload content: %w", readErr)
+		}
+	}
+
+	if first {
+		if err := stream.Send(&pb.WriteFileChunk{
+			Path:           path,
+			ExpectedSha256: expectedSHA256,
+		}); err != nil {
+			_ = c.CloseConnection(podIP)
+			return nil, fmt.Errorf("gRPC WriteFile send metadata failed: %w", err)
+		}
+	}
+
+	resp, err := stream.CloseAndRecv()
+	if err != nil {
+		_ = c.CloseConnection(podIP)
+		return nil, fmt.Errorf("gRPC WriteFile receive failed: %w", err)
+	}
+	localSHA := hex.EncodeToString(sum.Sum(nil))
+	if resp.GetSha256() != "" && resp.GetSha256() != localSHA {
+		return nil, fmt.Errorf("write file checksum mismatch: gateway=%s sidecar=%s", localSHA, resp.GetSha256())
+	}
+	if resp.GetBytesWritten() != sent {
+		return nil, fmt.Errorf("write file size mismatch: gateway=%d sidecar=%d", sent, resp.GetBytesWritten())
+	}
+	return &interfaces.FileWriteResult{
+		Path:         resp.GetPath(),
+		BytesWritten: resp.GetBytesWritten(),
+		SHA256:       resp.GetSha256(),
+	}, nil
+}
+
+func (c *GRPCSidecarClient) ReadFile(ctx context.Context, podIP string, path string, dst io.Writer) (*interfaces.FileReadResult, error) {
+	conn, err := c.getOrCreateConn(podIP)
+	if err != nil {
+		return nil, err
+	}
+
+	client := pb.NewAgentServiceClient(conn)
+	stream, err := client.ReadFile(ctx, &pb.ReadFileRequest{
 		Path: path,
 	})
 	if err != nil {
 		_ = c.CloseConnection(podIP)
 		return nil, fmt.Errorf("gRPC ReadFile failed: %w", err)
 	}
-	return resp.GetContent(), nil
+	var result interfaces.FileReadResult
+	for {
+		chunk, err := stream.Recv()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			_ = c.CloseConnection(podIP)
+			return nil, fmt.Errorf("gRPC ReadFile receive failed: %w", err)
+		}
+		if chunk.GetPath() != "" {
+			result.Path = chunk.GetPath()
+		}
+		if len(chunk.GetData()) > 0 {
+			if _, err := dst.Write(chunk.GetData()); err != nil {
+				return nil, fmt.Errorf("write downloaded content: %w", err)
+			}
+		}
+		if chunk.GetDone() {
+			result.Path = chunk.GetPath()
+			result.SizeBytes = chunk.GetSizeBytes()
+			result.SHA256 = chunk.GetSha256()
+		}
+	}
+	if result.Path == "" {
+		result.Path = path
+	}
+	return &result, nil
 }
 
 // StreamLogs streams log entries from the sidecar ring buffer via gRPC.

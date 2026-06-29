@@ -6,7 +6,7 @@ High-level Python wrapper for the ARL (Agent Runtime Layer) client providing sim
 
 - **Context Manager Support**: Automatic sandbox lifecycle management
 - **Type-Safe API**: Full type hints with Pydantic models
-- **Kubernetes Integration**: Direct CRD interaction
+- **Kubernetes Integration**: Gateway-backed allocation on agent-sandbox resources
 - **Error Handling**: Comprehensive error reporting and retry logic
 
 ## Installation
@@ -41,7 +41,7 @@ print("✓ WarmPool ready!")
 from arl import SandboxSession
 
 # Using context manager (recommended)
-with SandboxSession(pool_ref="python-39-std", namespace="default") as session:
+with SandboxSession(image="python:3.9-slim", profile="python-39-std", namespace="default") as session:
     result = session.execute([
         {
             "name": "hello",
@@ -63,7 +63,7 @@ For long-running operations or sandbox reuse:
 ```python
 from arl import SandboxSession
 
-session = SandboxSession(pool_ref="python-39-std", namespace="default", keep_alive=True)
+session = SandboxSession(image="python:3.9-slim", profile="python-39-std", namespace="default", keep_alive=True)
 
 try:
     session.create_sandbox()
@@ -144,14 +144,13 @@ warmpool_mgr.delete_warmpool("python-39-std")
 
 ## Architecture
 
-- **SandboxSession**: High-level API using Kubernetes CRDs for task execution
-- **Task CRD**: Operator watches and executes tasks via sidecar
-- **Auto-generated client**: `arl-client` package (CRD models)
+- **SandboxSession**: High-level API over the Gateway REST API.
+- **Gateway API**: Creates sessions, allocates `SandboxClaim` resources, and sends execution requests to the sandbox sidecar.
+- **agent-sandbox**: Reconciles `SandboxTemplate`, `SandboxWarmPool`, `SandboxClaim`, and `Sandbox` resources.
 
 Task execution flow:
-1. Client creates Task CRD via Kubernetes API
-2. Operator watches for new tasks
-3. Operator communicates with sidecar to execute steps
-4. Client polls Task status for results
 
-This architecture ensures tasks can be executed from anywhere with cluster access.
+1. The SDK asks the Gateway to create a session.
+2. The Gateway selects or creates a matching pool and creates a `SandboxClaim`.
+3. agent-sandbox binds the claim to a ready sandbox.
+4. The Gateway executes steps through the sidecar and returns results to the SDK.

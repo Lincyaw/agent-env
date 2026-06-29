@@ -28,7 +28,7 @@ pip install -e .
 
 Before using the SDK, ensure:
 
-1. **ARL-Infra deployed**: The operator and Gateway must be running on the cluster
+1. **ARL-Infra deployed**: The gateway and agent-sandbox controller must be running on the cluster
 2. **Gateway URL**: You need the URL of the ARL Gateway API
 3. **WarmPool available**: At least one WarmPool must exist
 4. **API key**: If authentication is enabled on the Gateway, you need a valid API key
@@ -39,11 +39,11 @@ Verify your setup:
 # Check cluster access
 kubectl cluster-info
 
-# Check ARL-Infra is deployed
-kubectl get crds | grep arl.infra.io
+# Check agent-sandbox CRDs are installed
+kubectl get crds | grep agents.x-k8s.io
 
 # Check available WarmPools
-kubectl get warmpools
+kubectl get sandboxwarmpools -A
 ```
 
 ## Authentication
@@ -64,7 +64,8 @@ The SDK automatically reads `ARL_API_KEY` — no code changes needed.
 from arl import SandboxSession
 
 session = SandboxSession(
-    pool_ref="python-pool",
+    image="python:3.12",
+    profile="python-pool",
     gateway_url="http://gateway:8080",
     api_key="your-api-key-here",
 )
@@ -77,7 +78,7 @@ All SDK classes (`SandboxSession`, `ManagedSession`, `GatewayClient`, `Interacti
 | Role | Permissions |
 |------|-------------|
 | `admin` | All operations: pool CRUD, managed sessions, experiment deletion |
-| `user` | Session CRUD, execute, upload, restore, shell, history, trajectory |
+| `user` | Session CRUD, execute, file transfer, restore, shell, history, trajectory |
 
 If your key has the `user` role, calling admin-only endpoints (e.g., pool creation) returns `403 Forbidden`.
 
@@ -91,7 +92,8 @@ from arl import SandboxSession
 # Using context manager (recommended)
 # Set ARL_API_KEY env var, or pass api_key= parameter
 with SandboxSession(
-    pool_ref="python-pool",
+    image="python:3.12",
+    profile="python-pool",
     namespace="default",
     gateway_url="http://localhost:8080",
 ) as session:
@@ -111,7 +113,8 @@ For long-running operations or sandbox reuse:
 from arl import SandboxSession
 
 session = SandboxSession(
-    pool_ref="python-pool",
+    image="python:3.12",
+    profile="python-pool",
     namespace="default",
     gateway_url="http://localhost:8080",
     keep_alive=True,  # Keep sandbox for multiple executions
@@ -140,7 +143,8 @@ The main class for interacting with sessions.
 from arl import SandboxSession
 
 session = SandboxSession(
-    pool_ref="python-pool",          # WarmPool to allocate from
+    image="python:3.12",            # Container image to run
+    profile="python-pool",          # Resource/profile selection key
     namespace="default",             # Kubernetes namespace
     gateway_url="http://localhost:8080",  # Gateway API URL
     keep_alive=False,                # Delete sandbox after use (default)
@@ -152,7 +156,8 @@ session = SandboxSession(
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `pool_ref` | str | Required | Name of the WarmPool |
+| `image` | str \| None | `None` | Container image to run. When provided, the gateway ensures a matching sandbox pool exists |
+| `profile` | str \| None | `"default"` | Resource/profile selection key |
 | `namespace` | str | `"default"` | Kubernetes namespace |
 | `gateway_url` | str | Required | URL of the Gateway API |
 | `keep_alive` | bool | `False` | Keep sandbox after use |
@@ -231,7 +236,8 @@ for step_result in result.results:
 ```python
 try:
     with SandboxSession(
-        pool_ref="python-pool",
+        image="python:3.12",
+    profile="python-pool",
         gateway_url="http://localhost:8080",
     ) as session:
         result = session.execute([...])
@@ -253,13 +259,18 @@ except Exception as e:
 ```python
 # Good: Resources are automatically cleaned up
 with SandboxSession(
-    pool_ref="python-pool",
+    image="python:3.12",
+    profile="python-pool",
     gateway_url="http://localhost:8080",
 ) as session:
     result = session.execute([...])
 
 # Avoid: Manual cleanup required
-session = SandboxSession(pool_ref="python-pool", gateway_url="http://localhost:8080")
+session = SandboxSession(
+    image="python:3.12",
+    profile="python-pool",
+    gateway_url="http://localhost:8080",
+)
 session.create_sandbox()
 # ... if exception occurs, sandbox may not be cleaned up
 session.delete_sandbox()
@@ -270,7 +281,8 @@ session.delete_sandbox()
 ```python
 # Good: Single sandbox for related executions
 session = SandboxSession(
-    pool_ref="python-pool",
+    image="python:3.12",
+    profile="python-pool",
     gateway_url="http://localhost:8080",
     keep_alive=True,
 )
@@ -293,7 +305,8 @@ finally:
 ```python
 # Set timeout on the session for long-running operations
 session = SandboxSession(
-    pool_ref="python-pool",
+    image="python:3.12",
+    profile="python-pool",
     gateway_url="http://localhost:8080",
     timeout="5m",  # 5 minutes
 )

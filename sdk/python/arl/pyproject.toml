@@ -8,7 +8,7 @@ license = {text = "Apache-2.0"}
 authors = [
     {name = "ARL Infrastructure Team"}
 ]
-keywords = ["kubernetes", "operator", "agent", "runtime", "sandbox", "gateway"]
+keywords = ["kubernetes", "agent", "runtime", "sandbox", "gateway"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",

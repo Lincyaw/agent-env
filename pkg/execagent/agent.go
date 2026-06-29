@@ -3,6 +3,8 @@ package execagent
 import (
 	// "bufio" removed: chunk-based I/O replaced line-based Scanner
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -17,6 +19,8 @@ import (
 	"syscall"
 	"time"
 )
+
+const fileChunkSize = 1024 * 1024
 
 // Agent listens on a Unix socket and executes commands in the current container.
 type Agent struct {
@@ -97,12 +101,12 @@ func (a *Agent) handleConn(ctx context.Context, conn net.Conn) {
 		case "exec":
 			log.Printf("[exec] id=%s cmd=%v workdir=%s", req.ID, req.Cmd, req.WorkDir)
 			a.handleExec(ctx, req, encoder)
-		case "write_file":
-			log.Printf("[write_file] id=%s path=%s bytes=%d", req.ID, req.Path, len(req.Content))
-			a.handleWriteFile(req, encoder)
-		case "read_file":
+		case "write_file_stream":
+			log.Printf("[write_file_stream] id=%s path=%s", req.ID, req.Path)
+			a.handleWriteFileStream(ctx, req, decoder, encoder)
+		case "read_file_stream":
 			log.Printf("[read_file] id=%s path=%s", req.ID, req.Path)
-			a.handleReadFile(req, encoder)
+			a.handleReadFileStream(ctx, req, encoder)
 		case "shell":
 			log.Printf("[shell] id=%s workdir=%s", req.ID, req.WorkDir)
 			a.handleShell(ctx, req, decoder, encoder)
@@ -228,7 +232,7 @@ func (a *Agent) handleExec(ctx context.Context, req Request, encoder *json.Encod
 	send(Response{ID: req.ID, ExitCode: &exitCode, Done: true})
 }
 
-func (a *Agent) handleWriteFile(req Request, encoder *json.Encoder) {
+func (a *Agent) handleWriteFileStream(ctx context.Context, req Request, decoder *json.Decoder, encoder *json.Encoder) {
 	if req.Path == "" {
 		encoder.Encode(Response{ID: req.ID, Error: "path is required", Done: true})
 		return
@@ -240,21 +244,93 @@ func (a *Agent) handleWriteFile(req Request, encoder *json.Encoder) {
 		return
 	}
 
-	if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
+	parent := filepath.Dir(targetPath)
+	if err := os.MkdirAll(parent, 0755); err != nil {
 		encoder.Encode(Response{ID: req.ID, Error: fmt.Sprintf("mkdir parent: %v", err), Done: true})
 		return
 	}
 
-	if err := os.WriteFile(targetPath, req.Content, 0644); err != nil {
-		encoder.Encode(Response{ID: req.ID, Error: fmt.Sprintf("write file: %v", err), Done: true})
+	tmp, err := os.CreateTemp(parent, "."+filepath.Base(targetPath)+".*.tmp")
+	if err != nil {
+		encoder.Encode(Response{ID: req.ID, Error: fmt.Sprintf("create temp file: %v", err), Done: true})
 		return
 	}
+	tmpPath := tmp.Name()
+	committed := false
+	defer func() {
+		tmp.Close()
+		if !committed {
+			os.Remove(tmpPath)
+		}
+	}()
 
-	written := int64(len(req.Content))
-	encoder.Encode(Response{ID: req.ID, BytesWritten: &written, Done: true})
+	hash := sha256.New()
+	var written int64
+	for {
+		select {
+		case <-ctx.Done():
+			encoder.Encode(Response{ID: req.ID, Error: ctx.Err().Error(), Done: true})
+			return
+		default:
+		}
+
+		var chunk Request
+		if err := decoder.Decode(&chunk); err != nil {
+			encoder.Encode(Response{ID: req.ID, Error: fmt.Sprintf("read file chunk: %v", err), Done: true})
+			return
+		}
+		if chunk.ID != "" && chunk.ID != req.ID {
+			encoder.Encode(Response{ID: req.ID, Error: "file chunk id mismatch", Done: true})
+			return
+		}
+		switch chunk.Type {
+		case "write_file_chunk":
+			if len(chunk.Content) == 0 {
+				continue
+			}
+			n, err := tmp.Write(chunk.Content)
+			if err != nil {
+				encoder.Encode(Response{ID: req.ID, Error: fmt.Sprintf("write file chunk: %v", err), Done: true})
+				return
+			}
+			if n != len(chunk.Content) {
+				encoder.Encode(Response{ID: req.ID, Error: "short write file chunk", Done: true})
+				return
+			}
+			if _, err := hash.Write(chunk.Content); err != nil {
+				encoder.Encode(Response{ID: req.ID, Error: fmt.Sprintf("hash file chunk: %v", err), Done: true})
+				return
+			}
+			written += int64(n)
+		case "write_file_finish":
+			actualSHA := hex.EncodeToString(hash.Sum(nil))
+			if req.ExpectedSHA256 != "" && !strings.EqualFold(req.ExpectedSHA256, actualSHA) {
+				encoder.Encode(Response{ID: req.ID, Error: fmt.Sprintf("sha256 mismatch: expected %s got %s", req.ExpectedSHA256, actualSHA), Done: true})
+				return
+			}
+			if err := tmp.Chmod(0644); err != nil {
+				encoder.Encode(Response{ID: req.ID, Error: fmt.Sprintf("chmod temp file: %v", err), Done: true})
+				return
+			}
+			if err := tmp.Close(); err != nil {
+				encoder.Encode(Response{ID: req.ID, Error: fmt.Sprintf("close temp file: %v", err), Done: true})
+				return
+			}
+			if err := os.Rename(tmpPath, targetPath); err != nil {
+				encoder.Encode(Response{ID: req.ID, Error: fmt.Sprintf("commit file: %v", err), Done: true})
+				return
+			}
+			committed = true
+			encoder.Encode(Response{ID: req.ID, BytesWritten: &written, SHA256: actualSHA, Done: true})
+			return
+		default:
+			encoder.Encode(Response{ID: req.ID, Error: fmt.Sprintf("unexpected file stream message: %s", chunk.Type), Done: true})
+			return
+		}
+	}
 }
 
-func (a *Agent) handleReadFile(req Request, encoder *json.Encoder) {
+func (a *Agent) handleReadFileStream(ctx context.Context, req Request, encoder *json.Encoder) {
 	if req.Path == "" {
 		encoder.Encode(Response{ID: req.ID, Error: "path is required", Done: true})
 		return
@@ -266,13 +342,51 @@ func (a *Agent) handleReadFile(req Request, encoder *json.Encoder) {
 		return
 	}
 
-	content, err := os.ReadFile(targetPath)
+	file, err := os.Open(targetPath)
 	if err != nil {
-		encoder.Encode(Response{ID: req.ID, Error: fmt.Sprintf("read file: %v", err), Done: true})
+		encoder.Encode(Response{ID: req.ID, Error: fmt.Sprintf("open file: %v", err), Done: true})
 		return
 	}
+	defer file.Close()
 
-	encoder.Encode(Response{ID: req.ID, Content: content, Done: true})
+	hash := sha256.New()
+	buf := make([]byte, fileChunkSize)
+	var offset int64
+	for {
+		select {
+		case <-ctx.Done():
+			encoder.Encode(Response{ID: req.ID, Error: ctx.Err().Error(), Done: true})
+			return
+		default:
+		}
+
+		n, err := file.Read(buf)
+		if n > 0 {
+			chunk := append([]byte(nil), buf[:n]...)
+			if _, hashErr := hash.Write(chunk); hashErr != nil {
+				encoder.Encode(Response{ID: req.ID, Error: fmt.Sprintf("hash file chunk: %v", hashErr), Done: true})
+				return
+			}
+			if encodeErr := encoder.Encode(Response{ID: req.ID, Offset: offset, Content: chunk}); encodeErr != nil {
+				return
+			}
+			offset += int64(n)
+		}
+		if errors.Is(err, io.EOF) {
+			size := offset
+			encoder.Encode(Response{
+				ID:        req.ID,
+				SizeBytes: &size,
+				SHA256:    hex.EncodeToString(hash.Sum(nil)),
+				Done:      true,
+			})
+			return
+		}
+		if err != nil {
+			encoder.Encode(Response{ID: req.ID, Error: fmt.Sprintf("read file: %v", err), Done: true})
+			return
+		}
+	}
 }
 
 func (a *Agent) resolveWorkspacePath(relPath string) (string, error) {

@@ -5,8 +5,9 @@ from __future__ import annotations
 import base64
 import json
 import re
-from collections.abc import Callable
-from typing import Any
+from collections.abc import Callable, Iterable, Iterator
+from pathlib import Path
+from typing import Any, BinaryIO
 
 from arl.configenv import ConfigEnvSpec
 from arl.gateway_client import GatewayClient
@@ -33,7 +34,7 @@ class SandboxSession:
     Examples:
         Using context manager (automatic cleanup):
 
-        >>> with SandboxSession(pool_ref="python-39") as session:
+        >>> with SandboxSession(image="python:3.12", profile="code") as session:
         ...     result = session.execute([
         ...         {"name": "hello", "type": "command", "command": ["echo", "hello"]}
         ...     ])
@@ -41,7 +42,7 @@ class SandboxSession:
 
         Manual lifecycle management with restore:
 
-        >>> session = SandboxSession(pool_ref="python-39", keep_alive=True)
+        >>> session = SandboxSession(image="python:3.12", profile="code", keep_alive=True)
         >>> try:
         ...     session.create_sandbox()
         ...     r1 = session.execute([...])
@@ -53,7 +54,7 @@ class SandboxSession:
 
         Export trajectory for RL/SFT:
 
-        >>> with SandboxSession(pool_ref="python-39") as session:
+        >>> with SandboxSession(image="python:3.12", profile="code") as session:
         ...     session.execute([...])
         ...     session.execute([...])
         ...     jsonl = session.export_trajectory()
@@ -67,18 +68,23 @@ class SandboxSession:
 
     def __init__(
         self,
-        pool_ref: str,
+        image: str | None = None,
+        *,
+        profile: str | None = "default",
         namespace: str = "default",
         gateway_url: str = "http://localhost:8080",
         keep_alive: bool = False,
         timeout: float = 300.0,
         idle_timeout_seconds: int | None = None,
+        max_lifetime_seconds: int | None = None,
         api_key: str | None = None,
     ) -> None:
-        self.pool_ref = pool_ref
+        self.image = image or ""
+        self.profile = profile or ""
         self.namespace = namespace
         self.keep_alive = keep_alive
         self.idle_timeout_seconds = idle_timeout_seconds
+        self.max_lifetime_seconds = max_lifetime_seconds
 
         self._client = GatewayClient(base_url=gateway_url, timeout=timeout, api_key=api_key)
         self._api_key = api_key
@@ -122,7 +128,8 @@ class SandboxSession:
             client.close()
 
         instance = cls(
-            pool_ref=info.pool_ref,
+            image=info.image or None,
+            profile=info.profile or None,
             namespace=info.namespace,
             gateway_url=gateway_url,
             keep_alive=keep_alive,
@@ -152,12 +159,16 @@ class SandboxSession:
             idle_timeout = 1800  # 30 minutes default for keep_alive
 
         info = self._client.create_session(
-            pool_ref=self.pool_ref,
+            image=self.image or None,
+            profile=self.profile or None,
             namespace=self.namespace,
             idle_timeout_seconds=idle_timeout,
+            max_lifetime_seconds=self.max_lifetime_seconds,
         )
         self._session_id = info.id
         self._session_info = info
+        self.image = info.image
+        self.profile = info.profile
         return info
 
     def execute(
@@ -194,32 +205,64 @@ class SandboxSession:
             raise RuntimeError("No session created. Call create_sandbox() first.")
         self._client.restore(self._session_id, snapshot_id)
 
-    def upload_file(self, path: str, content: str | bytes) -> UploadFileResponse:
+    def upload_file(
+        self,
+        path: str,
+        content: str | bytes | Iterable[bytes] | BinaryIO,
+        sha256: str | None = None,
+    ) -> UploadFileResponse:
         """Upload one file into the session workspace.
 
         Args:
             path: Relative path within the workspace.
-            content: Text content (sent as UTF-8) or raw bytes (sent as base64).
+            content: Text, bytes, a binary file object, or an iterable of byte chunks.
+            sha256: Optional expected SHA-256 checksum in hex.
 
         Returns:
             UploadFileResponse with the normalized path and byte count.
         """
         if self._session_id is None:
             raise RuntimeError("No session created. Call create_sandbox() first.")
-        if isinstance(content, bytes):
-            encoded = base64.b64encode(content).decode()
-            return self._client.upload_file(
-                self._session_id,
-                path=path,
-                content=encoded,
-                encoding="base64",
-            )
         return self._client.upload_file(
             self._session_id,
             path=path,
             content=content,
-            encoding="text",
+            sha256=sha256,
         )
+
+    def download_file(self, path: str) -> bytes:
+        """Download one file from the session workspace into memory."""
+        if self._session_id is None:
+            raise RuntimeError("No session created. Call create_sandbox() first.")
+        return self._client.download_file(self._session_id, path)
+
+    def upload_path(
+        self,
+        local_path: str | Path,
+        remote_path: str,
+        sha256: str | None = None,
+    ) -> UploadFileResponse:
+        """Stream a local file into the session workspace."""
+        if self._session_id is None:
+            raise RuntimeError("No session created. Call create_sandbox() first.")
+        return self._client.upload_path(
+            self._session_id,
+            local_path=local_path,
+            remote_path=remote_path,
+            sha256=sha256,
+        )
+
+    def download_path(self, remote_path: str, local_path: str | Path) -> None:
+        """Stream a session file to a local path."""
+        if self._session_id is None:
+            raise RuntimeError("No session created. Call create_sandbox() first.")
+        self._client.download_path(self._session_id, remote_path, local_path)
+
+    def iter_download(self, path: str, chunk_size: int = 1024 * 1024) -> Iterator[bytes]:
+        """Iterate over a session file as byte chunks."""
+        if self._session_id is None:
+            raise RuntimeError("No session created. Call create_sandbox() first.")
+        return self._client.iter_download_file(self._session_id, path, chunk_size=chunk_size)
 
     def get_history(self) -> list[StepResult]:
         """Get complete execution history for this session.
@@ -403,16 +446,15 @@ class ManagedSession(SandboxSession):
         resources: ResourceRequirements | None = None,
         tools: ToolsSpec | None = None,
         workspace_dir: str = "/workspace",
-        max_replicas: int | None = None,
-        min_replicas: int | None = None,
-        scale_up_step: int | None = None,
         idle_timeout_seconds: int | None = None,
         max_lifetime_seconds: int | None = None,
         config_env: ConfigEnvSpec | dict[str, Any] | None = None,
+        profile: str = "default",
         api_key: str | None = None,
     ) -> None:
         super().__init__(
-            pool_ref="",  # will be set by server
+            image=image,
+            profile=profile,
             namespace=namespace,
             gateway_url=gateway_url,
             keep_alive=False,
@@ -420,14 +462,12 @@ class ManagedSession(SandboxSession):
             api_key=api_key,
         )
         self._image = image
+        self._profile = profile
         self._experiment_id = experiment_id
         self._resources = resources
         self._config_env = config_env
         self._tools = tools
         self._workspace_dir = workspace_dir
-        self._max_replicas = max_replicas
-        self._min_replicas = min_replicas
-        self._scale_up_step = scale_up_step
         self._idle_timeout_seconds = idle_timeout_seconds
         self._max_lifetime_seconds = max_lifetime_seconds
 
@@ -447,17 +487,16 @@ class ManagedSession(SandboxSession):
             image=self._image,
             experiment_id=self._experiment_id,
             namespace=self.namespace,
+            profile=self._profile,
             config_env=self._config_env,
             resources=self._resources,
             tools=self._tools,
             workspace_dir=self._workspace_dir,
-            max_replicas=self._max_replicas,
-            min_replicas=self._min_replicas,
-            scale_up_step=self._scale_up_step,
             idle_timeout_seconds=self._idle_timeout_seconds,
             max_lifetime_seconds=self._max_lifetime_seconds,
         )
         self._session_id = info.id
         self._session_info = info
-        self.pool_ref = info.pool_ref
+        self.image = info.image
+        self.profile = info.profile
         return info

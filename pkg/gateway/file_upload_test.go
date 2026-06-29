@@ -1,36 +1,16 @@
 package gateway
 
 import (
+	"bytes"
 	"context"
-	"encoding/base64"
-	"encoding/json"
+	"io"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/Lincyaw/agent-env/pkg/client"
-	"github.com/Lincyaw/agent-env/pkg/labels"
-	corev1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"github.com/Lincyaw/agent-env/pkg/interfaces"
 )
-
-func TestNormalizeUploadFileRequestBase64(t *testing.T) {
-	req := UploadFileRequest{
-		Path:     "./nested/hello.bin",
-		Content:  base64.StdEncoding.EncodeToString([]byte("hello")),
-		Encoding: "base64",
-	}
-
-	relPath, payload, err := normalizeUploadFileRequest(req)
-	if err != nil {
-		t.Fatalf("normalizeUploadFileRequest returned error: %v", err)
-	}
-	if relPath != "nested/hello.bin" {
-		t.Fatalf("relPath = %q, want %q", relPath, "nested/hello.bin")
-	}
-	if string(payload) != "hello" {
-		t.Fatalf("payload = %q, want %q", string(payload), "hello")
-	}
-}
 
 func TestSanitizeUploadPathRejectsEscape(t *testing.T) {
 	_, err := sanitizeUploadPath("../secret.txt")
@@ -39,21 +19,14 @@ func TestSanitizeUploadPathRejectsEscape(t *testing.T) {
 	}
 }
 
-func TestUploadFileUsesNativeWritePathAndRecordsHistory(t *testing.T) {
-	pod := &corev1.Pod{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      "pod-1",
-			Namespace: "arl",
-			Labels: map[string]string{
-				labels.StatusLabelKey: labels.StatusAllocated,
-			},
-			Annotations: map[string]string{
-				labels.SessionAnnotation: "sess-1",
-			},
-		},
-		Status: corev1.PodStatus{PodIP: "10.0.0.1"},
+func TestNormalizeSHA256RejectsInvalidValue(t *testing.T) {
+	_, err := normalizeSHA256("not-a-sha")
+	if err == nil {
+		t.Fatal("normalizeSHA256 accepted invalid checksum")
 	}
+}
 
+func TestUploadFileStreamsContentAndDoesNotRecordHistory(t *testing.T) {
 	store := NewMemoryStore()
 	store.Set("sess-1", &session{
 		Info: SessionInfo{
@@ -67,25 +40,43 @@ func TestUploadFileUsesNativeWritePathAndRecordsHistory(t *testing.T) {
 
 	var gotPodIP string
 	var gotPath string
-	var gotContent []byte
+	var gotContent bytes.Buffer
+	var gotChecksum string
 
 	gw := &Gateway{
-		k8sClient: fake.NewClientBuilder().WithObjects(pod).Build(),
-		store:     store,
+		runtimeAllocator: staticRuntimeAllocator{allocation: RuntimeAllocation{
+			Backend:     runtimeBackendSandboxClaim,
+			Namespace:   "arl",
+			PodName:     "pod-1",
+			PodIP:       "10.0.0.1",
+			ClaimName:   "claim-1",
+			SandboxName: "sandbox-1",
+		}},
+		store: store,
 		sidecarClient: &client.MockSidecarClient{
-			WriteFileFunc: func(ctx context.Context, podIP string, path string, content []byte) (int64, error) {
+			WriteFileFunc: func(ctx context.Context, podIP string, path string, content io.Reader, expectedSHA256 string) (*interfaces.FileWriteResult, error) {
 				gotPodIP = podIP
 				gotPath = path
-				gotContent = append([]byte(nil), content...)
-				return int64(len(content)), nil
+				gotChecksum = expectedSHA256
+				if _, err := io.Copy(&gotContent, content); err != nil {
+					return nil, err
+				}
+				return &interfaces.FileWriteResult{
+					Path:         path,
+					BytesWritten: int64(gotContent.Len()),
+					SHA256:       "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+				}, nil
 			},
 		},
 	}
 
-	resp, err := gw.UploadFile(context.Background(), "sess-1", UploadFileRequest{
-		Path:    "nested/demo.txt",
-		Content: "hello",
-	})
+	resp, err := gw.UploadFile(
+		context.Background(),
+		"sess-1",
+		"nested/demo.txt",
+		strings.NewReader("hello"),
+		"2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824",
+	)
 	if err != nil {
 		t.Fatalf("UploadFile returned error: %v", err)
 	}
@@ -101,82 +92,99 @@ func TestUploadFileUsesNativeWritePathAndRecordsHistory(t *testing.T) {
 	if gotPath != "nested/demo.txt" {
 		t.Fatalf("path = %q, want %q", gotPath, "nested/demo.txt")
 	}
-	if string(gotContent) != "hello" {
-		t.Fatalf("content = %q, want %q", string(gotContent), "hello")
+	if gotContent.String() != "hello" {
+		t.Fatalf("content = %q, want %q", gotContent.String(), "hello")
+	}
+	if gotChecksum != "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824" {
+		t.Fatalf("checksum = %q", gotChecksum)
 	}
 
 	sess, ok := store.Get("sess-1")
 	if !ok {
 		t.Fatal("session missing after UploadFile")
 	}
-	record := sess.History.GetAll()
-	if len(record) != 1 {
-		t.Fatalf("history length = %d, want %d", len(record), 1)
-	}
-	if record[0].Name != uploadFileStepName {
-		t.Fatalf("history step name = %q, want %q", record[0].Name, uploadFileStepName)
-	}
-	if string(record[0].Input) == "" {
-		t.Fatal("history input is empty")
-	}
-	if string(record[0].ReplayInput) == "" {
-		t.Fatal("replay input is empty")
-	}
-	if string(record[0].Input) == string(record[0].ReplayInput) {
-		t.Fatal("history input unexpectedly retains the replay payload")
-	}
-	if string(record[0].Input) == `{"path":"nested/demo.txt","content":"hello","encoding":"text"}` {
-		t.Fatal("history input unexpectedly includes raw content")
-	}
-
-	var auditInput uploadFileAuditInput
-	if err := json.Unmarshal(record[0].Input, &auditInput); err != nil {
-		t.Fatalf("unmarshal audit input: %v", err)
-	}
-	if auditInput.Path != "nested/demo.txt" {
-		t.Fatalf("audit path = %q, want %q", auditInput.Path, "nested/demo.txt")
-	}
-	if auditInput.Encoding != "text" {
-		t.Fatalf("audit encoding = %q, want %q", auditInput.Encoding, "text")
-	}
-	if auditInput.SizeBytes != 5 {
-		t.Fatalf("audit size = %d, want %d", auditInput.SizeBytes, 5)
-	}
-
-	var replayInput UploadFileRequest
-	if err := json.Unmarshal(record[0].ReplayInput, &replayInput); err != nil {
-		t.Fatalf("unmarshal replay input: %v", err)
-	}
-	if replayInput.Content != "hello" {
-		t.Fatalf("replay content = %q, want %q", replayInput.Content, "hello")
+	if got := sess.History.Len(); got != 0 {
+		t.Fatalf("history length = %d, want 0", got)
 	}
 }
 
-func TestRedisSessionDataRoundTripsReplayInput(t *testing.T) {
-	history := NewStepHistory()
-	history.Add(StepRecord{
-		Name:        uploadFileStepName,
-		Input:       json.RawMessage(`{"path":"nested/demo.txt","encoding":"text","size_bytes":5,"sha256":"abc"}`),
-		ReplayInput: json.RawMessage(`{"path":"nested/demo.txt","content":"hello","encoding":"text"}`),
+func TestDownloadFileStreamsToWriter(t *testing.T) {
+	store := NewMemoryStore()
+	store.Set("sess-1", &session{
+		Info: SessionInfo{
+			ID:        "sess-1",
+			Namespace: "arl",
+			PodName:   "pod-1",
+			PodIP:     "10.0.0.1",
+		},
+		History: NewStepHistory(),
 	})
 
-	data := sessionToRedisData(&session{
-		Info:    SessionInfo{ID: "sess-1"},
-		History: history,
-	})
-	if len(data.HistoryReplayInputs) != 1 {
-		t.Fatalf("HistoryReplayInputs length = %d, want %d", len(data.HistoryReplayInputs), 1)
+	gw := &Gateway{
+		runtimeAllocator: staticRuntimeAllocator{allocation: RuntimeAllocation{
+			Backend:     runtimeBackendSandboxClaim,
+			Namespace:   "arl",
+			PodName:     "pod-1",
+			PodIP:       "10.0.0.1",
+			ClaimName:   "claim-1",
+			SandboxName: "sandbox-1",
+		}},
+		store: store,
+		sidecarClient: &client.MockSidecarClient{
+			ReadFileFunc: func(ctx context.Context, podIP string, path string, dst io.Writer) (*interfaces.FileReadResult, error) {
+				if podIP != "10.0.0.1" {
+					t.Fatalf("podIP = %q, want 10.0.0.1", podIP)
+				}
+				if path != "nested/demo.txt" {
+					t.Fatalf("path = %q, want nested/demo.txt", path)
+				}
+				if _, err := io.WriteString(dst, "hello"); err != nil {
+					return nil, err
+				}
+				return &interfaces.FileReadResult{Path: path, SizeBytes: 5}, nil
+			},
+		},
 	}
 
-	restored := redisDataToSession(data)
-	records := restored.History.GetAll()
-	if len(records) != 1 {
-		t.Fatalf("restored history length = %d, want %d", len(records), 1)
+	var out bytes.Buffer
+	result, err := gw.DownloadFile(context.Background(), "sess-1", "nested/demo.txt", &out)
+	if err != nil {
+		t.Fatalf("DownloadFile returned error: %v", err)
 	}
-	if string(records[0].Input) == string(records[0].ReplayInput) {
-		t.Fatal("restored history input unexpectedly matches replay payload")
+	if out.String() != "hello" {
+		t.Fatalf("downloaded content = %q, want hello", out.String())
 	}
-	if string(records[0].ReplayInput) != `{"path":"nested/demo.txt","content":"hello","encoding":"text"}` {
-		t.Fatalf("restored replay input = %s", string(records[0].ReplayInput))
+	if result.SizeBytes != 5 {
+		t.Fatalf("size = %d, want 5", result.SizeBytes)
 	}
+}
+
+type staticRuntimeAllocator struct {
+	allocation RuntimeAllocation
+}
+
+func (a staticRuntimeAllocator) Start(ctx context.Context) error { return nil }
+
+func (a staticRuntimeAllocator) Stop() {}
+
+func (a staticRuntimeAllocator) Allocate(ctx context.Context, req RuntimeAllocateRequest) (*RuntimeAllocation, error) {
+	allocation := a.allocation
+	return &allocation, nil
+}
+
+func (a staticRuntimeAllocator) Release(ctx context.Context, allocation RuntimeAllocation) error {
+	return nil
+}
+
+func (a staticRuntimeAllocator) Resolve(ctx context.Context, allocation RuntimeAllocation, sessionID string) (*RuntimeAllocation, error) {
+	resolved := a.allocation
+	return &resolved, nil
+}
+
+func (a staticRuntimeAllocator) Touch(ctx context.Context, allocation RuntimeAllocation, sessionID string, at time.Time) error {
+	return nil
+}
+
+func (a staticRuntimeAllocator) DiagnosticStats() map[string]AllocatorPoolStats {
+	return nil
 }

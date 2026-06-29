@@ -1,249 +1,125 @@
-# ARL-Infra Component Catalog
-# This file documents all components in the system with their responsibilities and interfaces
+# agent-env component catalog
 
 components:
-  # ============================================================================
-  # Custom Resource Definitions (CRDs)
-  # ============================================================================
-  - name: warmpool-crd
-    type: crd
-    paths:
-      - api/v1alpha1/warmpool_types.go
-      - config/crd/arl.infra.io_warmpools.yaml
-    responsibilities:
-      - Define WarmPool resource schema
-      - Specify validation rules for warm pool configuration
-      - Maintain pool of ready-to-use pods
-      - Define ToolsSpec for pre-provisioned tools in executor containers
-    interfaces:
-      inputs:
-        - Replicas count
-        - Pod template specification
-        - Tools specification (images, configmaps, inline)
-      outputs:
-        - ReadyReplicas count
-        - AllocatedReplicas count
-        - Conditions
-
-  # ============================================================================
-  # Controllers
-  # ============================================================================
-  - name: warmpool-controller
-    type: controller
-    paths:
-      - pkg/controller/warmpool_controller.go
-    responsibilities:
-      - Reconcile WarmPool resources
-      - Maintain desired number of warm pods
-      - Track pod readiness and allocation
-      - Inject sidecar and executor-agent containers
-      - Provision tools via init containers
-    interfaces:
-      watches:
-        - WarmPool
-        - Pod
-      manages:
-        - Pod
-
-  # ============================================================================
-  # Gateway
-  # ============================================================================
   - name: gateway
     type: gateway
     paths:
       - cmd/gateway/main.go
-      - pkg/gateway/gateway.go
-      - pkg/gateway/router.go
-      - pkg/gateway/types.go
-      - pkg/gateway/pod_allocator.go
-      - pkg/gateway/history.go
-      - pkg/gateway/ws_shell.go
-      - pkg/gateway/session_store.go
-      - pkg/gateway/memory_store.go
-      - pkg/gateway/redis_store.go
+      - pkg/gateway/
     responsibilities:
-      - Provide REST API for session and execution management
-      - Create/delete sessions (allocate pods from warm pools)
-      - Execute steps via direct gRPC to sidecar
-      - Manage execution history and trajectory export
-      - WebSocket proxy for interactive shell
-      - Pluggable session storage (in-memory or Redis)
+      - Expose session, execute, file, replay, pool, and managed-session REST APIs
+      - Create SandboxTemplate, SandboxWarmPool, and SandboxClaim resources
+      - Resolve ready SandboxClaims to sidecar endpoints
+      - Persist sessions in memory or Redis
+      - Write trajectory/audit records to ClickHouse
+      - Expose Prometheus metrics on the internal HTTP port
     interfaces:
       exposes:
-        - REST API (POST/GET/DELETE /v1/sessions, /v1/pools)
-        - WebSocket /v1/sessions/{id}/shell
+        - Public REST API on gateway.port
+        - Internal /metrics and debug endpoints on gateway.internalPort
       calls:
-        - Kubernetes API (WarmPool CRDs, Pods)
-        - Sidecar gRPC (AgentService)
-        - Redis (optional, for session state persistence)
-    config:
-      default_port: 8080
+        - Kubernetes API for agent-sandbox CRDs
+        - Sidecar gRPC AgentService
+        - Redis
+        - ClickHouse
 
-  # ============================================================================
-  # Webhooks
-  # ============================================================================
-  - name: warmpool-webhook
-    type: webhook
+  - name: agent-sandbox
+    type: external-controller
     paths:
-      - pkg/webhook/warmpool_validator.go
+      - ../agent-sandbox
     responsibilities:
-      - Validate WarmPool resources on create/update
-      - Ensure name is valid DNS label
+      - Reconcile SandboxTemplate, SandboxWarmPool, SandboxClaim, and Sandbox resources
+      - Maintain warm sandbox pools
+      - Adopt ready sandboxes for claims
+      - Manage underlying Kubernetes Pod, Service, and PVC resources
+    interfaces:
+      watches:
+        - SandboxTemplate
+        - SandboxWarmPool
+        - SandboxClaim
+        - Sandbox
+      manages:
+        - Pod
+        - Service
+        - PVC
 
-  # ============================================================================
-  # Operator
-  # ============================================================================
-  - name: operator
-    type: operator
-    paths:
-      - cmd/operator/main.go
-    responsibilities:
-      - Bootstrap Kubernetes controller manager
-      - Register WarmPool controller
-      - Register webhooks
-      - Serve health and metrics endpoints
-      - Initialize image-locality scheduler
-    config:
-      default_namespace: arl
-      health_probe_port: 8081
-      metrics_port: 8080
-
-  # ============================================================================
-  # Sidecar
-  # ============================================================================
   - name: sidecar
     type: sidecar
     paths:
       - cmd/sidecar/main.go
-      - pkg/sidecar/service.go
-      - pkg/sidecar/grpc_server.go
-      - pkg/sidecar/executor_client.go
+      - pkg/sidecar/
     responsibilities:
-      - Run as sidecar in warm pool pods
-      - Provide gRPC API for file operations and command execution
-      - Forward commands to executor-agent via Unix socket
-      - Manage interactive shell sessions
-      - Auto-snapshot workspace after each step (git-based)
+      - Run beside the executor container in every sandbox pod
+      - Provide gRPC APIs for file operations, process execution, reset, and shell
+      - Forward command execution to executor-agent over a Unix socket
+      - Snapshot workspace state after steps
     interfaces:
       exposes:
-        - gRPC AgentService
+        - AgentService gRPC
       calls:
-        - Executor Agent (Unix socket)
-      grpc_methods:
-        - UpdateFiles
-        - Execute
-        - SignalProcess
-        - Reset
-        - InteractiveShell
-    config:
-      default_port: 50051
-      workspace_dir: /workspace
+        - executor-agent Unix socket
 
-  # ============================================================================
-  # Executor Agent
-  # ============================================================================
   - name: executor-agent
     type: agent
     paths:
       - cmd/executor-agent/main.go
-      - pkg/execagent/agent.go
-      - pkg/execagent/protocol.go
+      - pkg/execagent/
     responsibilities:
-      - Run inside executor container
-      - Execute commands received from sidecar via Unix socket
-      - Provide isolated execution environment with executor-specific tools
+      - Run inside the executor container
+      - Execute commands requested by the sidecar
+      - Stream stdout, stderr, and exit status through the Unix socket protocol
 
-  # ============================================================================
-  # Scheduler
-  # ============================================================================
-  - name: image-scheduler
-    type: scheduler
-    paths:
-      - pkg/scheduler/image_scheduler.go
-      - pkg/scheduler/rendezvous.go
-    responsibilities:
-      - Image-locality aware pod scheduling
-      - Use rendezvous hashing for consistent node selection
-      - Prefer nodes that already have required container images
-
-  # ============================================================================
-  # Protocol Buffers
-  # ============================================================================
   - name: agent-proto
     type: proto
     paths:
       - proto/agent.proto
+      - pkg/pb/
     responsibilities:
-      - Define gRPC service interface for sidecar
-      - Define message types for file/process operations
-    interfaces:
-      defines:
-        - AgentService
-        - FileRequest/FileResponse
-        - ExecRequest/ExecLog
-        - SignalRequest/SignalResponse
-        - ResetRequest/ResetResponse
-        - ShellInput/ShellOutput
+      - Define the sidecar gRPC AgentService contract
+      - Generate Go protobuf and gRPC bindings
 
-  - name: proto-go-generated
-    type: generated
-    paths:
-      - pkg/pb/agent.pb.go
-      - pkg/pb/agent_grpc.pb.go
-    responsibilities:
-      - Go implementation of protobuf messages
-      - Go gRPC client and server stubs
-
-  # ============================================================================
-  # Python SDK
-  # ============================================================================
   - name: python-sdk
     type: sdk
     paths:
       - sdk/python/arl/
     responsibilities:
-      - Provide Python client for ARL via Gateway API
-      - High-level SandboxSession for session management
-      - GatewayClient for REST API communication
-      - Tool invocation (list_tools, call_tool)
-      - Trajectory export for RL/SFT training
-    interfaces:
-      depends_on:
-        - Gateway REST API
-      provides:
-        - SandboxSession
-        - GatewayClient
-        - WarmPoolManager
-        - InteractiveShellClient
+      - Provide Python clients for gateway APIs
+      - Provide SandboxSession and ManagedSession user workflows
+      - Upload/download files, execute commands, restore, replay, and export trajectories
 
-  # ============================================================================
-  # Helm Charts
-  # ============================================================================
   - name: helm-chart
-    type: config
+    type: deployment
     paths:
-      - charts/arl-operator/
+      - charts/agent-env/
     responsibilities:
-      - Kubernetes deployment configuration
-      - Service accounts and RBAC
-      - CRD installation
-      - Gateway deployment
+      - Deploy gateway
+      - Configure Redis, ClickHouse, Prometheus, Grafana, Alertmanager, and proxy options
+      - Grant gateway RBAC for agent-sandbox CRDs
 
-  # ============================================================================
-  # Configuration
-  # ============================================================================
-  - name: crd-manifests
-    type: config
+  - name: observability
+    type: support
     paths:
-      - config/crd/
+      - pkg/metrics/
+      - pkg/audit/
+      - charts/agent-env/templates/prometheus.yaml
+      - charts/agent-env/templates/grafana.yaml
     responsibilities:
-      - Generated CRD YAML manifests
-      - OpenAPI validation schemas
+      - Prometheus metrics collection
+      - ClickHouse audit and trajectory storage
+      - Grafana dashboard provisioning
 
-  - name: sample-resources
-    type: config
+  - name: redis
+    type: support
     paths:
-      - config/samples/
+      - pkg/gateway/redis_store.go
+      - charts/agent-env/templates/redis.yaml
     responsibilities:
-      - Example resource configurations
-      - Quick start templates
+      - Optional gateway session-state persistence
+
+  - name: clickhouse
+    type: support
+    paths:
+      - pkg/audit/
+      - charts/agent-env/templates/clickhouse.yaml
+    responsibilities:
+      - Optional trajectory and audit storage

@@ -1,13 +1,13 @@
 # CLAUDE.md
 
-K8s Operator for Agentic RL — warm pod pools + sidecar injection for ultra-low latency code execution.
+Gateway platform for Agentic RL sandboxes, backed by `sigs.k8s.io/agent-sandbox`.
 
 ## Commands
 
 ```bash
 make build              # Build all Go binaries
 make check              # fmt + vet + tidy + ruff + mypy
-make generate           # Proto, CRDs, deepcopy
+make generate           # Proto codegen
 make arch-check         # Validate architecture docs
 skaffold run --profile=k8s  # Deploy (dev)
 
@@ -21,29 +21,26 @@ Python: use `uv` exclusively (`uv run`, `uv add`). SDK: `make build-sdk`.
 ## Directory Structure
 
 ```
-api/v1alpha1/           # WarmPool CRD types
-pkg/controller/         # WarmPoolController (LRU scale-down)
-pkg/gateway/            # REST API + SessionStore + PoolManager
+pkg/gateway/            # REST API + SessionStore + SandboxClaim allocator
 pkg/execagent/          # Executor agent (Unix socket inside container)
 pkg/sidecar/            # Sidecar gRPC server
-pkg/scheduler/          # Image-locality scheduling (Rendezvous hashing)
 pkg/client/             # gRPC client for sidecar
-pkg/interfaces/         # Shared interfaces (SidecarClient, AuditWriter)
+pkg/interfaces/         # Shared interfaces (SidecarClient, MetricsCollector)
 pkg/metrics/            # Prometheus metrics
-pkg/audit/              # ClickHouse audit logging
-cmd/{operator,gateway,sidecar,executor-agent}/  # Entry points
+pkg/audit/              # ClickHouse trajectory storage
+cmd/{gateway,sidecar,executor-agent}/  # Entry points
 proto/agent.proto       # gRPC service definition
 sdk/python/arl/         # Python SDK (ManagedSession, SandboxSession, GatewayClient)
-charts/arl-operator/    # Helm chart
+charts/agent-env/    # Helm chart
 ```
 
 ## Lifecycle
 
-WarmPool creates N warm pods -> PodAllocator assigns pod to session -> Gateway forwards execution to sidecar gRPC. Managed sessions (`POST /v1/managed/sessions`) auto-create/scale pools.
+SandboxWarmPool creates warm Sandboxes -> SandboxClaim binds one Sandbox to a session -> Gateway forwards execution to the sidecar gRPC endpoint. Managed sessions (`POST /v1/managed/sessions`) auto-create sandbox-backed pools.
 
 ## Code Style
 
-- **Go 1.25.0**: English only. `make check` before commit. No test files unless requested.
+- **Go 1.26.0**: English only. `make check` before commit. No test files unless requested.
 - **Python 3.10+**: Modern type hints, Pydantic models, no `Any`. `make check` before commit.
 - Comments only where logic isn't self-evident. Chinese OK in docs.
 
@@ -51,7 +48,7 @@ WarmPool creates N warm pods -> PodAllocator assigns pod to session -> Gateway f
 
 After modifying components or interfaces:
 1. Check `architecture/propagation-rules.yaml` for affected components
-2. Run required actions (`make manifests`, `make proto-go`, etc.)
+2. Run required actions (`make proto-go`, Helm lint, SDK checks, etc.)
 3. Update `architecture/{components,dependencies,propagation-rules}.yaml` if needed
 4. Validate with `make arch-check`
 5. Update `docs/` if the change affects user-facing behavior, APIs, CRDs, or deployment config

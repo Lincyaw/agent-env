@@ -1,110 +1,48 @@
-# Getting Started for Developers
+# For Developers
 
-This guide is for developers and operators who need to deploy and manage ARL-Infra on a Kubernetes cluster.
+This guide is for developers deploying or modifying `agent-env`.
 
 ## Prerequisites
 
-Before deploying ARL-Infra, ensure you have:
+- Kubernetes cluster
+- `kubectl`
+- Helm
+- Docker
+- Go 1.26+
+- Python with `uv`
+- `agent-sandbox` CRDs and controller installed
 
-| Requirement | Version | Purpose |
-|-------------|---------|---------|
-| Kubernetes | 1.25+ | Container orchestration |
-| kubectl | Latest | Kubernetes CLI |
-| Helm | 3.x | Package manager |
-| Docker | 20.x+ | Container runtime |
-| Go | 1.25+ | Building from source |
-| Skaffold | Latest | Development workflow |
-
-## Quick Start
-
-### Option 1: Using Skaffold (Recommended)
+Check the sandbox CRDs:
 
 ```bash
-# Clone the repository
-git clone https://github.com/Lincyaw/agent-env.git
-cd agent-env
-
-# Setup K8s prerequisites (ClickHouse operator, Helm dependencies)
-make k8s-setup
-
-# Deploy using Skaffold (default profile for minikube)
-skaffold run
-
-# Or for development with auto-rebuild
-skaffold dev --profile=dev
-
-# Deploy to K8s cluster with registry
-skaffold run --profile=k8s
-
-# Deploy with sample resources
-skaffold run --profile=with-samples
+kubectl api-resources | grep -i sandbox
 ```
 
-### Option 2: Deploy to Production
+## Local Checks
 
 ```bash
-# Deploy to production environment
-skaffold run --profile=prod
+go test ./...
+uv run ruff check sdk/python/arl/arl examples/python scripts
+uv run mypy sdk/python/arl/arl
+helm lint charts/agent-env
 ```
 
-### Verify Deployment
+## Deployment
+
+For local or CI deployment, build the three runtime images:
 
 ```bash
-# Check operator pods
-kubectl get pods -n arl
-
-# Check CRDs are installed
-kubectl get crds | grep arl.infra.io
-
-# Check custom resources
-kubectl get warmpools
-
-# View operator logs
-make logs
+docker build -f Dockerfile.gateway -t arl-gateway:dev .
+docker build -f Dockerfile.sidecar -t arl-sidecar:dev .
+docker build -f Dockerfile.executor-agent -t arl-executor-agent:dev .
 ```
 
-## What's Next?
+Then install the Helm chart with matching tags.
 
-After deploying ARL-Infra, proceed to:
-
-1. **[Architecture](../developer-guide/architecture.md)** - Understand the system design
-2. **[Installation](../developer-guide/installation.md)** - Detailed installation options
-3. **[Deployment](../developer-guide/deployment.md)** - Production deployment guide
-4. **[CRD Reference](../developer-guide/crd-reference.md)** - Custom Resource definitions
-
-## Quick Test
-
-Create a simple warm pool and test with the SDK:
+## Debugging
 
 ```bash
-# Create a warm pool
-cat <<EOF | kubectl apply -f -
-apiVersion: arl.infra.io/v1alpha1
-kind: WarmPool
-metadata:
-  name: test-pool
-spec:
-  replicas: 1
-  template:
-    spec:
-      containers:
-        - name: executor
-          image: python:3.9-slim
-          command: ["sleep", "infinity"]
-EOF
-
-# Wait for pods to be ready
-kubectl get pods -w
+kubectl get deploy,pod,svc -n arl
+kubectl logs -n arl -l app.kubernetes.io/component=gateway --tail=100
+kubectl get sandboxwarmpools,sandboxclaims,sandboxes -A
 ```
-
-!!! note "Execution via Gateway API"
-    Task execution is handled through the Gateway REST API or the Python SDK, not via kubectl. See the [SDK User Guide](sdk-users.md) or the [Python SDK documentation](../user-guide/python-sdk.md) for details.
-
-## Troubleshooting
-
-| Issue | Solution |
-|-------|----------|
-| Pods not starting | Check `kubectl describe pod` for events |
-| CRDs not found | Run `make manifests` and apply CRDs |
-| Operator not running | Check `make logs` for operator logs |
-| Helm dependency issues | Run `make k8s-setup` to update dependencies |

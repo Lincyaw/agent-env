@@ -42,19 +42,11 @@ install-python-tools: ## Install Python development tools
 ##@ Deployment (Skaffold)
 
 .PHONY: k8s-setup
-k8s-setup: ## Setup prerequisites for new K8s cluster (ClickHouse operator, Helm dependencies, CRDs)
+k8s-setup: ## Setup prerequisites for a new K8s cluster
 	@echo "Setting up K8s cluster prerequisites..."
-	@echo "1. Installing ClickHouse operator..."
-	helm repo add clickhouse-operator https://helm.altinity.com || true
-	helm repo update
-	helm upgrade --install clickhouse-operator clickhouse-operator/altinity-clickhouse-operator \
-		--namespace kube-system \
-		--create-namespace \
-		--wait
-	@echo "2. Updating Helm dependencies..."
-	cd charts/arl-operator && helm dependency update
-	@echo "3. Installing CRDs..."
-	@echo "✅ Setup complete. Now run 'skaffold run --profile=dev' to deploy."
+	@echo "1. Updating Helm dependencies..."
+	cd charts/agent-env && helm dependency update
+	@echo "Setup complete. Install agent-sandbox first, then run 'skaffold run --profile=dev' to deploy agent-env."
 
 
 ##@ Build
@@ -74,10 +66,6 @@ build-executor-agent: ## Build executor agent binary
 .PHONY: build-sidecar
 build-sidecar: ## Build sidecar binary
 	CGO_ENABLED=0 go build -o bin/sidecar cmd/sidecar/main.go
-
-.PHONY: build-operator
-build-operator: ## Build operator binary
-	CGO_ENABLED=0 go build -o bin/operator cmd/operator/main.go
 
 .PHONY: build-cli
 build-cli: ## Build arl CLI binary
@@ -115,7 +103,7 @@ check: fmt vet tidy ## Run all code quality checks
 ##@ Code Generation
 
 .PHONY: generate
-generate: proto-go manifests deepcopy ## Generate all code (proto, CRDs, deepcopy)
+generate: proto-go ## Generate all code
 
 .PHONY: proto-go
 proto-go: ## Generate Go gRPC code from proto files
@@ -124,15 +112,6 @@ proto-go: ## Generate Go gRPC code from proto files
 		--go-grpc_out=. --go-grpc_opt=paths=source_relative \
 		proto/agent.proto
 	@mv proto/*.pb.go pkg/pb/ 2>/dev/null || true
-
-.PHONY: manifests
-manifests: ## Generate CRD manifests
-	go run sigs.k8s.io/controller-tools/cmd/controller-gen crd:maxDescLen=0,allowDangerousTypes=true paths="./api/..." output:crd:artifacts:config=config/crd
-	cp config/crd/*.yaml charts/arl-operator/crds/
-
-.PHONY: deepcopy
-deepcopy: ## Generate deepcopy code
-	go run sigs.k8s.io/controller-tools/cmd/controller-gen object:headerFile="hack/boilerplate.go.txt" paths="./api/..."
 
 ##@ Python SDK
 
@@ -161,5 +140,5 @@ arch-check: ## Validate architecture documentation
 ##@ Utilities
 
 .PHONY: logs
-logs: ## Show operator logs
-	kubectl logs -n arl -l app=arl-operator --tail=100 -f
+logs: ## Show gateway logs
+	kubectl logs -n arl -l app.kubernetes.io/component=gateway --tail=100 -f

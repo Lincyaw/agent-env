@@ -1,427 +1,80 @@
 # Deployment
 
-This guide covers deploying ARL-Infra to various environments.
+The supported runtime stack is:
 
-## Deployment Options
+```text
+agent-sandbox-controller
+agent-env gateway
+Redis       optional session persistence
+ClickHouse  optional trajectory storage
+Prometheus  optional metrics collection
+Grafana     optional dashboards
+```
 
-| Method | Best For | Auto-Rebuild |
-|--------|----------|--------------|
-| Skaffold (default) | Local minikube | No |
-| Skaffold (dev) | Development with auto-sync | Yes |
-| Skaffold (k8s) | K8s clusters with registry | No |
-| Skaffold (prod) | Production | No |
-| Helm | Custom deployments | No |
+The legacy in-tree WarmPool controller is no longer deployed.
 
-## Skaffold Deployment (Recommended)
+## Helm Install
 
-### Prerequisites Setup
-
-Before first deployment, run the setup command:
+Local development:
 
 ```bash
-# Setup K8s prerequisites (ClickHouse operator, Helm dependencies)
-make k8s-setup
+helm upgrade --install agent-env charts/agent-env \
+  -n arl --create-namespace \
+  --set auth.enabled=false \
+  --set image.injectedPullPolicy=IfNotPresent \
+  --set gateway.image.tag=dev \
+  --set sidecar.image.tag=dev \
+  --set executorAgent.image.tag=dev
 ```
 
-This will:
-1. Install ClickHouse operator
-2. Update Helm dependencies
-3. Prepare CRDs for installation
-
-### Local Development (minikube)
-
-For iterative development with auto-rebuild:
+Enable Redis, ClickHouse, Prometheus, and Grafana:
 
 ```bash
-# Start development mode with file watching
-skaffold dev --profile=dev
+helm upgrade --install agent-env charts/agent-env \
+  -n arl --create-namespace \
+  --set auth.enabled=false \
+  --set redis.enabled=true \
+  --set clickhouse.enabled=true \
+  --set prometheus.enabled=true \
+  --set grafana.enabled=true
 ```
 
-Or for a one-time deployment:
+## Required RBAC
+
+The gateway needs access to agent-sandbox resources:
+
+- `sandboxclaims`
+- `sandboxtemplates`
+- `sandboxwarmpools`
+- `sandboxes`
+- Pods and Secrets in target namespaces
+
+The Helm chart grants this through the gateway service account.
+
+## Verification
 
 ```bash
-# Deploy to minikube
-skaffold run
+kubectl get deploy,pod,svc -n arl
+kubectl get sandboxwarmpools,sandboxclaims,sandboxes -A
+kubectl logs -n arl -l app.kubernetes.io/component=gateway --tail=100
 ```
 
-### Deploy to Kubernetes Cluster
-
-For staging or production clusters with a container registry:
+Port-forward the gateway:
 
 ```bash
-# Deploy using k8s profile
-skaffold run --profile=k8s
-
-# With sample resources
-skaffold run --profile=k8s-with-samples
+kubectl -n arl port-forward svc/agent-env-gateway 8080:8080
+kubectl -n arl port-forward svc/agent-env-gateway-metrics 9091:9091
 ```
 
-### Deploy to Production
+Then check:
 
 ```bash
-# Deploy to production
-skaffold run --profile=prod
+curl http://127.0.0.1:8080/healthz
+curl http://127.0.0.1:9091/metrics
 ```
 
-### Delete Deployment
+## Cleanup
 
 ```bash
-# Delete resources deployed by Skaffold
-skaffold delete
-
-# Or with specific profile
-skaffold delete --profile=k8s
-```
-
-## Helm Deployment
-
-### Prerequisites
-
-```bash
-# Add Helm repository for dependencies
-helm repo add clickhouse-operator https://helm.altinity.com
-helm repo update
-
-# Update chart dependencies
-cd charts/arl-operator
-helm dependency update
-```
-
-### Install
-
-```bash
-# Install with default values
-helm install arl-operator charts/arl-operator -n arl --create-namespace
-
-# Install with custom values
-helm install arl-operator charts/arl-operator \
-  -n arl \
-  --create-namespace \
-  -f my-values.yaml
-```
-
-### Configuration
-
-Create a `values.yaml` file:
-
-```yaml
-operator:
-  image:
-    repository: your-registry/arl-operator
-    tag: v1.0.0
-  replicas: 1
-  resources:
-    limits:
-      cpu: 500m
-      memory: 512Mi
-    requests:
-      cpu: 100m
-      memory: 128Mi
-
-sidecar:
-  image:
-    repository: your-registry/arl-sidecar
-    tag: v1.0.0
-```
-
-### Upgrade
-
-```bash
-helm upgrade arl-operator charts/arl-operator -n arl -f my-values.yaml
-```
-
-### Uninstall
-
-```bash
-helm uninstall arl-operator -n arl
-```
-
-## Manual Deployment
-
-### 1. Install CRDs
-
-```bash
-kubectl apply -f config/crd/
-```
-
-### 2. Create Namespace
-
-```bash
-kubectl create namespace arl
-```
-
-### 3. Deploy Operator
-
-```bash
-# Build and push images
-docker build -f Dockerfile.operator -t your-registry/arl-operator:latest .
-docker push your-registry/arl-operator:latest
-
-# Deploy
-kubectl apply -f config/deployment/operator.yaml -n arl
-```
-
-### 4. Verify Deployment
-
-```bash
-kubectl get pods -n arl
-kubectl logs -n arl -l app=arl-operator
-```
-
-## Post-Deployment Setup
-
-### Create a WarmPool
-
-After deploying ARL-Infra, create at least one WarmPool:
-
-```yaml
-# warmpool.yaml
-apiVersion: arl.infra.io/v1alpha1
-kind: WarmPool
-metadata:
-  name: python-pool
-spec:
-  replicas: 3
-  template:
-    spec:
-      containers:
-        - name: executor
-          image: python:3.9-slim
-          command: ["sleep", "infinity"]
-          volumeMounts:
-            - name: workspace
-              mountPath: /workspace
-      volumes:
-        - name: workspace
-          emptyDir: {}
-```
-
-```bash
-kubectl apply -f warmpool.yaml
-```
-
-### Verify WarmPool
-
-```bash
-# Check WarmPool status
-kubectl get warmpools
-
-# Check pods created by the pool
-kubectl get pods -l arl.infra.io/warmpool=python-pool
-```
-
-## Authentication & Security
-
-The Gateway supports API key authentication with role-based access control. When enabled, all `/v1/` endpoints require a valid `Authorization: Bearer <api-key>` header. Prometheus metrics and debug endpoints are served on a separate internal port (default `9091`) that should not be exposed publicly.
-
-### Environment Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `AUTH_ENABLED` | `true` | Enable API key authentication. On by default (fail-closed): the gateway refuses to start when enabled with no keys. Set `AUTH_ENABLED=false` to explicitly opt out. |
-| `AUTH_API_KEYS` | `""` | Comma-separated `key:role` pairs (e.g., `abc123:admin,def456:user`) |
-| `INTERNAL_PORT` | `9091` | Port for metrics, debug health, and AlertManager webhook |
-| `RATE_LIMIT_RPS` | `100` | Max requests per second per IP |
-| `RATE_LIMIT_BURST` | `200` | Rate limiter burst capacity |
-| `ALLOWED_ORIGINS` | `""` | Comma-separated WebSocket allowed origins (host:port). Empty = reject browser origins when auth is enabled |
-
-### Roles
-
-| Role | Permissions |
-|------|-------------|
-| `admin` | All operations: pool CRUD, managed sessions, experiment deletion |
-| `user` | Session CRUD, execute, upload, restore, shell, history, trajectory |
-
-### Example
-
-```bash
-# Generate API keys (use a proper secret manager in production)
-ADMIN_KEY=$(openssl rand -hex 32)
-USER_KEY=$(openssl rand -hex 32)
-
-# Set environment variables
-export AUTH_ENABLED=true
-export AUTH_API_KEYS="${ADMIN_KEY}:admin,${USER_KEY}:user"
-export INTERNAL_PORT=9091
-```
-
-Python SDK:
-
-```python
-from arl import SandboxSession
-
-with SandboxSession(
-    pool_ref="python-pool",
-    gateway_url="http://gateway:8080",
-    api_key="your-user-key",  # or set ARL_API_KEY env var
-) as session:
-    result = session.execute([{"name": "test", "command": ["echo", "hello"]}])
-```
-
-### Port Separation
-
-| Port | Purpose | Auth Required |
-|------|---------|---------------|
-| `8080` (public) | `/v1/*` API endpoints, `/healthz` | Yes (when `AUTH_ENABLED=true`) |
-| `9091` (internal) | `/metrics`, `/debug/health`, `/internal/*` | No (restrict via NetworkPolicy) |
-
-Configure Prometheus to scrape the internal port, and restrict it via Kubernetes NetworkPolicy:
-
-```yaml
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: arl-gateway-internal
-spec:
-  podSelector:
-    matchLabels:
-      app: arl-gateway
-  ingress:
-    - ports:
-        - port: 9091
-      from:
-        - namespaceSelector:
-            matchLabels:
-              name: monitoring
-```
-
-## Production Considerations
-
-### High Availability
-
-For production deployments:
-
-```yaml
-# values.yaml
-operator:
-  replicas: 3
-  affinity:
-    podAntiAffinity:
-      requiredDuringSchedulingIgnoredDuringExecution:
-        - labelSelector:
-            matchLabels:
-              app: arl-operator
-          topologyKey: kubernetes.io/hostname
-```
-
-### Resource Quotas
-
-Set resource quotas for namespaces:
-
-```yaml
-apiVersion: v1
-kind: ResourceQuota
-metadata:
-  name: arl-quota
-  namespace: arl
-spec:
-  hard:
-    pods: "100"
-    requests.cpu: "10"
-    requests.memory: 20Gi
-    limits.cpu: "20"
-    limits.memory: 40Gi
-```
-
-### Monitoring
-
-Enable Prometheus metrics:
-
-```yaml
-# values.yaml
-operator:
-  metrics:
-    enabled: true
-    port: 8080
-```
-
-### Network Policies
-
-Restrict network access:
-
-```yaml
-apiVersion: networking.k8s.io/v1
-kind: NetworkPolicy
-metadata:
-  name: arl-operator-policy
-  namespace: arl
-spec:
-  podSelector:
-    matchLabels:
-      app: arl-operator
-  policyTypes:
-    - Ingress
-    - Egress
-  ingress:
-    - from:
-        - namespaceSelector: {}
-  egress:
-    - to:
-        - namespaceSelector: {}
-```
-
-## Clean Up
-
-### Using Skaffold
-
-```bash
-# Delete all deployed resources
-skaffold delete
-
-# Delete with specific profile
-skaffold delete --profile=k8s
-```
-
-### Manual Cleanup
-
-```bash
-# Delete all warmpools
-kubectl delete warmpools --all
-
-# Delete Helm release
-helm uninstall arl-operator -n arl
-
-# Delete CRDs
-kubectl delete -f config/crd/
-
-# Delete namespace
-kubectl delete namespace arl
-```
-
-## Troubleshooting
-
-### Operator Not Starting
-
-```bash
-# Check pod status
-kubectl get pods -n arl
-
-# Check logs using make target
-make logs
-
-# Describe pod for events
-kubectl describe pod -n arl -l app=arl-operator
-```
-
-### WarmPool Pods Not Creating
-
-```bash
-# Check WarmPool status
-kubectl describe warmpool <name>
-
-# Check operator logs for errors
-make logs
-```
-
-### Execution Not Working
-
-```bash
-# Check Gateway is running
-kubectl get pods -n arl -l app=arl-gateway
-
-# Check Gateway logs
-kubectl logs -n arl -l app=arl-gateway
-
-# Check sidecar logs in the pod
-kubectl logs <pod-name> -c sidecar
+helm uninstall agent-env -n arl
 ```

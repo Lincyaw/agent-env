@@ -43,6 +43,7 @@ class WarmPoolManager:
         name: str,
         image: str,
         replicas: int = 2,
+        profile: str = "default",
         tools: ToolsSpec | None = None,
         resources: ResourceRequirements | None = None,
         workspace_dir: str = "/workspace",
@@ -54,6 +55,7 @@ class WarmPoolManager:
             name: Name of the WarmPool.
             image: Container image for the executor.
             replicas: Number of warm pods to maintain.
+            profile: Resource profile used by session pool selection.
             tools: Optional tools specification to provision in the executor container.
             resources: Optional resource requirements (CPU/memory requests and limits).
                       If not specified, uses defaults: requests={cpu: 100m, memory: 128Mi},
@@ -65,6 +67,7 @@ class WarmPoolManager:
             namespace=self.namespace,
             image=image,
             replicas=replicas,
+            profile=profile,
             config_env=config_env,
             tools=tools,
             resources=resources,
