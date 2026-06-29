@@ -36,7 +36,7 @@ from arl.types import (
 )
 from arl.warmpool import WarmPoolManager
 
-__version__ = "0.9.0"
+__version__ = "0.14.1"
 __all__ = [
     "ApiKeyAuth",
     "ConfigEnvSpec",

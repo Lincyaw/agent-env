@@ -2,6 +2,18 @@
 
 ## [Unreleased]
 
+## [0.14.1] - 2026-06-29
+
+### Fixed
+- Treat managed-session `maxReplicas` as a hard ceiling instead of an eager
+  scale-up target.
+- Allow managed sessions to pass `idleTimeoutSeconds` and
+  `maxLifetimeSeconds` through the Python SDK.
+- Preserve source session routing for stale ARL session pods.
+
+### Changed
+- Bump Python SDK package metadata and `arl.__version__` to `0.14.1`.
+
 ### Added
 - **Gateway API**: New REST API component for session management and execution
   - POST/GET/DELETE /v1/sessions - Session lifecycle
