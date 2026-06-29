@@ -65,7 +65,8 @@ All Gateway code accesses sessions through this interface. The implementation is
     "id": "gw-1710000000000-abcd1234",
     "sandboxName": "gw-1710000000000-abcd1234",
     "namespace": "default",
-    "poolRef": "my-pool",
+    "image": "python:3.12",
+    "profile": "python-pool",
     "podIP": "10.0.0.5",
     "podName": "my-pool-abc123",
     "createdAt": "2024-03-10T10:00:00Z"

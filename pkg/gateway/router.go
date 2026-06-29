@@ -4,7 +4,9 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"path"
 	"strconv"
+	"strings"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	ctrlmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
@@ -34,7 +36,7 @@ func SetupRoutes(mux *http.ServeMux, gw *Gateway, authCfg *AuthConfig) {
 
 	// Execution (user role)
 	mux.HandleFunc("POST /v1/sessions/{id}/execute", user(handleExecute(gw)))
-	mux.HandleFunc("POST /v1/sessions/{id}/files", user(handleUploadFile(gw)))
+	mux.HandleFunc("PUT /v1/sessions/{id}/files/{path...}", user(handleUploadFile(gw)))
 	mux.HandleFunc("GET /v1/sessions/{id}/files/{path...}", user(handleDownloadFile(gw)))
 	mux.HandleFunc("POST /v1/sessions/{id}/restore", user(handleRestore(gw)))
 	mux.HandleFunc("POST /v1/sessions/{id}/replay", user(handleReplay(gw)))
@@ -113,8 +115,8 @@ func handleCreateSession(gw *Gateway) http.HandlerFunc {
 			return
 		}
 
-		if req.PoolRef == "" {
-			writeError(w, http.StatusBadRequest, "pool_ref is required")
+		if req.Image == "" && req.Profile == "" {
+			writeError(w, http.StatusBadRequest, "image or profile is required")
 			return
 		}
 
@@ -197,22 +199,17 @@ func handleUploadFile(gw *Gateway) http.HandlerFunc {
 			return
 		}
 
-		var req UploadFileRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
-			return
-		}
-
-		if req.Path == "" {
+		filePath := r.PathValue("path")
+		if filePath == "" {
 			writeError(w, http.StatusBadRequest, "path is required")
 			return
 		}
-		if _, _, err := normalizeUploadFileRequest(req); err != nil {
+		if _, err := sanitizeUploadPath(filePath); err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
 
-		resp, err := gw.UploadFile(r.Context(), id, req)
+		resp, err := gw.UploadFile(r.Context(), id, filePath, r.Body, r.Header.Get("X-ARL-SHA256"))
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
@@ -234,18 +231,55 @@ func handleDownloadFile(gw *Gateway) http.HandlerFunc {
 			writeError(w, http.StatusBadRequest, "path is required")
 			return
 		}
-
-		content, err := gw.DownloadFile(r.Context(), id, filePath)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
+		if _, err := sanitizeUploadPath(filePath); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
 
-		w.Header().Set("Content-Type", "application/octet-stream")
-		w.Header().Set("Content-Disposition", "attachment; filename=\""+filePath+"\"")
-		w.WriteHeader(http.StatusOK)
-		w.Write(content)
+		streamWriter := &downloadResponseWriter{w: w, filePath: filePath}
+		result, err := gw.DownloadFile(r.Context(), id, filePath, streamWriter)
+		if err != nil {
+			if !streamWriter.started {
+				writeError(w, http.StatusInternalServerError, err.Error())
+			}
+			return
+		}
+		streamWriter.ensureStarted()
+		w.Header().Set("X-ARL-Size-Bytes", strconv.FormatInt(result.SizeBytes, 10))
+		w.Header().Set("X-ARL-SHA256", result.SHA256)
 	}
+}
+
+type downloadResponseWriter struct {
+	w        http.ResponseWriter
+	filePath string
+	started  bool
+}
+
+func (w *downloadResponseWriter) Write(p []byte) (int, error) {
+	w.ensureStarted()
+	return w.w.Write(p)
+}
+
+func (w *downloadResponseWriter) ensureStarted() {
+	if w.started {
+		return
+	}
+	header := w.w.Header()
+	header.Set("Content-Type", "application/octet-stream")
+	header.Set("Content-Disposition", "attachment; filename="+strconv.Quote(pathBaseForHeader(w.filePath)))
+	header.Add("Trailer", "X-ARL-Size-Bytes")
+	header.Add("Trailer", "X-ARL-SHA256")
+	w.w.WriteHeader(http.StatusOK)
+	w.started = true
+}
+
+func pathBaseForHeader(filePath string) string {
+	base := path.Base(strings.ReplaceAll(filePath, "\\", "/"))
+	if base == "." || base == "/" || base == "" {
+		return "download"
+	}
+	return strings.ReplaceAll(base, "\x00", "")
 }
 
 func handleReplay(gw *Gateway) http.HandlerFunc {

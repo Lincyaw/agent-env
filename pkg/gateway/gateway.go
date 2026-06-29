@@ -1,7 +1,6 @@
 package gateway
 
 import (
-	"bytes"
 	"context"
 	"crypto/rand"
 	"encoding/hex"
@@ -22,28 +21,39 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	k8slabels "k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
+	sandboxv1beta1 "sigs.k8s.io/agent-sandbox/api/v1beta1"
+	extensionsv1beta1 "sigs.k8s.io/agent-sandbox/extensions/api/v1beta1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
-	arlv1alpha1 "github.com/Lincyaw/agent-env/api/v1alpha1"
 	"github.com/Lincyaw/agent-env/pkg/audit"
-	configenvutil "github.com/Lincyaw/agent-env/pkg/configenv"
 	"github.com/Lincyaw/agent-env/pkg/interfaces"
-	"github.com/Lincyaw/agent-env/pkg/labels"
 	"github.com/Lincyaw/agent-env/pkg/sidecar"
 )
 
 // GatewayConfig holds Gateway-level configuration.
 type GatewayConfig struct {
-	IdleTimeout   time.Duration
-	MaxLifetime   time.Duration
-	SweepInterval time.Duration
+	IdleTimeout        time.Duration
+	MaxLifetime        time.Duration
+	SweepInterval      time.Duration
+	SidecarImage       string
+	SidecarHTTPPort    int
+	SidecarGRPCPort    int
+	WorkspaceDir       string
+	ExecutorAgentImage string
+	ImagePullPolicy    string
+	GRPCAuthToken      string
+	GRPCAuthSecretName string
+	PodHTTPProxy       string
+	PodNoProxy         string
 }
 
 // session holds internal session state.
 type session struct {
 	mu                  sync.RWMutex
 	Info                SessionInfo
+	Runtime             RuntimeAllocation
 	History             *StepHistory
 	managed             bool
 	experimentID        string
@@ -57,169 +67,109 @@ type session struct {
 	activeExecs         int32 // atomic; >0 means execution in progress, sweep must not kill
 }
 
+func (s *session) runtimeAllocation() RuntimeAllocation {
+	allocation := s.Runtime
+	if allocation.Namespace == "" {
+		allocation.Namespace = s.Info.Namespace
+	}
+	if allocation.PoolRef == "" {
+		allocation.PoolRef = s.Info.PoolRef
+	}
+	if allocation.PodName == "" {
+		allocation.PodName = s.Info.PodName
+	}
+	if allocation.PodIP == "" {
+		allocation.PodIP = s.Info.PodIP
+	}
+	if allocation.SandboxName == "" {
+		allocation.SandboxName = s.Info.SandboxName
+	}
+	if allocation.Backend == "" {
+		allocation.Backend = runtimeBackendSandboxClaim
+	}
+	return allocation
+}
+
 // Gateway manages sessions and forwards execution to sidecars.
 type Gateway struct {
-	k8sClient        client.Client
-	podAllocator     *PodAllocator
-	sidecarClient    interfaces.SidecarClient
-	metrics          interfaces.MetricsCollector
-	trajectoryWriter *audit.TrajectoryWriter
-	store            SessionStore
-	poolManager      *PoolManager
-	gwConfig         GatewayConfig
-	sweepStopCh      chan struct{}
-	sweepWg          sync.WaitGroup
-	trajCh           chan audit.TrajectoryEntry
-	trajWg           sync.WaitGroup
+	k8sClient           client.Client
+	runtimeAllocator    RuntimeAllocator
+	poolSelector        PoolSelector
+	admissionController AdmissionController
+	sidecarClient       interfaces.SidecarClient
+	metrics             interfaces.MetricsCollector
+	trajectoryWriter    *audit.TrajectoryWriter
+	store               SessionStore
+	gwConfig            GatewayConfig
+	sweepStopCh         chan struct{}
+	sweepWg             sync.WaitGroup
+	trajMu              sync.RWMutex
+	trajCh              chan audit.TrajectoryEntry
+	trajWg              sync.WaitGroup
 }
 
 // New creates a new gateway. metrics and trajectoryWriter may be nil.
 // If store is nil, a default MemoryStore is used.
-func New(k8sClient client.Client, podAllocator *PodAllocator, sidecarClient interfaces.SidecarClient, metrics interfaces.MetricsCollector, trajectoryWriter *audit.TrajectoryWriter, pmConfig *PoolManagerConfig, gwConfig GatewayConfig, store SessionStore) *Gateway {
+func New(k8sClient client.Client, runtimeAllocator RuntimeAllocator, sidecarClient interfaces.SidecarClient, metrics interfaces.MetricsCollector, trajectoryWriter *audit.TrajectoryWriter, gwConfig GatewayConfig, store SessionStore) *Gateway {
 	if store == nil {
 		store = NewMemoryStore()
 	}
 	gw := &Gateway{
-		k8sClient:        k8sClient,
-		podAllocator:     podAllocator,
-		sidecarClient:    sidecarClient,
-		metrics:          metrics,
-		trajectoryWriter: trajectoryWriter,
-		store:            store,
-		gwConfig:         gwConfig,
-		sweepStopCh:      make(chan struct{}),
-	}
-	if pmConfig != nil {
-		gw.poolManager = NewPoolManager(k8sClient, *pmConfig)
+		k8sClient:           k8sClient,
+		runtimeAllocator:    runtimeAllocator,
+		poolSelector:        DefaultPoolSelector{},
+		admissionController: NewDefaultAdmissionController(),
+		sidecarClient:       sidecarClient,
+		metrics:             metrics,
+		trajectoryWriter:    trajectoryWriter,
+		store:               store,
+		gwConfig:            gwConfig,
+		sweepStopCh:         make(chan struct{}),
 	}
 	return gw
 }
 
-// StartPoolManager starts the pool manager background goroutine and recovers state.
-func (g *Gateway) StartPoolManager(ctx context.Context) error {
-	if g.poolManager == nil {
-		return nil
+// SetTrajectoryWriter installs a ClickHouse writer after gateway startup and
+// starts the trajectory worker. If the worker is already running, the new
+// writer is closed and ignored.
+func (g *Gateway) SetTrajectoryWriter(writer *audit.TrajectoryWriter) {
+	if writer == nil {
+		return
 	}
-	orphans, err := g.poolManager.Recover(ctx)
-	if err != nil {
-		return fmt.Errorf("recover pool manager: %w", err)
+	g.trajMu.Lock()
+	if g.trajCh != nil || g.trajectoryWriter != nil {
+		g.trajMu.Unlock()
+		writer.Close()
+		return
 	}
-
-	// Recover sessions from allocated pods.
-	// For each pod with a recent last-activity annotation AND a session annotation,
-	// rebuild the in-memory session so clients can continue using their session IDs.
-	// Pods without recent activity or without session annotations are reclaimed to idle.
-	if len(orphans) > 0 {
-		idleTimeout := g.gwConfig.IdleTimeout
-		if idleTimeout <= 0 {
-			idleTimeout = 10 * time.Minute // conservative fallback
-		}
-		now := time.Now()
-		recovered := 0
-		reclaimed := 0
-
-		for _, pod := range orphans {
-			sessionID := pod.Annotations[labels.SessionAnnotation]
-			recentlyActive := false
-
-			if ts, ok := pod.Annotations[labels.LastActivityAnnotation]; ok {
-				lastActivity, parseErr := time.Parse(time.RFC3339, ts)
-				if parseErr == nil && now.Sub(lastActivity) <= idleTimeout {
-					recentlyActive = true
-				}
-			}
-
-			// If recently active AND has session annotation, rebuild the session
-			if recentlyActive && sessionID != "" {
-				poolRef := pod.Labels[labels.PoolLabelKey]
-				sandboxName := pod.Labels[labels.SandboxLabelKey]
-				managed := pod.Labels[labelManaged] == "true"
-				experimentID := pod.Labels[labelExperiment]
-				lastActivity, _ := time.Parse(time.RFC3339, pod.Annotations[labels.LastActivityAnnotation])
-
-				info := SessionInfo{
-					ID:          sessionID,
-					SandboxName: sandboxName,
-					Namespace:   pod.Namespace,
-					PoolRef:     poolRef,
-					PodIP:       pod.Status.PodIP,
-					PodName:     pod.Name,
-					CreatedAt:   pod.CreationTimestamp.Time,
-				}
-
-				s := &session{
-					Info:                info,
-					History:             NewStepHistory(),
-					managed:             managed,
-					experimentID:        experimentID,
-					lastTaskTime:        lastActivity,
-					lastAnnotationPatch: lastActivity,
-					createdAt:           pod.CreationTimestamp.Time,
-					idleTimeout:         g.gwConfig.IdleTimeout,
-					maxLifetime:         g.gwConfig.MaxLifetime,
-				}
-
-				g.store.Set(sessionID, s)
-				g.store.IncrCount(1)
-				recovered++
-
-				// Restore pool manager session count for managed sessions
-				if managed {
-					if val, ok := g.poolManager.pools.Load(poolRef); ok {
-						state := val.(*poolState)
-						state.sessionCount.Add(1)
-					}
-				}
-
-				log.Printf("Recovered session %s (pod=%s/%s, pool=%s, lastActivity=%s)",
-					sessionID, pod.Namespace, pod.Name, poolRef, lastActivity.Format(time.RFC3339))
-			} else {
-				// Expired or missing session — workspace is tainted, delete the pod.
-				// WarmPoolController will create a clean replacement.
-				if err := g.k8sClient.Delete(ctx, pod); err != nil && !errors.IsNotFound(err) {
-					log.Printf("Warning: failed to delete orphaned pod %s/%s: %v", pod.Namespace, pod.Name, err)
-				} else {
-					reclaimed++
-				}
-			}
-		}
-
-		if recovered > 0 {
-			log.Printf("Recovered %d sessions from pod annotations", recovered)
-		}
-		if reclaimed > 0 {
-			log.Printf("Deleted %d orphaned allocated pods (workspace tainted)", reclaimed)
-		}
-
-		if g.metrics != nil {
-			g.metrics.SetActiveSessions(g.store.Count())
-		}
-	}
-
-	g.poolManager.Start()
-	return nil
-}
-
-// StopPoolManager stops the pool manager background goroutine.
-func (g *Gateway) StopPoolManager() {
-	if g.poolManager != nil {
-		g.poolManager.Stop()
-	}
+	g.trajectoryWriter = writer
+	g.trajMu.Unlock()
+	g.StartTrajectoryWorker()
 }
 
 // StartTrajectoryWorker starts a single background goroutine to drain the
 // trajectory write channel. Must be called after New() if trajectoryWriter is set.
 func (g *Gateway) StartTrajectoryWorker() {
+	g.trajMu.Lock()
 	if g.trajectoryWriter == nil {
+		g.trajMu.Unlock()
 		return
 	}
-	g.trajCh = make(chan audit.TrajectoryEntry, 4096)
+	if g.trajCh != nil {
+		g.trajMu.Unlock()
+		return
+	}
+	writer := g.trajectoryWriter
+	ch := make(chan audit.TrajectoryEntry, 4096)
+	g.trajCh = ch
 	g.trajWg.Add(1)
+	g.trajMu.Unlock()
+
 	go func() {
 		defer g.trajWg.Done()
-		for entry := range g.trajCh {
+		for entry := range ch {
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			if err := g.trajectoryWriter.WriteEntry(ctx, entry); err != nil {
+			if err := writer.WriteEntry(ctx, entry); err != nil {
 				log.Printf("Warning: failed to write trajectory entry: %v", err)
 			}
 			cancel()
@@ -229,16 +179,39 @@ func (g *Gateway) StartTrajectoryWorker() {
 
 // StopTrajectoryWorker closes the trajectory channel and waits for the worker to drain.
 func (g *Gateway) StopTrajectoryWorker() {
-	if g.trajCh != nil {
-		close(g.trajCh)
-		g.trajWg.Wait()
+	g.trajMu.Lock()
+	ch := g.trajCh
+	writer := g.trajectoryWriter
+	g.trajCh = nil
+	g.trajectoryWriter = nil
+	g.trajMu.Unlock()
+
+	if ch != nil {
+		close(ch)
+	}
+	g.trajWg.Wait()
+	if writer != nil {
+		writer.Close()
 	}
 }
 
-// CreateSession allocates a pod from the pool via PodAllocator and registers a session.
+func (g *Gateway) enqueueTrajectory(entry audit.TrajectoryEntry, sessionID string, step int) {
+	g.trajMu.RLock()
+	defer g.trajMu.RUnlock()
+	if g.trajCh == nil {
+		return
+	}
+	select {
+	case g.trajCh <- entry:
+	default:
+		log.Printf("Warning: trajectory channel full, dropping entry for session %s step %d", sessionID, step)
+	}
+}
+
+// CreateSession allocates a sandbox runtime from the pool and registers a session.
 func (g *Gateway) CreateSession(ctx context.Context, req CreateSessionRequest) (*SessionInfo, error) {
 	ctx, span := otel.Tracer("gateway").Start(ctx, "Gateway.CreateSession",
-		traceStartAttrs("pool", req.PoolRef, "namespace", req.Namespace),
+		traceStartAttrs("image", req.Image, "profile", req.Profile, "namespace", req.Namespace),
 	)
 	defer span.End()
 
@@ -246,64 +219,76 @@ func (g *Gateway) CreateSession(ctx context.Context, req CreateSessionRequest) (
 	if ns == "" {
 		ns = "default"
 	}
-
-	// Pre-flight: check pool health before allocating
-	if err := g.checkPoolHealth(ctx, req.PoolRef, ns); err != nil {
+	if strings.TrimSpace(req.Image) == "" && strings.TrimSpace(req.Profile) == "" && strings.TrimSpace(req.PoolName) == "" {
+		err := fmt.Errorf("image or profile is required")
 		recordSpanErr(span, err)
-		return nil, fmt.Errorf("pool not ready: %w", err)
+		return nil, err
 	}
+	var err error
+	req, err = g.ensureImageBackedSessionPool(ctx, req, ns)
+	if err != nil {
+		recordSpanErr(span, err)
+		return nil, fmt.Errorf("ensure session pool: %w", err)
+	}
+
+	intent := g.resourceIntentFromCreateSession(ctx, req, ns)
+	selection, admission, err := g.planSessionAllocation(ctx, intent)
+	if err != nil {
+		recordSpanErr(span, err)
+		return nil, fmt.Errorf("plan session allocation: %w", err)
+	}
+	poolRef := selection.PoolName
+	ns = selection.Namespace
 
 	sessionID := fmt.Sprintf("gw-%d-%s", time.Now().UnixMilli(), randomSuffix(8))
 	sandboxName := sessionID
-	span.SetAttributes(attribute.String("session.id", sessionID))
+	span.SetAttributes(
+		attribute.String("session.id", sessionID),
+		attribute.String("pool.selected", poolRef),
+		attribute.String("pool.selection_reason", selection.Reason),
+		attribute.String("admission.reason", admission.Reason),
+		attribute.Bool("admission.cold_start_expected", admission.ColdStartExpected),
+		attribute.Int("admission.warm_available", int(admission.WarmAvailable)),
+	)
 
-	// Allocate pod from warm pool via Informer-backed queue (5-minute timeout)
+	// Allocate a runtime from the selected pool (5-minute timeout).
 	allocCtx, allocCancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer allocCancel()
 
 	allocStart := time.Now()
-	pod, err := g.podAllocator.Allocate(allocCtx, req.PoolRef, ns)
+	allocation, err := g.runtimeAllocator.Allocate(allocCtx, RuntimeAllocateRequest{
+		PoolRef:     poolRef,
+		Namespace:   ns,
+		SessionID:   sessionID,
+		SandboxName: sandboxName,
+	})
 	if err != nil {
 		recordSpanErr(span, err)
-		diag := g.diagnosePoolHealth(ctx, req.PoolRef, ns)
-		return nil, fmt.Errorf("allocate pod from pool %s: %w (%s)", req.PoolRef, err, diag)
+		diag := g.diagnosePoolHealth(ctx, poolRef, ns)
+		return nil, fmt.Errorf("allocate runtime from pool %s: %w (%s)", poolRef, err, diag)
 	}
 	span.SetAttributes(
-		attribute.String("pod.name", pod.Name),
-		attribute.String("pod.ip", pod.Status.PodIP),
+		attribute.String("runtime.backend", allocation.Backend),
+		attribute.String("pod.name", allocation.PodName),
+		attribute.String("pod.ip", allocation.PodIP),
 	)
-
-	podIP := pod.Status.PodIP
-	podName := pod.Name
-
-	// Patch sandbox label and session annotation onto the allocated pod
-	patchPod := pod.DeepCopy()
-	patch := client.MergeFrom(pod.DeepCopy())
-	if patchPod.Labels == nil {
-		patchPod.Labels = make(map[string]string)
-	}
-	patchPod.Labels[labels.SandboxLabelKey] = sandboxName
-	if patchPod.Annotations == nil {
-		patchPod.Annotations = make(map[string]string)
-	}
-	patchPod.Annotations[labels.SessionAnnotation] = sessionID
-	if patchErr := g.k8sClient.Patch(ctx, patchPod, patch); patchErr != nil {
-		log.Printf("Warning: failed to patch sandbox label on pod %s: %v", podName, patchErr)
-	}
 
 	info := SessionInfo{
 		ID:          sessionID,
 		SandboxName: sandboxName,
 		Namespace:   ns,
-		PoolRef:     req.PoolRef,
-		PodIP:       podIP,
-		PodName:     podName,
+		Image:       selection.Pool.Image,
+		PoolRef:     poolRef,
+		Profile:     selection.Pool.Profile,
+		PodIP:       allocation.PodIP,
+		PodName:     allocation.PodName,
 		CreatedAt:   time.Now(),
 	}
 
 	ownerHash, _ := KeyHashFromContext(ctx)
 	g.store.Set(sessionID, &session{
 		Info:         info,
+		Runtime:      *allocation,
 		History:      NewStepHistory(),
 		managed:      req.Managed,
 		experimentID: req.ExperimentID,
@@ -316,7 +301,7 @@ func (g *Gateway) CreateSession(ctx context.Context, req CreateSessionRequest) (
 
 	if g.metrics != nil {
 		g.metrics.SetActiveSessions(g.store.IncrCount(1))
-		g.metrics.RecordSessionAllocationDuration(req.PoolRef, time.Since(allocStart))
+		g.metrics.RecordSessionAllocationDuration(poolRef, time.Since(allocStart))
 	}
 
 	return &info, nil
@@ -334,7 +319,7 @@ func (g *Gateway) GetSession(sessionID string) (*SessionInfo, error) {
 	return &info, nil
 }
 
-// DeleteSession deletes the pod directly and removes the session.
+// DeleteSession releases the sandbox runtime and removes the session.
 func (g *Gateway) DeleteSession(ctx context.Context, sessionID string) error {
 	s, ok := g.store.Get(sessionID)
 	if !ok {
@@ -347,16 +332,15 @@ func (g *Gateway) DeleteSession(ctx context.Context, sessionID string) error {
 		return fmt.Errorf("session %s not found", sessionID)
 	}
 	s.closed = true
-	podName := s.Info.PodName
-	podIP := s.Info.PodIP
-	namespace := s.Info.Namespace
-	poolRef := s.Info.PoolRef
-	managed := s.managed
+	allocation := s.runtimeAllocation()
+	podName := allocation.PodName
+	podIP := allocation.PodIP
 	s.mu.Unlock()
 
-	// Delete pod directly via PodAllocator (WarmPoolController will create replacement)
-	if err := g.podAllocator.Release(ctx, podName, namespace); err != nil && !errors.IsNotFound(err) {
-		log.Printf("Warning: failed to delete pod %s for session %s: %v", podName, sessionID, err)
+	// Release the runtime by deleting the SandboxClaim. agent-sandbox handles
+	// the underlying Sandbox/Pod lifecycle.
+	if err := g.runtimeAllocator.Release(ctx, allocation); err != nil && !errors.IsNotFound(err) {
+		log.Printf("Warning: failed to release runtime %s for session %s: %v", podName, sessionID, err)
 	}
 
 	// Close the gRPC connection to the deleted pod
@@ -372,17 +356,12 @@ func (g *Gateway) DeleteSession(ctx context.Context, sessionID string) error {
 		g.metrics.SetActiveSessions(g.store.IncrCount(-1))
 	}
 
-	// Release from pool manager if managed
-	if managed && g.poolManager != nil {
-		g.poolManager.ReleaseSession(poolRef)
-	}
-
 	return nil
 }
 
-// resolveSessionPodIP validates that the session still owns the recorded pod
-// before using the pod IP. Pod IPs are reusable; the pod name plus session
-// annotation is the control-plane identity.
+// resolveSessionPodIP validates the session's SandboxClaim binding before
+// returning the current pod IP. Pod IPs are reusable; the Claim/Sandbox identity
+// is the control-plane binding.
 func (g *Gateway) resolveSessionPodIP(ctx context.Context, sessionID string) (*session, string, error) {
 	s, ok := g.store.Get(sessionID)
 	if !ok {
@@ -396,49 +375,32 @@ func (g *Gateway) resolveSessionPodIP(ctx context.Context, sessionID string) (*s
 	if closed {
 		return nil, "", fmt.Errorf("session %s not found", sessionID)
 	}
-	if info.PodName == "" || info.Namespace == "" {
-		return nil, "", fmt.Errorf("session %s has incomplete pod binding", sessionID)
+	if g.runtimeAllocator == nil {
+		return nil, "", fmt.Errorf("runtime allocator not configured")
+	}
+	resolved, err := g.runtimeAllocator.Resolve(ctx, s.runtimeAllocation(), sessionID)
+	if err != nil {
+		g.dropSession(sessionID, s)
+		return nil, "", err
 	}
 
-	pod := &corev1.Pod{}
-	if err := g.k8sClient.Get(ctx, types.NamespacedName{Name: info.PodName, Namespace: info.Namespace}, pod); err != nil {
-		if errors.IsNotFound(err) {
-			g.dropSession(sessionID, s)
-			return nil, "", fmt.Errorf("session %s pod %s/%s no longer exists", sessionID, info.Namespace, info.PodName)
-		}
-		return nil, "", fmt.Errorf("validate session %s pod %s/%s: %w", sessionID, info.Namespace, info.PodName, err)
-	}
-	if pod.DeletionTimestamp != nil {
-		g.dropSession(sessionID, s)
-		return nil, "", fmt.Errorf("session %s pod %s/%s is terminating", sessionID, info.Namespace, info.PodName)
-	}
-	if got := pod.Annotations[labels.SessionAnnotation]; got != sessionID {
-		g.dropSession(sessionID, s)
-		return nil, "", fmt.Errorf("session %s lost pod ownership for %s/%s (annotation=%q)", sessionID, info.Namespace, info.PodName, got)
-	}
-	if status := pod.Labels[labels.StatusLabelKey]; status != labels.StatusAllocated {
-		g.dropSession(sessionID, s)
-		return nil, "", fmt.Errorf("session %s pod %s/%s is not allocated (status=%q)", sessionID, info.Namespace, info.PodName, status)
-	}
-	if pod.Status.PodIP == "" {
-		return nil, "", fmt.Errorf("session %s pod %s/%s has no pod IP", sessionID, info.Namespace, info.PodName)
-	}
-
-	if pod.Status.PodIP != info.PodIP {
+	if resolved.PodIP != info.PodIP {
 		if info.PodIP != "" {
 			if err := g.sidecarClient.CloseConnection(info.PodIP); err != nil {
 				log.Printf("Warning: failed to close stale sidecar connection for pod %s: %v", info.PodName, err)
 			}
 		}
 		s.mu.Lock()
-		s.Info.PodIP = pod.Status.PodIP
+		s.Info.PodIP = resolved.PodIP
+		s.Info.PodName = resolved.PodName
+		s.Runtime = *resolved
 		s.mu.Unlock()
 		if rs, ok := g.store.(*RedisStore); ok {
 			rs.Sync(sessionID)
 		}
 	}
 
-	return s, pod.Status.PodIP, nil
+	return s, resolved.PodIP, nil
 }
 
 func (g *Gateway) acquireSessionPodIP(ctx context.Context, sessionID string) (*session, string, func(), error) {
@@ -474,8 +436,6 @@ func (g *Gateway) dropSession(sessionID string, s *session) {
 	}
 	s.closed = true
 	info := s.Info
-	managed := s.managed
-	poolRef := s.Info.PoolRef
 	s.mu.Unlock()
 
 	if info.PodIP != "" {
@@ -486,9 +446,6 @@ func (g *Gateway) dropSession(sessionID string, s *session) {
 	g.store.Delete(sessionID)
 	if g.metrics != nil {
 		g.metrics.SetActiveSessions(g.store.IncrCount(-1))
-	}
-	if managed && g.poolManager != nil {
-		g.poolManager.ReleaseSession(poolRef)
 	}
 }
 
@@ -574,25 +531,17 @@ func (g *Gateway) ExecuteSteps(ctx context.Context, sessionID string, req Execut
 
 		resp.Results = append(resp.Results, result)
 
-		// Write to ClickHouse trajectory if configured
-		if g.trajCh != nil {
-			obsJSON, _ := json.Marshal(result.Output)
-			entry := audit.TrajectoryEntry{
-				SessionID:   sessionID,
-				Step:        globalIdx,
-				Name:        result.Name,
-				Action:      result.Input,
-				Observation: obsJSON,
-				SnapshotID:  result.SnapshotID,
-				DurationMs:  result.DurationMs,
-				Timestamp:   result.Timestamp,
-			}
-			select {
-			case g.trajCh <- entry:
-			default:
-				log.Printf("Warning: trajectory channel full, dropping entry for session %s step %d", sessionID, globalIdx)
-			}
-		}
+		obsJSON, _ := json.Marshal(result.Output)
+		g.enqueueTrajectory(audit.TrajectoryEntry{
+			SessionID:   sessionID,
+			Step:        globalIdx,
+			Name:        result.Name,
+			Action:      result.Input,
+			Observation: obsJSON,
+			SnapshotID:  result.SnapshotID,
+			DurationMs:  result.DurationMs,
+			Timestamp:   result.Timestamp,
+		}, sessionID, globalIdx)
 	}
 
 	resp.TotalDurationMs = time.Since(totalStart).Milliseconds()
@@ -730,25 +679,17 @@ func (g *Gateway) ExecuteStepsSSE(w http.ResponseWriter, ctx context.Context, se
 		result.Index = globalIdx
 		result.SnapshotID = fmt.Sprintf("%d", globalIdx)
 
-		// Write to ClickHouse trajectory (same as ExecuteSteps)
-		if g.trajCh != nil {
-			obsJSON, _ := json.Marshal(result.Output)
-			entry := audit.TrajectoryEntry{
-				SessionID:   sessionID,
-				Step:        globalIdx,
-				Name:        result.Name,
-				Action:      result.Input,
-				Observation: obsJSON,
-				SnapshotID:  result.SnapshotID,
-				DurationMs:  result.DurationMs,
-				Timestamp:   result.Timestamp,
-			}
-			select {
-			case g.trajCh <- entry:
-			default:
-				log.Printf("Warning: trajectory channel full, dropping entry for session %s step %d", sessionID, globalIdx)
-			}
-		}
+		obsJSON, _ := json.Marshal(result.Output)
+		g.enqueueTrajectory(audit.TrajectoryEntry{
+			SessionID:   sessionID,
+			Step:        globalIdx,
+			Name:        result.Name,
+			Action:      result.Input,
+			Observation: obsJSON,
+			SnapshotID:  result.SnapshotID,
+			DurationMs:  result.DurationMs,
+			Timestamp:   result.Timestamp,
+		}, sessionID, globalIdx)
 
 		// Stream the completed step result as SSE event
 		resultData, _ := json.Marshal(result)
@@ -801,43 +742,22 @@ func (g *Gateway) ReplayFrom(ctx context.Context, targetSessionID string, req Re
 
 	for _, record := range records {
 		if record.Name == uploadFileStepName {
-			var uploadReq UploadFileRequest
-			replayInput := record.ReplayInput
-			if len(replayInput) == 0 {
-				replayInput = record.Input
-			}
-			if len(replayInput) == 0 {
-				errors++
-				continue
-			}
-			if err := json.Unmarshal(replayInput, &uploadReq); err != nil {
-				errors++
-				continue
-			}
-			relPath, payload, err := normalizeUploadFileRequest(uploadReq)
-			if err != nil {
-				errors++
-				continue
-			}
-			if _, err := g.sidecarClient.WriteFile(ctx, podIP, relPath, payload); err != nil {
-				errors++
-				continue
-			}
-		} else {
-			var step StepRequest
-			if err := json.Unmarshal(record.Input, &step); err != nil {
-				errors++
-				continue
-			}
-			execReq := &sidecar.ExecRequest{
-				Command:    step.Command,
-				Env:        step.Env,
-				WorkingDir: step.WorkDir,
-			}
-			if _, err := g.sidecarClient.Execute(ctx, podIP, execReq); err != nil {
-				errors++
-				continue
-			}
+			continue
+		}
+
+		var step StepRequest
+		if err := json.Unmarshal(record.Input, &step); err != nil {
+			errors++
+			continue
+		}
+		execReq := &sidecar.ExecRequest{
+			Command:    step.Command,
+			Env:        step.Env,
+			WorkingDir: step.WorkDir,
+		}
+		if _, err := g.sidecarClient.Execute(ctx, podIP, execReq); err != nil {
+			errors++
+			continue
 		}
 		replayed++
 	}
@@ -883,73 +803,28 @@ func (g *Gateway) Restore(ctx context.Context, sessionID string, snapshotID stri
 
 	// Read current session info under read lock
 	s.mu.RLock()
-	oldPodName := s.Info.PodName
-	oldPodIP := s.Info.PodIP
-	oldNamespace := s.Info.Namespace
-	poolRef := s.Info.PoolRef
+	oldAllocation := s.runtimeAllocation()
 	s.mu.RUnlock()
 
-	// Allocate a new pod from the pool via PodAllocator
+	newSandboxName := fmt.Sprintf("%s-r%d", sessionID, time.Now().UnixMilli())
+
+	// Allocate a new runtime from the pool and replay into it.
 	allocCtx, allocCancel := context.WithTimeout(ctx, 5*time.Minute)
 	defer allocCancel()
 
-	newPod, err := g.podAllocator.Allocate(allocCtx, poolRef, oldNamespace)
+	newAllocation, err := g.runtimeAllocator.Allocate(allocCtx, RuntimeAllocateRequest{
+		PoolRef:     oldAllocation.PoolRef,
+		Namespace:   oldAllocation.Namespace,
+		SessionID:   sessionID,
+		SandboxName: newSandboxName,
+	})
 	if err != nil {
-		return fmt.Errorf("allocate new pod for restore: %w", err)
-	}
-
-	newPodIP := newPod.Status.PodIP
-	newPodName := newPod.Name
-	newSandboxName := fmt.Sprintf("%s-r%d", sessionID, time.Now().UnixMilli())
-
-	// Patch sandbox label and session annotation on the new pod
-	patchPod := newPod.DeepCopy()
-	patch := client.MergeFrom(newPod.DeepCopy())
-	if patchPod.Labels == nil {
-		patchPod.Labels = make(map[string]string)
-	}
-	patchPod.Labels[labels.SandboxLabelKey] = newSandboxName
-	if patchPod.Annotations == nil {
-		patchPod.Annotations = make(map[string]string)
-	}
-	patchPod.Annotations[labels.SessionAnnotation] = sessionID
-	if patchErr := g.k8sClient.Patch(ctx, patchPod, patch); patchErr != nil {
-		log.Printf("Warning: failed to patch sandbox label on pod %s: %v", newPodName, patchErr)
+		return fmt.Errorf("allocate new runtime for restore: %w", err)
 	}
 
 	// Replay each step from history on the new pod
 	for _, record := range records {
 		if record.Name == uploadFileStepName {
-			var uploadReq UploadFileRequest
-			replayInput := record.ReplayInput
-			if len(replayInput) == 0 && bytes.Contains(record.Input, []byte(`"content"`)) {
-				replayInput = record.Input
-			}
-			if len(replayInput) == 0 {
-				if err := g.releaseRestorePod(newPodName, oldNamespace); err != nil {
-					log.Printf("Warning: failed to release pod %s after restore failure: %v", newPodName, err)
-				}
-				return fmt.Errorf("replay upload step %d failed: missing replay payload", record.Index)
-			}
-			if err := json.Unmarshal(replayInput, &uploadReq); err != nil {
-				if err := g.releaseRestorePod(newPodName, oldNamespace); err != nil {
-					log.Printf("Warning: failed to release pod %s after restore failure: %v", newPodName, err)
-				}
-				return fmt.Errorf("replay upload step %d failed: decode replay payload: %w", record.Index, err)
-			}
-			relPath, payload, err := normalizeUploadFileRequest(uploadReq)
-			if err != nil {
-				if err := g.releaseRestorePod(newPodName, oldNamespace); err != nil {
-					log.Printf("Warning: failed to release pod %s after restore failure: %v", newPodName, err)
-				}
-				return fmt.Errorf("replay upload step %d failed: invalid replay payload: %w", record.Index, err)
-			}
-			if _, err := g.sidecarClient.WriteFile(ctx, newPodIP, relPath, payload); err != nil {
-				if err := g.releaseRestorePod(newPodName, oldNamespace); err != nil {
-					log.Printf("Warning: failed to release pod %s after restore failure: %v", newPodName, err)
-				}
-				return fmt.Errorf("replay upload step %d failed: %w", record.Index, err)
-			}
 			continue
 		}
 
@@ -964,9 +839,9 @@ func (g *Gateway) Restore(ctx context.Context, sessionID string, snapshotID stri
 			Env:        step.Env,
 			WorkingDir: step.WorkDir,
 		}
-		if _, err := g.sidecarClient.Execute(ctx, newPodIP, execReq); err != nil {
-			if err := g.releaseRestorePod(newPodName, oldNamespace); err != nil {
-				log.Printf("Warning: failed to release pod %s after restore failure: %v", newPodName, err)
+		if _, err := g.sidecarClient.Execute(ctx, newAllocation.PodIP, execReq); err != nil {
+			if err := g.releaseRestoreAllocation(*newAllocation); err != nil {
+				log.Printf("Warning: failed to release runtime %s after restore failure: %v", newAllocation.PodName, err)
 			}
 			return fmt.Errorf("replay step %d failed: %w", record.Index, err)
 		}
@@ -974,24 +849,29 @@ func (g *Gateway) Restore(ctx context.Context, sessionID string, snapshotID stri
 
 	// Update session to point at the new pod under write lock
 	s.mu.Lock()
-	s.Info.PodIP = newPodIP
-	s.Info.PodName = newPodName
+	s.Info.PodIP = newAllocation.PodIP
+	s.Info.PodName = newAllocation.PodName
 	s.Info.SandboxName = newSandboxName
+	s.Runtime = *newAllocation
 	s.mu.Unlock()
 
 	// Truncate history to records 0..targetIdx
 	s.History.TruncateTo(targetIdx)
+	g.touchLastTaskTime(sessionID)
+	if rs, ok := g.store.(*RedisStore); ok {
+		rs.Sync(sessionID)
+	}
 
-	// Delete old pod directly (async, best-effort) and close its gRPC connection
+	// Release old runtime directly (async, best-effort) and close its gRPC connection.
 	go func() {
 		bgCtx, bgCancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer bgCancel()
-		if err := g.podAllocator.Release(bgCtx, oldPodName, oldNamespace); err != nil {
-			log.Printf("Warning: failed to delete old pod %s: %v", oldPodName, err)
+		if err := g.runtimeAllocator.Release(bgCtx, oldAllocation); err != nil {
+			log.Printf("Warning: failed to release old runtime %s: %v", oldAllocation.PodName, err)
 		}
-		if oldPodIP != "" {
-			if err := g.sidecarClient.CloseConnection(oldPodIP); err != nil {
-				log.Printf("Warning: failed to close sidecar connection for old pod %s: %v", oldPodName, err)
+		if oldAllocation.PodIP != "" {
+			if err := g.sidecarClient.CloseConnection(oldAllocation.PodIP); err != nil {
+				log.Printf("Warning: failed to close sidecar connection for old runtime %s: %v", oldAllocation.PodName, err)
 			}
 		}
 	}()
@@ -999,10 +879,10 @@ func (g *Gateway) Restore(ctx context.Context, sessionID string, snapshotID stri
 	return nil
 }
 
-func (g *Gateway) releaseRestorePod(podName, namespace string) error {
+func (g *Gateway) releaseRestoreAllocation(allocation RuntimeAllocation) error {
 	bgCtx, bgCancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer bgCancel()
-	return g.podAllocator.Release(bgCtx, podName, namespace)
+	return g.runtimeAllocator.Release(bgCtx, allocation)
 }
 
 // GetHistory returns the execution history for a session.
@@ -1023,7 +903,7 @@ func (g *Gateway) ExportTrajectory(sessionID string) ([]byte, error) {
 	return s.History.ExportTrajectory(sessionID)
 }
 
-// CreatePool creates a WarmPool CRD.
+// CreatePool creates an agent-sandbox SandboxTemplate and SandboxWarmPool.
 func (g *Gateway) CreatePool(ctx context.Context, req CreatePoolRequest) error {
 	ns := req.Namespace
 	if ns == "" {
@@ -1056,80 +936,95 @@ func (g *Gateway) CreatePool(ctx context.Context, req CreatePoolRequest) error {
 		workspaceDir = "/workspace"
 	}
 
-	configEnv, err := decodeConfigEnv(req.ConfigEnv)
-	if err != nil {
+	if hasJSONPayload(req.ConfigEnv) {
+		return fmt.Errorf("configEnv is not supported by SandboxWarmPool-backed pools yet")
+	}
+	if hasJSONPayload(req.Tools) {
+		return fmt.Errorf("tools are not supported by SandboxWarmPool-backed pools yet")
+	}
+	if hasJSONPayload(req.ImageLocality) {
+		return fmt.Errorf("imageLocality is owned by agent-sandbox/scheduler in sandbox-backed pools")
+	}
+	if err := g.ensureSandboxRuntimeSecret(ctx, ns); err != nil {
 		return err
 	}
 
-	pool := &arlv1alpha1.WarmPool{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      req.Name,
-			Namespace: ns,
-		},
-		Spec: arlv1alpha1.WarmPoolSpec{
-			Replicas: replicas,
-			Template: corev1.PodTemplateSpec{
-				Spec: corev1.PodSpec{
-					Containers: []corev1.Container{
-						{
-							Name:            "executor",
-							Image:           req.Image,
-							ImagePullPolicy: corev1.PullIfNotPresent,
-							Command:         []string{"sh", "-c", "sleep infinity"},
-							Resources:       *resources,
-							VolumeMounts: []corev1.VolumeMount{
-								{Name: "workspace", MountPath: workspaceDir},
-							},
-						},
-					},
-				},
+	templateName := sandboxTemplateName(req.Name)
+	templateMeta := metav1.ObjectMeta{
+		Name:      templateName,
+		Namespace: ns,
+	}
+	poolMeta := metav1.ObjectMeta{
+		Name:      req.Name,
+		Namespace: ns,
+	}
+	if strings.TrimSpace(req.Profile) != "" {
+		templateMeta.Annotations = map[string]string{poolProfileAnnotation: strings.TrimSpace(req.Profile)}
+		poolMeta.Annotations = map[string]string{poolProfileAnnotation: strings.TrimSpace(req.Profile)}
+	}
+	template := &extensionsv1beta1.SandboxTemplate{
+		ObjectMeta: templateMeta,
+		Spec: extensionsv1beta1.SandboxTemplateSpec{
+			NetworkPolicyManagement: extensionsv1beta1.NetworkPolicyManagementUnmanaged,
+			Service:                 boolPtr(false),
+			PodTemplate: sandboxv1beta1.PodTemplate{
+				Spec: g.sandboxPodSpec(req.Image, workspaceDir, *resources),
 			},
-			Tools:         req.Tools,
-			ImageLocality: req.ImageLocality,
-			ConfigEnv:     configEnv,
 		},
 	}
+	if err := g.k8sClient.Create(ctx, template); err != nil {
+		if !errors.IsAlreadyExists(err) {
+			return fmt.Errorf("create sandbox template: %w", err)
+		}
+	}
 
-	return g.k8sClient.Create(ctx, pool)
+	pool := &extensionsv1beta1.SandboxWarmPool{
+		ObjectMeta: poolMeta,
+		Spec: extensionsv1beta1.SandboxWarmPoolSpec{
+			Replicas:    int32Ptr(replicas),
+			TemplateRef: extensionsv1beta1.SandboxTemplateRef{Name: templateName},
+			UpdateStrategy: &extensionsv1beta1.SandboxWarmPoolUpdateStrategy{
+				Type: extensionsv1beta1.RecreateSandboxWarmPoolUpdateStrategyType,
+			},
+		},
+	}
+	if err := g.k8sClient.Create(ctx, pool); err != nil {
+		return fmt.Errorf("create sandbox warm pool: %w", err)
+	}
+	return nil
 }
 
-// GetPool returns WarmPool info.
+// GetPool returns SandboxWarmPool info.
 func (g *Gateway) GetPool(ctx context.Context, name, namespace string) (*PoolInfo, error) {
 	if namespace == "" {
 		namespace = "default"
 	}
 
-	pool := &arlv1alpha1.WarmPool{}
+	pool := &extensionsv1beta1.SandboxWarmPool{}
 	if err := g.k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, pool); err != nil {
 		return nil, err
 	}
 
-	info := poolInfoFromCRD(pool)
+	info := g.poolInfoFromSandboxWarmPool(ctx, pool)
 	return &info, nil
 }
 
-// ScalePool updates the replica count of a WarmPool.
+// ScalePool updates the replica count of a SandboxWarmPool.
 func (g *Gateway) ScalePool(ctx context.Context, name string, req ScalePoolRequest) (*PoolInfo, error) {
 	ns := req.Namespace
 	if ns == "" {
 		ns = "default"
 	}
 
-	pool := &arlv1alpha1.WarmPool{}
+	pool := &extensionsv1beta1.SandboxWarmPool{}
 	if err := g.k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: ns}, pool); err != nil {
 		return nil, fmt.Errorf("get pool: %w", err)
 	}
 
-	pool.Spec.Replicas = req.Replicas
-
 	if req.Resources != nil {
-		for i := range pool.Spec.Template.Spec.Containers {
-			if pool.Spec.Template.Spec.Containers[i].Name == "executor" {
-				pool.Spec.Template.Spec.Containers[i].Resources = *req.Resources
-				break
-			}
-		}
+		return nil, fmt.Errorf("updating resources requires updating the SandboxTemplate and is not supported by ScalePool")
 	}
+	pool.Spec.Replicas = int32Ptr(req.Replicas)
 
 	if err := g.k8sClient.Update(ctx, pool); err != nil {
 		return nil, fmt.Errorf("update pool: %w", err)
@@ -1138,102 +1033,62 @@ func (g *Gateway) ScalePool(ctx context.Context, name string, req ScalePoolReque
 	return g.GetPool(ctx, name, ns)
 }
 
-// DeletePool deletes a WarmPool CRD.
+// DeletePool deletes a SandboxWarmPool and the default SandboxTemplate created by CreatePool.
 func (g *Gateway) DeletePool(ctx context.Context, name, namespace string) error {
 	if namespace == "" {
 		namespace = "default"
 	}
 
-	pool := &arlv1alpha1.WarmPool{
+	pool := &extensionsv1beta1.SandboxWarmPool{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      name,
 			Namespace: namespace,
 		},
 	}
-
-	return g.k8sClient.Delete(ctx, pool)
+	if err := g.k8sClient.Delete(ctx, pool); err != nil && !errors.IsNotFound(err) {
+		return err
+	}
+	template := &extensionsv1beta1.SandboxTemplate{
+		ObjectMeta: metav1.ObjectMeta{
+			Name:      sandboxTemplateName(name),
+			Namespace: namespace,
+		},
+	}
+	if err := g.k8sClient.Delete(ctx, template); err != nil && !errors.IsNotFound(err) {
+		return err
+	}
+	return nil
 }
 
-// checkPoolHealth returns an error if the pool is unhealthy (failing pods, no ready replicas).
+// checkPoolHealth returns an error if the SandboxWarmPool cannot be found.
 func (g *Gateway) checkPoolHealth(ctx context.Context, poolRef, namespace string) error {
-	pool := &arlv1alpha1.WarmPool{}
+	pool := &extensionsv1beta1.SandboxWarmPool{}
 	if err := g.k8sClient.Get(ctx, types.NamespacedName{Name: poolRef, Namespace: namespace}, pool); err != nil {
 		if errors.IsNotFound(err) {
 			return fmt.Errorf("pool %q not found in namespace %q", poolRef, namespace)
 		}
 		return fmt.Errorf("get pool: %w", err)
 	}
-
-	for _, cond := range pool.Status.Conditions {
-		if cond.Type == configenvutil.ReadyConditionType && cond.Status == metav1.ConditionFalse {
-			return fmt.Errorf("pool %q has invalid configEnv: %s", poolRef, cond.Message)
-		}
-	}
-
-	// Check for PodsFailing condition
-	for _, cond := range pool.Status.Conditions {
-		if cond.Type == "PodsFailing" && cond.Status == "True" {
-			if pool.Status.ReadyReplicas == 0 {
-				if isTransientImagePullRateLimit(cond.Message) {
-					log.Printf("Warning: pool %q has transient image pull rate-limit with no ready replicas, continuing: %s",
-						poolRef, cond.Message)
-					return nil
-				}
-				return fmt.Errorf("pool %q has failing pods and no ready replicas: %s", poolRef, cond.Message)
-			}
-			// If some replicas are ready despite failures, log warning but allow
-			log.Printf("Warning: pool %q has failing pods but %d ready replicas: %s",
-				poolRef, pool.Status.ReadyReplicas, cond.Message)
-		}
-	}
-
 	return nil
-}
-
-func isTransientImagePullRateLimit(message string) bool {
-	if message == "" {
-		return false
-	}
-
-	lower := strings.ToLower(message)
-	isPullFailure := strings.Contains(lower, "imagepullbackoff") || strings.Contains(lower, "errimagepull")
-	if !isPullFailure {
-		return false
-	}
-
-	return strings.Contains(lower, "qps exceeded") ||
-		strings.Contains(lower, "rate limit") ||
-		strings.Contains(lower, "toomanyrequests") ||
-		strings.Contains(lower, "429")
 }
 
 // diagnosePoolHealth returns a diagnostic string about pool health (used in timeout errors).
 func (g *Gateway) diagnosePoolHealth(ctx context.Context, poolRef, namespace string) string {
-	pool := &arlv1alpha1.WarmPool{}
+	pool := &extensionsv1beta1.SandboxWarmPool{}
 	if err := g.k8sClient.Get(ctx, types.NamespacedName{Name: poolRef, Namespace: namespace}, pool); err != nil {
 		return fmt.Sprintf("unable to check pool health: %v", err)
 	}
 
-	diag := fmt.Sprintf("pool=%s replicas=%d ready=%d allocated=%d",
-		poolRef, pool.Spec.Replicas, pool.Status.ReadyReplicas, pool.Status.AllocatedReplicas)
-
-	for _, cond := range pool.Status.Conditions {
-		if cond.Status == "True" ||
-			(cond.Type == "Ready" && cond.Status == "False") ||
-			(cond.Type == configenvutil.ReadyConditionType && cond.Status == "False") {
-			diag += fmt.Sprintf(" [%s: %s]", cond.Type, cond.Message)
-		}
-	}
-
-	return diag
+	return fmt.Sprintf("pool=%s desired=%d replicas=%d ready=%d template=%s",
+		poolRef, desiredSandboxWarmPoolReplicas(pool), pool.Status.Replicas, pool.Status.ReadyReplicas, pool.Spec.TemplateRef.Name)
 }
 
-// annotationPatchMinInterval is the minimum time between pod annotation patches
+// annotationPatchMinInterval is the minimum time between runtime annotation patches
 // to avoid excessive K8s API calls.
 const annotationPatchMinInterval = 30 * time.Second
 
 // touchLastTaskTime updates the in-memory lastTaskTime for session idle tracking
-// and asynchronously patches the pod's last-activity annotation (throttled to at most once per 30s).
+// and asynchronously patches runtime last-activity annotations (throttled to at most once per 30s).
 func (g *Gateway) touchLastTaskTime(sessionID string) {
 	s, ok := g.store.Get(sessionID)
 	if !ok {
@@ -1247,8 +1102,7 @@ func (g *Gateway) touchLastTaskTime(sessionID string) {
 	if shouldPatch {
 		s.lastAnnotationPatch = now
 	}
-	podName := s.Info.PodName
-	namespace := s.Info.Namespace
+	allocation := s.runtimeAllocation()
 	s.mu.Unlock()
 
 	if shouldPatch {
@@ -1256,30 +1110,13 @@ func (g *Gateway) touchLastTaskTime(sessionID string) {
 			bgCtx, bgCancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer bgCancel()
 
-			pod := &corev1.Pod{}
-			if err := g.k8sClient.Get(bgCtx, types.NamespacedName{Name: podName, Namespace: namespace}, pod); err != nil {
-				log.Printf("Warning: failed to get pod %s for annotation patch: %v", podName, err)
+			if err := g.runtimeAllocator.Touch(bgCtx, allocation, sessionID, now); err != nil {
+				log.Printf("Warning: failed to patch last-activity for runtime %s: %v", allocation.PodName, err)
 				if errors.IsNotFound(err) {
 					if current, ok := g.store.Get(sessionID); ok {
 						g.dropSession(sessionID, current)
 					}
 				}
-				return
-			}
-			if got := pod.Annotations[labels.SessionAnnotation]; got != sessionID {
-				if current, ok := g.store.Get(sessionID); ok {
-					g.dropSession(sessionID, current)
-				}
-				log.Printf("Warning: session %s lost pod ownership for annotation patch on pod %s (annotation=%q)", sessionID, podName, got)
-				return
-			}
-			patch := client.MergeFrom(pod.DeepCopy())
-			if pod.Annotations == nil {
-				pod.Annotations = make(map[string]string)
-			}
-			pod.Annotations[labels.LastActivityAnnotation] = now.UTC().Format(time.RFC3339)
-			if err := g.k8sClient.Patch(bgCtx, pod, patch); err != nil {
-				log.Printf("Warning: failed to patch last-activity annotation on pod %s: %v", podName, err)
 			}
 		}()
 	}
@@ -1390,16 +1227,11 @@ func (g *Gateway) CreateManagedSession(ctx context.Context, req CreateManagedSes
 		traceStartAttrs(
 			"experiment.id", req.ExperimentID,
 			"image", req.Image,
+			"profile", req.Profile,
 			"namespace", req.Namespace,
 		),
 	)
 	defer span.End()
-
-	if g.poolManager == nil {
-		err := fmt.Errorf("pool manager not configured")
-		recordSpanErr(span, err)
-		return nil, err
-	}
 
 	if !validLabelValue.MatchString(req.ExperimentID) {
 		err := fmt.Errorf("experimentId must be a valid Kubernetes label value (max 63 chars, alphanumeric/dash/underscore/dot, must start and end with alphanumeric)")
@@ -1412,15 +1244,41 @@ func (g *Gateway) CreateManagedSession(ctx context.Context, req CreateManagedSes
 		ns = "default"
 	}
 
-	poolName, err := g.poolManager.AcquireSession(ctx, req)
+	if hasJSONPayload(req.ConfigEnv) {
+		err := fmt.Errorf("managed session configEnv is not supported by sandbox-backed pools yet")
+		recordSpanErr(span, err)
+		return nil, err
+	}
+	if hasJSONPayload(req.Tools) {
+		err := fmt.Errorf("managed session tools are not supported by sandbox-backed pools yet")
+		recordSpanErr(span, err)
+		return nil, err
+	}
+	image := normalizeImage(req.Image)
+	profile := normalizeProfile(req.Profile)
+	poolName, err := managedPoolName(image, ns, profile, nil)
 	if err != nil {
 		recordSpanErr(span, err)
-		return nil, fmt.Errorf("acquire pool: %w", err)
+		return nil, fmt.Errorf("derive managed pool name: %w", err)
+	}
+	if err := g.CreatePool(ctx, CreatePoolRequest{
+		Name:         poolName,
+		Image:        image,
+		Profile:      profile,
+		Replicas:     1,
+		Namespace:    ns,
+		Resources:    req.Resources,
+		WorkspaceDir: req.WorkspaceDir,
+	}); err != nil && !errors.IsAlreadyExists(err) {
+		recordSpanErr(span, err)
+		return nil, fmt.Errorf("ensure managed sandbox pool: %w", err)
 	}
 	span.SetAttributes(attribute.String("pool.name", poolName))
 
 	info, err := g.CreateSession(ctx, CreateSessionRequest{
-		PoolRef:            poolName,
+		Image:              image,
+		Profile:            profile,
+		PoolName:           poolName,
 		Namespace:          ns,
 		IdleTimeoutSeconds: req.IdleTimeoutSeconds,
 		MaxLifetimeSeconds: req.MaxLifetimeSeconds,
@@ -1428,7 +1286,6 @@ func (g *Gateway) CreateManagedSession(ctx context.Context, req CreateManagedSes
 		ExperimentID:       req.ExperimentID,
 	})
 	if err != nil {
-		g.poolManager.ReleaseSession(poolName)
 		return nil, fmt.Errorf("create session: %w", err)
 	}
 
@@ -1500,9 +1357,9 @@ func (g *Gateway) ListSessions() []SessionListItem {
 	return items
 }
 
-// ListPools returns all WarmPool CRDs in the given namespace (empty = all namespaces).
+// ListPools returns all SandboxWarmPool CRDs in the given namespace (empty = all namespaces).
 func (g *Gateway) ListPools(ctx context.Context, namespace string) ([]PoolInfo, error) {
-	var poolList arlv1alpha1.WarmPoolList
+	var poolList extensionsv1beta1.SandboxWarmPoolList
 	var opts []client.ListOption
 	if namespace != "" {
 		opts = append(opts, client.InNamespace(namespace))
@@ -1513,7 +1370,7 @@ func (g *Gateway) ListPools(ctx context.Context, namespace string) ([]PoolInfo, 
 
 	pools := make([]PoolInfo, 0, len(poolList.Items))
 	for i := range poolList.Items {
-		pools = append(pools, poolInfoFromCRD(&poolList.Items[i]))
+		pools = append(pools, g.poolInfoFromSandboxWarmPool(ctx, &poolList.Items[i]))
 	}
 	return pools, nil
 }
@@ -1530,7 +1387,8 @@ func (g *Gateway) ListExperiments() []ExperimentSummary {
 				expMap[s.experimentID] = &ExperimentSummary{
 					ExperimentID: s.experimentID,
 					SessionCount: 1,
-					PoolRef:      s.Info.PoolRef,
+					Image:        s.Info.Image,
+					Profile:      s.Info.Profile,
 					Namespace:    s.Info.Namespace,
 				}
 			}
@@ -1579,17 +1437,25 @@ func (g *Gateway) StreamPoolLogs(ctx context.Context, poolName, namespace string
 		namespace = "default"
 	}
 
-	pool := &arlv1alpha1.WarmPool{}
+	pool := &extensionsv1beta1.SandboxWarmPool{}
 	if err := g.k8sClient.Get(ctx, types.NamespacedName{Name: poolName, Namespace: namespace}, pool); err != nil {
 		return nil, fmt.Errorf("get pool: %w", err)
 	}
 
 	// List all pods belonging to this pool
 	var podList corev1.PodList
-	if err := g.k8sClient.List(ctx, &podList,
+	if pool.Status.Selector == "" {
+		return nil, fmt.Errorf("pool %s/%s has no pod selector yet", namespace, poolName)
+	}
+	selector, err := k8slabels.Parse(pool.Status.Selector)
+	if err != nil {
+		return nil, fmt.Errorf("parse pool selector: %w", err)
+	}
+	opts := []client.ListOption{
 		client.InNamespace(namespace),
-		client.MatchingLabels{labels.PoolLabelKey: poolName},
-	); err != nil {
+		client.MatchingLabelsSelector{Selector: selector},
+	}
+	if err := g.k8sClient.List(ctx, &podList, opts...); err != nil {
 		return nil, fmt.Errorf("list pods: %w", err)
 	}
 
@@ -1637,25 +1503,27 @@ type PoolLogEntry struct {
 	Entry   interfaces.LogEntry `json:"entry"`
 }
 
-func poolInfoFromCRD(pool *arlv1alpha1.WarmPool) PoolInfo {
+func (g *Gateway) poolInfoFromSandboxWarmPool(ctx context.Context, pool *extensionsv1beta1.SandboxWarmPool) PoolInfo {
 	info := PoolInfo{
-		Name:              pool.Name,
-		Namespace:         pool.Namespace,
-		Replicas:          pool.Spec.Replicas,
-		ReadyReplicas:     pool.Status.ReadyReplicas,
-		AllocatedReplicas: pool.Status.AllocatedReplicas,
-		CreatedAt:         pool.CreationTimestamp.Time,
+		Name:          pool.Name,
+		Namespace:     pool.Namespace,
+		Profile:       firstNonEmpty(profileFromObjectMeta(pool.ObjectMeta), defaultPoolProfile),
+		Replicas:      desiredSandboxWarmPoolReplicas(pool),
+		ReadyReplicas: pool.Status.ReadyReplicas,
+		CreatedAt:     pool.CreationTimestamp.Time,
 	}
-	if len(pool.Spec.Template.Spec.Containers) > 0 {
-		info.Image = pool.Spec.Template.Spec.Containers[0].Image
+	template := &extensionsv1beta1.SandboxTemplate{}
+	if err := g.k8sClient.Get(ctx, types.NamespacedName{Name: pool.Spec.TemplateRef.Name, Namespace: pool.Namespace}, template); err == nil {
+		info.Image = primarySandboxTemplateImage(template)
+		info.Profile = firstNonEmpty(profileFromObjectMeta(pool.ObjectMeta), profileFromObjectMeta(template.ObjectMeta), defaultPoolProfile)
 	}
-	for _, c := range pool.Status.Conditions {
-		info.Conditions = append(info.Conditions, PoolCondition{
-			Type:    c.Type,
-			Status:  string(c.Status),
-			Reason:  c.Reason,
-			Message: c.Message,
-		})
+	var claims extensionsv1beta1.SandboxClaimList
+	if err := g.k8sClient.List(ctx, &claims, client.InNamespace(pool.Namespace)); err == nil {
+		for i := range claims.Items {
+			if claims.Items[i].Spec.WarmPoolRef.Name == pool.Name && claims.Items[i].DeletionTimestamp == nil {
+				info.AllocatedReplicas++
+			}
+		}
 	}
 	return info
 }

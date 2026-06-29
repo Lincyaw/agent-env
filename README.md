@@ -4,7 +4,7 @@
 [![Go Version](https://img.shields.io/badge/go-1.25+-00ADD8.svg)](https://golang.org/)
 [![Python Version](https://img.shields.io/badge/python-3.10+-3776AB.svg)](https://python.org/)
 
-**Kubernetes Operator for Agentic Reinforcement Learning environments with warm pool and sidecar injection for ultra-low latency code execution.**
+**Gateway and Python SDK for agent-sandbox-backed Agentic Reinforcement Learning environments with warm pools and sidecar execution.**
 
 ## Features
 
@@ -39,7 +39,11 @@ pip install arl-env
 ```python
 from arl import SandboxSession
 
-with SandboxSession(pool_ref="my-python-pool", gateway_url="http://localhost:8080") as session:
+with SandboxSession(
+    image="python:3.12",
+    profile="my-python-pool",
+    gateway_url="http://localhost:8080",
+) as session:
     result = session.execute([
         {"name": "hello", "command": ["echo", "Hello, World!"]},
     ])
@@ -65,14 +69,14 @@ skaffold run --profile=k8s
 
 ```
 ┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
-│   Python SDK    │────▶│    Gateway      │────▶│   ARL Operator  │
+│   Python SDK    │────▶│    Gateway      │────▶│ agent-sandbox   │
 └─────────────────┘     └─────────────────┘     └─────────────────┘
                                │                        │
                                │ gRPC          ┌───────┴───────┐
                                ▼               ▼               ▼
                         ┌───────────┐   ┌───────────┐   ┌───────────┐
-                        │  Sidecar  │   │ WarmPool  │   │  Sandbox  │
-                        │  (Pod)    │   │ (CRD)     │   │  (CRD)    │
+                        │  Sidecar  │   │ Sandbox-  │   │  Sandbox  │
+                        │  (Pod)    │   │ WarmPool  │   │  (CRD)    │
                         └───────────┘   └───────────┘   └───────────┘
 ```
 
@@ -88,7 +92,7 @@ devbox run -- make generate
 # Run quality checks
 devbox run -- make check
 
-# View operator logs
+# View gateway logs
 make logs
 ```
 

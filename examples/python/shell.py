@@ -43,7 +43,10 @@ from rich.table import Table
 DEFAULT_GATEWAY_URL = "http://localhost:8080"
 DEFAULT_POOL_NAME = "numpy"
 DEFAULT_NAMESPACE = "arl"
-DEFAULT_POOL_IMAGE = "aibrix-docker-mirror-cn-beijing.cr.volces.com/namanjain12/numpy_final:6df0b6e2b79aad40715f933b561660f951693289"
+DEFAULT_POOL_IMAGE = (
+    "aibrix-docker-mirror-cn-beijing.cr.volces.com/namanjain12/"
+    "numpy_final:6df0b6e2b79aad40715f933b561660f951693289"
+)
 
 console = Console(stderr=True)
 
@@ -172,7 +175,7 @@ def _check_gateway(client: GatewayClient) -> bool:
             "  1. Verify the gateway pod is running\n"
             "  2. Start a port-forward:\n"
             "     [cyan]kubectl port-forward -n arl "
-            "svc/arl-operator-gateway 8080:8080[/cyan]",
+            "svc/agent-env-gateway 8080:8080[/cyan]",
             title="Connection Error",
             border_style="red",
         )
@@ -188,7 +191,7 @@ def _ensure_pool(
 ) -> bool:
     """Create the pool if it doesn't exist and wait until ready."""
     try:
-        pool_mgr.create_warmpool(name=name, image=image, replicas=replicas)
+        pool_mgr.create_warmpool(name=name, image=image, replicas=replicas, profile=name)
         console.print(f"  [green]\u2713[/green] Pool [cyan]{name}[/cyan] created")
     except GatewayError as e:
         if "already exists" in str(e):
@@ -230,7 +233,8 @@ def _print_session_banner(info: SessionInfo) -> None:
     table.add_row("Pod", info.pod_name or "\u2014")
     table.add_row("Pod IP", info.pod_ip or "\u2014")
     table.add_row("Namespace", info.namespace)
-    table.add_row("Pool", info.pool_ref)
+    table.add_row("Image", info.image or "\u2014")
+    table.add_row("Profile", info.profile or "\u2014")
     if info.created_at:
         table.add_row("Created", info.created_at.strftime("%Y-%m-%d %H:%M:%S"))
 
@@ -323,7 +327,8 @@ def main() -> None:
         progress.add_task("Creating sandbox session...", total=None)
 
     with SandboxSession(
-        pool_ref=pool_name,
+        image=args.image,
+        profile=pool_name,
         namespace=namespace,
         gateway_url=gateway_url,
         keep_alive=args.keep_alive,

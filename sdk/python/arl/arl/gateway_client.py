@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Callable
-from typing import Any, cast
+from collections.abc import Callable, Iterable, Iterator
+from pathlib import Path
+from typing import Any, BinaryIO, cast
+from urllib.parse import quote
 
 import httpx
 
@@ -33,6 +35,13 @@ def _serialize_config_env(
     if isinstance(config_env, ConfigEnvSpec):
         return config_env.to_request_payload()
     return config_env
+
+
+def _quote_file_path(path: str) -> str:
+    normalized = path.strip().replace("\\", "/").lstrip("/")
+    if not normalized:
+        raise ValueError("path is required")
+    return quote(normalized, safe="/")
 
 
 class GatewayError(Exception):
@@ -122,13 +131,24 @@ class GatewayClient:
 
     def create_session(
         self,
-        pool_ref: str,
+        image: str | None = None,
+        *,
+        profile: str | None = "default",
         namespace: str = "default",
         idle_timeout_seconds: int | None = None,
+        max_lifetime_seconds: int | None = None,
     ) -> SessionInfo:
-        body: dict[str, Any] = {"poolRef": pool_ref, "namespace": namespace}
+        if not image and not profile:
+            raise ValueError("image or profile is required")
+        body: dict[str, Any] = {"namespace": namespace}
+        if image:
+            body["image"] = image
+        if profile:
+            body["profile"] = profile
         if idle_timeout_seconds is not None:
             body["idleTimeoutSeconds"] = idle_timeout_seconds
+        if max_lifetime_seconds is not None:
+            body["maxLifetimeSeconds"] = max_lifetime_seconds
         resp = self._client.post("/v1/sessions", json=body)
         self._handle_error(resp)
         return SessionInfo.model_validate(resp.json())
@@ -249,11 +269,17 @@ class GatewayClient:
         self,
         session_id: str,
         path: str,
-        content: str,
-        encoding: str = "text",
+        content: str | bytes | Iterable[bytes] | BinaryIO,
+        sha256: str | None = None,
     ) -> UploadFileResponse:
-        body = {"path": path, "content": content, "encoding": encoding}
-        resp = self._client.post(f"/v1/sessions/{session_id}/files", json=body)
+        headers = {"Content-Type": "application/octet-stream"}
+        if sha256:
+            headers["X-ARL-SHA256"] = sha256
+        resp = self._client.put(
+            f"/v1/sessions/{session_id}/files/{_quote_file_path(path)}",
+            content=content,
+            headers=headers,
+        )
         self._handle_error(resp)
         return UploadFileResponse.model_validate(resp.json())
 
@@ -262,9 +288,46 @@ class GatewayClient:
         session_id: str,
         path: str,
     ) -> bytes:
-        resp = self._client.get(f"/v1/sessions/{session_id}/files/{path}")
+        resp = self._client.get(f"/v1/sessions/{session_id}/files/{_quote_file_path(path)}")
         self._handle_error(resp)
         return resp.content
+
+    def iter_download_file(
+        self,
+        session_id: str,
+        path: str,
+        chunk_size: int = 1024 * 1024,
+    ) -> Iterator[bytes]:
+        with self._client.stream(
+            "GET",
+            f"/v1/sessions/{session_id}/files/{_quote_file_path(path)}",
+        ) as resp:
+            self._handle_error(resp)
+            for chunk in resp.iter_bytes(chunk_size=chunk_size):
+                if chunk:
+                    yield chunk
+
+    def upload_path(
+        self,
+        session_id: str,
+        local_path: str | Path,
+        remote_path: str,
+        sha256: str | None = None,
+    ) -> UploadFileResponse:
+        with Path(local_path).open("rb") as file:
+            return self.upload_file(session_id, remote_path, file, sha256=sha256)
+
+    def download_path(
+        self,
+        session_id: str,
+        remote_path: str,
+        local_path: str | Path,
+    ) -> None:
+        target = Path(local_path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with target.open("wb") as file:
+            for chunk in self.iter_download_file(session_id, remote_path):
+                file.write(chunk)
 
     def replay_from(
         self,
@@ -307,6 +370,7 @@ class GatewayClient:
         namespace: str,
         image: str,
         replicas: int = 2,
+        profile: str = "default",
         tools: ToolsSpec | None = None,
         resources: ResourceRequirements | None = None,
         workspace_dir: str = "/workspace",
@@ -316,6 +380,7 @@ class GatewayClient:
             "name": name,
             "namespace": namespace,
             "image": image,
+            "profile": profile,
             "replicas": replicas,
             "workspaceDir": workspace_dir,
         }
@@ -378,33 +443,26 @@ class GatewayClient:
         image: str,
         experiment_id: str,
         namespace: str = "default",
+        profile: str = "default",
         resources: ResourceRequirements | None = None,
         tools: ToolsSpec | None = None,
         workspace_dir: str = "/workspace",
-        max_replicas: int | None = None,
-        min_replicas: int | None = None,
-        scale_up_step: int | None = None,
         idle_timeout_seconds: int | None = None,
         max_lifetime_seconds: int | None = None,
         config_env: ConfigEnvSpec | dict[str, Any] | None = None,
     ) -> ManagedSessionInfo:
         """Create a managed session with automatic pool management.
 
-        The server automatically creates and scales WarmPools. Just specify
-        the image and experiment ID.
+        The server automatically creates a sandbox-backed pool when needed.
 
         Args:
             image: Container image for the executor.
             experiment_id: Experiment identifier for grouping and management.
             namespace: Kubernetes namespace.
+            profile: Resource profile for pool selection.
             resources: Optional CPU/memory requirements (used on first pool creation).
             tools: Optional tools specification (used on first pool creation).
             workspace_dir: Workspace mount path.
-            max_replicas: Per-pool scale ceiling hint.
-            min_replicas: Per-pool scale floor hint. The server will not scale
-                below this value during scale-down (0 = use server default).
-            scale_up_step: Max replicas to add per scale-up event
-                (0 = use server default).
             idle_timeout_seconds: Per-session idle TTL. The gateway deletes the
                 session after this many seconds without execute/file activity.
             max_lifetime_seconds: Per-session maximum lifetime.
@@ -416,6 +474,7 @@ class GatewayClient:
             "image": image,
             "experimentId": experiment_id,
             "namespace": namespace,
+            "profile": profile,
             "workspaceDir": workspace_dir,
         }
         config_env_payload = _serialize_config_env(config_env)
@@ -425,12 +484,6 @@ class GatewayClient:
             body["resources"] = resources.model_dump(exclude_none=True)
         if tools is not None:
             body["tools"] = tools.model_dump(by_alias=True, exclude_none=True)
-        if max_replicas is not None:
-            body["maxReplicas"] = max_replicas
-        if min_replicas is not None:
-            body["minReplicas"] = min_replicas
-        if scale_up_step is not None:
-            body["scaleUpStep"] = scale_up_step
         if idle_timeout_seconds is not None:
             body["idleTimeoutSeconds"] = idle_timeout_seconds
         if max_lifetime_seconds is not None:

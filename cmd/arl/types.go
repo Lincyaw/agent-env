@@ -9,7 +9,8 @@ type SessionInfo struct {
 	ID          string    `json:"id"`
 	SandboxName string    `json:"sandboxName"`
 	Namespace   string    `json:"namespace"`
-	PoolRef     string    `json:"poolRef"`
+	Image       string    `json:"image,omitempty"`
+	Profile     string    `json:"profile,omitempty"`
 	PodIP       string    `json:"podIP"`
 	PodName     string    `json:"podName"`
 	CreatedAt   time.Time `json:"createdAt"`
@@ -31,6 +32,7 @@ type PoolInfo struct {
 	Name              string          `json:"name"`
 	Namespace         string          `json:"namespace"`
 	Image             string          `json:"image,omitempty"`
+	Profile           string          `json:"profile,omitempty"`
 	Replicas          int32           `json:"replicas"`
 	ReadyReplicas     int32           `json:"readyReplicas"`
 	AllocatedReplicas int32           `json:"allocatedReplicas"`
@@ -48,7 +50,8 @@ type PoolCondition struct {
 type ExperimentSummary struct {
 	ExperimentID string `json:"experimentId"`
 	SessionCount int    `json:"sessionCount"`
-	PoolRef      string `json:"poolRef,omitempty"`
+	Image        string `json:"image,omitempty"`
+	Profile      string `json:"profile,omitempty"`
 	Namespace    string `json:"namespace,omitempty"`
 }
 
@@ -102,15 +105,16 @@ type ScalePoolRequest struct {
 type CreatePoolRequest struct {
 	Name      string `json:"name"`
 	Image     string `json:"image"`
+	Profile   string `json:"profile,omitempty"`
 	Replicas  int32  `json:"replicas,omitempty"`
 	Namespace string `json:"namespace,omitempty"`
 }
 
 type CreateManagedSessionRequest struct {
 	Image        string `json:"image"`
+	Profile      string `json:"profile,omitempty"`
 	ExperimentID string `json:"experimentId"`
 	Namespace    string `json:"namespace,omitempty"`
-	MaxReplicas  int32  `json:"maxReplicas,omitempty"`
 }
 
 type ErrorResponse struct {

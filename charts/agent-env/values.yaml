@@ -1,0 +1,280 @@
+# Default values for the agent-env gateway stack.
+# This is a YAML-formatted file.
+
+image:
+  # ImagePullPolicy applied to gateway-INJECTED containers (the sidecar and
+  # the copy-executor-agent init container) in every sandbox pod.
+  # "Always" (default) keeps production pulling the latest pushed images.
+  # Set "IfNotPresent" on local kind/minikube where images are side-loaded and
+  # never pushed to a registry, else kubelet ignores the local image and the
+  # pod gets ImagePullBackOff. Surfaced to the gateway as IMAGE_PULL_POLICY.
+  injectedPullPolicy: Always
+
+sidecar:
+  image:
+    repository: arl-sidecar
+    pullPolicy: IfNotPresent
+    tag: ""
+  httpPort: 8080
+  grpcPort: 9090
+
+# Executor agent configuration
+executorAgent:
+  image:
+    repository: arl-executor-agent
+    pullPolicy: IfNotPresent
+    tag: ""
+
+# Gateway configuration
+gateway:
+  enabled: true
+  replicaCount: 1
+  image:
+    repository: arl-gateway
+    pullPolicy: IfNotPresent
+    tag: ""
+  port: 8080
+  internalPort: 9091        # Metrics, debug, AlertManager webhook (no auth)
+  sidecarGrpcPort: 9090
+  service:
+    type: ClusterIP
+    port: ""      # external service port; defaults to gateway.port (8080) if empty
+    nodePort: ""  # e.g. 30080, only used when type is NodePort
+  serviceAccount:
+    name: ""
+  resources:
+    limits:
+      cpu: "4"
+      memory: 8Gi
+    requests:
+      cpu: "1"
+      memory: 2Gi
+  # Session lifecycle defaults
+  idleTimeout: "600s"       # Max idle time before session is reaped
+  maxLifetime: "3600s"      # Max total session lifetime
+  sweepInterval: "30s"      # How often to check for expired sessions
+  writeTimeout: "0s"        # Public HTTP write timeout; 0 disables it for long streaming execs
+
+# Authentication & security
+auth:
+  # Authentication is enabled by default (fail-closed). When enabled, apiKeys
+  # MUST be set or the install fails. Set to false only for trusted,
+  # network-isolated deployments where every endpoint may be reached without
+  # credentials.
+  enabled: true
+  # API keys in "key:role" format, one per line. Stored in a K8s Secret.
+  # Roles: "admin" (pool/experiment management) or "user" (session/exec only).
+  # Example:
+  #   apiKeys: |
+  #     my-admin-key-here:admin
+  #     my-user-key-here:user
+  apiKeys: ""
+  # Rate limiting (per IP)
+  rateLimitRPS: 100
+  rateLimitBurst: 200
+  # Allowed WebSocket origins (comma-separated host:port). Empty = reject
+  # browser origins when auth is enabled.
+  allowedOrigins: ""
+  # gRPC shared token for gateway ↔ sidecar authentication. Mandatory: the
+  # sidecar refuses to start without it. Leave empty to auto-generate a random
+  # token (preserved across upgrades); set explicitly to pin a known value.
+  grpcToken: ""
+
+# Redis configuration (for HA session state persistence across gateway replicas)
+redis:
+  enabled: false
+  # Deploy a single-instance Redis in-cluster. Set to false to use an external Redis.
+  deploy: true
+  image:
+    repository: pair-diag-cn-guangzhou.cr.volces.com/pair/redis
+    tag: "8-alpine"
+    pullPolicy: IfNotPresent
+  addr: "redis:6379"       # Only used when deploy=false (external Redis)
+  password: ""             # Redis password (stored in Secret)
+  db: 0                    # Redis database number
+  resources:
+    requests:
+      cpu: "100m"
+      memory: 128Mi
+    limits:
+      cpu: "500m"
+      memory: 512Mi
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+podAnnotations: {}
+
+podSecurityContext: {}
+
+securityContext: {}
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}
+
+# HTTP proxy injected into warm pool pods. When set, all containers get
+# HTTP_PROXY/HTTPS_PROXY/NO_PROXY env vars pointing to this address.
+# Use with the mihomo deployment for GitHub access.
+proxy:
+  url: ""       # e.g. "http://mihomo.arl.svc:7890"
+  noProxy: ""   # defaults to localhost,127.0.0.1,10.0.0.0/8,172.16.0.0/12,192.168.0.0/16,.svc,.svc.cluster.local
+
+# Mihomo (Clash Meta) in-cluster proxy for accessing GitHub etc.
+mihomo:
+  enabled: false
+  image: pair-diag-cn-guangzhou.cr.volces.com/pair/mihomo:latest
+  subscriptionURL: ""   # your Clash subscription URL
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+# ClickHouse configuration (for trajectory storage)
+clickhouse:
+  # Enable ClickHouse deployment
+  enabled: false
+  # Image (use private registry since nodes cannot access Docker Hub)
+  image:
+    repository: pair-diag-cn-guangzhou.cr.volces.com/pair/clickhouse-server
+    tag: "24.8"
+    pullPolicy: IfNotPresent
+  # Connection settings
+  host: ""  # auto-resolved via helper to <fullname>-clickhouse
+  port: 9000
+  database: "arl"
+  username: "default"
+  # REQUIRED: Must be set by the user. Do not use a default password.
+  password: "clickhouse123"
+  # Storage configuration
+  storageClassName: "ebs-ssd"
+  storageSize: "10Gi"
+  # Service configuration
+  serviceType: "ClusterIP"
+  # httpNodePort: 30123   # Port for HTTP interface (8123) - uncomment if serviceType is NodePort
+  # nativeNodePort: 30000 # Port for native protocol (9000) - uncomment if serviceType is NodePort
+  # Resources
+  resources:
+    requests:
+      cpu: "8"
+      memory: 8Gi
+    limits:
+      cpu: "16"
+      memory: 32Gi
+
+# API Server Priority and Fairness
+# Promotes the gateway ServiceAccount to a higher priority level
+# so K8s API requests are not throttled under high load.
+apiPriority:
+  enabled: true
+  priorityLevel: "workload-high"  # workload-high has ~110 concurrency seats
+  matchingPrecedence: 900         # lower number = higher priority (exempt=1, system=900s)
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Alerting (AlertManager + Feishu)
+# ─────────────────────────────────────────────────────────────────────────────
+alerting:
+  enabled: true
+  image: pair-diag-cn-guangzhou.cr.volces.com/pair/alertmanager:v0.27.0
+  feishu:
+    webhookURL: ""  # 飞书自定义机器人 Webhook URL
+  resources:
+    requests:
+      cpu: "100m"
+      memory: 128Mi
+    limits:
+      cpu: "500m"
+      memory: 256Mi
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Prometheus
+# ─────────────────────────────────────────────────────────────────────────────
+prometheus:
+  enabled: true
+  image: pair-diag-cn-guangzhou.cr.volces.com/pair/prometheus:v3.10.0
+  retentionTime: "3d"
+  service:
+    type: ClusterIP
+  resources:
+    requests:
+      cpu: "4"
+      memory: 8Gi
+    limits:
+      cpu: "8"
+      memory: 16Gi
+  persistence:
+    enabled: false
+    storageClass: ebs-ssd
+    size: 50Gi
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Grafana
+# ─────────────────────────────────────────────────────────────────────────────
+grafana:
+  enabled: true
+  image: pair-diag-cn-guangzhou.cr.volces.com/pair/grafana:12.3.1
+  adminUser: admin
+  adminPassword: newpassword123
+  service:
+    type: ClusterIP
+  resources:
+    requests:
+      cpu: "4"
+      memory: 8Gi
+    limits:
+      cpu: "8"
+      memory: 16Gi
+  persistence:
+    enabled: false
+    storageClass: ebs-ssd
+    size: 20Gi
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Metrics / Prometheus scraping
+# ─────────────────────────────────────────────────────────────────────────────
+metrics:
+  # Creates a dedicated ClusterIP Service exposing the gateway's internal
+  # /metrics port.
+  service:
+    enabled: true
+    port: 8080
+  # Creates VMServiceScrape (VictoriaMetrics) for the gateway.
+  serviceMonitor:
+    enabled: false
+    interval: "15s"
+    # Labels required by the VictoriaMetrics agent in this cluster
+    additionalLabels:
+      volcengine.vmp: "true"
+  # Creates standard Prometheus ServiceMonitor (monitoring.coreos.com/v1)
+  # Enable this if using kube-prometheus-stack instead of VictoriaMetrics.
+  prometheusServiceMonitor:
+    enabled: false
+    interval: "15s"
+    # Labels to match your Prometheus operator's serviceMonitorSelector
+    # e.g. release: kube-prometheus-stack
+    additionalLabels: {}
+
+# OpenTelemetry tracing. When enabled, the gateway and every injected sidecar
+# export OTLP/gRPC spans to the configured collector.
+# Disabled by default so traces only flow when explicitly opted in.
+otel:
+  enabled: false
+  # OTLP/gRPC endpoint, host:port form (no scheme).
+  # Common defaults:
+  #   in-cluster collector:  otel-collector.observability.svc:4317
+  #   sidecar collector:     localhost:4317
+  endpoint: "otel-collector.observability.svc:4317"
+  # Set to false when the collector terminates TLS in front of the workload.
+  insecure: true
+  # Parent-based head sampling ratio in [0,1]. Empty string keeps the default
+  # AlwaysSample. Use "0.1" to sample 10% of root traces.
+  sampleRatio: ""
+  # Extra OTEL resource attributes attached to every span, in OTEL spec format
+  # ("key=value,key=value"). The component-level service.name is set automatically.
+  resourceAttributes: ""

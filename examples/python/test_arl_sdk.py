@@ -1,285 +1,323 @@
-"""Comprehensive integration tests for ARL Python SDK.
+"""Integration smoke tests for the sandbox-backed ARL Python SDK.
 
-Tests all major features:
-1. Gateway health check
-2. WarmPool management (create, wait, monitor)
-3. Basic command execution
-4. Snapshot & restore mechanism
-5. Session history & trajectory export
-6. Tool provisioning and calling
-7. Interactive shell (WebSocket)
-8. Keep-alive & reattach
-9. Managed sessions (server-side pool auto-scaling)
+The suite validates the currently supported gateway surface:
 
-Prerequisites:
-    - ARL operator + gateway deployed to Kubernetes
-    - Gateway accessible (port-forward or direct access)
-    - Sufficient resources for test pools
+1. Gateway health
+2. SandboxWarmPool lifecycle and scale
+3. SDK execution through SSE
+4. SDK file upload and download
+5. Snapshot restore
+6. Cross-session replay
+7. History and trajectory export
+8. Session and pool logs
+9. Interactive shell, when the optional websockets package is installed
+10. Keep-alive reattach
+11. Managed sessions
+12. Optional observability endpoints
 
 Usage:
-    # Basic run
-    uv run python examples/python/test_arl_sdk.py
+    uv run python examples/python/test_arl_sdk.py \
+      --gateway-url http://127.0.0.1:18080 \
+      --namespace arl \
+      --pool-image busybox:latest
 
-    # Verbose output with details
-    uv run python examples/python/test_arl_sdk.py --verbose
-
-    # Custom gateway URL
-    uv run python examples/python/test_arl_sdk.py --gateway-url http://localhost:8080
-
-    # Keep pool after tests (for debugging)
-    uv run python examples/python/test_arl_sdk.py --skip-cleanup
+    uv run python examples/python/test_arl_sdk.py \
+      --gateway-url http://127.0.0.1:18080 \
+      --metrics-url http://127.0.0.1:19091 \
+      --prometheus-url http://127.0.0.1:19090 \
+      --grafana-url http://127.0.0.1:13000 \
+      --clickhouse-url http://127.0.0.1:18123 \
+      --clickhouse-user default \
+      --clickhouse-password clickhouse123
 """
 
 from __future__ import annotations
 
 import argparse
 import contextlib
+import hashlib
 import json
+import os
 import sys
 import time
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Any
 
+import httpx
 from arl import (
     GatewayClient,
-    GatewayError,
     InteractiveShellClient,
     ManagedSession,
-    PoolNotReadyError,
     ResourceRequirements,
     SandboxSession,
     WarmPoolManager,
 )
-from arl.types import InlineToolSpec, ToolsSpec
 from rich.console import Console
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
 
-# Configuration
 DEFAULT_GATEWAY_URL = "http://localhost:8080"
-DEFAULT_POOL_NAME = "test-pool"
-DEFAULT_POOL_IMAGE = "pair-diag-cn-guangzhou.cr.volces.com/pair/ubuntu:22.04"
-NAMESPACE = "arl"
-TOOLS_POOL_NAME = "tools-demo-pool"
+DEFAULT_NAMESPACE = "arl"
+DEFAULT_POOL_IMAGE = "busybox:latest"
 
-# Rich console for beautiful output
 console = Console()
 
 
-class TestResult:
-    """Result of a test run."""
+class SkipTestError(Exception):
+    """Raised by a test when an optional dependency or endpoint is absent."""
 
-    def __init__(self, name: str, passed: bool, duration: float, skipped: bool = False):
-        self.name = name
-        self.passed = passed
-        self.duration = duration
-        self.skipped = skipped
+
+@dataclass
+class TestResult:
+    name: str
+    passed: bool
+    duration: float
+    skipped: bool = False
+    detail: str = ""
 
 
 def print_header(args: argparse.Namespace) -> None:
-    """Print test suite header."""
+    resource_lines: list[str] = []
+    if args.cpu_request:
+        resource_lines.append(f"  CPU request: [yellow]{args.cpu_request}[/yellow]")
+    if args.memory_request:
+        resource_lines.append(f"  Memory request: [yellow]{args.memory_request}[/yellow]")
+    if args.cpu_limit:
+        resource_lines.append(f"  CPU limit: [yellow]{args.cpu_limit}[/yellow]")
+    if args.memory_limit:
+        resource_lines.append(f"  Memory limit: [yellow]{args.memory_limit}[/yellow]")
+
+    observability = [
+        value
+        for value in (
+            args.metrics_url,
+            args.prometheus_url,
+            args.grafana_url,
+            args.clickhouse_url,
+        )
+        if value
+    ]
+
     console.print()
-
-    resource_info = ""
-    if args.cpu_request or args.memory_request or args.cpu_limit or args.memory_limit:
-        resource_info = "\nResources:\n"
-        if args.cpu_request:
-            resource_info += f"  CPU request: [yellow]{args.cpu_request}[/yellow]\n"
-        if args.memory_request:
-            resource_info += f"  Memory request: [yellow]{args.memory_request}[/yellow]\n"
-        if args.cpu_limit:
-            resource_info += f"  CPU limit: [yellow]{args.cpu_limit}[/yellow]\n"
-        if args.memory_limit:
-            resource_info += f"  Memory limit: [yellow]{args.memory_limit}[/yellow]"
-
-    workspace_info = ""
-    if args.workspace_dir != "/workspace":
-        workspace_info = f"\nWorkspace: [yellow]{args.workspace_dir}[/yellow]"
-
     console.print(
         Panel.fit(
-            f"[bold cyan]ARL SDK Integration Tests[/bold cyan]\n\n"
+            "[bold cyan]ARL SDK Integration Tests[/bold cyan]\n\n"
             f"Gateway: [yellow]{args.gateway_url}[/yellow]\n"
+            f"Namespace: [yellow]{args.namespace}[/yellow]\n"
             f"Pool: [yellow]{args.pool_name}[/yellow]\n"
             f"Image: [yellow]{args.pool_image}[/yellow]\n"
-            f"Namespace: [yellow]{NAMESPACE}[/yellow]"
-            f"{resource_info}{workspace_info}",
+            f"Replicas: [yellow]{args.pool_replicas}[/yellow]\n"
+            f"Workspace: [yellow]{args.workspace_dir}[/yellow]\n"
+            f"Observability endpoints: [yellow]{len(observability)}[/yellow]"
+            + (("\nResources:\n" + "\n".join(resource_lines)) if resource_lines else ""),
             border_style="cyan",
         )
     )
     console.print()
 
 
-def test_health(client: GatewayClient, verbose: bool) -> tuple[bool, float]:
-    """Test 1: Gateway health check."""
-    start = time.time()
+def build_resources(args: argparse.Namespace) -> ResourceRequirements | None:
+    if not (args.cpu_request or args.memory_request or args.cpu_limit or args.memory_limit):
+        return None
 
-    ok = client.health()
-    duration = time.time() - start
+    requests: dict[str, str] = {}
+    limits: dict[str, str] = {}
+    if args.cpu_request:
+        requests["cpu"] = args.cpu_request
+    if args.memory_request:
+        requests["memory"] = args.memory_request
+    if args.cpu_limit:
+        limits["cpu"] = args.cpu_limit
+    if args.memory_limit:
+        limits["memory"] = args.memory_limit
+    return ResourceRequirements(requests=requests, limits=limits)
 
-    if verbose:
-        status = "[green]OK[/green]" if ok else "[red]FAILED[/red]"
-        console.print(f"  Gateway health: {status}")
 
-    if not ok:
-        console.print(
-            "[red]Gateway not reachable. Please check:[/red]\n"
-            "  1. Gateway is deployed to Kubernetes\n"
-            "  2. Port-forward is running:\n"
-            "     [yellow]kubectl port-forward -n arl svc/arl-operator-gateway 8080:8080[/yellow]"
+def normalize_image(image: str) -> str:
+    normalized = image.removeprefix("docker.io/library/").removeprefix("docker.io/")
+    if ":" not in normalized and "@" not in normalized:
+        normalized += ":latest"
+    return normalized
+
+
+def managed_pool_name(image: str, namespace: str, profile: str) -> str:
+    identity = f"{namespace}/{profile or 'default'}/{normalize_image(image)}"
+    digest = hashlib.sha256(identity.encode()).hexdigest()[:12]
+    return f"managed-{digest}"
+
+
+def assert_step_success(result: Any, expected_stdout: str | None = None) -> None:
+    if not result.results:
+        raise AssertionError("execute returned no step results")
+    step = result.results[0]
+    if step.output.exit_code != 0:
+        raise AssertionError(f"step exited {step.output.exit_code}: {step.output.stderr}")
+    if expected_stdout is not None and expected_stdout not in step.output.stdout:
+        raise AssertionError(
+            f"stdout {step.output.stdout!r} did not contain {expected_stdout!r}"
         )
 
-    return ok, duration
+
+def http_get_text(url: str, timeout: float = 20.0, **kwargs: Any) -> str:
+    with httpx.Client(timeout=timeout) as client:
+        resp = client.get(url, **kwargs)
+        resp.raise_for_status()
+        return resp.text
+
+
+def parse_ndjson(raw: str) -> list[dict[str, Any]]:
+    return [json.loads(line) for line in raw.splitlines() if line.strip()]
+
+
+def run_test(
+    index: int,
+    total: int,
+    name: str,
+    fn: Callable[[], None],
+) -> TestResult:
+    start = time.time()
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        console=console,
+        transient=True,
+    ) as progress:
+        task = progress.add_task(f"[{index}/{total}] {name}", total=None)
+        try:
+            fn()
+            progress.update(task, completed=True)
+        except SkipTestError as exc:
+            progress.update(task, completed=True)
+            duration = time.time() - start
+            console.print(f"[{index}/{total}] SKIP {name} ({duration:.2f}s) {exc}")
+            return TestResult(
+                name=name,
+                passed=True,
+                duration=duration,
+                skipped=True,
+                detail=str(exc),
+            )
+        except Exception as exc:
+            progress.update(task, completed=True)
+            duration = time.time() - start
+            console.print(f"[{index}/{total}] FAIL {name} ({duration:.2f}s): {exc}")
+            return TestResult(name=name, passed=False, duration=duration, detail=str(exc))
+
+    duration = time.time() - start
+    console.print(f"[{index}/{total}] PASS {name} ({duration:.2f}s)")
+    return TestResult(name=name, passed=True, duration=duration)
+
+
+def test_health(client: GatewayClient, args: argparse.Namespace) -> None:
+    if not client.health():
+        raise AssertionError(
+            "gateway health check failed; run kubectl port-forward "
+            f"-n {args.namespace} svc/agent-env-gateway 8080:8080"
+        )
 
 
 def test_pool_lifecycle(
     pool_mgr: WarmPoolManager,
-    pool_name: str,
-    pool_image: str,
-    verbose: bool,
-    resources: ResourceRequirements | None = None,
-    workspace_dir: str = "/workspace",
-) -> tuple[bool, float]:
-    """Test 2: WarmPool creation and readiness."""
-    start = time.time()
+    args: argparse.Namespace,
+    resources: ResourceRequirements | None,
+) -> None:
+    with contextlib.suppress(Exception):
+        pool_mgr.delete_warmpool(args.pool_name)
+        time.sleep(1)
 
-    # Create pool
-    if verbose:
-        console.print(
-            f"  Creating pool '[cyan]{pool_name}[/cyan]' with image '[cyan]{pool_image}[/cyan]'..."
-        )
-        if resources:
-            console.print(f"  Resources: {resources.model_dump(exclude_none=True)}")
-        if workspace_dir != "/workspace":
-            console.print(f"  Workspace: {workspace_dir}")
+    pool_mgr.create_warmpool(
+        name=args.pool_name,
+        image=args.pool_image,
+        replicas=args.pool_replicas,
+        profile=args.pool_name,
+        resources=resources,
+        workspace_dir=args.workspace_dir,
+    )
+    info = pool_mgr.wait_for_ready(
+        args.pool_name,
+        timeout=args.pool_ready_timeout,
+        poll_interval=2.0,
+        min_ready=max(1, args.pool_replicas),
+    )
+    if info.ready_replicas < max(1, args.pool_replicas):
+        raise AssertionError(f"pool ready replicas too low: {info.ready_replicas}")
 
-    try:
-        pool_mgr.create_warmpool(
-            name=pool_name,
-            image=pool_image,
-            replicas=3,
-            resources=resources,
-            workspace_dir=workspace_dir,
-        )
-        if verbose:
-            console.print("  [green]✓[/green] Pool created")
-    except GatewayError as e:
-        if "already exists" in str(e):
-            if verbose:
-                console.print("  [yellow]Pool already exists, continuing[/yellow]")
-        else:
-            console.print(f"  [red]✗ Failed to create pool: {e}[/red]")
-            return False, time.time() - start
+    if args.skip_scale:
+        return
 
-    # Wait for pool to be ready
-    if verbose:
-        console.print("  Waiting for pool to have ready replicas...")
-
-    try:
-        info = pool_mgr.wait_for_ready(pool_name, timeout=300.0, poll_interval=5.0)
-        if verbose:
-            console.print(
-                f"  [green]✓[/green] Pool ready: "
-                f"replicas={info.replicas} "
-                f"ready={info.ready_replicas} "
-                f"allocated={info.allocated_replicas}"
-            )
-        duration = time.time() - start
-        return True, duration
-    except PoolNotReadyError as e:
-        console.print(f"  [red]✗ Pool has failing pods: {e}[/red]")
-        if verbose:
-            for cond in e.conditions:
-                console.print(f"    {cond.type}={cond.status}: {cond.message}")
-        return False, time.time() - start
-    except TimeoutError as e:
-        console.print(f"  [red]✗ Timeout: {e}[/red]")
-        console.print(
-            "  Check pod status with:\n"
-            f"    [yellow]kubectl get pods -n {NAMESPACE} -l warmpool={pool_name}[/yellow]"
-        )
-        return False, time.time() - start
+    scaled_replicas = max(1, args.pool_replicas) + 1
+    scaled = pool_mgr.scale_warmpool(args.pool_name, scaled_replicas)
+    if scaled.replicas != scaled_replicas:
+        raise AssertionError(f"scale response replicas={scaled.replicas}, want {scaled_replicas}")
+    pool_mgr.wait_for_ready(
+        args.pool_name,
+        timeout=args.pool_ready_timeout,
+        poll_interval=2.0,
+        min_ready=scaled_replicas,
+    )
+    restored = pool_mgr.scale_warmpool(args.pool_name, args.pool_replicas)
+    if restored.replicas != args.pool_replicas:
+        raise AssertionError(f"scale-back replicas={restored.replicas}, want {args.pool_replicas}")
 
 
-def test_basic_execution(gateway_url: str, pool_name: str, verbose: bool) -> tuple[bool, float]:
-    """Test 3: Basic command execution."""
-    start = time.time()
+def test_basic_execution_sse(args: argparse.Namespace) -> None:
+    chunks: list[str] = []
+
+    def on_output(stdout: str, stderr: str) -> None:
+        chunks.append(stdout + stderr)
 
     with SandboxSession(
-        pool_ref=pool_name,
-        namespace=NAMESPACE,
-        gateway_url=gateway_url,
+        image=args.pool_image,
+        profile=args.pool_name,
+        namespace=args.namespace,
+        gateway_url=args.gateway_url,
     ) as session:
-        if verbose:
-            console.print(f"  Session: [cyan]{session.session_id}[/cyan]")
-            info = session.session_info
-            if info:
-                console.print(f"  Pod: [cyan]{info.pod_name}[/cyan] ({info.pod_ip})")
-
-        # Execute basic commands
         result = session.execute(
             [
-                {"name": "echo", "command": ["echo", "hello world"]},
-                {"name": "uname", "command": ["uname", "-a"]},
-            ]
+                {"name": "sse", "command": ["sh", "-c", "echo sse-ok && pwd"]},
+            ],
+            on_output=on_output,
         )
+        assert_step_success(result, "sse-ok")
+        assert_step_success(result, args.workspace_dir)
 
-        if verbose:
-            console.print(f"\n  Step results ({len(result.results)} steps):")
-            for r in result.results:
-                exit_style = "green" if r.output.exit_code == 0 else "red"
-                console.print(
-                    f"    [{r.index}] {r.name}: exit_code=[{exit_style}]{r.output.exit_code}[/{exit_style}]"
-                )
-                if r.output.stdout and verbose:
-                    console.print(f"         stdout: {r.output.stdout.strip()[:80]}")
-                if r.output.stderr and verbose:
-                    console.print(f"         stderr: {r.output.stderr.strip()[:80]}")
-
-        # Write and execute script
-        result2 = session.execute(
-            [
-                {
-                    "name": "write_file",
-                    "command": [
-                        "sh",
-                        "-c",
-                        "printf '#!/bin/sh\\necho Hello from ARL!\\n' > /workspace/hello.sh",
-                    ],
-                },
-                {"name": "run_file", "command": ["sh", "/workspace/hello.sh"]},
-                {"name": "whoami", "command": ["whoami"]},
-            ]
-        )
-
-        if verbose:
-            console.print("\n  Write + run results:")
-            for r in result2.results:
-                exit_style = "green" if r.output.exit_code == 0 else "red"
-                console.print(
-                    f"    [{r.index}] {r.name}: exit_code=[{exit_style}]{r.output.exit_code}[/{exit_style}]"
-                )
-                if r.output.stdout and verbose:
-                    console.print(f"         stdout: {r.output.stdout.strip()[:80]}")
-
-        ok = all(r.output.exit_code == 0 for r in result.results + result2.results)
-        duration = time.time() - start
-        return ok, duration
+    if "sse-ok" not in "".join(chunks):
+        raise AssertionError("SSE output callback did not receive command output")
 
 
-def test_snapshot_restore(gateway_url: str, pool_name: str, verbose: bool) -> tuple[bool, float]:
-    """Test 4: Snapshot and restore mechanism."""
-    start = time.time()
-
+def test_file_upload_download(client: GatewayClient, args: argparse.Namespace) -> None:
     with SandboxSession(
-        pool_ref=pool_name,
-        namespace=NAMESPACE,
-        gateway_url=gateway_url,
+        image=args.pool_image,
+        profile=args.pool_name,
+        namespace=args.namespace,
+        gateway_url=args.gateway_url,
     ) as session:
-        if verbose:
-            console.print(f"  Session: [cyan]{session.session_id}[/cyan]")
+        assert session.session_id is not None
+        text_resp = session.upload_file("nested/text.txt", "text-ok")
+        if text_resp.bytes_written != len("text-ok"):
+            raise AssertionError(f"unexpected text upload response: {text_resp}")
 
-        # Create version 1
-        r1 = session.execute(
+        raw_bytes = b"\x00arl-bytes\xff"
+        client.upload_file(session.session_id, "nested/blob.bin", raw_bytes)
+
+        text = client.download_file(session.session_id, "nested/text.txt").decode()
+        blob = client.download_file(session.session_id, "nested/blob.bin")
+        if text != "text-ok":
+            raise AssertionError(f"downloaded text={text!r}")
+        if blob != raw_bytes:
+            raise AssertionError(f"downloaded bytes={blob!r}")
+
+
+def test_snapshot_restore(args: argparse.Namespace) -> None:
+    with SandboxSession(
+        image=args.pool_image,
+        profile=args.pool_name,
+        namespace=args.namespace,
+        gateway_url=args.gateway_url,
+    ) as session:
+        first = session.execute(
             [
                 {
                     "name": "create_v1",
@@ -287,12 +325,11 @@ def test_snapshot_restore(gateway_url: str, pool_name: str, verbose: bool) -> tu
                 },
             ]
         )
-        snap1 = r1.results[0].snapshot_id
-        if verbose:
-            console.print(f"  Step 1 (create v1): snapshot=[cyan]{snap1}[/cyan]")
+        snapshot_id = first.results[0].snapshot_id
+        if not snapshot_id:
+            raise AssertionError("first step did not return a snapshot id")
 
-        # Create version 2
-        r2 = session.execute(
+        session.execute(
             [
                 {
                     "name": "create_v2",
@@ -300,716 +337,407 @@ def test_snapshot_restore(gateway_url: str, pool_name: str, verbose: bool) -> tu
                 },
             ]
         )
-        snap2 = r2.results[0].snapshot_id
-        if verbose:
-            console.print(f"  Step 2 (create v2): snapshot=[cyan]{snap2}[/cyan]")
-
-        # Verify current state is v2
-        check = session.execute(
-            [
-                {"name": "check_v2", "command": ["cat", "/workspace/data.txt"]},
-            ]
+        current = session.execute(
+            [{"name": "check_v2", "command": ["cat", "/workspace/data.txt"]}]
         )
-        current = check.results[0].output.stdout.strip()
-        if verbose:
-            console.print(f"  Current content: '[yellow]{current}[/yellow]'")
+        assert_step_success(current, "version=2")
 
-        # Restore to snapshot 1
-        if verbose:
-            console.print(f"  Restoring to snapshot [cyan]{snap1}[/cyan]...")
-        session.restore(snap1)
-
-        # Verify restored state is v1
-        check2 = session.execute(
-            [
-                {"name": "check_v1", "command": ["cat", "/workspace/data.txt"]},
-            ]
+        session.restore(snapshot_id)
+        restored = session.execute(
+            [{"name": "check_v1", "command": ["cat", "/workspace/data.txt"]}]
         )
-        restored = check2.results[0].output.stdout.strip()
-        if verbose:
-            console.print(f"  Restored content: '[yellow]{restored}[/yellow]'")
-
-        ok = current == "version=2" and restored == "version=1"
-        duration = time.time() - start
-        return ok, duration
+        assert_step_success(restored, "version=1")
 
 
-def test_history_trajectory(gateway_url: str, pool_name: str, verbose: bool) -> tuple[bool, float]:
-    """Test 5: Session history and trajectory export."""
-    start = time.time()
-
+def test_replay(client: GatewayClient, args: argparse.Namespace) -> None:
     with SandboxSession(
-        pool_ref=pool_name,
-        namespace=NAMESPACE,
-        gateway_url=gateway_url,
-    ) as session:
-        if verbose:
-            console.print(f"  Session: [cyan]{session.session_id}[/cyan]")
+        image=args.pool_image,
+        profile=args.pool_name,
+        namespace=args.namespace,
+        gateway_url=args.gateway_url,
+    ) as source, SandboxSession(
+        image=args.pool_image,
+        profile=args.pool_name,
+        namespace=args.namespace,
+        gateway_url=args.gateway_url,
+    ) as target:
+        assert source.session_id is not None
+        assert target.session_id is not None
 
-        # Execute some commands
+        source.execute(
+            [
+                {
+                    "name": "create_replay",
+                    "command": ["sh", "-c", "printf first > /workspace/replay.txt"],
+                },
+                {
+                    "name": "mutate_replay",
+                    "command": ["sh", "-c", "printf second > /workspace/replay.txt"],
+                },
+            ]
+        )
+
+        partial = client.replay_from(target.session_id, source.session_id, up_to_step=0)
+        if int(partial.get("stepsReplayed", 0)) < 1:
+            raise AssertionError(f"partial replay response={partial}")
+        partial_check = target.execute(
+            [{"name": "check_partial_replay", "command": ["cat", "/workspace/replay.txt"]}]
+        )
+        assert_step_success(partial_check, "first")
+
+        full = client.replay_from(target.session_id, source.session_id)
+        if int(full.get("stepsReplayed", 0)) < 2:
+            raise AssertionError(f"full replay response={full}")
+        full_check = target.execute(
+            [{"name": "check_full_replay", "command": ["cat", "/workspace/replay.txt"]}]
+        )
+        assert_step_success(full_check, "second")
+
+
+def test_history_trajectory(args: argparse.Namespace) -> None:
+    with SandboxSession(
+        image=args.pool_image,
+        profile=args.pool_name,
+        namespace=args.namespace,
+        gateway_url=args.gateway_url,
+    ) as session:
         session.execute(
             [
                 {"name": "step_a", "command": ["echo", "aaa"]},
                 {"name": "step_b", "command": ["echo", "bbb"]},
             ]
         )
-        session.execute(
-            [
-                {"name": "step_c", "command": ["echo", "ccc"]},
-            ]
-        )
+        session.execute([{"name": "step_c", "command": ["echo", "ccc"]}])
 
-        # Get history
         history = session.get_history()
-        if verbose:
-            console.print(f"  History entries: {len(history)}")
-            for h in history:
-                snap_str = f"snapshot={h.snapshot_id}" if h.snapshot_id else "no snapshot"
-                console.print(f"    [{h.index}] {h.name}: {snap_str}")
-
-        # Export trajectory
         trajectory = session.export_trajectory()
-        lines = [line for line in trajectory.strip().split("\n") if line]
-        if verbose:
-            console.print(f"\n  Trajectory JSONL lines: {len(lines)}")
-            for line in lines[:3]:  # Show first 3 lines
-                entry = json.loads(line)
-                step = entry.get("step", "?")
-                snapshot = entry.get("snapshot_id", "none")
-                action = entry.get("action", {})
-                observation = entry.get("observation", {})
+        lines = [line for line in trajectory.splitlines() if line.strip()]
 
-                # Extract command from action
-                cmd = action.get("command", []) if isinstance(action, dict) else []
-                cmd_str = " ".join(cmd[:3]) if cmd else "N/A"
+        if len(history) < 3:
+            raise AssertionError(f"history too short: {len(history)}")
+        if len(lines) < 3:
+            raise AssertionError(f"trajectory too short: {len(lines)}")
+        for line in lines:
+            json.loads(line)
 
-                # Extract exit code from observation
-                exit_code = (
-                    observation.get("exit_code", "?") if isinstance(observation, dict) else "?"
+
+def test_logs(args: argparse.Namespace) -> None:
+    with SandboxSession(
+        image=args.pool_image,
+        profile=args.pool_name,
+        namespace=args.namespace,
+        gateway_url=args.gateway_url,
+    ) as session:
+        assert session.session_id is not None
+        result = session.execute([{"name": "logs", "command": ["sh", "-c", "echo logs-ok"]}])
+        assert_step_success(result, "logs-ok")
+
+        session_logs: list[dict[str, Any]] = []
+        pool_logs: list[dict[str, Any]] = []
+        deadline = time.time() + args.logs_timeout
+        while time.time() < deadline:
+            with httpx.Client(base_url=args.gateway_url, timeout=20.0) as http:
+                session_resp = http.get(
+                    f"/v1/sessions/{session.session_id}/logs",
+                    params={"tail": 50},
                 )
-
-                console.print(
-                    f"    step {step}: cmd=[cyan]{cmd_str}[/cyan] exit=[yellow]{exit_code}[/yellow] snapshot={snapshot}"
+                session_resp.raise_for_status()
+                pool_resp = http.get(
+                    f"/v1/pools/{args.pool_name}/logs",
+                    params={"namespace": args.namespace, "tail": 50},
                 )
+                pool_resp.raise_for_status()
 
-        ok = len(history) == 3 and len(lines) == 3
-        duration = time.time() - start
-        return ok, duration
+            session_logs = parse_ndjson(session_resp.text)
+            pool_logs = parse_ndjson(pool_resp.text)
+            if session_logs:
+                break
+            time.sleep(1)
+
+        if not session_logs:
+            raise AssertionError("session logs endpoint returned no entries")
+        if args.verbose:
+            console.print(
+                f"  Session logs: {len(session_logs)}, pool logs: {len(pool_logs)}"
+            )
 
 
-def test_tool_provisioning(
-    pool_mgr: WarmPoolManager, gateway_url: str, verbose: bool, pool_image: str = "ubuntu:22.04"
-) -> tuple[bool, float]:
-    """Test 6: Tool provisioning and calling."""
-    start = time.time()
-
-    # Define inline tool
-    tools = ToolsSpec(
-        inline=[
-            InlineToolSpec(
-                name="greet",
-                description="Return a greeting message",
-                parameters={"type": "object", "properties": {"name": {"type": "string"}}},
-                runtime="bash",
-                entrypoint="run.sh",
-                timeout="10s",
-                files={
-                    "run.sh": (
-                        "#!/bin/sh\n"
-                        "read input\n"
-                        '# Simple extraction without jq: get value of "name" key\n'
-                        'name=$(echo "$input" | sed -n \'s/.*"name"[[:space:]]*:[[:space:]]*"\\([^"]*\\)".*/\\1/p\')\n'
-                        '[ -z "$name" ] && name="world"\n'
-                        'printf \'{"message": "hello %s"}\\n\' "$name"\n'
-                    ),
-                },
-            ),
-        ],
-    )
-
-    # Create temporary pool with tools
-    if verbose:
-        console.print(f"  Creating tools pool '[cyan]{TOOLS_POOL_NAME}[/cyan]'...")
-
+def test_interactive_shell(args: argparse.Namespace) -> None:
     try:
-        pool_mgr.create_warmpool(
-            name=TOOLS_POOL_NAME,
-            image=pool_image,
-            replicas=1,
-            tools=tools,
-        )
-        if verbose:
-            console.print("  Waiting for tools pool to be ready...")
-        pool_mgr.wait_for_ready(TOOLS_POOL_NAME, timeout=300.0)
-        if verbose:
-            console.print("  [green]✓[/green] Tools pool ready")
-    except Exception as e:
-        console.print(f"  [red]✗ Failed to create tools pool: {e}[/red]")
-        return False, time.time() - start
-
-    # Use session to discover and call tools
-    try:
-        with SandboxSession(
-            pool_ref=TOOLS_POOL_NAME,
-            namespace=NAMESPACE,
-            gateway_url=gateway_url,
-        ) as session:
-            # Discover tools
-            registry = session.list_tools()
-            if verbose:
-                console.print(f"  Available tools: {[t.name for t in registry.tools]}")
-                for tool in registry.tools:
-                    console.print(f"    - {tool.name}: {tool.description} (runtime={tool.runtime})")
-
-            # Call tool
-            result = session.call_tool("greet", {"name": "ARL"})
-            if verbose:
-                console.print(f"  Tool result: {result.parsed}")
-                console.print(f"  Exit code: {result.exit_code}")
-
-            ok = result.exit_code == 0 and "hello arl" in str(result.parsed).lower()
-            duration = time.time() - start
-            return ok, duration
-    except Exception as e:
-        console.print(f"  [red]✗ Tool execution failed: {e}[/red]")
-        return False, time.time() - start
-    finally:
-        # Cleanup tools pool
-        try:
-            pool_mgr.delete_warmpool(TOOLS_POOL_NAME)
-            if verbose:
-                console.print("  [green]✓[/green] Tools pool cleaned up")
-        except Exception:
-            pass  # Ignore cleanup errors
-
-
-def test_interactive_shell(gateway_url: str, pool_name: str, verbose: bool) -> tuple[bool, float]:
-    """Test 7: Interactive shell via WebSocket."""
-    start = time.time()
-
-    try:
-        # Check if websockets is available
         import websockets  # noqa: F401
-    except ImportError:
-        if verbose:
-            console.print("  [yellow]SKIPPED[/yellow] - websockets not installed")
-            console.print("  Install with: [cyan]uv add websockets[/cyan]")
-        return True, 0.0  # Not a failure, just skipped
+    except ImportError as exc:
+        raise SkipTestError("optional dependency 'websockets' is not installed") from exc
 
-    try:
-        with SandboxSession(
-            pool_ref=pool_name,
-            namespace=NAMESPACE,
-            gateway_url=gateway_url,
-        ) as session:
-            if verbose:
-                console.print(f"  Session: [cyan]{session.session_id}[/cyan]")
-            assert session.session_id is not None
-            shell = InteractiveShellClient(gateway_url=gateway_url)
-            try:
-                shell.connect(session.session_id)
-                if verbose:
-                    console.print("  [green]✓[/green] WebSocket connected")
-
-                # Send command
-                shell.send_input("echo 'shell-test-ok'\n")
-                time.sleep(1)
-
-                # Read output
-                output = ""
-                for _ in range(10):
-                    chunk = shell.read_output(timeout=0.5)
-                    if chunk:
-                        output += chunk
-
-                if verbose:
-                    console.print(f"  Shell output: {output.strip()[:100]}")
-
-                ok = "shell-test-ok" in output
-                duration = time.time() - start
-                return ok, duration
-            finally:
-                shell.close()
-    except Exception as e:
-        console.print(f"  [red]✗ Interactive shell failed: {e}[/red]")
-        return False, time.time() - start
+    with SandboxSession(
+        image=args.pool_image,
+        profile=args.pool_name,
+        namespace=args.namespace,
+        gateway_url=args.gateway_url,
+    ) as session:
+        assert session.session_id is not None
+        shell = InteractiveShellClient(gateway_url=args.gateway_url)
+        try:
+            shell.connect(session.session_id)
+            shell.send_input("echo shell-test-ok\n")
+            output = ""
+            deadline = time.time() + 10.0
+            while time.time() < deadline and "shell-test-ok" not in output:
+                output += shell.read_output(timeout=0.5)
+            if "shell-test-ok" not in output:
+                raise AssertionError(f"shell output did not contain marker: {output!r}")
+        finally:
+            shell.close()
 
 
-def test_keep_alive_reattach(gateway_url: str, pool_name: str, verbose: bool) -> tuple[bool, float]:
-    """Test 8: Keep-alive session and reattach by session ID."""
-    start = time.time()
-
-    # Phase 1: create a keep_alive session, write data, exit without cleanup
-    session1 = SandboxSession(
-        pool_ref=pool_name,
-        namespace=NAMESPACE,
-        gateway_url=gateway_url,
+def test_keep_alive_reattach(args: argparse.Namespace) -> None:
+    first = SandboxSession(
+        image=args.pool_image,
+        profile=args.pool_name,
+        namespace=args.namespace,
+        gateway_url=args.gateway_url,
         keep_alive=True,
     )
-    session1.create_sandbox()
-    sid = session1.session_id
-    assert sid is not None
-    if verbose:
-        console.print(f"  Phase 1 - created session: [cyan]{sid}[/cyan]")
-
-    r1 = session1.execute(
-        [{"name": "write", "command": ["sh", "-c", "echo persist-ok > /workspace/flag.txt"]}]
-    )
-    if verbose:
-        console.print(f"  Phase 1 - wrote flag: exit_code={r1.results[0].output.exit_code}")
-    # Intentionally do NOT call delete_sandbox — session stays alive
-
-    # Phase 2: reattach using session ID
-    try:
-        session2 = SandboxSession.attach(sid, gateway_url=gateway_url)
-    except Exception as e:
-        console.print(f"  [red]\u2717 Failed to attach: {e}[/red]")
-        # Cleanup
-        session1.delete_sandbox()
-        return False, time.time() - start
-
-    if verbose:
-        info = session2.session_info
-        pod = info.pod_name if info else "unknown"
-        console.print(f"  Phase 2 - attached to session: [cyan]{sid}[/cyan] (pod={pod})")
-
-    r2 = session2.execute([{"name": "read", "command": ["cat", "/workspace/flag.txt"]}])
-    content = r2.results[0].output.stdout.strip()
-    if verbose:
-        console.print(f"  Phase 2 - read flag: '[yellow]{content}[/yellow]'")
-
-    # Phase 3: verify history spans both phases
-    history = session2.get_history()
-    if verbose:
-        console.print(f"  Phase 2 - history entries: {len(history)}")
-
-    # Cleanup
-    session2.delete_sandbox()
-    if verbose:
-        console.print("  [green]\u2713[/green] Session cleaned up")
-
-    ok = content == "persist-ok" and len(history) >= 2
-    return ok, time.time() - start
-
-
-def test_managed_session(
-    gateway_url: str, pool_image: str, verbose: bool
-) -> tuple[bool, float]:
-    """Test 9: Managed sessions with server-side pool auto-scaling.
-
-    Demonstrates ManagedSession: just specify image + experiment ID,
-    no manual pool creation needed. The server handles pool lifecycle.
-    """
-    start = time.time()
-    experiment_id = f"sdk-test-{int(time.time())}"
-    client = GatewayClient(base_url=gateway_url)
+    first.create_sandbox()
+    session_id = first.session_id
+    assert session_id is not None
 
     try:
-        # --- Phase 1: Create managed sessions ---
-        if verbose:
-            console.print(
-                f"  Experiment: [cyan]{experiment_id}[/cyan]"
-            )
-            console.print(f"  Image: [cyan]{pool_image}[/cyan]")
-            console.print("  Creating managed session (server auto-creates pool)...")
+        result = first.execute(
+            [{"name": "write", "command": ["sh", "-c", "echo persist-ok > /workspace/flag.txt"]}]
+        )
+        assert_step_success(result)
+        first.close()
 
-        with ManagedSession(
-            image=pool_image,
-            experiment_id=experiment_id,
-            namespace=NAMESPACE,
-            gateway_url=gateway_url,
-        ) as session:
-            if verbose:
-                console.print(f"  Session: [cyan]{session.session_id}[/cyan]")
-                console.print(f"  Pool ref: [cyan]{session.pool_ref}[/cyan]")
-                info = session.session_info
-                if info:
-                    console.print(f"  Pod: [cyan]{info.pod_name}[/cyan] ({info.pod_ip})")
-
-            # Execute commands
-            result = session.execute(
-                [
-                    {"name": "hello", "command": ["echo", "Hello from managed session!"]},
-                    {"name": "uname", "command": ["uname", "-s"]},
-                ]
-            )
-
-            if verbose:
-                for r in result.results:
-                    exit_style = "green" if r.output.exit_code == 0 else "red"
-                    console.print(
-                        f"    [{r.index}] {r.name}: "
-                        f"exit_code=[{exit_style}]{r.output.exit_code}[/{exit_style}]"
-                    )
-                    if r.output.stdout:
-                        console.print(f"         stdout: {r.output.stdout.strip()[:80]}")
-
-            exec_ok = all(r.output.exit_code == 0 for r in result.results)
-
-            # Snapshot & restore also works with managed sessions
-            r1 = session.execute(
-                [{"name": "write_v1", "command": ["sh", "-c", "echo v1 > /workspace/managed.txt"]}]
-            )
-            snap = r1.results[0].snapshot_id
-
-            session.execute(
-                [{"name": "write_v2", "command": ["sh", "-c", "echo v2 > /workspace/managed.txt"]}]
-            )
-            session.restore(snap)
-
-            check = session.execute(
-                [{"name": "check", "command": ["cat", "/workspace/managed.txt"]}]
-            )
-            restored = check.results[0].output.stdout.strip()
-            if verbose:
-                console.print(
-                    f"  Snapshot restore: expected='v1', got='[yellow]{restored}[/yellow]'"
-                )
-
-            restore_ok = restored == "v1"
-
-        if verbose:
-            console.print("  [green]✓[/green] Session auto-cleaned up on exit")
-
-        # --- Phase 2: List experiment sessions ---
-        sessions = client.list_experiment_sessions(experiment_id)
-        if verbose:
-            console.print(f"  Experiment sessions (after cleanup): {len(sessions)}")
-
-        # --- Phase 3: Manual lifecycle (no context manager) + batch-delete ---
-        session2 = ManagedSession(
-            image=pool_image,
-            experiment_id=experiment_id,
-            namespace=NAMESPACE,
-            gateway_url=gateway_url,
+        attached = SandboxSession.attach(
+            session_id,
+            gateway_url=args.gateway_url,
+            keep_alive=True,
         )
         try:
-            session2.create_sandbox()
-            if verbose:
-                console.print(f"  Second session (manual): [cyan]{session2.session_id}[/cyan]")
-
-            session2.execute(
-                [{"name": "ping", "command": ["echo", "session2"]}]
-            )
+            read = attached.execute([{"name": "read", "command": ["cat", "/workspace/flag.txt"]}])
+            assert_step_success(read, "persist-ok")
+            if len(attached.get_history()) < 2:
+                raise AssertionError("reattached session history did not include both steps")
         finally:
-            session2.delete_sandbox()
-            session2.close()
-            if verbose:
-                console.print("  [green]✓[/green] Manual session cleaned up")
+            attached.delete_sandbox()
+            attached.close()
+    except Exception:
+        with contextlib.suppress(Exception):
+            first.delete_sandbox()
+        raise
 
-        # Batch delete all sessions for the experiment
-        deleted = client.delete_experiment(experiment_id)
-        if verbose:
-            console.print(f"  Batch delete: [cyan]{deleted}[/cyan] session(s) deleted")
 
-        # Verify experiment is empty
+def test_managed_session(client: GatewayClient, args: argparse.Namespace) -> None:
+    experiment_id = f"sdk-{int(time.time())}"
+    profile = "default"
+    auto_pool = managed_pool_name(args.pool_image, args.namespace, profile)
+
+    try:
+        with ManagedSession(
+            image=args.pool_image,
+            experiment_id=experiment_id,
+            namespace=args.namespace,
+            gateway_url=args.gateway_url,
+            profile=profile,
+            workspace_dir=args.workspace_dir,
+        ) as session:
+            result = session.execute([{"name": "managed", "command": ["echo", "managed-ok"]}])
+            assert_step_success(result, "managed-ok")
+
+            first = session.execute(
+                [{"name": "managed_v1", "command": ["sh", "-c", "echo v1 > /workspace/m.txt"]}]
+            )
+            snapshot_id = first.results[0].snapshot_id
+            session.execute(
+                [{"name": "managed_v2", "command": ["sh", "-c", "echo v2 > /workspace/m.txt"]}]
+            )
+            session.restore(snapshot_id)
+            restored = session.execute(
+                [{"name": "managed_check", "command": ["cat", "/workspace/m.txt"]}]
+            )
+            assert_step_success(restored, "v1")
+
         remaining = client.list_experiment_sessions(experiment_id)
-        cleanup_ok = len(remaining) == 0
-        if verbose:
-            console.print(f"  Remaining sessions: {len(remaining)}")
-
-        ok = exec_ok and restore_ok and cleanup_ok
-        return ok, time.time() - start
-
-    except Exception as e:
-        console.print(f"  [red]✗ Managed session test failed: {e}[/red]")
-        # Best-effort cleanup
+        if remaining:
+            raise AssertionError(f"managed session cleanup left {len(remaining)} sessions")
+    finally:
         with contextlib.suppress(Exception):
             client.delete_experiment(experiment_id)
-        return False, time.time() - start
+        with contextlib.suppress(Exception):
+            client.delete_pool(auto_pool, namespace=args.namespace)
+
+
+def test_observability(args: argparse.Namespace) -> None:
+    if not any((args.metrics_url, args.prometheus_url, args.grafana_url, args.clickhouse_url)):
+        raise SkipTestError("no observability endpoint URLs were provided")
+
+    if args.metrics_url:
+        text = http_get_text(args.metrics_url.rstrip("/") + "/metrics")
+        required = [
+            "arl_session_allocation_seconds",
+            "arl_gateway_step_result_total",
+            "arl_gateway_step_duration_seconds",
+            "arl_gateway_sidecar_call_seconds",
+        ]
+        missing = [metric for metric in required if metric not in text]
+        if missing:
+            raise AssertionError(f"gateway metrics missing: {missing}")
+
+    if args.prometheus_url:
+        with httpx.Client(base_url=args.prometheus_url.rstrip("/"), timeout=20.0) as http:
+            ready = http.get("/-/ready")
+            ready.raise_for_status()
+            query = http.get(
+                "/api/v1/query",
+                params={"query": "arl_gateway_step_result_total"},
+            )
+            query.raise_for_status()
+            payload = query.json()
+            if payload.get("status") != "success":
+                raise AssertionError(f"Prometheus query failed: {payload}")
+
+    if args.grafana_url:
+        with httpx.Client(base_url=args.grafana_url.rstrip("/"), timeout=20.0) as http:
+            health = http.get("/api/health")
+            health.raise_for_status()
+            payload = health.json()
+            if payload.get("database") != "ok":
+                raise AssertionError(f"Grafana health failed: {payload}")
+
+    if args.clickhouse_url:
+        auth = None
+        user = args.clickhouse_user or os.environ.get("CLICKHOUSE_USER")
+        password = args.clickhouse_password or os.environ.get("CLICKHOUSE_PASSWORD")
+        if user or password:
+            auth = (user or "default", password or "")
+        with httpx.Client(
+            base_url=args.clickhouse_url.rstrip("/"),
+            timeout=20.0,
+            auth=auth,
+        ) as http:
+            resp = http.get("/", params={"query": "SELECT count() FROM arl.trajectory"})
+            resp.raise_for_status()
+            count = int(resp.text.strip())
+            if count < 1:
+                raise AssertionError("ClickHouse arl.trajectory has no rows")
 
 
 def print_summary(results: list[TestResult]) -> None:
-    """Print test results summary table."""
-    table = Table(title="\n[bold]Test Results[/bold]", show_header=True, header_style="bold cyan")
-    table.add_column("Test", style="white", width=25)
-    table.add_column("Status", justify="center", width=10)
-    table.add_column("Duration", justify="right", width=12)
+    table = Table(title="\nTest Results", show_header=True, header_style="bold cyan")
+    table.add_column("Test", style="white")
+    table.add_column("Status", justify="center")
+    table.add_column("Duration", justify="right")
+    table.add_column("Detail", overflow="fold")
 
-    passed_count = 0
+    passed = 0
+    skipped = 0
     total_duration = 0.0
-
     for result in results:
+        total_duration += result.duration
         if result.skipped:
             status = "[yellow]SKIP[/yellow]"
+            skipped += 1
         elif result.passed:
-            status = "[green]✓[/green]"
-            passed_count += 1
+            status = "[green]PASS[/green]"
+            passed += 1
         else:
-            status = "[red]✗[/red]"
+            status = "[red]FAIL[/red]"
+        table.add_row(result.name, status, f"{result.duration:.2f}s", result.detail)
 
-        duration_str = f"{result.duration:.2f}s"
-        total_duration += result.duration
-
-        table.add_row(result.name, status, duration_str)
-
-    # Add summary row
+    non_skipped = len([result for result in results if not result.skipped])
     table.add_section()
-    non_skipped = [r for r in results if not r.skipped]
-    summary = f"{passed_count}/{len(non_skipped)} PASSED • Total: {total_duration:.2f}s"
-    table.add_row("[bold]Summary[/bold]", "", f"[bold]{summary}[/bold]")
-
+    table.add_row(
+        "[bold]Summary[/bold]",
+        "",
+        f"[bold]{total_duration:.2f}s[/bold]",
+        f"[bold]{passed}/{non_skipped} passed, {skipped} skipped[/bold]",
+    )
     console.print(table)
 
 
-def main() -> None:
-    """Run all tests."""
+def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Comprehensive ARL SDK integration tests",
-        formatter_class=argparse.RawDescriptionHelpFormatter,
+        description="Integration smoke tests for the sandbox-backed ARL SDK",
+        formatter_class=argparse.ArgumentDefaultsHelpFormatter,
     )
-    parser.add_argument(
-        "--verbose", "-v", action="store_true", help="Show detailed output for each test step"
-    )
-    parser.add_argument(
-        "--gateway-url",
-        default=DEFAULT_GATEWAY_URL,
-        help=f"Gateway URL (default: {DEFAULT_GATEWAY_URL})",
-    )
-    parser.add_argument(
-        "--pool-name",
-        default=DEFAULT_POOL_NAME,
-        help=f"WarmPool name (default: {DEFAULT_POOL_NAME})",
-    )
-    parser.add_argument(
-        "--pool-image",
-        default=DEFAULT_POOL_IMAGE,
-        help=f"Pool image (default: {DEFAULT_POOL_IMAGE})",
-    )
-    parser.add_argument(
-        "--skip-cleanup", action="store_true", help="Skip pool cleanup after tests (for debugging)"
-    )
-    parser.add_argument(
-        "--cpu-request",
-        help="CPU request (e.g., '100m', '0.5', '1')",
-    )
-    parser.add_argument(
-        "--memory-request",
-        help="Memory request (e.g., '128Mi', '512Mi', '1Gi')",
-    )
-    parser.add_argument(
-        "--cpu-limit",
-        help="CPU limit (e.g., '1', '2', '4')",
-    )
-    parser.add_argument(
-        "--memory-limit",
-        help="Memory limit (e.g., '1Gi', '2Gi', '4Gi')",
-    )
-    parser.add_argument(
-        "--workspace-dir",
-        default="/workspace",
-        help="Workspace directory mount path (default: /workspace)",
-    )
-
+    parser.add_argument("--verbose", "-v", action="store_true")
+    parser.add_argument("--gateway-url", default=DEFAULT_GATEWAY_URL)
+    parser.add_argument("--namespace", default=DEFAULT_NAMESPACE)
+    parser.add_argument("--pool-name", default="")
+    parser.add_argument("--pool-image", default=DEFAULT_POOL_IMAGE)
+    parser.add_argument("--pool-replicas", type=int, default=1)
+    parser.add_argument("--pool-ready-timeout", type=float, default=180.0)
+    parser.add_argument("--logs-timeout", type=float, default=30.0)
+    parser.add_argument("--workspace-dir", default="/workspace")
+    parser.add_argument("--skip-scale", action="store_true")
+    parser.add_argument("--skip-cleanup", action="store_true")
+    parser.add_argument("--cpu-request")
+    parser.add_argument("--memory-request")
+    parser.add_argument("--cpu-limit")
+    parser.add_argument("--memory-limit")
+    parser.add_argument("--metrics-url", default="")
+    parser.add_argument("--prometheus-url", default="")
+    parser.add_argument("--grafana-url", default="")
+    parser.add_argument("--clickhouse-url", default="")
+    parser.add_argument("--clickhouse-user", default="")
+    parser.add_argument("--clickhouse-password", default="")
     args = parser.parse_args()
 
-    # Build resource requirements if any resource args provided
-    resources = None
-    if args.cpu_request or args.memory_request or args.cpu_limit or args.memory_limit:
-        requests = {}
-        limits = {}
-        if args.cpu_request:
-            requests["cpu"] = args.cpu_request
-        if args.memory_request:
-            requests["memory"] = args.memory_request
-        if args.cpu_limit:
-            limits["cpu"] = args.cpu_limit
-        if args.memory_limit:
-            limits["memory"] = args.memory_limit
+    if args.pool_replicas < 1:
+        console.print("[red]--pool-replicas must be >= 1[/red]")
+        return 2
+    if not args.pool_name:
+        args.pool_name = f"sdk-smoke-{int(time.time())}"
 
-        try:
-            resources = ResourceRequirements(requests=requests, limits=limits)
-            if args.verbose:
-                console.print(
-                    f"\n[dim]Resource requirements: {resources.model_dump(exclude_none=True)}[/dim]"
-                )
-        except ValueError as e:
-            console.print(f"\n[red]Invalid resource specification: {e}[/red]")
-            sys.exit(1)
+    try:
+        resources = build_resources(args)
+    except ValueError as exc:
+        console.print(f"[red]Invalid resource specification: {exc}[/red]")
+        return 2
 
-    # Print header
     print_header(args)
 
-    # Initialize clients
     client = GatewayClient(base_url=args.gateway_url)
-    pool_mgr = WarmPoolManager(namespace=NAMESPACE, gateway_url=args.gateway_url)
+    pool_mgr = WarmPoolManager(
+        namespace=args.namespace,
+        gateway_url=args.gateway_url,
+        timeout=args.pool_ready_timeout,
+    )
+
+    tests: list[tuple[str, Callable[[], None]]] = [
+        ("Gateway Health", lambda: test_health(client, args)),
+        ("Pool Lifecycle", lambda: test_pool_lifecycle(pool_mgr, args, resources)),
+        ("Execution + SSE", lambda: test_basic_execution_sse(args)),
+        ("File Upload/Download", lambda: test_file_upload_download(client, args)),
+        ("Snapshot Restore", lambda: test_snapshot_restore(args)),
+        ("Replay", lambda: test_replay(client, args)),
+        ("History + Trajectory", lambda: test_history_trajectory(args)),
+        ("Logs", lambda: test_logs(args)),
+        ("Interactive Shell", lambda: test_interactive_shell(args)),
+        ("Keep-Alive Reattach", lambda: test_keep_alive_reattach(args)),
+        ("Managed Sessions", lambda: test_managed_session(client, args)),
+        ("Observability", lambda: test_observability(args)),
+    ]
 
     results: list[TestResult] = []
-    test_count = 9
+    try:
+        total = len(tests)
+        for index, (name, fn) in enumerate(tests, start=1):
+            result = run_test(index, total, name, fn)
+            results.append(result)
+            if name in {"Gateway Health", "Pool Lifecycle"} and not result.passed:
+                break
+    finally:
+        if not args.skip_cleanup:
+            with contextlib.suppress(Exception):
+                pool_mgr.delete_warmpool(args.pool_name)
+        pool_mgr.close()
+        client.close()
 
-    # Test 1: Health check
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        console=console,
-    ) as progress:
-        task = progress.add_task(f"[1/{test_count}] Health Check", total=None)
-        passed, duration = test_health(client, args.verbose)
-        progress.update(task, completed=True)
-
-    status = "[green]✓[/green]" if passed else "[red]✗[/red]"
-    console.print(f"[1/{test_count}] {status} Health Check ([cyan]{duration:.2f}s[/cyan])")
-    results.append(TestResult("Health Check", passed, duration))
-
-    if not passed:
-        console.print("\n[red]Gateway not reachable. Aborting.[/red]")
-        sys.exit(1)
-
-    # Test 2: Pool lifecycle
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        console=console,
-    ) as progress:
-        task = progress.add_task(f"[2/{test_count}] WarmPool Management", total=None)
-        passed, duration = test_pool_lifecycle(
-            pool_mgr,
-            args.pool_name,
-            args.pool_image,
-            args.verbose,
-            resources=resources,
-            workspace_dir=args.workspace_dir,
-        )
-        progress.update(task, completed=True)
-
-    status = "[green]✓[/green]" if passed else "[red]✗[/red]"
-    console.print(f"[2/{test_count}] {status} WarmPool Management ([cyan]{duration:.2f}s[/cyan])")
-    results.append(TestResult("WarmPool Management", passed, duration))
-
-    if not passed:
-        console.print("\n[red]Pool not ready. Aborting.[/red]")
-        sys.exit(1)
-
-    # Test 3: Basic execution
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        console=console,
-    ) as progress:
-        task = progress.add_task(f"[3/{test_count}] Basic Execution", total=None)
-        passed, duration = test_basic_execution(args.gateway_url, args.pool_name, args.verbose)
-        progress.update(task, completed=True)
-
-    status = "[green]✓[/green]" if passed else "[red]✗[/red]"
-    console.print(f"[3/{test_count}] {status} Basic Execution ([cyan]{duration:.2f}s[/cyan])")
-    results.append(TestResult("Basic Execution", passed, duration))
-
-    # Test 4: Snapshot & restore
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        console=console,
-    ) as progress:
-        task = progress.add_task(f"[4/{test_count}] Snapshot & Restore", total=None)
-        passed, duration = test_snapshot_restore(args.gateway_url, args.pool_name, args.verbose)
-        progress.update(task, completed=True)
-
-    status = "[green]✓[/green]" if passed else "[red]✗[/red]"
-    console.print(f"[4/{test_count}] {status} Snapshot & Restore ([cyan]{duration:.2f}s[/cyan])")
-    results.append(TestResult("Snapshot & Restore", passed, duration))
-
-    # Test 5: History & trajectory
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        console=console,
-    ) as progress:
-        task = progress.add_task(f"[5/{test_count}] History & Trajectory", total=None)
-        passed, duration = test_history_trajectory(args.gateway_url, args.pool_name, args.verbose)
-        progress.update(task, completed=True)
-
-    status = "[green]✓[/green]" if passed else "[red]✗[/red]"
-    console.print(f"[5/{test_count}] {status} History & Trajectory ([cyan]{duration:.2f}s[/cyan])")
-    results.append(TestResult("History & Trajectory", passed, duration))
-
-    # Test 6: Tool provisioning
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        console=console,
-    ) as progress:
-        task = progress.add_task(f"[6/{test_count}] Tool Provisioning", total=None)
-        passed, duration = test_tool_provisioning(pool_mgr, args.gateway_url, args.verbose)
-        progress.update(task, completed=True)
-
-    status = "[green]✓[/green]" if passed else "[red]✗[/red]"
-    console.print(f"[6/{test_count}] {status} Tool Provisioning ([cyan]{duration:.2f}s[/cyan])")
-    results.append(TestResult("Tool Provisioning", passed, duration))
-
-    # Test 7: Interactive shell
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        console=console,
-    ) as progress:
-        task = progress.add_task(f"[7/{test_count}] Interactive Shell", total=None)
-        passed, duration = test_interactive_shell(args.gateway_url, args.pool_name, args.verbose)
-        progress.update(task, completed=True)
-
-    if duration == 0.0:
-        # Skipped
-        console.print(
-            f"[7/{test_count}] [yellow]⊘[/yellow] Interactive Shell ([yellow]SKIPPED[/yellow])"
-        )
-        results.append(TestResult("Interactive Shell", True, duration, skipped=True))
-    else:
-        status = "[green]✓[/green]" if passed else "[red]✗[/red]"
-        console.print(f"[7/{test_count}] {status} Interactive Shell ([cyan]{duration:.2f}s[/cyan])")
-        results.append(TestResult("Interactive Shell", passed, duration))
-
-    # Test 8: Keep-alive & reattach
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        console=console,
-    ) as progress:
-        task = progress.add_task(f"[8/{test_count}] Keep-Alive & Reattach", total=None)
-        passed, duration = test_keep_alive_reattach(args.gateway_url, args.pool_name, args.verbose)
-        progress.update(task, completed=True)
-
-    status = "[green]\u2713[/green]" if passed else "[red]\u2717[/red]"
-    console.print(f"[8/{test_count}] {status} Keep-Alive & Reattach ([cyan]{duration:.2f}s[/cyan])")
-    results.append(TestResult("Keep-Alive & Reattach", passed, duration))
-
-    # Test 9: Managed sessions
-    with Progress(
-        SpinnerColumn(),
-        TextColumn("[progress.description]{task.description}"),
-        console=console,
-    ) as progress:
-        task = progress.add_task(f"[9/{test_count}] Managed Sessions", total=None)
-        passed, duration = test_managed_session(
-            args.gateway_url, args.pool_image, args.verbose
-        )
-        progress.update(task, completed=True)
-
-    status = "[green]✓[/green]" if passed else "[red]✗[/red]"
-    console.print(f"[9/{test_count}] {status} Managed Sessions ([cyan]{duration:.2f}s[/cyan])")
-    results.append(TestResult("Managed Sessions", passed, duration))
-
-    # Cleanup
-    if not args.skip_cleanup:
-        console.print(f"\n[dim]Cleaning up pool '{args.pool_name}'...[/dim]")
-        try:
-            pool_mgr.delete_warmpool(args.pool_name)
-            console.print(f"[dim]Pool '{args.pool_name}' deleted.[/dim]")
-        except Exception as e:
-            console.print(f"[yellow]Pool cleanup failed: {e}[/yellow]")
-    else:
-        console.print("\n[yellow]Skipping cleanup (--skip-cleanup)[/yellow]")
-
-    # Print summary
     print_summary(results)
-
-    # Exit with appropriate code
-    all_passed = all(r.passed for r in results if not r.skipped)
-    if all_passed:
-        console.print("\n[bold green]ALL TESTS PASSED[/bold green]")
-        sys.exit(0)
-    else:
-        console.print("\n[bold red]SOME TESTS FAILED[/bold red]")
-        sys.exit(1)
+    all_required_passed = all(result.passed for result in results if not result.skipped)
+    return 0 if all_required_passed else 1
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

@@ -18,7 +18,7 @@ var sessionListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List active sessions",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		filterPool, _ := cmd.Flags().GetString("pool")
+		filterProfile, _ := cmd.Flags().GetString("profile")
 		filterExp, _ := cmd.Flags().GetString("experiment")
 
 		c := newClient()
@@ -29,7 +29,7 @@ var sessionListCmd = &cobra.Command{
 
 		var filtered []SessionListItem
 		for _, s := range sessions {
-			if filterPool != "" && s.PoolRef != filterPool {
+			if filterProfile != "" && s.Profile != filterProfile {
 				continue
 			}
 			if filterExp != "" && s.ExperimentID != filterExp {
@@ -50,24 +50,24 @@ var sessionListCmd = &cobra.Command{
 
 		w := newTabWriter()
 		if flagOutput == "wide" {
-			fmt.Fprintln(w, "ID\tPOOL\tPOD\tPOD-IP\tNAMESPACE\tEXPERIMENT\tAGE")
+			fmt.Fprintln(w, "ID\tPROFILE\tIMAGE\tPOD\tPOD-IP\tNAMESPACE\tEXPERIMENT\tAGE")
 			for _, s := range filtered {
 				exp := s.ExperimentID
 				if exp == "" {
 					exp = "-"
 				}
-				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-					s.ID, s.PoolRef, s.PodName, s.PodIP, s.Namespace, exp, age(s.CreatedAt))
+				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+					s.ID, s.Profile, shortImage(s.Image), s.PodName, s.PodIP, s.Namespace, exp, age(s.CreatedAt))
 			}
 		} else {
-			fmt.Fprintln(w, "ID\tPOOL\tPOD\tEXPERIMENT\tAGE")
+			fmt.Fprintln(w, "ID\tPROFILE\tIMAGE\tPOD\tEXPERIMENT\tAGE")
 			for _, s := range filtered {
 				exp := s.ExperimentID
 				if exp == "" {
 					exp = "-"
 				}
-				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n",
-					s.ID, s.PoolRef, s.PodName, exp, age(s.CreatedAt))
+				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n",
+					s.ID, s.Profile, shortImage(s.Image), s.PodName, exp, age(s.CreatedAt))
 			}
 		}
 		return w.Flush()
@@ -93,7 +93,8 @@ var sessionGetCmd = &cobra.Command{
 		fmt.Printf("ID:         %s\n", s.ID)
 		fmt.Printf("Sandbox:    %s\n", s.SandboxName)
 		fmt.Printf("Namespace:  %s\n", s.Namespace)
-		fmt.Printf("Pool:       %s\n", s.PoolRef)
+		fmt.Printf("Image:      %s\n", s.Image)
+		fmt.Printf("Profile:    %s\n", s.Profile)
 		fmt.Printf("Pod:        %s\n", s.PodName)
 		fmt.Printf("Pod IP:     %s\n", s.PodIP)
 		fmt.Printf("Age:        %s\n", age(s.CreatedAt))
@@ -249,7 +250,7 @@ var sessionLogsCmd = &cobra.Command{
 }
 
 func init() {
-	sessionListCmd.Flags().String("pool", "", "Filter by pool name")
+	sessionListCmd.Flags().String("profile", "", "Filter by profile")
 	sessionListCmd.Flags().String("experiment", "", "Filter by experiment ID")
 
 	sessionHistoryCmd.Flags().BoolP("verbose", "v", false, "Show step output")

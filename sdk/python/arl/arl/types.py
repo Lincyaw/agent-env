@@ -67,7 +67,8 @@ class SessionInfo(BaseModel):
     id: str
     sandbox_name: str = Field(alias="sandboxName")
     namespace: str
-    pool_ref: str = Field(alias="poolRef")
+    image: str = ""
+    profile: str = ""
     pod_ip: str = Field("", alias="podIP")
     pod_name: str = Field("", alias="podName")
     created_at: datetime | None = Field(None, alias="createdAt")
@@ -97,6 +98,7 @@ class UploadFileResponse(BaseModel):
 
     path: str
     bytes_written: int = Field(alias="bytesWritten")
+    sha256: str = ""
 
     model_config = {"populate_by_name": True}
 
@@ -131,6 +133,8 @@ class PoolInfo(BaseModel):
 
     name: str
     namespace: str
+    image: str = ""
+    profile: str = ""
     replicas: Annotated[int, Field(ge=0)] = 0
     ready_replicas: Annotated[int, Field(ge=0)] = Field(0, alias="readyReplicas")
     allocated_replicas: Annotated[int, Field(ge=0)] = Field(0, alias="allocatedReplicas")
@@ -326,8 +330,8 @@ class ResourceRequirements(BaseModel):
                 if quantity.endswith("m"):
                     try:
                         millicores = int(quantity[:-1])
-                    except ValueError:
-                        raise ValueError(f"Invalid cpu millicore quantity: {quantity}")
+                    except ValueError as err:
+                        raise ValueError(f"Invalid cpu millicore quantity: {quantity}") from err
                     if millicores <= 0 or millicores > 1_000_000:
                         raise ValueError(
                             f"CPU millicores must be between 1 and 1000000, got {millicores}"

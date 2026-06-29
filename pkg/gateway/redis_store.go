@@ -22,6 +22,7 @@ const (
 // are managed separately or reconstructed on load.
 type redisSessionData struct {
 	Info                SessionInfo             `json:"info"`
+	Runtime             RuntimeAllocation       `json:"runtime,omitempty"`
 	Managed             bool                    `json:"managed"`
 	ExperimentID        string                  `json:"experimentId"`
 	Deleted             bool                    `json:"deleted,omitempty"`
@@ -41,6 +42,7 @@ func sessionToRedisData(s *session) redisSessionData {
 
 	data := redisSessionData{
 		Info:                s.Info,
+		Runtime:             s.Runtime,
 		Managed:             s.managed,
 		ExperimentID:        s.experimentID,
 		LastTaskTime:        s.lastTaskTime,
@@ -81,6 +83,7 @@ func redisDataToSession(data redisSessionData) *session {
 
 	return &session{
 		Info:                data.Info,
+		Runtime:             data.Runtime,
 		History:             h,
 		managed:             data.Managed,
 		experimentID:        data.ExperimentID,

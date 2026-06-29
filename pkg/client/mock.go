@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"fmt"
+	"io"
 
 	"github.com/Lincyaw/agent-env/pkg/interfaces"
 )
@@ -11,7 +12,8 @@ import (
 type MockSidecarClient struct {
 	ExecuteFunc          func(ctx context.Context, podIP string, req interfaces.ExecRequest) (interfaces.ExecResponse, error)
 	ExecuteStreamFunc    func(ctx context.Context, podIP string, req interfaces.ExecRequest) (<-chan interfaces.ExecResponse, error)
-	WriteFileFunc        func(ctx context.Context, podIP string, path string, content []byte) (int64, error)
+	WriteFileFunc        func(ctx context.Context, podIP string, path string, content io.Reader, expectedSHA256 string) (*interfaces.FileWriteResult, error)
+	ReadFileFunc         func(ctx context.Context, podIP string, path string, dst io.Writer) (*interfaces.FileReadResult, error)
 	InteractiveShellFunc func(ctx context.Context, podIP string) (interfaces.ShellStream, error)
 	HealthCheckFunc      func(ctx context.Context, podIP string) error
 }
@@ -33,15 +35,18 @@ func (m *MockSidecarClient) ExecuteStream(ctx context.Context, podIP string, req
 }
 
 // WriteFile mocks native file upload
-func (m *MockSidecarClient) WriteFile(ctx context.Context, podIP string, path string, content []byte) (int64, error) {
+func (m *MockSidecarClient) WriteFile(ctx context.Context, podIP string, path string, content io.Reader, expectedSHA256 string) (*interfaces.FileWriteResult, error) {
 	if m.WriteFileFunc != nil {
-		return m.WriteFileFunc(ctx, podIP, path, content)
+		return m.WriteFileFunc(ctx, podIP, path, content, expectedSHA256)
 	}
-	return 0, fmt.Errorf("not implemented")
+	return nil, fmt.Errorf("not implemented")
 }
 
 // ReadFile mocks native file download
-func (m *MockSidecarClient) ReadFile(ctx context.Context, podIP string, path string) ([]byte, error) {
+func (m *MockSidecarClient) ReadFile(ctx context.Context, podIP string, path string, dst io.Writer) (*interfaces.FileReadResult, error) {
+	if m.ReadFileFunc != nil {
+		return m.ReadFileFunc(ctx, podIP, path, dst)
+	}
 	return nil, fmt.Errorf("not implemented")
 }
 

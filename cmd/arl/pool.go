@@ -41,18 +41,18 @@ var poolListCmd = &cobra.Command{
 
 		w := newTabWriter()
 		if flagOutput == "wide" {
-			fmt.Fprintln(w, "NAME\tNAMESPACE\tIMAGE\tREPLICAS\tREADY\tALLOCATED\tSTATUS\tAGE")
+			fmt.Fprintln(w, "NAME\tNAMESPACE\tPROFILE\tIMAGE\tREPLICAS\tREADY\tALLOCATED\tSTATUS\tAGE")
 			for _, p := range pools {
-				fmt.Fprintf(w, "%s\t%s\t%s\t%d\t%d\t%d\t%s\t%s\n",
-					p.Name, p.Namespace, shortImage(p.Image),
+				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%d\t%d\t%d\t%s\t%s\n",
+					p.Name, p.Namespace, p.Profile, shortImage(p.Image),
 					p.Replicas, p.ReadyReplicas, p.AllocatedReplicas,
 					conditionSummary(p.Conditions), age(p.CreatedAt))
 			}
 		} else {
-			fmt.Fprintln(w, "NAME\tREPLICAS\tREADY\tALLOCATED\tSTATUS\tAGE")
+			fmt.Fprintln(w, "NAME\tPROFILE\tREPLICAS\tREADY\tALLOCATED\tSTATUS\tAGE")
 			for _, p := range pools {
-				fmt.Fprintf(w, "%s\t%d\t%d\t%d\t%s\t%s\n",
-					p.Name, p.Replicas, p.ReadyReplicas, p.AllocatedReplicas,
+				fmt.Fprintf(w, "%s\t%s\t%d\t%d\t%d\t%s\t%s\n",
+					p.Name, p.Profile, p.Replicas, p.ReadyReplicas, p.AllocatedReplicas,
 					conditionSummary(p.Conditions), age(p.CreatedAt))
 			}
 		}
@@ -78,6 +78,7 @@ var poolGetCmd = &cobra.Command{
 
 		fmt.Printf("Name:       %s\n", p.Name)
 		fmt.Printf("Namespace:  %s\n", p.Namespace)
+		fmt.Printf("Profile:    %s\n", p.Profile)
 		fmt.Printf("Image:      %s\n", p.Image)
 		fmt.Printf("Replicas:   %d (ready=%d, allocated=%d)\n", p.Replicas, p.ReadyReplicas, p.AllocatedReplicas)
 		fmt.Printf("Age:        %s\n", age(p.CreatedAt))
@@ -100,16 +101,21 @@ var poolCreateCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		image, _ := cmd.Flags().GetString("image")
+		profile, _ := cmd.Flags().GetString("profile")
 		replicas, _ := cmd.Flags().GetInt32("replicas")
 
 		if image == "" {
 			return fmt.Errorf("--image is required")
+		}
+		if profile == "" {
+			profile = args[0]
 		}
 
 		c := newClient()
 		if err := c.CreatePool(CreatePoolRequest{
 			Name:      args[0],
 			Image:     image,
+			Profile:   profile,
 			Replicas:  replicas,
 			Namespace: flagNamespace,
 		}); err != nil {
@@ -183,11 +189,20 @@ var poolExecCmd = &cobra.Command{
 		}
 
 		c := newClient()
+		pool, err := c.GetPool(poolName, flagNamespace)
+		if err != nil {
+			return fmt.Errorf("get pool: %w", err)
+		}
+		profile := pool.Profile
+		if profile == "" {
+			profile = poolName
+		}
 
 		// Create a temporary session from the pool
 		var sessInfo SessionInfo
 		if err := c.do("POST", "/v1/sessions", map[string]string{
-			"poolRef":   poolName,
+			"image":     pool.Image,
+			"profile":   profile,
 			"namespace": flagNamespace,
 		}, &sessInfo); err != nil {
 			return fmt.Errorf("create temporary session: %w", err)
@@ -238,6 +253,7 @@ func init() {
 	poolListCmd.Flags().BoolP("all-namespaces", "A", false, "List pools across all namespaces")
 
 	poolCreateCmd.Flags().String("image", "", "Container image (required)")
+	poolCreateCmd.Flags().String("profile", "", "Pool selection profile (default: pool name)")
 	poolCreateCmd.Flags().Int32("replicas", 2, "Number of warm replicas")
 
 	poolScaleCmd.Flags().Int32("replicas", 0, "Target replica count")

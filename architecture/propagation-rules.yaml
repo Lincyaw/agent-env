@@ -1,42 +1,6 @@
-# ARL-Infra Change Propagation Rules
-# This file defines what actions are required when specific components change
-
-# Rule Structure:
-#   trigger: Pattern or component that triggers this rule
-#   impacts: List of affected components/files
-#   actions: Required steps when this change occurs
-#   validation: Commands to verify changes are correct
+# agent-env change propagation rules
 
 rules:
-  # ============================================================================
-  # CRD Changes
-  # ============================================================================
-  - name: warmpool-crd-change
-    trigger:
-      component: warmpool-crd
-      patterns:
-        - api/v1alpha1/warmpool_types.go
-    impacts:
-      - config/crd/arl.infra.io_warmpools.yaml
-      - api/v1alpha1/zz_generated.deepcopy.go
-      - pkg/controller/warmpool_controller.go
-    actions:
-      - description: Regenerate deepcopy methods
-        command: make deepcopy
-      - description: Regenerate CRD manifests
-        command: make manifests
-      - description: Update Helm chart if schema changed significantly
-        manual: true
-        files:
-          - charts/arl-operator/templates/
-    validation:
-      - make vet
-      - make check
-      - kubectl apply --dry-run=server -f config/crd/
-
-  # ============================================================================
-  # Proto Changes
-  # ============================================================================
   - name: proto-change
     trigger:
       component: agent-proto
@@ -45,51 +9,16 @@ rules:
     impacts:
       - pkg/pb/agent.pb.go
       - pkg/pb/agent_grpc.pb.go
-      - pkg/sidecar/service.go
-      - pkg/gateway/gateway.go
+      - pkg/sidecar/
+      - pkg/client/
     actions:
       - description: Regenerate Go protobuf code
         command: make proto-go
-      - description: Update sidecar service implementation
-        manual: true
-        files:
-          - pkg/sidecar/service.go
-      - description: Update gateway gRPC client usage
-        manual: true
-        files:
-          - pkg/gateway/gateway.go
     validation:
-      - make vet
-      - make check
+      - go test ./...
       - go build ./cmd/sidecar/
       - go build ./cmd/gateway/
 
-  # ============================================================================
-  # Controller Changes
-  # ============================================================================
-  - name: controller-change
-    trigger:
-      patterns:
-        - pkg/controller/*.go
-    impacts:
-      - cmd/operator/main.go
-    actions:
-      - description: Ensure controller is registered in operator
-        manual: true
-        files:
-          - cmd/operator/main.go
-      - description: Update RBAC if new resources are accessed
-        manual: true
-        files:
-          - charts/arl-operator/templates/clusterrole.yaml
-          - charts/arl-operator/templates/clusterrolebinding.yaml
-    validation:
-      - make vet
-      - go build ./cmd/operator/
-
-  # ============================================================================
-  # Gateway Changes
-  # ============================================================================
   - name: gateway-change
     trigger:
       patterns:
@@ -98,38 +27,16 @@ rules:
     impacts:
       - sdk/python/arl/arl/gateway_client.py
       - sdk/python/arl/arl/session.py
+      - charts/agent-env/templates/gateway-*.yaml
     actions:
-      - description: Update Python SDK gateway client if API changed
+      - description: Update Python SDK if API shape changed
         manual: true
-        files:
-          - sdk/python/arl/arl/gateway_client.py
-      - description: Rebuild gateway image
+      - description: Validate gateway image build
         command: docker build -f Dockerfile.gateway -t arl-gateway:dev .
     validation:
-      - make vet
-      - go build ./cmd/gateway/
+      - go test ./...
+      - helm lint charts/agent-env
 
-  # ============================================================================
-  # Webhook Changes
-  # ============================================================================
-  - name: webhook-change
-    trigger:
-      patterns:
-        - pkg/webhook/*.go
-    impacts:
-      - cmd/operator/main.go
-    actions:
-      - description: Ensure webhook is registered in operator
-        manual: true
-        files:
-          - cmd/operator/main.go
-    validation:
-      - make vet
-      - go build ./cmd/operator/
-
-  # ============================================================================
-  # Sidecar Changes
-  # ============================================================================
   - name: sidecar-change
     trigger:
       patterns:
@@ -141,12 +48,9 @@ rules:
       - description: Rebuild sidecar image
         command: docker build -f Dockerfile.sidecar -t arl-sidecar:dev .
     validation:
-      - make vet
+      - go test ./...
       - go build ./cmd/sidecar/
 
-  # ============================================================================
-  # Executor Agent Changes
-  # ============================================================================
   - name: executor-agent-change
     trigger:
       patterns:
@@ -158,12 +62,9 @@ rules:
       - description: Rebuild executor-agent image
         command: docker build -f Dockerfile.executor-agent -t arl-executor-agent:dev .
     validation:
-      - make vet
+      - go test ./...
       - go build ./cmd/executor-agent/
 
-  # ============================================================================
-  # SDK Changes
-  # ============================================================================
   - name: sdk-python-change
     trigger:
       patterns:
@@ -172,58 +73,31 @@ rules:
       - examples/python/
     actions:
       - description: Run Python quality checks
-        command: make check
-      - description: Update examples if API changed
-        manual: true
-        files:
-          - examples/python/
+        command: uv run ruff check sdk/python/arl/arl examples/python
     validation:
-      - uv run ruff check sdk/python/
-      - uv run mypy sdk/python/arl/arl/
+      - uv run ruff check sdk/python/arl/arl examples/python
+      - uv run mypy sdk/python/arl/arl
 
-  # ============================================================================
-  # Helm Chart Changes
-  # ============================================================================
   - name: helm-chart-change
     trigger:
       patterns:
-        - charts/arl-operator/**
+        - charts/agent-env/**
     actions:
       - description: Validate Helm chart
-        command: helm lint charts/arl-operator
-      - description: Test Helm template rendering
-        command: helm template arl charts/arl-operator
+        command: helm lint charts/agent-env
+      - description: Render Helm chart
+        command: helm template agent-env charts/agent-env
     validation:
-      - helm lint charts/arl-operator
+      - helm lint charts/agent-env
 
-  # ============================================================================
-  # Go Module Changes
-  # ============================================================================
-  - name: go-mod-change
+  - name: go-module-change
     trigger:
       patterns:
         - go.mod
         - go.sum
     actions:
       - description: Tidy dependencies
-        command: make tidy
-      - description: Verify builds still work
-        command: go build ./...
+        command: go mod tidy
     validation:
       - go mod verify
-      - make vet
-
-  # ============================================================================
-  # Python Dependencies Changes
-  # ============================================================================
-  - name: python-deps-change
-    trigger:
-      patterns:
-        - pyproject.toml
-        - uv.lock
-        - sdk/python/arl/pyproject.toml
-    actions:
-      - description: Sync Python dependencies
-        command: uv sync --all-groups
-    validation:
-      - uv run ruff check .
+      - go test ./...

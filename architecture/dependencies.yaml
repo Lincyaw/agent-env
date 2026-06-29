@@ -1,143 +1,47 @@
-# ARL-Infra Dependency Graph
-# This file documents technical and logical dependencies between components
-
-# Dependency Types:
-#   - import: Go package import
-#   - watch: Kubernetes watch on resource type
-#   - grpc: gRPC client-server communication
-#   - references: Logical reference (e.g., field referencing another CRD)
-#   - generates: Code generation output
-#   - implements: Implements an interface definition
-#   - includes: Includes/bundles other resources
-#   - deploys: Deploys/installs a component
-#   - http: HTTP client-server communication
-#   - unix_socket: Unix domain socket communication
+# agent-env dependency graph
 
 dependencies:
-  # ============================================================================
-  # Controller Dependencies
-  # ============================================================================
-  # WarmPool Controller
-  - from: warmpool-controller
-    to: warmpool-crd
-    type: import
-    description: Uses WarmPool types for reconciliation
-
-  - from: warmpool-controller
-    to: warmpool-crd
-    type: watch
-    description: Watches WarmPool resources for changes
-
-  - from: warmpool-controller
-    to: image-scheduler
-    type: import
-    description: Uses image-locality scheduler for pod placement
-
-  # ============================================================================
-  # Gateway Dependencies
-  # ============================================================================
   - from: gateway
-    to: warmpool-crd
-    type: import
-    description: Creates/reads/deletes WarmPool CRDs for pool management
+    to: agent-sandbox
+    type: kubernetes-api
+    description: Creates and reads SandboxTemplate, SandboxWarmPool, SandboxClaim, and Sandbox resources.
 
   - from: gateway
     to: sidecar
     type: grpc
-    description: Calls sidecar AgentService to execute steps
+    description: Executes commands and file operations through the sidecar AgentService.
 
   - from: gateway
-    to: proto-go-generated
-    type: import
-    description: Uses generated gRPC client stubs
+    to: redis
+    type: tcp
+    description: Persists session state when Redis is enabled.
 
-  # ============================================================================
-  # Webhook Dependencies
-  # ============================================================================
-  - from: warmpool-webhook
-    to: warmpool-crd
-    type: import
-    description: Validates WarmPool resources
+  - from: gateway
+    to: clickhouse
+    type: tcp
+    description: Writes trajectory and audit events when ClickHouse is enabled.
 
-  # ============================================================================
-  # Operator Dependencies
-  # ============================================================================
-  - from: operator
-    to: warmpool-controller
-    type: import
-    description: Registers WarmPool controller
-
-  - from: operator
-    to: warmpool-webhook
-    type: import
-    description: Registers WarmPool webhook
-
-  - from: operator
-    to: image-scheduler
-    type: import
-    description: Initializes image-locality scheduler
-
-  # ============================================================================
-  # Sidecar Dependencies
-  # ============================================================================
   - from: sidecar
-    to: proto-go-generated
-    type: import
-    description: Implements AgentService gRPC server
+    to: executor-agent
+    type: unix-socket
+    description: Delegates process execution inside the executor container.
 
   - from: sidecar
     to: agent-proto
     type: implements
-    description: Implements AgentService interface
+    description: Implements AgentService from proto/agent.proto.
 
-  - from: sidecar
-    to: executor-agent
-    type: unix_socket
-    description: Forwards command execution to executor-agent
-
-  # ============================================================================
-  # Executor Agent Dependencies
-  # ============================================================================
-  - from: executor-agent
-    to: sidecar
-    type: unix_socket
-    description: Receives commands from sidecar via shared Unix socket
-
-  # ============================================================================
-  # Code Generation Dependencies
-  # ============================================================================
-  - from: proto-go-generated
-    to: agent-proto
-    type: generates
-    description: Generated from proto/agent.proto via protoc
-
-  - from: crd-manifests
-    to: warmpool-crd
-    type: generates
-    description: Generated from Go types via controller-gen
-
-  # ============================================================================
-  # SDK Dependencies
-  # ============================================================================
   - from: python-sdk
     to: gateway
     type: http
-    description: SDK communicates with Gateway REST API
-
-  # ============================================================================
-  # Deployment Dependencies
-  # ============================================================================
-  - from: helm-chart
-    to: crd-manifests
-    type: includes
-    description: Helm chart installs CRD manifests
-
-  - from: helm-chart
-    to: operator
-    type: deploys
-    description: Helm chart deploys operator
+    description: Calls the gateway REST API.
 
   - from: helm-chart
     to: gateway
     type: deploys
-    description: Helm chart deploys gateway
+    description: Deploys gateway and grants RBAC for agent-sandbox CRDs.
+
+  - from: helm-chart
+    to: observability
+    type: deploys
+    description: Optionally deploys Redis, ClickHouse, Prometheus, Grafana, Alertmanager, and proxy components.

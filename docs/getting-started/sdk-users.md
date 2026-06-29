@@ -7,7 +7,7 @@ This guide is for users who want to use the Python SDK to execute code in ARL-In
 | Requirement | Description |
 |-------------|-------------|
 | Python | 3.9 or higher |
-| ARL-Infra deployed | The operator and Gateway must be running on the cluster |
+| ARL-Infra deployed | The gateway and agent-sandbox controller must be running on the cluster |
 | Gateway URL | The URL of the ARL Gateway API |
 
 !!! note "Don't have ARL-Infra deployed?"
@@ -36,7 +36,8 @@ from arl import SandboxSession
 
 # Create a session (automatically allocates a sandbox)
 with SandboxSession(
-    pool_ref="python-pool",
+    image="python:3.12",
+    profile="python-pool",
     namespace="default",
     gateway_url="http://localhost:8080",
 ) as session:
@@ -55,7 +56,8 @@ with SandboxSession(
 from arl import SandboxSession
 
 with SandboxSession(
-    pool_ref="python-pool",
+    image="python:3.12",
+    profile="python-pool",
     namespace="default",
     gateway_url="http://localhost:8080",
 ) as session:
@@ -123,6 +125,6 @@ Continue learning with these resources:
 
 | Issue | Solution |
 |-------|----------|
-| `No warm pool found` | Check if the pool exists: `kubectl get warmpools` |
+| `No warm pool found` | Check if the pool exists: `kubectl get sandboxwarmpools -A` |
 | `Connection refused` | Verify the Gateway URL is correct and the Gateway is running |
 | `Timeout` | Increase timeout on SandboxSession or check pod status |

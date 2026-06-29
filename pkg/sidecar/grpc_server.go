@@ -1,7 +1,6 @@
 package sidecar
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"log"
@@ -119,39 +118,100 @@ func (s *GRPCServer) Execute(req *pb.ExecRequest, stream grpc.ServerStreamingSer
 	return nil
 }
 
-// WriteFile writes one file into the executor workspace.
-func (s *GRPCServer) WriteFile(ctx context.Context, req *pb.WriteFileRequest) (*pb.WriteFileResponse, error) {
-	if req.GetPath() == "" {
-		return nil, status.Error(codes.InvalidArgument, "path is required")
+// WriteFile streams one file into the executor workspace.
+func (s *GRPCServer) WriteFile(stream grpc.ClientStreamingServer[pb.WriteFileChunk, pb.WriteFileResponse]) error {
+	first, err := stream.Recv()
+	if err == io.EOF {
+		return status.Error(codes.InvalidArgument, "path is required")
 	}
-
-	written, err := s.service.WriteFile(ctx, req.GetPath(), req.GetContent())
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "write file: %v", err)
+		return status.Errorf(codes.Internal, "receive first file chunk: %v", err)
+	}
+	if first.GetPath() == "" {
+		return status.Error(codes.InvalidArgument, "path is required")
 	}
 
-	return &pb.WriteFileResponse{
-		Path:         req.GetPath(),
-		BytesWritten: written,
-	}, nil
+	reader, writer := io.Pipe()
+	defer reader.Close()
+	go func() {
+		defer writer.Close()
+		if len(first.GetData()) > 0 {
+			if _, err := writer.Write(first.GetData()); err != nil {
+				return
+			}
+		}
+		for {
+			chunk, err := stream.Recv()
+			if err == io.EOF {
+				return
+			}
+			if err != nil {
+				_ = writer.CloseWithError(err)
+				return
+			}
+			if chunk.GetPath() != "" && chunk.GetPath() != first.GetPath() {
+				_ = writer.CloseWithError(fmt.Errorf("file chunk path mismatch"))
+				return
+			}
+			if len(chunk.GetData()) == 0 {
+				continue
+			}
+			if _, err := writer.Write(chunk.GetData()); err != nil {
+				return
+			}
+		}
+	}()
+
+	result, err := s.service.WriteFile(stream.Context(), first.GetPath(), reader, first.GetExpectedSha256())
+	if err != nil {
+		return status.Errorf(codes.Internal, "write file: %v", err)
+	}
+	return stream.SendAndClose(&pb.WriteFileResponse{
+		Path:         result.Path,
+		BytesWritten: result.BytesWritten,
+		Sha256:       result.SHA256,
+	})
 }
 
-// ReadFile reads one file from the executor workspace.
-func (s *GRPCServer) ReadFile(ctx context.Context, req *pb.ReadFileRequest) (*pb.ReadFileResponse, error) {
+type fileChunkStreamWriter struct {
+	stream grpc.ServerStreamingServer[pb.FileChunk]
+	path   string
+	offset int64
+}
+
+func (w *fileChunkStreamWriter) Write(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, nil
+	}
+	data := append([]byte(nil), p...)
+	if err := w.stream.Send(&pb.FileChunk{
+		Path:   w.path,
+		Data:   data,
+		Offset: w.offset,
+	}); err != nil {
+		return 0, err
+	}
+	w.offset += int64(len(p))
+	return len(p), nil
+}
+
+// ReadFile streams one file from the executor workspace.
+func (s *GRPCServer) ReadFile(req *pb.ReadFileRequest, stream grpc.ServerStreamingServer[pb.FileChunk]) error {
 	if req.GetPath() == "" {
-		return nil, status.Error(codes.InvalidArgument, "path is required")
+		return status.Error(codes.InvalidArgument, "path is required")
 	}
 
-	content, err := s.service.ReadFile(ctx, req.GetPath())
+	writer := &fileChunkStreamWriter{stream: stream, path: req.GetPath()}
+	result, err := s.service.ReadFile(stream.Context(), req.GetPath(), writer)
 	if err != nil {
-		return nil, status.Errorf(codes.Internal, "read file: %v", err)
+		return status.Errorf(codes.Internal, "read file: %v", err)
 	}
-
-	return &pb.ReadFileResponse{
-		Path:      req.GetPath(),
-		Content:   content,
-		SizeBytes: int64(len(content)),
-	}, nil
+	return stream.Send(&pb.FileChunk{
+		Path:      result.Path,
+		SizeBytes: result.SizeBytes,
+		Sha256:    result.SHA256,
+		Done:      true,
+	})
 }
 
 // StreamLogs streams log entries from the sidecar ring buffer.

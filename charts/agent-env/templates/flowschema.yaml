@@ -1,0 +1,23 @@
+{{- if and .Values.apiPriority.enabled .Values.gateway.enabled }}
+apiVersion: flowcontrol.apiserver.k8s.io/v1
+kind: FlowSchema
+metadata:
+  name: {{ include "agent-env.fullname" . }}
+  labels:
+    {{- include "agent-env.labels" . | nindent 4 }}
+spec:
+  priorityLevelConfiguration:
+    name: {{ .Values.apiPriority.priorityLevel | default "workload-high" }}
+  matchingPrecedence: {{ .Values.apiPriority.matchingPrecedence | default 900 }}
+  rules:
+    - subjects:
+        - kind: ServiceAccount
+          serviceAccount:
+            name: {{ include "agent-env.fullname" . }}-gateway
+            namespace: {{ .Release.Namespace }}
+      resourceRules:
+        - apiGroups: ["*"]
+          resources: ["*"]
+          verbs: ["*"]
+          namespaces: ["*"]
+{{- end }}

@@ -27,10 +27,10 @@ export ARL_API_KEY="your-api-key-here"
 
 ```bash
 # Check ARL-Infra is deployed
-kubectl get warmpools
+kubectl get sandboxwarmpools -A
 ```
 
-You should see at least one WarmPool. If not, ask your administrator to create one.
+You should see at least one `SandboxWarmPool`. If not, ask your administrator to create one.
 
 ## Step 4: Your First Execution
 
@@ -42,7 +42,8 @@ from arl import SandboxSession
 # Connect to a sandbox via the Gateway
 # API key is read from ARL_API_KEY env var automatically
 with SandboxSession(
-    pool_ref="python-pool",
+    image="python:3.12",
+    profile="python-pool",
     namespace="default",
     gateway_url="http://localhost:8080",
 ) as session:
@@ -75,7 +76,8 @@ Let's write a Python script and execute it:
 from arl import SandboxSession
 
 with SandboxSession(
-    pool_ref="python-pool",
+    image="python:3.12",
+    profile="python-pool",
     namespace="default",
     gateway_url="http://localhost:8080",
 ) as session:
@@ -123,7 +125,8 @@ Pass environment variables to your commands:
 from arl import SandboxSession
 
 with SandboxSession(
-    pool_ref="python-pool",
+    image="python:3.12",
+    profile="python-pool",
     namespace="default",
     gateway_url="http://localhost:8080",
 ) as session:
@@ -154,7 +157,8 @@ from arl import SandboxSession
 
 # Create a persistent session
 session = SandboxSession(
-    pool_ref="python-pool",
+    image="python:3.12",
+    profile="python-pool",
     namespace="default",
     gateway_url="http://localhost:8080",
     keep_alive=True,  # Keep sandbox between executions
@@ -208,7 +212,8 @@ Handle errors gracefully:
 from arl import SandboxSession
 
 with SandboxSession(
-    pool_ref="python-pool",
+    image="python:3.12",
+    profile="python-pool",
     namespace="default",
     gateway_url="http://localhost:8080",
 ) as session:

@@ -10,7 +10,8 @@ This page contains practical examples for common use cases with the ARL Python S
 from arl import SandboxSession
 
 with SandboxSession(
-    pool_ref="python-pool",
+    image="python:3.12",
+    profile="python-pool",
     namespace="default",
     gateway_url="http://localhost:8080",
 ) as session:
@@ -26,7 +27,8 @@ with SandboxSession(
 from arl import SandboxSession
 
 with SandboxSession(
-    pool_ref="python-pool",
+    image="python:3.12",
+    profile="python-pool",
     namespace="default",
     gateway_url="http://localhost:8080",
 ) as session:
@@ -55,7 +57,8 @@ python /workspace/script.py
 from arl import SandboxSession
 
 with SandboxSession(
-    pool_ref="python-pool",
+    image="python:3.12",
+    profile="python-pool",
     namespace="default",
     gateway_url="http://localhost:8080",
 ) as session:
@@ -105,7 +108,8 @@ data = {
 }
 
 with SandboxSession(
-    pool_ref="python-pool",
+    image="python:3.12",
+    profile="python-pool",
     namespace="default",
     gateway_url="http://localhost:8080",
 ) as session:
@@ -142,7 +146,8 @@ python /workspace/filter.py
 from arl import SandboxSession
 
 with SandboxSession(
-    pool_ref="python-pool",
+    image="python:3.12",
+    profile="python-pool",
     namespace="default",
     gateway_url="http://localhost:8080",
     timeout="120s",
@@ -191,7 +196,8 @@ python /workspace/train.py
 from arl import SandboxSession
 
 session = SandboxSession(
-    pool_ref="python-pool",
+    image="python:3.12",
+    profile="python-pool",
     namespace="default",
     gateway_url="http://localhost:8080",
     keep_alive=True,  # Important: keep sandbox for state
@@ -262,7 +268,8 @@ def execute_with_retry(session, steps, max_retries=3):
     raise RuntimeError(f"Failed after {max_retries} attempts")
 
 with SandboxSession(
-    pool_ref="python-pool",
+    image="python:3.12",
+    profile="python-pool",
     namespace="default",
     gateway_url="http://localhost:8080",
 ) as session:
@@ -278,7 +285,8 @@ with SandboxSession(
 from arl import SandboxSession
 
 with SandboxSession(
-    pool_ref="python-pool",
+    image="python:3.12",
+    profile="python-pool",
     namespace="default",
     gateway_url="http://localhost:8080",
 ) as session:
@@ -327,7 +335,7 @@ except Exception:
     manager.create_warmpool(
         name=pool_name,
         image="python:3.9-slim",
-        sidecar_image="arl-sidecar:latest",
+        profile=pool_name,
         replicas=2,
     )
     manager.wait_for_warmpool_ready(pool_name, timeout=120)
@@ -335,7 +343,8 @@ except Exception:
 
 # Use the pool
 with SandboxSession(
-    pool_ref=pool_name,
+    image="python:3.9-slim",
+    profile=pool_name,
     namespace="default",
     gateway_url="http://localhost:8080",
 ) as session:
@@ -371,7 +380,8 @@ def run_pipeline(session, stages):
     return results, True
 
 with SandboxSession(
-    pool_ref="python-pool",
+    image="python:3.12",
+    profile="python-pool",
     namespace="default",
     gateway_url="http://localhost:8080",
 ) as session:

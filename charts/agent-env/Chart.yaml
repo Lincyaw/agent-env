@@ -1,0 +1,17 @@
+apiVersion: v2
+name: agent-env
+description: A Helm chart for deploying the agent-env gateway stack
+type: application
+version: 0.6.0
+appVersion: "0.6.0"
+keywords:
+  - kubernetes
+  - gateway
+  - agent
+  - sandbox
+home: https://github.com/Lincyaw/agent-env
+sources:
+  - https://github.com/Lincyaw/agent-env
+maintainers:
+  - name: Lincyaw
+    url: https://github.com/Lincyaw

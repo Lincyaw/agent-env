@@ -1,91 +1,41 @@
 # Overview
 
-ARL-Infra provides a Kubernetes-native infrastructure for AI agent code execution with ultra-low latency.
+`agent-env` provides a user-facing session API on top of
+`agent-sandbox` resources.
 
-## The Problem
+## Responsibilities
 
-Traditional approaches to running agent code in Kubernetes face significant challenges:
+`agent-env`:
 
-- **Cold start latency**: Creating a new pod for each task takes 5-30 seconds
-- **Resource overhead**: Maintaining always-on pods is expensive
-- **Isolation**: Running multiple tasks in shared environments creates security risks
+- exposes REST APIs and the Python SDK;
+- manages session metadata and lifecycle;
+- persists session state in Redis when enabled;
+- writes trajectory data to ClickHouse when enabled;
+- exposes gateway Prometheus metrics;
+- creates `SandboxWarmPool` and `SandboxClaim` resources.
 
-## The Solution
+`agent-sandbox`:
 
-ARL-Infra solves these problems with a warm pool architecture:
+- reconciles `SandboxTemplate`, `SandboxWarmPool`, `SandboxClaim`, and
+  `Sandbox`;
+- keeps warm sandboxes ready;
+- adopts sandboxes for claims;
+- manages Kubernetes Pods and related resources.
 
-```mermaid
-flowchart LR
-    subgraph "Traditional Approach"
-        A[Task Request] --> B[Create Pod]
-        B --> C[Pull Image]
-        C --> D[Start Container]
-        D --> E[Execute Code]
-        style B fill:#ff6b6b
-        style C fill:#ff6b6b
-        style D fill:#ff6b6b
-    end
+## Session Lifecycle
+
+1. The client creates a session with an `image` and optional `profile`.
+2. The gateway selects or creates a sandbox-backed pool.
+3. The gateway creates a `SandboxClaim`.
+4. `agent-sandbox-controller` binds the claim to a ready sandbox and updates
+   status.
+5. The gateway connects to the sandbox sidecar and executes commands.
+6. Deleting the session deletes the claim; `agent-sandbox` handles cleanup.
+
+## Key Resources
+
+Use the agent-sandbox CRDs to inspect runtime state:
+
+```bash
+kubectl get sandboxwarmpools,sandboxclaims,sandboxes -A
 ```
-
-```mermaid
-flowchart LR
-    subgraph "ARL-Infra Approach"
-        A[Task Request] --> B[Allocate from Pool]
-        B --> C[Execute Code]
-        style B fill:#51cf66
-    end
-```
-
-## Core Concepts
-
-### 1. WarmPool
-
-A **WarmPool** maintains a set of pre-created pods ready for instant allocation. Think of it as a "parking lot" with reserved spots.
-
-```yaml
-apiVersion: arl.infra.io/v1alpha1
-kind: WarmPool
-metadata:
-  name: python-pool
-spec:
-  replicas: 3  # Keep 3 pods ready
-```
-
-### 2. Session
-
-A **Session** is a Gateway-managed workspace bound to a pod from the warm pool. Created via REST API or Python SDK.
-
-## Workflow
-
-```mermaid
-sequenceDiagram
-    participant User
-    participant SDK
-    participant Gateway as Gateway API
-    participant K8s as Kubernetes API
-    participant Operator
-    participant Pod
-
-    Note over User,Pod: Setup Phase (one-time)
-    User->>SDK: Create WarmPool
-    SDK->>K8s: Apply WarmPool CRD
-    K8s->>Operator: Watch event
-    Operator->>Pod: Create pods (pre-warm)
-
-    Note over User,Pod: Execution Phase (fast!)
-    User->>SDK: Execute command
-    SDK->>Gateway: REST API call
-    Gateway->>Pod: gRPC execute
-    Pod-->>Gateway: stdout, stderr, exitCode
-    Gateway-->>SDK: ExecuteResponse
-    SDK-->>User: Return results
-```
-
-## Choose Your Path
-
-Based on your role, proceed to the appropriate guide:
-
-| Role | Description | Next Steps |
-|------|-------------|------------|
-| **Developer / Operator** | Deploy and manage ARL-Infra | [Developer Getting Started](developers.md) |
-| **SDK User** | Use Python SDK only | [SDK User Getting Started](sdk-users.md) |

@@ -16,12 +16,15 @@ class SandboxSession:
 ```python
 def __init__(
     self,
-    pool_ref: str,
+    image: str | None = None,
+    *,
+    profile: str | None = "default",
     namespace: str = "default",
     gateway_url: str = "http://localhost:8080",
     keep_alive: bool = False,
     timeout: float = 300.0,
     idle_timeout_seconds: int | None = None,
+    max_lifetime_seconds: int | None = None,
 ) -> None
 ```
 
@@ -29,7 +32,8 @@ def __init__(
 
 | Parameter | Type | Default | Description |
 |-----------|------|---------|-------------|
-| `pool_ref` | `str` | Required | Name of the WarmPool to allocate from |
+| `image` | `str \| None` | `None` | Container image to run. When provided, the gateway ensures a matching sandbox pool exists |
+| `profile` | `str \| None` | `"default"` | Resource/profile selection key |
 | `namespace` | `str` | `"default"` | Kubernetes namespace |
 | `gateway_url` | `str` | `"http://localhost:8080"` | URL of the Gateway API |
 | `keep_alive` | `bool` | `False` | Keep sandbox after context manager exit |
@@ -43,7 +47,8 @@ def __init__(
 from arl import SandboxSession
 
 session = SandboxSession(
-    pool_ref="python-pool",
+    image="python:3.12",
+    profile="python-pool",
     namespace="default",
     gateway_url="http://localhost:8080",
     keep_alive=True,
@@ -98,7 +103,8 @@ Automatically creates a sandbox on enter. On exit, deletes the sandbox unless `k
 
 ```python
 with SandboxSession(
-    pool_ref="python-pool",
+    image="python:3.12",
+    profile="python-pool",
     gateway_url="http://localhost:8080",
 ) as session:
     result = session.execute([...])
@@ -119,7 +125,8 @@ Create a new session (sandbox) via the Gateway.
 
 ```python
 session = SandboxSession(
-    pool_ref="python-pool",
+    image="python:3.12",
+    profile="python-pool",
     gateway_url="http://localhost:8080",
     keep_alive=True,
 )
@@ -280,14 +287,18 @@ def __init__(
 
 | Method | Description |
 |--------|-------------|
-| `create_session(pool_ref, namespace, idle_timeout_seconds)` | Create a new session |
+| `create_session(image, profile, namespace, idle_timeout_seconds, max_lifetime_seconds)` | Create a new session |
 | `get_session(session_id)` | Get session info |
 | `delete_session(session_id)` | Delete a session |
 | `execute(session_id, steps, trace_id)` | Execute steps |
+| `upload_file(session_id, path, content, sha256)` | Stream bytes to a workspace file |
+| `download_file(session_id, path)` | Download a workspace file into memory |
+| `upload_path(session_id, local_path, remote_path, sha256)` | Stream a local file to the workspace |
+| `download_path(session_id, remote_path, local_path)` | Stream a workspace file to a local path |
 | `restore(session_id, snapshot_id)` | Restore to a snapshot |
 | `get_history(session_id)` | Get execution history |
 | `get_trajectory(session_id)` | Export trajectory as JSONL |
-| `create_pool(name, namespace, image, replicas, tools)` | Create a WarmPool |
+| `create_pool(name, namespace, image, replicas, tools)` | Create a `SandboxWarmPool` through the Gateway |
 | `get_pool(name, namespace)` | Get pool status |
 | `delete_pool(name, namespace)` | Delete a pool |
 | `health()` | Health check |
@@ -455,7 +466,8 @@ Returned by `create_sandbox()` and `attach()`.
 class SessionInfo:
     id: str               # Session ID
     namespace: str        # Kubernetes namespace
-    pool_ref: str         # WarmPool name
+    image: str            # Container image
+    profile: str          # Resource/profile selection key
     pod_ip: str           # Pod IP address
     pod_name: str         # Pod name
     created_at: datetime  # Creation timestamp
@@ -467,7 +479,7 @@ Returned by `GatewayClient.get_pool()`.
 
 ```python
 class PoolInfo:
-    name: str                       # WarmPool name
+    name: str                       # SandboxWarmPool name
     namespace: str                  # Kubernetes namespace
     replicas: int                   # Desired pod count
     ready_replicas: int             # Ready idle pods
@@ -511,7 +523,7 @@ try:
     result = session.execute([...])
 except GatewayError as e:
     if e.status_code == 404:
-        print("Session or WarmPool not found")
+        print("Session or pool not found")
     else:
         print(f"Gateway error: {e.status_code} - {e.error}")
 ```

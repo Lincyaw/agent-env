@@ -1,5 +1,5 @@
-site_name: ARL-Infra Documentation
-site_description: Kubernetes Operator for Agentic Reinforcement Learning environments with warm pool and sidecar injection
+site_name: agent-env Documentation
+site_description: Gateway and SDK for agent-sandbox-backed execution environments
 site_author: ARL-Infra Team
 site_url: https://lincyaw.github.io/agent-env/
 
@@ -79,12 +79,10 @@ nav:
       - Architecture: developer-guide/architecture.md
       - Installation: developer-guide/installation.md
       - Deployment: developer-guide/deployment.md
-      - CRD Reference: developer-guide/crd-reference.md
       - Development: developer-guide/development.md
   - User Guide:
       - Python SDK: user-guide/python-sdk.md
       - Quick Start: user-guide/quickstart.md
-      - ConfigEnv: user-guide/config-env.md
       - API Reference: user-guide/api-reference.md
       - Examples: user-guide/examples.md
 
