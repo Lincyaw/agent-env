@@ -104,6 +104,22 @@ func TestGatewayRecoverSessionsValidatesRuntimeBindings(t *testing.T) {
 	}
 }
 
+func TestMemoryStoreSessionCountDoesNotGoNegative(t *testing.T) {
+	store := NewMemoryStore()
+	if got := store.IncrCount(-1); got != 0 {
+		t.Fatalf("IncrCount(-1) = %d, want 0", got)
+	}
+	if got := store.IncrCount(2); got != 2 {
+		t.Fatalf("IncrCount(2) = %d, want 2", got)
+	}
+	if got := store.IncrCount(-1); got != 1 {
+		t.Fatalf("IncrCount(-1) after 2 = %d, want 1", got)
+	}
+	if got := store.SetCount(-3); got != 0 {
+		t.Fatalf("SetCount(-3) = %d, want 0", got)
+	}
+}
+
 func TestGatewayRecoverSessionsFromRuntimeBindingsForMemoryStore(t *testing.T) {
 	scheme := newGatewayTestScheme(t)
 	namespace := "default"

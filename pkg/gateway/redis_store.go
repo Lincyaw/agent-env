@@ -247,10 +247,16 @@ func (rs *RedisStore) IncrCount(delta int64) int64 {
 		log.Printf("Warning: failed to increment session count in Redis: %v", err)
 		return 0
 	}
+	if val < 0 {
+		return rs.SetCount(0)
+	}
 	return val
 }
 
 func (rs *RedisStore) SetCount(count int64) int64 {
+	if count < 0 {
+		count = 0
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 

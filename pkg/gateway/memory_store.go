@@ -48,7 +48,20 @@ func (ms *MemoryStore) Count() int64 {
 }
 
 func (ms *MemoryStore) IncrCount(delta int64) int64 {
-	return ms.sessionCount.Add(delta)
+	count := ms.sessionCount.Add(delta)
+	if count >= 0 {
+		return count
+	}
+	ms.sessionCount.Store(0)
+	return 0
+}
+
+func (ms *MemoryStore) SetCount(count int64) int64 {
+	if count < 0 {
+		count = 0
+	}
+	ms.sessionCount.Store(count)
+	return count
 }
 
 func (ms *MemoryStore) Close() error {
