@@ -241,26 +241,18 @@ func (c *Client) GetTrajectory(sessionID string) ([]byte, error) {
 
 // --- Pool API ---
 
-func (c *Client) ListPools(namespace string) ([]PoolInfo, error) {
-	path := "/v1/pools"
-	if namespace != "" {
-		path += "?namespace=" + url.QueryEscape(namespace)
-	}
+func (c *Client) ListPools() ([]PoolInfo, error) {
 	var pools []PoolInfo
-	err := c.do("GET", path, nil, &pools)
+	err := c.do("GET", "/v1/pools", nil, &pools)
 	if pools == nil {
 		pools = []PoolInfo{}
 	}
 	return pools, err
 }
 
-func (c *Client) GetPool(name, namespace string) (*PoolInfo, error) {
-	path := "/v1/pools/" + name
-	if namespace != "" {
-		path += "?namespace=" + url.QueryEscape(namespace)
-	}
+func (c *Client) GetPool(name string) (*PoolInfo, error) {
 	var p PoolInfo
-	return &p, c.do("GET", path, nil, &p)
+	return &p, c.do("GET", "/v1/pools/"+name, nil, &p)
 }
 
 func (c *Client) CreatePool(req CreatePoolRequest) error {
@@ -272,12 +264,8 @@ func (c *Client) ScalePool(name string, req ScalePoolRequest) (*PoolInfo, error)
 	return &p, c.do("PATCH", "/v1/pools/"+name, req, &p)
 }
 
-func (c *Client) DeletePool(name, namespace string) error {
-	path := "/v1/pools/" + name
-	if namespace != "" {
-		path += "?namespace=" + url.QueryEscape(namespace)
-	}
-	return c.do("DELETE", path, nil, nil)
+func (c *Client) DeletePool(name string) error {
+	return c.do("DELETE", "/v1/pools/"+name, nil, nil)
 }
 
 // --- Experiment API ---

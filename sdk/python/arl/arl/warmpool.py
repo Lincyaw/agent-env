@@ -32,12 +32,10 @@ class WarmPoolManager:
 
     def __init__(
         self,
-        namespace: str = "default",
         gateway_url: str = "http://localhost:8080",
         timeout: float = 300.0,
         api_key: str | None = None,
     ) -> None:
-        self.namespace = namespace
         self._client = GatewayClient(base_url=gateway_url, timeout=timeout, api_key=api_key)
 
     def create_warmpool(
@@ -68,7 +66,6 @@ class WarmPoolManager:
         """
         self._client.create_pool(
             name=name,
-            namespace=self.namespace,
             image=image,
             replicas=replicas,
             profile=profile,
@@ -80,8 +77,8 @@ class WarmPoolManager:
         )
 
     def list_warmpools(self) -> list[PoolInfo]:
-        """List WarmPools in this manager's namespace."""
-        return self._client.list_pools(namespace=self.namespace)
+        """List WarmPools in the gateway-scoped namespace."""
+        return self._client.list_pools()
 
     def get_warmpool(self, name: str) -> PoolInfo:
         """Get WarmPool info.
@@ -92,7 +89,7 @@ class WarmPoolManager:
         Returns:
             PoolInfo with current pool status.
         """
-        return self._client.get_pool(name, namespace=self.namespace)
+        return self._client.get_pool(name)
 
     def wait_for_ready(
         self,
@@ -185,7 +182,7 @@ class WarmPoolManager:
         Args:
             name: Name of the WarmPool to delete.
         """
-        self._client.delete_pool(name, namespace=self.namespace)
+        self._client.delete_pool(name)
 
     def scale_warmpool(
         self,
@@ -210,7 +207,6 @@ class WarmPoolManager:
         return self._client.scale_pool(
             name,
             replicas=replicas,
-            namespace=self.namespace,
             resources=resources,
         )
 
@@ -224,14 +220,13 @@ class WarmPoolManager:
         """Iterate over NDJSON log entries from all pods in a WarmPool."""
         return self._client.iter_pool_logs(
             name,
-            namespace=self.namespace,
             follow=follow,
             tail=tail,
         )
 
     def get_logs(self, name: str, *, tail: int = 100) -> list[PoolLogEntry]:
         """Return recent log entries from all pods in a WarmPool."""
-        return self._client.list_pool_logs(name, namespace=self.namespace, tail=tail)
+        return self._client.list_pool_logs(name, tail=tail)
 
     def close(self) -> None:
         """Close the underlying HTTP client."""

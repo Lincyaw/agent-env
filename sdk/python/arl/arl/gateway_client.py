@@ -7,7 +7,7 @@ import os
 import uuid
 from collections.abc import Callable, Iterable, Iterator
 from pathlib import Path
-from typing import Any, BinaryIO, TypeVar, cast
+from typing import Any, BinaryIO, TypeVar
 from urllib.parse import quote
 
 import httpx
@@ -16,6 +16,7 @@ from pydantic import BaseModel
 from arl.auth import resolve_auth
 from arl.configenv import ConfigEnvSpec
 from arl.types import (
+    DeleteExperimentResponse,
     ErrorResponse,
     ExecuteOperationInfo,
     ExecuteResponse,
@@ -25,6 +26,7 @@ from arl.types import (
     PoolCondition,
     PoolInfo,
     PoolLogEntry,
+    ReplayResponse,
     ResourceRequirements,
     SessionInfo,
     SessionListItem,
@@ -151,13 +153,12 @@ class GatewayClient:
         image: str | None = None,
         *,
         profile: str | None = "default",
-        namespace: str = "default",
         idle_timeout_seconds: int | None = None,
         max_lifetime_seconds: int | None = None,
     ) -> SessionInfo:
         if not image and not profile:
             raise ValueError("image or profile is required")
-        body: dict[str, Any] = {"namespace": namespace}
+        body: dict[str, Any] = {}
         if image:
             body["image"] = image
         if profile:
@@ -375,13 +376,13 @@ class GatewayClient:
         session_id: str,
         source_session_id: str,
         up_to_step: int | None = None,
-    ) -> dict[Any, Any]:
+    ) -> ReplayResponse:
         body: dict[str, Any] = {"sourceSessionID": source_session_id}
         if up_to_step is not None:
             body["upToStep"] = up_to_step
         resp = self._client.post(f"/v1/sessions/{session_id}/replay", json=body)
         self._handle_error(resp)
-        return cast(dict[Any, Any], resp.json())
+        return ReplayResponse.model_validate(resp.json())
 
     def restore(self, session_id: str, snapshot_id: str) -> None:
         resp = self._client.post(
@@ -442,7 +443,6 @@ class GatewayClient:
     def create_pool(
         self,
         name: str,
-        namespace: str,
         image: str,
         replicas: int = 2,
         profile: str = "default",
@@ -454,7 +454,6 @@ class GatewayClient:
     ) -> None:
         body: dict[str, Any] = {
             "name": name,
-            "namespace": namespace,
             "image": image,
             "profile": profile,
             "replicas": replicas,
@@ -472,37 +471,27 @@ class GatewayClient:
         resp = self._client.post("/v1/pools", json=body)
         self._handle_error(resp)
 
-    def list_pools(self, namespace: str = "") -> list[PoolInfo]:
-        params = {}
-        if namespace:
-            params["namespace"] = namespace
-        resp = self._client.get("/v1/pools", params=params)
+    def list_pools(self) -> list[PoolInfo]:
+        resp = self._client.get("/v1/pools")
         self._handle_error(resp)
         data = resp.json()
         if isinstance(data, list):
             return [PoolInfo.model_validate(item) for item in data]
         return []
 
-    def get_pool(self, name: str, namespace: str = "") -> PoolInfo:
-        params = {}
-        if namespace:
-            params["namespace"] = namespace
-        resp = self._client.get(f"/v1/pools/{name}", params=params)
+    def get_pool(self, name: str) -> PoolInfo:
+        resp = self._client.get(f"/v1/pools/{name}")
         self._handle_error(resp)
         return PoolInfo.model_validate(resp.json())
 
-    def delete_pool(self, name: str, namespace: str = "") -> None:
-        params = {}
-        if namespace:
-            params["namespace"] = namespace
-        resp = self._client.delete(f"/v1/pools/{name}", params=params)
+    def delete_pool(self, name: str) -> None:
+        resp = self._client.delete(f"/v1/pools/{name}")
         self._handle_error(resp)
 
     def scale_pool(
         self,
         name: str,
         replicas: int,
-        namespace: str = "",
         resources: ResourceRequirements | None = None,
     ) -> PoolInfo:
         """Scale a WarmPool and optionally update resource requirements.
@@ -510,15 +499,12 @@ class GatewayClient:
         Args:
             name: Name of the WarmPool.
             replicas: Desired number of replicas (non-negative).
-            namespace: Kubernetes namespace (default: "").
             resources: Optional resource requirements (CPU/memory requests and limits).
 
         Returns:
             Updated PoolInfo.
         """
         body: dict[str, Any] = {"replicas": replicas}
-        if namespace:
-            body["namespace"] = namespace
         if resources is not None:
             body["resources"] = resources.model_dump(exclude_none=True)
         resp = self._client.patch(f"/v1/pools/{name}", json=body)
@@ -529,13 +515,10 @@ class GatewayClient:
         self,
         name: str,
         *,
-        namespace: str = "",
         follow: bool = False,
         tail: int = 100,
     ) -> Iterator[PoolLogEntry]:
         params = {"follow": str(follow).lower(), "tail": str(tail)}
-        if namespace:
-            params["namespace"] = namespace
         with self._client.stream(
             "GET",
             f"/v1/pools/{name}/logs",
@@ -550,10 +533,9 @@ class GatewayClient:
         self,
         name: str,
         *,
-        namespace: str = "",
         tail: int = 100,
     ) -> list[PoolLogEntry]:
-        return list(self.iter_pool_logs(name, namespace=namespace, follow=False, tail=tail))
+        return list(self.iter_pool_logs(name, follow=False, tail=tail))
 
     # --- Managed Session APIs ---
 
@@ -561,7 +543,6 @@ class GatewayClient:
         self,
         image: str,
         experiment_id: str,
-        namespace: str = "default",
         profile: str = "default",
         resources: ResourceRequirements | None = None,
         tools: ToolsSpec | None = None,
@@ -577,7 +558,6 @@ class GatewayClient:
         Args:
             image: Container image for the executor.
             experiment_id: Experiment identifier for grouping and management.
-            namespace: Kubernetes namespace.
             profile: Resource profile for pool selection.
             resources: Optional CPU/memory requirements (used on first pool creation).
             tools: Optional tools specification (used on first pool creation).
@@ -595,8 +575,6 @@ class GatewayClient:
             "profile": profile,
             "workspaceDir": workspace_dir,
         }
-        if namespace:
-            body["namespace"] = namespace
         config_env_payload = _serialize_config_env(config_env)
         if config_env_payload is not None:
             body["configEnv"] = config_env_payload
@@ -640,22 +618,35 @@ class GatewayClient:
             return [ExperimentSummary.model_validate(item) for item in data]
         return []
 
+    def delete_experiment_info(
+        self,
+        experiment_id: str,
+    ) -> DeleteExperimentResponse:
+        """Delete all sessions for an experiment and return the full response.
+
+        Args:
+            experiment_id: Experiment identifier.
+
+        Returns:
+            DeleteExperimentResponse with deletion count and optional error.
+        """
+        resp = self._client.delete(f"/v1/managed/experiments/{experiment_id}")
+        self._handle_error(resp)
+        result = DeleteExperimentResponse.model_validate(resp.json())
+        if result.error:
+            raise GatewayError(resp.status_code, result.error)
+        return result
+
     def delete_experiment(
         self,
         experiment_id: str,
     ) -> int:
         """Delete all sessions for an experiment.
 
-        Args:
-            experiment_id: Experiment identifier.
-
         Returns:
             Number of sessions deleted.
         """
-        resp = self._client.delete(f"/v1/managed/experiments/{experiment_id}")
-        self._handle_error(resp)
-        data = resp.json()
-        return int(data.get("deleted", 0))
+        return self.delete_experiment_info(experiment_id).deleted
 
     # --- Health ---
 

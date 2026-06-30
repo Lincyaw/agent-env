@@ -41,7 +41,6 @@ var expCreateCmd = &cobra.Command{
 				Image:              image,
 				Profile:            profile,
 				ExperimentID:       args[0],
-				Namespace:          flagNamespace,
 				WorkspaceDir:       workspaceDir,
 				IdleTimeoutSeconds: idleTimeout,
 				MaxLifetimeSeconds: maxLifetime,
@@ -93,9 +92,9 @@ var expListCmd = &cobra.Command{
 		}
 
 		w := newTabWriter()
-		fmt.Fprintln(w, "EXPERIMENT\tSESSIONS\tPROFILE\tIMAGE\tNAMESPACE")
+		fmt.Fprintln(w, "EXPERIMENT\tSESSIONS\tPROFILE\tIMAGE")
 		for _, e := range exps {
-			fmt.Fprintf(w, "%s\t%d\t%s\t%s\t%s\n", e.ExperimentID, e.SessionCount, e.Profile, shortImage(e.Image), e.Namespace)
+			fmt.Fprintf(w, "%s\t%d\t%s\t%s\n", e.ExperimentID, e.SessionCount, e.Profile, shortImage(e.Image))
 		}
 		return w.Flush()
 	},
@@ -150,7 +149,6 @@ var expStatsCmd = &cobra.Command{
 			if len(sessions) > 0 {
 				stats["image"] = sessions[0].Image
 				stats["profile"] = sessions[0].Profile
-				stats["namespace"] = sessions[0].Namespace
 			}
 			printJSON(stats)
 			return nil
@@ -161,7 +159,6 @@ var expStatsCmd = &cobra.Command{
 		if len(sessions) > 0 {
 			fmt.Printf("Image:       %s\n", sessions[0].Image)
 			fmt.Printf("Profile:     %s\n", sessions[0].Profile)
-			fmt.Printf("Namespace:   %s\n", sessions[0].Namespace)
 		}
 		return nil
 	},

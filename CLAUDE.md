@@ -101,7 +101,7 @@ After modifying components or interfaces:
   kubectl --context <context> -n arl rollout status deploy/agent-env-image-locality-scheduler
   kubectl --context <context> -n arl rollout status deploy/agent-env-gateway
   kubectl --context <context> -n arl port-forward svc/agent-env-gateway 18080:8080
-  uv run python examples/python/test_arl_sdk.py --gateway-url http://127.0.0.1:18080 --namespace arl
+  uv run python examples/python/test_arl_sdk.py --gateway-url http://127.0.0.1:18080
   ```
 
 ## Reference Files

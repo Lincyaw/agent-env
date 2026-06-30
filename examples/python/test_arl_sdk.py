@@ -11,14 +11,13 @@ The suite validates the currently supported gateway surface:
 7. History and trajectory export
 8. Session and pool logs
 9. Interactive shell, when the optional websockets package is installed
-10. Keep-alive reattach
+10. Detach and reattach
 11. Managed sessions
 12. Optional observability endpoints
 
 Usage:
     uv run python examples/python/test_arl_sdk.py \
       --gateway-url http://127.0.0.1:18080 \
-      --namespace arl \
       --pool-image busybox:latest
 
     uv run python examples/python/test_arl_sdk.py \
@@ -59,7 +58,6 @@ from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.table import Table
 
 DEFAULT_GATEWAY_URL = "http://localhost:8080"
-DEFAULT_NAMESPACE = "arl"
 DEFAULT_POOL_IMAGE = "busybox:latest"
 
 console = Console()
@@ -105,7 +103,6 @@ def print_header(args: argparse.Namespace) -> None:
         Panel.fit(
             "[bold cyan]ARL SDK Integration Tests[/bold cyan]\n\n"
             f"Gateway: [yellow]{args.gateway_url}[/yellow]\n"
-            f"Namespace: [yellow]{args.namespace}[/yellow]\n"
             f"Pool: [yellow]{args.pool_name}[/yellow]\n"
             f"Image: [yellow]{args.pool_image}[/yellow]\n"
             f"Replicas: [yellow]{args.pool_replicas}[/yellow]\n"
@@ -142,8 +139,8 @@ def normalize_image(image: str) -> str:
     return normalized
 
 
-def managed_pool_name(image: str, namespace: str, profile: str) -> str:
-    identity = f"{namespace}/{profile or 'default'}/{normalize_image(image)}"
+def managed_pool_name(image: str, gateway_namespace: str, profile: str) -> str:
+    identity = f"{gateway_namespace}/{profile or 'default'}/{normalize_image(image)}"
     digest = hashlib.sha256(identity.encode()).hexdigest()[:12]
     return f"managed-{digest}"
 
@@ -212,7 +209,7 @@ def test_health(client: GatewayClient, args: argparse.Namespace) -> None:
     if not client.health():
         raise AssertionError(
             "gateway health check failed; run kubectl port-forward "
-            f"-n {args.namespace} svc/agent-env-gateway 8080:8080"
+            "-n <gateway-namespace> svc/agent-env-gateway 8080:8080"
         )
 
 
@@ -269,7 +266,6 @@ def test_basic_execution_sse(args: argparse.Namespace) -> None:
     with SandboxSession(
         image=args.pool_image,
         profile=args.pool_name,
-        namespace=args.namespace,
         gateway_url=args.gateway_url,
     ) as session:
         result = session.execute(
@@ -289,7 +285,6 @@ def test_file_upload_download(client: GatewayClient, args: argparse.Namespace) -
     with SandboxSession(
         image=args.pool_image,
         profile=args.pool_name,
-        namespace=args.namespace,
         gateway_url=args.gateway_url,
     ) as session:
         assert session.session_id is not None
@@ -312,7 +307,6 @@ def test_snapshot_restore(args: argparse.Namespace) -> None:
     with SandboxSession(
         image=args.pool_image,
         profile=args.pool_name,
-        namespace=args.namespace,
         gateway_url=args.gateway_url,
     ) as session:
         first = session.execute(
@@ -350,13 +344,11 @@ def test_replay(client: GatewayClient, args: argparse.Namespace) -> None:
         SandboxSession(
             image=args.pool_image,
             profile=args.pool_name,
-            namespace=args.namespace,
             gateway_url=args.gateway_url,
         ) as source,
         SandboxSession(
             image=args.pool_image,
             profile=args.pool_name,
-            namespace=args.namespace,
             gateway_url=args.gateway_url,
         ) as target,
     ):
@@ -377,7 +369,7 @@ def test_replay(client: GatewayClient, args: argparse.Namespace) -> None:
         )
 
         partial = client.replay_from(target.session_id, source.session_id, up_to_step=0)
-        if int(partial.get("stepsReplayed", 0)) < 1:
+        if partial.steps_replayed < 1:
             raise AssertionError(f"partial replay response={partial}")
         partial_check = target.execute(
             [{"name": "check_partial_replay", "command": ["cat", "/workspace/replay.txt"]}]
@@ -385,7 +377,7 @@ def test_replay(client: GatewayClient, args: argparse.Namespace) -> None:
         assert_step_success(partial_check, "first")
 
         full = client.replay_from(target.session_id, source.session_id)
-        if int(full.get("stepsReplayed", 0)) < 2:
+        if full.steps_replayed < 2:
             raise AssertionError(f"full replay response={full}")
         full_check = target.execute(
             [{"name": "check_full_replay", "command": ["cat", "/workspace/replay.txt"]}]
@@ -397,7 +389,6 @@ def test_history_trajectory(args: argparse.Namespace) -> None:
     with SandboxSession(
         image=args.pool_image,
         profile=args.pool_name,
-        namespace=args.namespace,
         gateway_url=args.gateway_url,
     ) as session:
         session.execute(
@@ -424,7 +415,6 @@ def test_logs(args: argparse.Namespace) -> None:
     with SandboxSession(
         image=args.pool_image,
         profile=args.pool_name,
-        namespace=args.namespace,
         gateway_url=args.gateway_url,
     ) as session:
         assert session.session_id is not None
@@ -443,7 +433,7 @@ def test_logs(args: argparse.Namespace) -> None:
                 session_resp.raise_for_status()
                 pool_resp = http.get(
                     f"/v1/pools/{args.pool_name}/logs",
-                    params={"namespace": args.namespace, "tail": 50},
+                    params={"tail": 50},
                 )
                 pool_resp.raise_for_status()
 
@@ -468,7 +458,6 @@ def test_interactive_shell(args: argparse.Namespace) -> None:
     with SandboxSession(
         image=args.pool_image,
         profile=args.pool_name,
-        namespace=args.namespace,
         gateway_url=args.gateway_url,
     ) as session:
         assert session.session_id is not None
@@ -486,13 +475,11 @@ def test_interactive_shell(args: argparse.Namespace) -> None:
             shell.close()
 
 
-def test_keep_alive_reattach(args: argparse.Namespace) -> None:
+def test_detach_reattach(args: argparse.Namespace) -> None:
     first = SandboxSession(
         image=args.pool_image,
         profile=args.pool_name,
-        namespace=args.namespace,
         gateway_url=args.gateway_url,
-        keep_alive=True,
     )
     first.create_sandbox()
     session_id = first.session_id
@@ -508,7 +495,6 @@ def test_keep_alive_reattach(args: argparse.Namespace) -> None:
         attached = SandboxSession.attach(
             session_id,
             gateway_url=args.gateway_url,
-            keep_alive=True,
         )
         try:
             read = attached.execute([{"name": "read", "command": ["cat", "/workspace/flag.txt"]}])
@@ -527,17 +513,22 @@ def test_keep_alive_reattach(args: argparse.Namespace) -> None:
 def test_managed_session(client: GatewayClient, args: argparse.Namespace) -> None:
     experiment_id = f"sdk-{int(time.time())}"
     profile = "default"
-    auto_pool = managed_pool_name(args.pool_image, args.namespace, profile)
+    auto_pool = ""
 
     try:
         with ManagedSession(
             image=args.pool_image,
             experiment_id=experiment_id,
-            namespace=args.namespace,
             gateway_url=args.gateway_url,
             profile=profile,
             workspace_dir=args.workspace_dir,
         ) as session:
+            if session.session_info is not None:
+                auto_pool = managed_pool_name(
+                    args.pool_image,
+                    session.session_info.namespace,
+                    profile,
+                )
             result = session.execute([{"name": "managed", "command": ["echo", "managed-ok"]}])
             assert_step_success(result, "managed-ok")
 
@@ -561,7 +552,8 @@ def test_managed_session(client: GatewayClient, args: argparse.Namespace) -> Non
         with contextlib.suppress(Exception):
             client.delete_experiment(experiment_id)
         with contextlib.suppress(Exception):
-            client.delete_pool(auto_pool, namespace=args.namespace)
+            if auto_pool:
+                client.delete_pool(auto_pool)
 
 
 def test_observability(args: argparse.Namespace) -> None:
@@ -659,7 +651,6 @@ def main() -> int:
     )
     parser.add_argument("--verbose", "-v", action="store_true")
     parser.add_argument("--gateway-url", default=DEFAULT_GATEWAY_URL)
-    parser.add_argument("--namespace", default=DEFAULT_NAMESPACE)
     parser.add_argument("--pool-name", default="")
     parser.add_argument("--pool-image", default=DEFAULT_POOL_IMAGE)
     parser.add_argument("--pool-replicas", type=int, default=1)
@@ -696,7 +687,6 @@ def main() -> int:
 
     client = GatewayClient(base_url=args.gateway_url)
     pool_mgr = WarmPoolManager(
-        namespace=args.namespace,
         gateway_url=args.gateway_url,
         timeout=args.pool_ready_timeout,
     )
@@ -711,7 +701,7 @@ def main() -> int:
         ("History + Trajectory", lambda: test_history_trajectory(args)),
         ("Logs", lambda: test_logs(args)),
         ("Interactive Shell", lambda: test_interactive_shell(args)),
-        ("Keep-Alive Reattach", lambda: test_keep_alive_reattach(args)),
+        ("Detach/Reattach", lambda: test_detach_reattach(args)),
         ("Managed Sessions", lambda: test_managed_session(client, args)),
         ("Observability", lambda: test_observability(args)),
     ]

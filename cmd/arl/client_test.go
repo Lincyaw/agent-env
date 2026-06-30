@@ -26,7 +26,7 @@ func TestClientListMethodsReturnEmptySlices(t *testing.T) {
 		t.Fatalf("ListSessions = %#v, want empty non-nil slice", sessions)
 	}
 
-	pools, err := client.ListPools("default")
+	pools, err := client.ListPools()
 	if err != nil {
 		t.Fatalf("ListPools returned error: %v", err)
 	}

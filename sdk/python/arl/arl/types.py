@@ -17,14 +17,18 @@ class StepRequest(BaseModel):
         command: Shell command with arguments, e.g. ["echo", "hello"]
         env: Environment variables to set for this step
         work_dir: Working directory (default: /workspace)
-        timeout: Timeout in seconds (None = no timeout)
+        timeout_seconds: Timeout in seconds (None = no timeout).
+        timeout: Legacy timeout field accepted by the gateway.
     """
 
     name: str
     command: list[str] | None = None
     env: dict[str, str] | None = None
     work_dir: str | None = Field(None, alias="workDir")
+    timeout_seconds: Annotated[int | None, Field(gt=0)] = Field(None, alias="timeoutSeconds")
     timeout: Annotated[int | None, Field(gt=0)] = None  # Must be positive if specified
+
+    model_config = {"populate_by_name": True}
 
 
 class StepOutput(BaseModel):
@@ -51,6 +55,7 @@ class StepResult(BaseModel):
         snapshot_id: Git snapshot ID for workspace state after this step
         duration_ms: Execution duration in milliseconds
         timestamp: Execution timestamp (ISO 8601)
+        input: Original step request recorded by the gateway.
     """
 
     index: Annotated[int, Field(ge=0)]
@@ -59,14 +64,35 @@ class StepResult(BaseModel):
     snapshot_id: str = ""
     duration_ms: Annotated[int, Field(ge=0)] = 0
     timestamp: datetime | None = None
+    input: dict[str, object] | None = None
+
+
+class ReplayResponse(BaseModel):
+    """Response from replaying recorded steps into another session."""
+
+    steps_replayed: Annotated[int, Field(ge=0)] = Field(0, alias="stepsReplayed")
+    errors: Annotated[int, Field(ge=0)] = 0
+
+    model_config = {"populate_by_name": True}
+
+
+class DeleteExperimentResponse(BaseModel):
+    """Response from deleting sessions associated with an experiment."""
+
+    deleted: Annotated[int, Field(ge=0)] = 0
+    error: str = ""
 
 
 class SessionInfo(BaseModel):
-    """Information about an active session."""
+    """Information about an active session.
+
+    The gateway may include its scoped Kubernetes namespace for diagnostics;
+    callers do not choose it during session creation.
+    """
 
     id: str
     sandbox_name: str = Field(alias="sandboxName")
-    namespace: str
+    namespace: str = ""
     image: str = ""
     profile: str = ""
     pod_ip: str = Field("", alias="podIP")
@@ -150,7 +176,7 @@ class PoolInfo(BaseModel):
 
     Attributes:
         name: WarmPool name
-        namespace: Kubernetes namespace
+        namespace: Gateway-scoped Kubernetes namespace, returned for diagnostics
         replicas: Desired number of warm pods
         ready_replicas: Number of ready idle pods
         allocated_replicas: Number of pods currently allocated to sessions
@@ -158,7 +184,7 @@ class PoolInfo(BaseModel):
     """
 
     name: str
-    namespace: str
+    namespace: str = ""
     image: str = ""
     profile: str = ""
     replicas: Annotated[int, Field(ge=0)] = 0

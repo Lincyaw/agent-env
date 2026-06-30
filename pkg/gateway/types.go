@@ -23,7 +23,6 @@ type CreateSessionRequest struct {
 	Image              string            `json:"image,omitempty"`
 	Profile            string            `json:"profile,omitempty"`
 	Namespace          string            `json:"namespace,omitempty"`
-	KeepAlive          bool              `json:"keepAlive,omitempty"`
 	IdleTimeoutSeconds int               `json:"idleTimeoutSeconds,omitempty"`
 	MaxLifetimeSeconds int               `json:"maxLifetimeSeconds,omitempty"`
 	PoolName           string            `json:"-"` // internal pinned SandboxWarmPool, not part of the public API

@@ -6,8 +6,8 @@
   no matching pool exists, then allocates a session from that pool.
 - `SandboxSession(profile=...)` without image: gateway expects a matching
   existing pool; it cannot infer an executor image.
-- `ManagedSession`: gateway derives a stable `managed-...` pool from
-  namespace/profile/image, creates it if needed, and tags the session with
+- `ManagedSession`: gateway derives a stable `managed-...` pool from the
+  scoped profile/image identity, creates it if needed, and tags the session with
   experiment metadata.
 - Warm capacity is preferred. If no warm sandbox is available, gateway policy
   decides whether to allow cold start or queue/reject.
@@ -58,4 +58,4 @@ make check
 ```
 
 When a gateway is available, run the Python smoke flow from `examples/python`
-against the target namespace and image.
+against the target gateway and image.

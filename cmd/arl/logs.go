@@ -26,9 +26,6 @@ func streamLogs(c *Client, path string, follow bool, tail int, showPod bool) err
 	if tail > 0 {
 		params.Set("tail", fmt.Sprintf("%d", tail))
 	}
-	if flagNamespace != "default" {
-		params.Set("namespace", flagNamespace)
-	}
 	fullPath := path
 	if len(params) > 0 {
 		fullPath += "?" + params.Encode()

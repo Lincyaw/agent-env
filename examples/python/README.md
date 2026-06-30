@@ -6,7 +6,7 @@ This directory contains runnable examples for the current `arl-env` SDK.
 
 | File | Purpose |
 | --- | --- |
-| `test_arl_sdk.py` | Integration smoke suite for gateway health, pool lifecycle, execution, file transfer, restore, replay, logs, shell, keep-alive attach, managed sessions, and optional observability endpoints. |
+| `test_arl_sdk.py` | Integration smoke suite for gateway health, pool lifecycle, execution, file transfer, restore, replay, logs, shell, detach/reattach, managed sessions, and optional observability endpoints. |
 | `shell.py` | Interactive terminal client for a sandbox session over the gateway WebSocket shell endpoint. |
 | `bench_gateway.py` | Gateway benchmark helper. |
 
@@ -27,7 +27,6 @@ Then run:
 cd examples/python
 uv run python test_arl_sdk.py \
   --gateway-url http://127.0.0.1:8080 \
-  --namespace arl \
   --pool-image busybox:latest
 ```
 
@@ -47,7 +46,6 @@ If gateway auth is enabled, set `ARL_API_KEY` before running the examples.
 cd examples/python
 uv run python shell.py \
   --gateway-url http://127.0.0.1:8080 \
-  --namespace arl \
   --pool numpy
 ```
 

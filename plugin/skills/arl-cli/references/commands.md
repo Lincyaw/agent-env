@@ -7,7 +7,6 @@
 | `--gateway-url` | `-g` | `ARL_GATEWAY_URL` | `http://localhost:8080` | Gateway base URL |
 | `--api-key-file` | none | none | empty | Read bearer token from a file |
 | `--api-key` | `-k` | `ARL_API_KEY` | empty | Bearer token; prefer env or file for automation |
-| `--namespace` | `-n` | `ARL_NAMESPACE` | `default` | Namespace for session, pool, and experiment creation |
 | `--format` | none | `ARL_FORMAT` / `ARL_OUTPUT_FORMAT` | `table` | `table`, `json`, or `wide` |
 | `--output` | `-o` | none | same as `--format` | Legacy alias for `--format` |
 | `--no-color` | none | `NO_COLOR` | false | Disable ANSI color |
@@ -44,7 +43,6 @@ trajectory export, or bulk deletion.
 
 ```bash
 arl pool list
-arl pool list -A
 arl pool list --format wide
 arl pool get <name>
 arl pool create <name> --image python:3.12 --profile <profile> --replicas 2

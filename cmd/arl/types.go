@@ -25,7 +25,6 @@ type SessionListItem struct {
 type CreateSessionRequest struct {
 	Image              string `json:"image,omitempty"`
 	Profile            string `json:"profile,omitempty"`
-	Namespace          string `json:"namespace,omitempty"`
 	IdleTimeoutSeconds int    `json:"idleTimeoutSeconds,omitempty"`
 	MaxLifetimeSeconds int    `json:"maxLifetimeSeconds,omitempty"`
 }
@@ -140,8 +139,7 @@ type ReplayResponse struct {
 }
 
 type ScalePoolRequest struct {
-	Replicas  int32  `json:"replicas"`
-	Namespace string `json:"namespace,omitempty"`
+	Replicas int32 `json:"replicas"`
 }
 
 type CreatePoolRequest struct {
@@ -149,7 +147,6 @@ type CreatePoolRequest struct {
 	Image        string `json:"image"`
 	Profile      string `json:"profile,omitempty"`
 	Replicas     int32  `json:"replicas,omitempty"`
-	Namespace    string `json:"namespace,omitempty"`
 	WorkspaceDir string `json:"workspaceDir,omitempty"`
 }
 
@@ -157,7 +154,6 @@ type CreateManagedSessionRequest struct {
 	Image              string `json:"image"`
 	Profile            string `json:"profile,omitempty"`
 	ExperimentID       string `json:"experimentId"`
-	Namespace          string `json:"namespace,omitempty"`
 	WorkspaceDir       string `json:"workspaceDir,omitempty"`
 	IdleTimeoutSeconds int    `json:"idleTimeoutSeconds,omitempty"`
 	MaxLifetimeSeconds int    `json:"maxLifetimeSeconds,omitempty"`

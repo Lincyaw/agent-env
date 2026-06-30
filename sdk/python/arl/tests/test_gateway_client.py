@@ -7,6 +7,7 @@ import httpx
 
 from arl import (
     GatewayClient,
+    GatewayError,
     GatewayOperationTimeout,
     InteractiveShellClient,
     SandboxSession,
@@ -50,6 +51,7 @@ def test_gateway_public_routes_have_python_sdk_entrypoints() -> None:
         (GatewayClient, "list_pool_logs"),
         (GatewayClient, "create_managed_session"),
         (GatewayClient, "list_experiment_sessions"),
+        (GatewayClient, "delete_experiment_info"),
         (GatewayClient, "delete_experiment"),
         (GatewayClient, "health"),
         (InteractiveShellClient, "connect"),
@@ -89,7 +91,6 @@ def test_list_endpoints_parse_models() -> None:
                 ],
             )
         if request.method == "GET" and request.url.path == "/v1/pools":
-            assert request.url.params["namespace"] == "default"
             return httpx.Response(
                 200,
                 json=[
@@ -125,7 +126,7 @@ def test_list_endpoints_parse_models() -> None:
         assert sessions[0].managed is True
         assert sessions[0].experiment_id == "exp-1"
 
-        pools = client.list_pools(namespace="default")
+        pools = client.list_pools()
         assert pools[0].name == "pool-1"
         assert pools[0].ready_replicas == 1
 
@@ -144,7 +145,6 @@ def test_log_stream_endpoints_parse_ndjson() -> None:
                 content=b'{"timestamp":"t1","level":"info","message":"ready","source":"sidecar"}\n',
             )
         if request.method == "GET" and request.url.path == "/v1/pools/pool-1/logs":
-            assert request.url.params["namespace"] == "default"
             assert request.url.params["follow"] == "true"
             assert request.url.params["tail"] == "5"
             return httpx.Response(
@@ -163,7 +163,6 @@ def test_log_stream_endpoints_parse_ndjson() -> None:
         pool_logs = list(
             client.iter_pool_logs(
                 "pool-1",
-                namespace="default",
                 follow=True,
                 tail=5,
             )
@@ -183,10 +182,34 @@ def test_create_pool_exposes_image_locality_payload() -> None:
     with _client_with_handler(handler) as client:
         client.create_pool(
             name="pool-1",
-            namespace="default",
             image="python:3.12",
             image_locality=True,
         )
+
+
+def test_create_session_omits_namespace_by_default() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "POST"
+        assert request.url.path == "/v1/sessions"
+        body = json.loads(request.content)
+        assert "namespace" not in body
+        return httpx.Response(
+            201,
+            json={
+                "id": "gw-1",
+                "sandboxName": "gw-1",
+                "namespace": "arl",
+                "image": "python:3.12",
+                "profile": "default",
+                "podIP": "10.0.0.1",
+                "podName": "pod-1",
+                "createdAt": "2026-01-01T00:00:00Z",
+            },
+        )
+
+    with _client_with_handler(handler) as client:
+        session = client.create_session(image="python:3.12")
+        assert session.namespace == "arl"
 
 
 def test_execute_uses_operation_id_without_sse_by_default() -> None:
@@ -209,6 +232,65 @@ def test_execute_uses_operation_id_without_sse_by_default() -> None:
     with _client_with_handler(handler) as client:
         result = client.execute("gw-1", [{"name": "noop", "command": ["true"]}])
         assert result.operation_id
+
+
+def test_execute_parses_step_input() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "POST"
+        assert request.url.path == "/v1/sessions/gw-1/execute"
+        body = json.loads(request.content)
+        return httpx.Response(
+            200,
+            json={
+                "sessionID": "gw-1",
+                "operationID": body["operationID"],
+                "results": [
+                    {
+                        "index": 0,
+                        "name": "echo",
+                        "input": {"name": "echo", "command": ["echo", "ok"]},
+                        "output": {"stdout": "ok\n", "stderr": "", "exit_code": 0},
+                        "snapshot_id": "0",
+                        "duration_ms": 1,
+                        "timestamp": "2026-01-01T00:00:00Z",
+                    }
+                ],
+                "totalDurationMs": 1,
+            },
+        )
+
+    with _client_with_handler(handler) as client:
+        result = client.execute("gw-1", [{"name": "echo", "command": ["echo", "ok"]}])
+        assert result.results[0].input == {"name": "echo", "command": ["echo", "ok"]}
+
+
+def test_replay_response_is_typed() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "POST"
+        assert request.url.path == "/v1/sessions/target/replay"
+        body = json.loads(request.content)
+        assert body == {"sourceSessionID": "source", "upToStep": 3}
+        return httpx.Response(200, json={"stepsReplayed": 4, "errors": 1})
+
+    with _client_with_handler(handler) as client:
+        result = client.replay_from("target", "source", up_to_step=3)
+        assert result.steps_replayed == 4
+        assert result.errors == 1
+
+
+def test_delete_experiment_info_surfaces_backend_error_field() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "DELETE"
+        assert request.url.path == "/v1/managed/experiments/exp-1"
+        return httpx.Response(200, json={"deleted": 1, "error": "partial cleanup failed"})
+
+    with _client_with_handler(handler) as client:
+        try:
+            client.delete_experiment_info("exp-1")
+        except GatewayError as exc:
+            assert "partial cleanup failed" in str(exc)
+        else:
+            raise AssertionError("expected delete_experiment_info to surface error")
 
 
 def test_execute_timeout_surfaces_operation_id_without_retry() -> None:

@@ -21,7 +21,7 @@ var statusCmd = &cobra.Command{
 		}
 
 		sessions, sessErr := c.ListSessions()
-		pools, poolErr := c.ListPools("")
+		pools, poolErr := c.ListPools()
 		exps, expErr := c.ListExperiments()
 
 		if flagOutput == "json" {

@@ -44,14 +44,14 @@ var sessionListCmd = &cobra.Command{
 
 		w := newTabWriter()
 		if flagOutput == "wide" {
-			fmt.Fprintln(w, "ID\tPROFILE\tIMAGE\tPOD\tPOD-IP\tNAMESPACE\tEXPERIMENT\tAGE")
+			fmt.Fprintln(w, "ID\tPROFILE\tIMAGE\tPOD\tPOD-IP\tEXPERIMENT\tAGE")
 			for _, s := range filtered {
 				exp := s.ExperimentID
 				if exp == "" {
 					exp = "-"
 				}
-				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
-					s.ID, s.Profile, shortImage(s.Image), s.PodName, s.PodIP, s.Namespace, exp, age(s.CreatedAt))
+				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n",
+					s.ID, s.Profile, shortImage(s.Image), s.PodName, s.PodIP, exp, age(s.CreatedAt))
 			}
 		} else {
 			fmt.Fprintln(w, "ID\tPROFILE\tIMAGE\tPOD\tEXPERIMENT\tAGE")
@@ -99,7 +99,6 @@ var sessionCreateCmd = &cobra.Command{
 		s, err := c.CreateSession(CreateSessionRequest{
 			Image:              image,
 			Profile:            profile,
-			Namespace:          flagNamespace,
 			IdleTimeoutSeconds: idleTimeout,
 			MaxLifetimeSeconds: maxLifetime,
 		})
@@ -114,7 +113,6 @@ var sessionCreateCmd = &cobra.Command{
 
 		fmt.Printf("Session %s created.\n", s.ID)
 		fmt.Printf("Sandbox:    %s\n", s.SandboxName)
-		fmt.Printf("Namespace:  %s\n", s.Namespace)
 		fmt.Printf("Image:      %s\n", s.Image)
 		fmt.Printf("Profile:    %s\n", s.Profile)
 		fmt.Printf("Pod:        %s\n", s.PodName)
@@ -141,7 +139,6 @@ var sessionGetCmd = &cobra.Command{
 
 		fmt.Printf("ID:         %s\n", s.ID)
 		fmt.Printf("Sandbox:    %s\n", s.SandboxName)
-		fmt.Printf("Namespace:  %s\n", s.Namespace)
 		fmt.Printf("Image:      %s\n", s.Image)
 		fmt.Printf("Profile:    %s\n", s.Profile)
 		fmt.Printf("Pod:        %s\n", s.PodName)

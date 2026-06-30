@@ -18,14 +18,8 @@ var poolListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all WarmPools",
 	RunE: func(cmd *cobra.Command, args []string) error {
-		allNamespaces, _ := cmd.Flags().GetBool("all-namespaces")
-		ns := flagNamespace
-		if allNamespaces {
-			ns = ""
-		}
-
 		c := newClient()
-		pools, err := c.ListPools(ns)
+		pools, err := c.ListPools()
 		if err != nil {
 			return err
 		}
@@ -42,10 +36,10 @@ var poolListCmd = &cobra.Command{
 
 		w := newTabWriter()
 		if flagOutput == "wide" {
-			fmt.Fprintln(w, "NAME\tNAMESPACE\tPROFILE\tIMAGE\tREPLICAS\tREADY\tALLOCATED\tSTATUS\tAGE")
+			fmt.Fprintln(w, "NAME\tPROFILE\tIMAGE\tREPLICAS\tREADY\tALLOCATED\tSTATUS\tAGE")
 			for _, p := range pools {
-				fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%d\t%d\t%d\t%s\t%s\n",
-					p.Name, p.Namespace, p.Profile, shortImage(p.Image),
+				fmt.Fprintf(w, "%s\t%s\t%s\t%d\t%d\t%d\t%s\t%s\n",
+					p.Name, p.Profile, shortImage(p.Image),
 					p.Replicas, p.ReadyReplicas, p.AllocatedReplicas,
 					conditionSummary(p.Conditions), age(p.CreatedAt))
 			}
@@ -67,7 +61,7 @@ var poolGetCmd = &cobra.Command{
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		c := newClient()
-		p, err := c.GetPool(args[0], flagNamespace)
+		p, err := c.GetPool(args[0])
 		if err != nil {
 			return err
 		}
@@ -78,7 +72,6 @@ var poolGetCmd = &cobra.Command{
 		}
 
 		fmt.Printf("Name:       %s\n", p.Name)
-		fmt.Printf("Namespace:  %s\n", p.Namespace)
 		fmt.Printf("Profile:    %s\n", p.Profile)
 		fmt.Printf("Image:      %s\n", p.Image)
 		fmt.Printf("Replicas:   %d (ready=%d, allocated=%d)\n", p.Replicas, p.ReadyReplicas, p.AllocatedReplicas)
@@ -122,7 +115,6 @@ var poolCreateCmd = &cobra.Command{
 			Image:        image,
 			Profile:      profile,
 			Replicas:     replicas,
-			Namespace:    flagNamespace,
 			WorkspaceDir: workspaceDir,
 		}); err != nil {
 			return err
@@ -132,7 +124,7 @@ var poolCreateCmd = &cobra.Command{
 			if minReady < 0 {
 				minReady = replicas
 			}
-			p, err := waitForPoolReady(c, args[0], flagNamespace, minReady, timeout)
+			p, err := waitForPoolReady(c, args[0], minReady, timeout)
 			if err != nil {
 				return err
 			}
@@ -145,7 +137,7 @@ var poolCreateCmd = &cobra.Command{
 		}
 
 		if flagOutput == "json" {
-			p, err := c.GetPool(args[0], flagNamespace)
+			p, err := c.GetPool(args[0])
 			if err != nil {
 				return err
 			}
@@ -170,8 +162,7 @@ var poolScaleCmd = &cobra.Command{
 
 		c := newClient()
 		p, err := c.ScalePool(args[0], ScalePoolRequest{
-			Replicas:  replicas,
-			Namespace: flagNamespace,
+			Replicas: replicas,
 		})
 		if err != nil {
 			return err
@@ -180,7 +171,7 @@ var poolScaleCmd = &cobra.Command{
 			if minReady < 0 {
 				minReady = replicas
 			}
-			p, err = waitForPoolReady(c, args[0], flagNamespace, minReady, timeout)
+			p, err = waitForPoolReady(c, args[0], minReady, timeout)
 			if err != nil {
 				return err
 			}
@@ -205,7 +196,7 @@ var poolWaitCmd = &cobra.Command{
 		timeout, _ := cmd.Flags().GetDuration("timeout")
 
 		c := newClient()
-		p, err := waitForPoolReady(c, args[0], flagNamespace, minReady, timeout)
+		p, err := waitForPoolReady(c, args[0], minReady, timeout)
 		if err != nil {
 			return err
 		}
@@ -227,12 +218,12 @@ var poolDeleteCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		force, _ := cmd.Flags().GetBool("force")
 		if !force {
-			fmt.Fprintf(os.Stderr, "Delete pool %q in namespace %q? Use --force to confirm.\n", args[0], flagNamespace)
+			fmt.Fprintf(os.Stderr, "Delete pool %q? Use --force to confirm.\n", args[0])
 			return fmt.Errorf("aborted (use --force)")
 		}
 
 		c := newClient()
-		if err := c.DeletePool(args[0], flagNamespace); err != nil {
+		if err := c.DeletePool(args[0]); err != nil {
 			return err
 		}
 
@@ -256,7 +247,7 @@ var poolExecCmd = &cobra.Command{
 		}
 
 		c := newClient()
-		pool, err := c.GetPool(poolName, flagNamespace)
+		pool, err := c.GetPool(poolName)
 		if err != nil {
 			return fmt.Errorf("get pool: %w", err)
 		}
@@ -266,9 +257,8 @@ var poolExecCmd = &cobra.Command{
 		}
 
 		sessInfo, err := c.CreateSession(CreateSessionRequest{
-			Image:     pool.Image,
-			Profile:   profile,
-			Namespace: flagNamespace,
+			Image:   pool.Image,
+			Profile: profile,
 		})
 		if err != nil {
 			return fmt.Errorf("create temporary session: %w", err)
@@ -302,7 +292,7 @@ var poolExecCmd = &cobra.Command{
 	},
 }
 
-func waitForPoolReady(c *Client, name, namespace string, minReady int32, timeout time.Duration) (*PoolInfo, error) {
+func waitForPoolReady(c *Client, name string, minReady int32, timeout time.Duration) (*PoolInfo, error) {
 	if timeout <= 0 {
 		return nil, usageError("--timeout must be positive")
 	}
@@ -311,7 +301,7 @@ func waitForPoolReady(c *Client, name, namespace string, minReady int32, timeout
 	var last *PoolInfo
 	var lastErr error
 	for {
-		p, err := c.GetPool(name, namespace)
+		p, err := c.GetPool(name)
 		if err != nil {
 			lastErr = err
 		} else {
@@ -356,8 +346,6 @@ var poolLogsCmd = &cobra.Command{
 }
 
 func init() {
-	poolListCmd.Flags().BoolP("all-namespaces", "A", false, "List pools across all namespaces")
-
 	poolCreateCmd.Flags().String("image", "", "Container image (required)")
 	poolCreateCmd.Flags().String("profile", "", "Pool selection profile (default: pool name)")
 	poolCreateCmd.Flags().Int32("replicas", 2, "Number of warm replicas")

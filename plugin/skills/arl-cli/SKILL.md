@@ -19,7 +19,6 @@ make build-cli
 
 export ARL_GATEWAY_URL=http://localhost:8080
 export ARL_API_KEY=your-token
-export ARL_NAMESPACE=default
 export ARL_FORMAT=json
 ```
 
@@ -41,8 +40,8 @@ arl --dump-schema
 
 ## Core Workflow
 
-1. Confirm `ARL_GATEWAY_URL`, namespace, and auth context before mutating pools
-   or sessions.
+1. Confirm `ARL_GATEWAY_URL` and auth context before mutating pools or
+   sessions.
 2. Start with `arl status`, `arl pool list --format wide`, and
    `arl session list --format wide` when diagnosing runtime state.
 3. Use experiments for benchmark/training runs that need grouping and cleanup.

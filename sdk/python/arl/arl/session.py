@@ -14,6 +14,7 @@ from arl.gateway_client import GatewayClient
 from arl.types import (
     ExecuteResponse,
     LogEntry,
+    ReplayResponse,
     ResourceRequirements,
     SessionInfo,
     StepResult,
@@ -43,7 +44,7 @@ class SandboxSession:
 
         Manual lifecycle management with restore:
 
-        >>> session = SandboxSession(image="python:3.12", profile="code", keep_alive=True)
+        >>> session = SandboxSession(image="python:3.12", profile="code")
         >>> try:
         ...     session.create_sandbox()
         ...     r1 = session.execute([...])
@@ -72,9 +73,7 @@ class SandboxSession:
         image: str | None = None,
         *,
         profile: str | None = "default",
-        namespace: str = "default",
         gateway_url: str = "http://localhost:8080",
-        keep_alive: bool = False,
         timeout: float = 300.0,
         idle_timeout_seconds: int | None = None,
         max_lifetime_seconds: int | None = None,
@@ -82,8 +81,6 @@ class SandboxSession:
     ) -> None:
         self.image = image or ""
         self.profile = profile or ""
-        self.namespace = namespace
-        self.keep_alive = keep_alive
         self.idle_timeout_seconds = idle_timeout_seconds
         self.max_lifetime_seconds = max_lifetime_seconds
 
@@ -91,6 +88,7 @@ class SandboxSession:
         self._api_key = api_key
         self._session_id: str | None = None
         self._session_info: SessionInfo | None = None
+        self._delete_on_exit = True
 
     @classmethod
     def attach(
@@ -98,7 +96,6 @@ class SandboxSession:
         session_id: str,
         gateway_url: str = "http://localhost:8080",
         timeout: float = 300.0,
-        keep_alive: bool = True,
         api_key: str | None = None,
     ) -> SandboxSession:
         """Attach to an existing session by session ID.
@@ -111,9 +108,6 @@ class SandboxSession:
             session_id: The session ID to attach to.
             gateway_url: Gateway base URL.
             timeout: HTTP request timeout.
-            keep_alive: If False, exiting a context manager will
-                delete the session.  Defaults to True to avoid
-                accidentally destroying a session you attached to.
             api_key: API key for authentication.
 
         Returns:
@@ -131,14 +125,13 @@ class SandboxSession:
         instance = cls(
             image=info.image or None,
             profile=info.profile or None,
-            namespace=info.namespace,
             gateway_url=gateway_url,
-            keep_alive=keep_alive,
             timeout=timeout,
             api_key=api_key,
         )
         instance._session_id = info.id
         instance._session_info = info
+        instance._delete_on_exit = False
         return instance
 
     @property
@@ -155,15 +148,10 @@ class SandboxSession:
         Returns:
             SessionInfo with sandbox details (pod IP, pod name, etc.)
         """
-        idle_timeout = self.idle_timeout_seconds
-        if self.keep_alive and idle_timeout is None:
-            idle_timeout = 1800  # 30 minutes default for keep_alive
-
         info = self._client.create_session(
             image=self.image or None,
             profile=self.profile or None,
-            namespace=self.namespace,
-            idle_timeout_seconds=idle_timeout,
+            idle_timeout_seconds=self.idle_timeout_seconds,
             max_lifetime_seconds=self.max_lifetime_seconds,
         )
         self._session_id = info.id
@@ -217,7 +205,7 @@ class SandboxSession:
         self,
         source_session_id: str,
         up_to_step: int | None = None,
-    ) -> dict[Any, Any]:
+    ) -> ReplayResponse:
         """Replay another session's history into this session."""
         if self._session_id is None:
             raise RuntimeError("No session created. Call create_sandbox() first.")
@@ -416,17 +404,8 @@ class SandboxSession:
         self._client.close()
 
     def __enter__(self) -> SandboxSession:
-        if self.keep_alive:
-            import warnings
-
-            warnings.warn(
-                "Using context manager with keep_alive=True. "
-                "Sandbox will NOT be automatically deleted on exit. "
-                "Call delete_sandbox() manually or use keep_alive=False.",
-                UserWarning,
-                stacklevel=2,
-            )
-        self.create_sandbox()
+        if self._session_id is None:
+            self.create_sandbox()
         return self
 
     def __exit__(
@@ -436,7 +415,7 @@ class SandboxSession:
         exc_tb: object | None,
     ) -> None:
         try:
-            if not self.keep_alive:
+            if self._delete_on_exit:
                 self.delete_sandbox()
         finally:
             self.close()
@@ -479,7 +458,6 @@ class ManagedSession(SandboxSession):
         self,
         image: str,
         experiment_id: str,
-        namespace: str = "default",
         gateway_url: str = "http://localhost:8080",
         timeout: float = 300.0,
         resources: ResourceRequirements | None = None,
@@ -494,9 +472,7 @@ class ManagedSession(SandboxSession):
         super().__init__(
             image=image,
             profile=profile,
-            namespace=namespace,
             gateway_url=gateway_url,
-            keep_alive=False,
             timeout=timeout,
             api_key=api_key,
         )
@@ -525,7 +501,6 @@ class ManagedSession(SandboxSession):
         info = self._client.create_managed_session(
             image=self._image,
             experiment_id=self._experiment_id,
-            namespace=self.namespace,
             profile=self._profile,
             config_env=self._config_env,
             resources=self._resources,

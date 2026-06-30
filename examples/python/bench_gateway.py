@@ -69,7 +69,7 @@ def _cleanup_port_forward() -> None:
 
 def ensure_port_forward(
     gateway_url: str,
-    namespace: str,
+    gateway_namespace: str,
     svc: str = DEFAULT_SVC,
     svc_port: int = DEFAULT_SVC_PORT,
 ) -> None:
@@ -101,7 +101,7 @@ def ensure_port_forward(
         "kubectl",
         "port-forward",
         "-n",
-        namespace,
+        gateway_namespace,
         svc,
         f"{local_port}:{svc_port}",
     ]
@@ -220,6 +220,7 @@ def _ensure_pool(
     image: str,
     replicas: int,
     timeout: float,
+    gateway_namespace: str,
 ) -> None:
     """Reuse an existing pool if it has enough ready replicas, otherwise create one.
 
@@ -236,7 +237,7 @@ def _ensure_pool(
                 f"[yellow]Pool [cyan]{name}[/cyan] has {info.allocated_replicas} "
                 f"allocated pods from stale sessions, cleaning up...[/yellow]"
             )
-            _cleanup_stale_sessions(pool_mgr, name)
+            _cleanup_stale_sessions(pool_mgr, name, gateway_namespace)
             # Re-check after cleanup
             info = pool_mgr.get_warmpool(name)
             info.ready_replicas + info.allocated_replicas
@@ -265,7 +266,11 @@ def _ensure_pool(
     pool_mgr.wait_for_ready(name, timeout=timeout, poll_interval=2.0, min_ready=replicas)
 
 
-def _cleanup_stale_sessions(pool_mgr: WarmPoolManager, pool_name: str) -> None:
+def _cleanup_stale_sessions(
+    pool_mgr: WarmPoolManager,
+    pool_name: str,
+    gateway_namespace: str,
+) -> None:
     """Delete any sessions still holding pods from a pool."""
     client = GatewayClient(base_url=pool_mgr._client._base_url, timeout=30)
     try:
@@ -276,7 +281,7 @@ def _cleanup_stale_sessions(pool_mgr: WarmPoolManager, pool_name: str) -> None:
                 "get",
                 "sandbox",
                 "-n",
-                pool_mgr.namespace,
+                gateway_namespace,
                 "-l",
                 f"arl.infra.io/pool={pool_name}",
                 "-o",
@@ -296,7 +301,7 @@ def _cleanup_stale_sessions(pool_mgr: WarmPoolManager, pool_name: str) -> None:
                     "get",
                     "sandboxclaim",
                     "-n",
-                    pool_mgr.namespace,
+                    gateway_namespace,
                     "-o",
                     'jsonpath={range .items[?(@.spec.warmPoolRef.name=="'
                     + pool_name
@@ -317,7 +322,7 @@ def _cleanup_stale_sessions(pool_mgr: WarmPoolManager, pool_name: str) -> None:
                 client.delete_session(name)
             except Exception:
                 subprocess.run(
-                    ["kubectl", "delete", "sandbox", name, "-n", pool_mgr.namespace],
+                    ["kubectl", "delete", "sandbox", name, "-n", gateway_namespace],
                     capture_output=True,
                     timeout=10,
                 )
@@ -337,7 +342,12 @@ def warmpool_scale(
     num_pools: int = typer.Option(8, "--pools", "-p", help="Number of WarmPools to create."),
     replicas: int = typer.Option(8, "--replicas", "-r", help="Replicas per pool."),
     image: str = typer.Option(DEFAULT_IMAGE, "--image", "-i", help="Container image."),
-    namespace: str = typer.Option(DEFAULT_NAMESPACE, "--namespace", "-n", help="K8s namespace."),
+    gateway_namespace: str = typer.Option(
+        DEFAULT_NAMESPACE,
+        "--gateway-namespace",
+        "-N",
+        help="K8s namespace containing the gateway service.",
+    ),
     gateway_url: str = typer.Option(DEFAULT_GATEWAY, "--gateway", "-g", help="Gateway URL."),
     timeout: float = typer.Option(600.0, "--timeout", help="Max wait seconds per pool."),
     cleanup: bool = typer.Option(True, "--cleanup/--no-cleanup", help="Delete pools after test."),
@@ -347,10 +357,10 @@ def warmpool_scale(
 ) -> None:
     """Benchmark WarmPool scale: create N pools × M replicas and measure readiness."""
     if port_forward:
-        ensure_port_forward(gateway_url, namespace)
+        ensure_port_forward(gateway_url, gateway_namespace)
     console.rule(f"[bold]WarmPool Scale Benchmark: {num_pools} pools × {replicas} replicas")
 
-    pool_mgr = WarmPoolManager(namespace=namespace, gateway_url=gateway_url, timeout=timeout)
+    pool_mgr = WarmPoolManager(gateway_url=gateway_url, timeout=timeout)
 
     pool_names = [f"bench-scale-{i}" for i in range(num_pools)]
 
@@ -429,7 +439,7 @@ def warmpool_scale(
                     "get",
                     "pods",
                     "-n",
-                    namespace,
+                    gateway_namespace,
                     "-l",
                     f"arl.infra.io/pool={name}",
                     "-o",
@@ -471,7 +481,12 @@ def session_bench(
     replicas: int = typer.Option(10, "--replicas", "-r", help="Pool replicas."),
     num_sessions: int = typer.Option(10, "--sessions", "-s", help="Number of sessions to create."),
     image: str = typer.Option(DEFAULT_IMAGE, "--image", "-i", help="Container image."),
-    namespace: str = typer.Option(DEFAULT_NAMESPACE, "--namespace", "-n", help="K8s namespace."),
+    gateway_namespace: str = typer.Option(
+        DEFAULT_NAMESPACE,
+        "--gateway-namespace",
+        "-N",
+        help="K8s namespace containing the gateway service.",
+    ),
     gateway_url: str = typer.Option(DEFAULT_GATEWAY, "--gateway", "-g", help="Gateway URL."),
     timeout: float = typer.Option(300.0, "--timeout", help="Max wait seconds."),
     cleanup: bool = typer.Option(
@@ -483,14 +498,14 @@ def session_bench(
 ) -> None:
     """Benchmark session creation: first response time, average, percentiles."""
     if port_forward:
-        ensure_port_forward(gateway_url, namespace)
+        ensure_port_forward(gateway_url, gateway_namespace)
     console.rule(f"[bold]Session Creation Benchmark: {num_sessions} sessions from {pool_name}")
 
     client = GatewayClient(base_url=gateway_url, timeout=timeout)
-    pool_mgr = WarmPoolManager(namespace=namespace, gateway_url=gateway_url, timeout=timeout)
+    pool_mgr = WarmPoolManager(gateway_url=gateway_url, timeout=timeout)
 
     # Reuse pool if it already exists and has enough replicas; otherwise create
-    _ensure_pool(pool_mgr, pool_name, image, replicas, timeout)
+    _ensure_pool(pool_mgr, pool_name, image, replicas, timeout, gateway_namespace)
     console.print("[green]Pool ready.[/green]\n")
 
     # --- Create sessions ---
@@ -500,7 +515,7 @@ def session_bench(
     for i in range(num_sessions):
         t = Timer()
         with t:
-            info = client.create_session(image=image, profile=pool_name, namespace=namespace)
+            info = client.create_session(image=image, profile=pool_name)
         create_times.append(t.ms)
         sessions.append(info.id)
         console.print(f"  [{i + 1}/{num_sessions}] {fmt(t.ms)}  pod={info.pod_name}")
@@ -552,7 +567,12 @@ def exec_bench(
     pool_name: str = typer.Option("bench-exec-pool", "--pool", help="Pool name."),
     replicas: int = typer.Option(2, "--replicas", "-r", help="Pool replicas."),
     image: str = typer.Option(DEFAULT_IMAGE, "--image", "-i", help="Container image."),
-    namespace: str = typer.Option(DEFAULT_NAMESPACE, "--namespace", "-n", help="K8s namespace."),
+    gateway_namespace: str = typer.Option(
+        DEFAULT_NAMESPACE,
+        "--gateway-namespace",
+        "-N",
+        help="K8s namespace containing the gateway service.",
+    ),
     gateway_url: str = typer.Option(DEFAULT_GATEWAY, "--gateway", "-g", help="Gateway URL."),
     timeout: float = typer.Option(300.0, "--timeout", help="Max wait seconds."),
     cleanup: bool = typer.Option(
@@ -564,16 +584,16 @@ def exec_bench(
 ) -> None:
     """Benchmark execution performance: single commands, batches, throughput."""
     if port_forward:
-        ensure_port_forward(gateway_url, namespace)
+        ensure_port_forward(gateway_url, gateway_namespace)
     console.rule("[bold]Execution Benchmark")
 
     client = GatewayClient(base_url=gateway_url, timeout=timeout)
-    pool_mgr = WarmPoolManager(namespace=namespace, gateway_url=gateway_url, timeout=timeout)
+    pool_mgr = WarmPoolManager(gateway_url=gateway_url, timeout=timeout)
 
     # Setup pool + session
-    _ensure_pool(pool_mgr, pool_name, image, replicas, timeout)
+    _ensure_pool(pool_mgr, pool_name, image, replicas, timeout, gateway_namespace)
 
-    info = client.create_session(image=image, profile=pool_name, namespace=namespace)
+    info = client.create_session(image=image, profile=pool_name)
     sid = info.id
     console.print(f"Session: {sid}  pod={info.pod_name}\n")
 
@@ -653,7 +673,12 @@ def exec_bench(
 def managed_bench(
     concurrency: int = typer.Option(32, "--concurrency", "-c", help="Concurrent managed sessions."),
     image: str = typer.Option(DEFAULT_IMAGE, "--image", "-i"),
-    namespace: str = typer.Option(DEFAULT_NAMESPACE, "--namespace", "-n"),
+    gateway_namespace: str = typer.Option(
+        DEFAULT_NAMESPACE,
+        "--gateway-namespace",
+        "-N",
+        help="K8s namespace containing the gateway service.",
+    ),
     gateway_url: str = typer.Option(DEFAULT_GATEWAY, "--gateway", "-g"),
     timeout: float = typer.Option(300.0, "--timeout"),
     execute: bool = typer.Option(
@@ -685,7 +710,7 @@ def managed_bench(
             -c 512 --no-execute --no-cleanup
     """
     if port_forward:
-        ensure_port_forward(gateway_url, namespace)
+        ensure_port_forward(gateway_url, gateway_namespace)
 
     exp_id = f"bench-managed-{int(time.time())}"
     console.rule(f"[bold]Managed Session Bench: {concurrency} concurrent")
@@ -713,7 +738,6 @@ def managed_bench(
                 info = client.create_managed_session(
                     image=image,
                     experiment_id=exp_id,
-                    namespace=namespace,
                 )
             return idx, t.ms, info.id, None
         except Exception as exc:
@@ -854,7 +878,12 @@ def managed_bench(
 @app.command()
 def full(
     image: str = typer.Option(DEFAULT_IMAGE, "--image", "-i", help="Container image."),
-    namespace: str = typer.Option(DEFAULT_NAMESPACE, "--namespace", "-n", help="K8s namespace."),
+    gateway_namespace: str = typer.Option(
+        DEFAULT_NAMESPACE,
+        "--gateway-namespace",
+        "-N",
+        help="K8s namespace containing the gateway service.",
+    ),
     gateway_url: str = typer.Option(DEFAULT_GATEWAY, "--gateway", "-g", help="Gateway URL."),
     timeout: float = typer.Option(600.0, "--timeout", help="Max wait seconds."),
     port_forward: bool = typer.Option(
@@ -863,7 +892,7 @@ def full(
 ) -> None:
     """Run all benchmarks sequentially."""
     if port_forward:
-        ensure_port_forward(gateway_url, namespace)
+        ensure_port_forward(gateway_url, gateway_namespace)
     console.rule("[bold green]Full Benchmark Suite")
 
     # 1. Health check
@@ -883,7 +912,7 @@ def full(
         num_pools=8,
         replicas=8,
         image=image,
-        namespace=namespace,
+        gateway_namespace=gateway_namespace,
         gateway_url=gateway_url,
         timeout=timeout,
         cleanup=True,
@@ -897,7 +926,7 @@ def full(
         replicas=10,
         num_sessions=10,
         image=image,
-        namespace=namespace,
+        gateway_namespace=gateway_namespace,
         gateway_url=gateway_url,
         timeout=timeout,
         cleanup=True,
@@ -910,7 +939,7 @@ def full(
         pool_name="bench-full-exec",
         replicas=2,
         image=image,
-        namespace=namespace,
+        gateway_namespace=gateway_namespace,
         gateway_url=gateway_url,
         timeout=timeout,
         cleanup=True,

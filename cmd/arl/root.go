@@ -12,7 +12,6 @@ var (
 	flagGatewayURL string
 	flagAPIKey     string
 	flagAPIKeyFile string
-	flagNamespace  string
 	flagFormat     string
 	flagOutput     string
 	flagNoColor    bool
@@ -48,7 +47,6 @@ func init() {
 	rootCmd.PersistentFlags().StringVarP(&flagGatewayURL, "gateway-url", "g", envOrDefault("ARL_GATEWAY_URL", "http://localhost:8080"), "Gateway API base URL")
 	rootCmd.PersistentFlags().StringVarP(&flagAPIKey, "api-key", "k", "", "API key for authentication (prefer ARL_API_KEY or --api-key-file)")
 	rootCmd.PersistentFlags().StringVar(&flagAPIKeyFile, "api-key-file", "", "Read API key from file")
-	rootCmd.PersistentFlags().StringVarP(&flagNamespace, "namespace", "n", envOrDefault("ARL_NAMESPACE", "default"), "Kubernetes namespace")
 	rootCmd.PersistentFlags().StringVar(&flagFormat, "format", defaultFormat, "Output format: table, json, wide")
 	rootCmd.PersistentFlags().StringVarP(&flagOutput, "output", "o", defaultFormat, "Legacy alias for --format: table, json, wide")
 	rootCmd.PersistentFlags().BoolVar(&flagNoColor, "no-color", false, "Disable ANSI color in human-readable output")

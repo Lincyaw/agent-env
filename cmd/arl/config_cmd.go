@@ -14,7 +14,6 @@ var configCmd = &cobra.Command{
 		if flagOutput == "json" {
 			printJSON(map[string]string{
 				"gatewayURL": flagGatewayURL,
-				"namespace":  flagNamespace,
 				"apiKey":     maskKey(apiKey),
 				"format":     flagOutput,
 			})
@@ -22,7 +21,6 @@ var configCmd = &cobra.Command{
 		}
 
 		fmt.Printf("Gateway URL:  %s\n", flagGatewayURL)
-		fmt.Printf("Namespace:    %s\n", flagNamespace)
 		fmt.Printf("API Key:      %s\n", maskKey(apiKey))
 		fmt.Printf("Format:       %s\n", flagOutput)
 		return nil

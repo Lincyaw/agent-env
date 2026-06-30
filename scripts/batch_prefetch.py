@@ -309,12 +309,6 @@ def main():
         help="ARL Gateway URL (default: $ARL_GATEWAY_URL or http://localhost:8080)",
     )
     parser.add_argument(
-        "--namespace",
-        type=str,
-        default="default",
-        help="Kubernetes namespace (default: default)",
-    )
-    parser.add_argument(
         "--dataset",
         choices=["r2egym", "swebench", "all"],
         default="all",
@@ -477,7 +471,7 @@ def main():
         counters = {"deleted": 0, "skipped": 0, "failed": 0}
 
         def _delete_one(pool: dict[str, str]) -> None:
-            mgr = WarmPoolManager(namespace=args.namespace, gateway_url=args.gateway)
+            mgr = WarmPoolManager(gateway_url=args.gateway)
             try:
                 mgr.delete_warmpool(pool["name"])
                 with _lock:
@@ -508,7 +502,7 @@ def main():
     # `concurrency` pods are pulling images at any time — preventing
     # registry overload from thousands of simultaneous pulls.
     logger.info(f"Prefetching {len(pools)} WarmPools with concurrency={args.concurrency}")
-    logger.info(f"Gateway: {args.gateway}, Namespace: {args.namespace}")
+    logger.info(f"Gateway: {args.gateway}")
     if args.scale_down_after:
         logger.info("Scale-down-after enabled: pools scaled to 0 replicas after image pull")
 
@@ -520,7 +514,6 @@ def main():
         """Full lifecycle for one pool: create/scale-up → wait → scale_down."""
         name = pool["name"]
         mgr = WarmPoolManager(
-            namespace=args.namespace,
             gateway_url=args.gateway,
             timeout=args.pool_timeout,
         )
