@@ -159,7 +159,7 @@ build-sidecar: ## Build sidecar binary
 
 .PHONY: build-cli
 build-cli: ## Build arl CLI binary
-	CGO_ENABLED=0 go build -o bin/arl cmd/arl/main.go
+	CGO_ENABLED=0 go build -o bin/arl ./cmd/arl
 
 .PHONY: codex-skills
 codex-skills: ## Generate Codex compatibility skills from plugin slash commands
