@@ -4,14 +4,16 @@ on:
   push:
     tags:
       - "v[0-9]+.[0-9]+.[0-9]+*"
-    paths:
-      - 'charts/**'
   workflow_dispatch:
     inputs:
       version:
         description: "Chart version to publish (e.g., 0.1.0)"
         required: true
         default: "0.1.0"
+      oci_registry:
+        description: "OCI chart registry namespace"
+        required: true
+        default: "registry-1.docker.io/opspai"
 
 permissions:
   contents: write
@@ -21,6 +23,8 @@ jobs:
   publish:
     name: Publish Helm Chart
     runs-on: ubuntu-latest
+    env:
+      DEFAULT_OCI_REGISTRY: registry-1.docker.io/opspai
 
     steps:
       - name: Checkout source
@@ -38,6 +42,28 @@ jobs:
           fi
           echo "version=${VERSION}" >> $GITHUB_OUTPUT
           echo "📦 Chart version: ${VERSION}"
+
+      - name: Resolve OCI registry
+        id: oci
+        run: |
+          set -euo pipefail
+
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            OCI_REGISTRY="${{ github.event.inputs.oci_registry }}"
+          else
+            OCI_REGISTRY="${DEFAULT_OCI_REGISTRY}"
+          fi
+
+          OCI_REGISTRY="${OCI_REGISTRY#oci://}"
+          OCI_REGISTRY="${OCI_REGISTRY%/}"
+          OCI_HOST="${OCI_REGISTRY%%/*}"
+
+          {
+            echo "registry=oci://${OCI_REGISTRY}"
+            echo "host=${OCI_HOST}"
+          } >> "${GITHUB_OUTPUT}"
+
+          echo "📦 OCI registry: oci://${OCI_REGISTRY}"
 
       - name: Set up Helm
         uses: azure/setup-helm@v4.3.0
@@ -63,6 +89,34 @@ jobs:
           helm package charts/agent-env -d .deploy
           echo "📦 Packaged chart:"
           ls -la .deploy/
+
+      - name: Log in to OCI chart registry
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+          DOCKERHUB_PASSWORD: ${{ secrets.DOCKERHUB_PASSWORD }}
+          REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
+          REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
+        run: |
+          USERNAME="${DOCKERHUB_USERNAME:-${REGISTRY_USERNAME}}"
+          PASSWORD="${DOCKERHUB_TOKEN:-${DOCKERHUB_PASSWORD:-${REGISTRY_PASSWORD}}}"
+
+          if [ -z "${USERNAME}" ] || [ -z "${PASSWORD}" ]; then
+            echo "DOCKERHUB_USERNAME plus DOCKERHUB_TOKEN, or REGISTRY_USERNAME plus REGISTRY_PASSWORD, are required for ${{ steps.oci.outputs.host }}" >&2
+            exit 1
+          fi
+
+          printf '%s' "${PASSWORD}" | helm registry login "${{ steps.oci.outputs.host }}" \
+            --username "${USERNAME}" \
+            --password-stdin
+
+      - name: Publish chart to OCI registry
+        run: |
+          helm push ".deploy/agent-env-${{ steps.version.outputs.version }}.tgz" "${{ steps.oci.outputs.registry }}"
+          {
+            echo "### Published OCI chart"
+            echo "- ${{ steps.oci.outputs.registry }}/agent-env:${{ steps.version.outputs.version }}"
+          } >> "${GITHUB_STEP_SUMMARY}"
 
       - name: Checkout gh-pages branch
         uses: actions/checkout@v4
