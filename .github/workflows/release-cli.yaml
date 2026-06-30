@@ -1,4 +1,4 @@
-name: Release ARL CLI
+name: Release ARL Artifacts
 
 on:
   push:
@@ -54,9 +54,77 @@ jobs:
           name: arl-${{ matrix.goos }}-${{ matrix.goarch }}
           path: dist/
 
+  plugin:
+    name: Package Plugin
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Determine version
+        id: version
+        run: |
+          TAG="${GITHUB_REF_NAME:-${{ github.event.inputs.tag }}}"
+          VERSION="${TAG#v}"
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+
+      - name: Update plugin manifest versions
+        run: |
+          python3 plugin/scripts/set_plugin_version.py "${{ steps.version.outputs.version }}"
+          python3 -m json.tool plugin/.claude-plugin/plugin.json >/dev/null
+          python3 -m json.tool plugin/.claude-plugin/marketplace.json >/dev/null
+          python3 -m json.tool plugin/.codex-plugin/plugin.json >/dev/null
+
+      - name: Package plugin
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import tarfile
+          import zipfile
+
+          version = "${{ steps.version.outputs.version }}"
+          source = Path("plugin")
+          dist = Path("dist")
+          dist.mkdir(exist_ok=True)
+
+          excluded_parts = {
+              ".codex-generated-skills",
+              "__pycache__",
+              ".pytest_cache",
+              ".ruff_cache",
+          }
+
+          files = [
+              path
+              for path in source.rglob("*")
+              if path.is_file()
+              and not any(part in excluded_parts for part in path.relative_to(source).parts)
+          ]
+
+          tar_path = dist / f"arl-plugin-{version}.tar.gz"
+          with tarfile.open(tar_path, "w:gz") as archive:
+              for path in files:
+                  archive.add(path, arcname=Path("arl") / path.relative_to(source))
+
+          zip_path = dist / f"arl-plugin-{version}.zip"
+          with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+              for path in files:
+                  archive.write(path, arcname=Path("arl") / path.relative_to(source))
+
+          print(f"Packaged {tar_path}")
+          print(f"Packaged {zip_path}")
+          PY
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: arl-plugin
+          path: dist/
+
   release:
     name: Create Release
-    needs: build
+    needs:
+      - build
+      - plugin
     runs-on: ubuntu-latest
 
     steps:
@@ -77,6 +145,6 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ steps.tag.outputs.tag }}
-          name: ARL CLI ${{ steps.tag.outputs.tag }}
+          name: ARL ${{ steps.tag.outputs.tag }}
           generate_release_notes: true
           files: dist/*

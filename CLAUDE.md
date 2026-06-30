@@ -58,7 +58,7 @@ SandboxWarmPool creates warm Sandboxes -> SandboxClaim binds one Sandbox to a se
 
 - **Go 1.26.0**: English only. `make check` before commit. No test files unless requested.
 - **Python 3.10+**: Modern type hints, Pydantic models, no `Any`. `make check` before commit.
-- Comments only where logic isn't self-evident. Chinese OK in docs.
+- Comments only where logic isn't self-evident.
 
 ## Architecture Change Rules
 
@@ -67,7 +67,6 @@ After modifying components or interfaces:
 2. Run required actions (`make proto-go`, Helm lint, SDK checks, etc.)
 3. Update `architecture/{components,dependencies,propagation-rules}.yaml` if needed
 4. Validate with `make arch-check`
-5. Update `docs/` if the change affects user-facing behavior, APIs, CRDs, or deployment config
 
 ## Deployment Tips
 
@@ -105,9 +104,8 @@ After modifying components or interfaces:
   uv run python examples/python/test_arl_sdk.py --gateway-url http://127.0.0.1:18080 --namespace arl
   ```
 
-## Docs
+## Reference Files
 
-- `docs/developer-guide/session-state.md` — SessionStore, Redis setup, deployment patterns
 - `pkg/gateway/router.go` — all REST API endpoints
 - `pkg/config/config.go` — all environment variables
-- Site: https://lincyaw.github.io/agent-env/
+- `plugin/skills/` — agent-facing operational and SDK guidance

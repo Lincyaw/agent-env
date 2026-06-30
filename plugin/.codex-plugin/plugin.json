@@ -1,13 +1,13 @@
 {
   "name": "arl",
-  "version": "0.13.0",
+  "version": "0.15.6",
   "description": "ARL runtime CLI and operations for Codex: manage experiments, warm pools, sessions, logs, and metrics.",
   "author": {
     "name": "lincyaw",
     "url": "https://github.com/Lincyaw"
   },
   "repository": "https://github.com/Lincyaw/agent-env",
-  "homepage": "https://lincyaw.github.io/agent-env/",
+  "homepage": "https://github.com/Lincyaw/agent-env",
   "license": "Apache-2.0",
   "keywords": [
     "arl",
@@ -29,7 +29,7 @@
       "Read",
       "Write"
     ],
-    "websiteURL": "https://lincyaw.github.io/agent-env/",
+    "websiteURL": "https://github.com/Lincyaw/agent-env",
     "defaultPrompt": [
       "Use $arl-cli to inspect ARL pools and sessions.",
       "Help me debug an ARL session or experiment.",

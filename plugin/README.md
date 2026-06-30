@@ -1,39 +1,44 @@
 # ARL Agent Plugin
 
-This directory is the agent-facing ARL plugin source.
+This directory contains the ARL agent-facing plugin. Install it to give Claude
+Code or Codex task-specific ARL skills for sessions, warm pools, experiments,
+files, replay, trajectories, logs, and Python SDK work.
 
-## Claude Code
+## Install for Claude Code
 
-Claude Code uses `.claude-plugin/plugin.json`, `skills/`, and `commands/` directly.
+Add the ARL plugin marketplace, then install the `arl` plugin from it:
 
-## Codex
+```text
+/plugin marketplace add Lincyaw/agent-env
+/plugin install arl@arl
+/reload-plugins
+```
 
-Codex uses `.codex-plugin/plugin.json` and `skills/`. Claude Code slash commands do not have a
-native Codex equivalent, so convert them into compatibility skills before installing or testing:
+Claude Code reads `.claude-plugin/plugin.json`, `skills/`, and `commands/`.
+Before cutting a release tag, sync the source manifest versions so Claude Code
+can detect marketplace updates:
 
-After this plugin has been pushed to GitHub, install or update it in one command:
+```bash
+python3 plugin/scripts/set_plugin_version.py 0.15.7
+```
+
+## Install for Codex
+
+Codex uses `.codex-plugin/plugin.json` and skill folders. The installer clones
+this repository, regenerates command compatibility skills, and installs ARL
+skills into `~/.codex/skills`:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Lincyaw/agent-env/main/plugin/install.sh | bash
 ```
 
-To install a specific branch or tag:
+Install a specific branch or tag:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/Lincyaw/agent-env/main/plugin/install.sh | bash -s -- my-feature-branch
+curl -fsSL https://raw.githubusercontent.com/Lincyaw/agent-env/main/plugin/install.sh | bash -s -- v0.15.6
 ```
 
-For forks or private mirrors, override the clone URL:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/Lincyaw/agent-env/main/plugin/install.sh \
-  | ARL_REPO_URL=git@github.com:your-org/agent-env.git bash
-```
-
-The remote installer clones/updates the repo under `~/.codex/repos/arl`, regenerates command
-compatibility skills, and installs them into `~/.codex/skills`.
-
-Useful environment overrides:
+Useful overrides:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Lincyaw/agent-env/main/plugin/install.sh \
@@ -43,7 +48,20 @@ curl -fsSL https://raw.githubusercontent.com/Lincyaw/agent-env/main/plugin/insta
     bash -s -- main
 ```
 
-For local development, regenerate the compatibility skills directly:
+## Included Skills
+
+- `arl-cli`: operational CLI workflows for experiments, pools, sessions, logs,
+  files, replay, trajectories, and gateway status.
+- `arl-python-sdk`: Python SDK feature map and implementation guidance.
+- Generated Codex command-wrapper skills from `commands/*.md`, produced during
+  Codex install.
+
+Detailed command/API notes live under each skill's `references/` directory so
+the loaded skill body stays small.
+
+## Local Development
+
+Regenerate Codex command-wrapper skills:
 
 ```bash
 cd plugin
@@ -53,26 +71,16 @@ python3 scripts/build_codex_compat_skills.py \
   --clean
 ```
 
-The generated `.codex-generated-skills/` directory is ignored by git because `commands/*.md` remain
-the source of truth. Copy both `skills/` and `.codex-generated-skills/` into a Codex skills location
-when doing a manual install.
-
-To do that automatically:
+Install locally:
 
 ```bash
 make install-codex-skills
 ```
 
-The installer refreshes generated skills, then copies both `skills/` and `.codex-generated-skills/`
-into `~/.codex/skills`. It writes `.arl-managed.json` markers so later installs can update ARL-owned
-skills without clobbering unrelated same-named skills.
-
-Useful options:
+Dry run or custom destination:
 
 ```bash
 cd plugin
 ./install-codex-skills.sh --dry-run
 ./install-codex-skills.sh --skills-dir /tmp/codex-skills
-CODEX_SKILLS_DIR=/tmp/codex-skills make install-codex-skills
-./install-codex-skills.sh --force
 ```

@@ -7,7 +7,7 @@
     "url": "https://github.com/Lincyaw"
   },
   "repository": "https://github.com/Lincyaw/agent-env",
-  "homepage": "https://lincyaw.github.io/agent-env/",
+  "homepage": "https://github.com/Lincyaw/agent-env",
   "license": "Apache-2.0",
   "keywords": ["arl", "python-sdk", "kubernetes", "warm-pool", "agentic-rl", "sandbox", "experiment"],
   "skills": "./skills/",
