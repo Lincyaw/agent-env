@@ -152,6 +152,7 @@ func main() {
 		SandboxSeccompProfileType:       cfg.SandboxSeccompProfileType,
 		SandboxSeccompLocalhostProfile:  cfg.SandboxSeccompLocalhostProfile,
 		SandboxAllowPrivilegeEscalation: cfg.SandboxAllowPrivilegeEscalation,
+		K8sRESTConfig:                   k8sConfig,
 	}, sessionStore)
 
 	// Start runtime allocator cache and event handlers.

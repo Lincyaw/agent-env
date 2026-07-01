@@ -35,6 +35,7 @@ type redisSessionData struct {
 	IdleTimeout         time.Duration           `json:"idleTimeout"`
 	MaxLifetime         time.Duration           `json:"maxLifetime"`
 	CreatedAt           time.Time               `json:"createdAt"`
+	PrivateContainers   []PrivateContainerSpec  `json:"privateContainers,omitempty"`
 	HistoryRecords      []StepRecord            `json:"historyRecords"`
 	HistoryReplayInputs map[int]json.RawMessage `json:"historyReplayInputs,omitempty"`
 	HistoryNextIndex    int                     `json:"historyNextIndex"`
@@ -58,6 +59,12 @@ func sessionToRedisData(s *session) redisSessionData {
 		IdleTimeout:         s.idleTimeout,
 		MaxLifetime:         s.maxLifetime,
 		CreatedAt:           s.createdAt,
+	}
+	if len(s.privateContainers) > 0 {
+		data.PrivateContainers = make([]PrivateContainerSpec, 0, len(s.privateContainers))
+		for _, spec := range s.privateContainers {
+			data.PrivateContainers = append(data.PrivateContainers, spec)
+		}
 	}
 
 	if s.History != nil {
@@ -105,6 +112,7 @@ func redisDataToSession(data redisSessionData) *session {
 		maxLifetime:         data.MaxLifetime,
 		createdAt:           data.CreatedAt,
 		operations:          make(map[string]*executeOperation),
+		privateContainers:   privateContainerMap(data.PrivateContainers),
 	}
 }
 

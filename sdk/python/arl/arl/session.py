@@ -12,8 +12,10 @@ from typing import Any, BinaryIO
 from arl.configenv import ConfigEnvSpec
 from arl.gateway_client import GatewayClient
 from arl.types import (
+    ContainerExecuteResponse,
     ExecuteResponse,
     LogEntry,
+    PrivateContainerSpec,
     ReplayResponse,
     ResourceRequirements,
     SessionInfo,
@@ -78,11 +80,13 @@ class SandboxSession:
         idle_timeout_seconds: int | None = None,
         max_lifetime_seconds: int | None = None,
         api_key: str | None = None,
+        private_containers: Iterable[PrivateContainerSpec | dict[str, Any]] | None = None,
     ) -> None:
         self.image = image or ""
         self.profile = profile or ""
         self.idle_timeout_seconds = idle_timeout_seconds
         self.max_lifetime_seconds = max_lifetime_seconds
+        self.private_containers = private_containers
 
         self._client = GatewayClient(base_url=gateway_url, timeout=timeout, api_key=api_key)
         self._api_key = api_key
@@ -153,6 +157,7 @@ class SandboxSession:
             profile=self.profile or None,
             idle_timeout_seconds=self.idle_timeout_seconds,
             max_lifetime_seconds=self.max_lifetime_seconds,
+            private_containers=self.private_containers,
         )
         self._session_id = info.id
         self._session_info = info
@@ -187,6 +192,16 @@ class SandboxSession:
             operation_id=operation_id,
             on_output=on_output,
         )
+
+    def execute_container(
+        self,
+        container: str,
+        steps: list[dict[str, Any]],
+    ) -> ContainerExecuteResponse:
+        """Execute steps in a configured private container."""
+        if self._session_id is None:
+            raise RuntimeError("No session created. Call create_sandbox() first.")
+        return self._client.execute_container(self._session_id, container, steps)
 
     def restore(self, snapshot_id: str) -> None:
         """Restore workspace to a previous step's snapshot.
@@ -468,6 +483,7 @@ class ManagedSession(SandboxSession):
         config_env: ConfigEnvSpec | dict[str, Any] | None = None,
         profile: str = "default",
         api_key: str | None = None,
+        private_containers: Iterable[PrivateContainerSpec | dict[str, Any]] | None = None,
     ) -> None:
         super().__init__(
             image=image,
@@ -475,6 +491,7 @@ class ManagedSession(SandboxSession):
             gateway_url=gateway_url,
             timeout=timeout,
             api_key=api_key,
+            private_containers=private_containers,
         )
         self._image = image
         self._profile = profile
@@ -485,6 +502,7 @@ class ManagedSession(SandboxSession):
         self._workspace_dir = workspace_dir
         self._idle_timeout_seconds = idle_timeout_seconds
         self._max_lifetime_seconds = max_lifetime_seconds
+        self._private_containers = private_containers
 
     @property
     def experiment_id(self) -> str:
@@ -508,6 +526,7 @@ class ManagedSession(SandboxSession):
             workspace_dir=self._workspace_dir,
             idle_timeout_seconds=self._idle_timeout_seconds,
             max_lifetime_seconds=self._max_lifetime_seconds,
+            private_containers=self._private_containers,
         )
         self._session_id = info.id
         self._session_info = info

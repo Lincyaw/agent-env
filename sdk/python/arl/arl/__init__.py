@@ -18,6 +18,7 @@ from arl.gateway_client import (
 from arl.interactive_shell_client import InteractiveShellClient, create_websocket_proxy
 from arl.session import ManagedSession, SandboxSession
 from arl.types import (
+    ContainerExecuteResponse,
     DeleteExperimentResponse,
     ErrorResponse,
     ExecuteOperationInfo,
@@ -29,6 +30,7 @@ from arl.types import (
     PoolCondition,
     PoolInfo,
     PoolLogEntry,
+    PrivateContainerSpec,
     ReplayResponse,
     ResourceRequirements,
     SessionInfo,
@@ -53,6 +55,7 @@ __all__ = [
     "ApiKeyAuth",
     "ConfigEnvSpec",
     "ConfigMapTemplate",
+    "ContainerExecuteResponse",
     "DeleteExperimentResponse",
     "ErrorResponse",
     "ExecuteOperationInfo",
@@ -70,6 +73,7 @@ __all__ = [
     "PoolInfo",
     "PoolLogEntry",
     "PoolNotReadyError",
+    "PrivateContainerSpec",
     "ReplayResponse",
     "ResourceRequirements",
     "SandboxSession",

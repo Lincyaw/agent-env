@@ -23,10 +23,11 @@ type SessionListItem struct {
 }
 
 type CreateSessionRequest struct {
-	Image              string `json:"image,omitempty"`
-	Profile            string `json:"profile,omitempty"`
-	IdleTimeoutSeconds int    `json:"idleTimeoutSeconds,omitempty"`
-	MaxLifetimeSeconds int    `json:"maxLifetimeSeconds,omitempty"`
+	Image              string                 `json:"image,omitempty"`
+	Profile            string                 `json:"profile,omitempty"`
+	IdleTimeoutSeconds int                    `json:"idleTimeoutSeconds,omitempty"`
+	MaxLifetimeSeconds int                    `json:"maxLifetimeSeconds,omitempty"`
+	PrivateContainers  []PrivateContainerSpec `json:"privateContainers,omitempty"`
 }
 
 type ManagedSessionInfo struct {
@@ -103,6 +104,17 @@ type ExecuteResponse struct {
 	OperationID     string       `json:"operationID,omitempty"`
 }
 
+type ContainerExecuteRequest struct {
+	Steps []StepRequest `json:"steps"`
+}
+
+type ContainerExecuteResponse struct {
+	SessionID       string       `json:"sessionID"`
+	Container       string       `json:"container"`
+	Results         []StepResult `json:"results"`
+	TotalDurationMs int64        `json:"totalDurationMs"`
+}
+
 type ExecuteOperationInfo struct {
 	OperationID string           `json:"operationID"`
 	SessionID   string           `json:"sessionID"`
@@ -143,20 +155,35 @@ type ScalePoolRequest struct {
 }
 
 type CreatePoolRequest struct {
-	Name         string `json:"name"`
-	Image        string `json:"image"`
-	Profile      string `json:"profile,omitempty"`
-	Replicas     int32  `json:"replicas,omitempty"`
-	WorkspaceDir string `json:"workspaceDir,omitempty"`
+	Name              string                 `json:"name"`
+	Image             string                 `json:"image"`
+	Profile           string                 `json:"profile,omitempty"`
+	Replicas          int32                  `json:"replicas,omitempty"`
+	WorkspaceDir      string                 `json:"workspaceDir,omitempty"`
+	PrivateContainers []PrivateContainerSpec `json:"privateContainers,omitempty"`
 }
 
 type CreateManagedSessionRequest struct {
-	Image              string `json:"image"`
-	Profile            string `json:"profile,omitempty"`
-	ExperimentID       string `json:"experimentId"`
-	WorkspaceDir       string `json:"workspaceDir,omitempty"`
-	IdleTimeoutSeconds int    `json:"idleTimeoutSeconds,omitempty"`
-	MaxLifetimeSeconds int    `json:"maxLifetimeSeconds,omitempty"`
+	Image              string                 `json:"image"`
+	Profile            string                 `json:"profile,omitempty"`
+	ExperimentID       string                 `json:"experimentId"`
+	WorkspaceDir       string                 `json:"workspaceDir,omitempty"`
+	IdleTimeoutSeconds int                    `json:"idleTimeoutSeconds,omitempty"`
+	MaxLifetimeSeconds int                    `json:"maxLifetimeSeconds,omitempty"`
+	PrivateContainers  []PrivateContainerSpec `json:"privateContainers,omitempty"`
+}
+
+type PrivateContainerSpec struct {
+	Name               string            `json:"name"`
+	Image              string            `json:"image"`
+	MountWorkspace     bool              `json:"mountWorkspace,omitempty"`
+	WorkspaceMountPath string            `json:"workspaceMountPath,omitempty"`
+	WorkspaceAccess    string            `json:"workspaceAccess,omitempty"`
+	Command            []string          `json:"command,omitempty"`
+	Args               []string          `json:"args,omitempty"`
+	Env                map[string]string `json:"env,omitempty"`
+	Resources          json.RawMessage   `json:"resources,omitempty"`
+	ImagePullPolicy    string            `json:"imagePullPolicy,omitempty"`
 }
 
 type ErrorResponse struct {

@@ -90,6 +90,10 @@ var sessionCreateCmd = &cobra.Command{
 		profile, _ := cmd.Flags().GetString("profile")
 		idleTimeout, _ := cmd.Flags().GetInt("idle-timeout")
 		maxLifetime, _ := cmd.Flags().GetInt("max-lifetime")
+		privateContainers, err := privateContainersFromFlags(cmd)
+		if err != nil {
+			return err
+		}
 
 		if image == "" && profile == "" {
 			return usageError("--image or --profile is required")
@@ -101,6 +105,7 @@ var sessionCreateCmd = &cobra.Command{
 			Profile:            profile,
 			IdleTimeoutSeconds: idleTimeout,
 			MaxLifetimeSeconds: maxLifetime,
+			PrivateContainers:  privateContainers,
 		})
 		if err != nil {
 			return err
@@ -394,6 +399,54 @@ var sessionExecCmd = &cobra.Command{
 	},
 }
 
+var sessionExecContainerCmd = &cobra.Command{
+	Use:   "exec-container <id> <container> -- <command...>",
+	Short: "Execute a command in a private container",
+	Args:  cobra.MinimumNArgs(2),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		sessionID := args[0]
+		container := args[1]
+		cmdArgs := args[2:]
+		if dash := cmd.ArgsLenAtDash(); dash >= 0 {
+			cmdArgs = args[dash:]
+		}
+		if len(cmdArgs) == 0 {
+			return usageError("no command specified; use: arl session exec-container <id> <container> -- <cmd>")
+		}
+
+		workDir, _ := cmd.Flags().GetString("workdir")
+		timeoutSeconds, _ := cmd.Flags().GetInt32("timeout")
+		envValues, _ := cmd.Flags().GetStringArray("env")
+		env, err := envMapFromFlags(envValues)
+		if err != nil {
+			return err
+		}
+
+		c := newClient()
+		resp, err := c.ExecuteContainer(sessionID, container, ContainerExecuteRequest{
+			Steps: []StepRequest{
+				{
+					Name:           strings.Join(cmdArgs, " "),
+					Command:        cmdArgs,
+					Env:            env,
+					WorkDir:        workDir,
+					TimeoutSeconds: timeoutSeconds,
+				},
+			},
+		})
+		if err != nil {
+			return err
+		}
+
+		if flagOutput == "json" {
+			printJSON(resp)
+			return nil
+		}
+
+		return printExecResults(resp.Results)
+	},
+}
+
 var sessionRestoreCmd = &cobra.Command{
 	Use:   "restore <id> <snapshot-id>",
 	Short: "Restore a session to a snapshot",
@@ -504,6 +557,7 @@ func init() {
 	sessionCreateCmd.Flags().String("profile", "default", "Resource profile")
 	sessionCreateCmd.Flags().Int("idle-timeout", 0, "Idle timeout in seconds (0 uses gateway default)")
 	sessionCreateCmd.Flags().Int("max-lifetime", 0, "Maximum lifetime in seconds (0 uses gateway default)")
+	addPrivateContainerFlags(sessionCreateCmd)
 
 	sessionHistoryCmd.Flags().BoolP("verbose", "v", false, "Show step output")
 
@@ -514,6 +568,10 @@ func init() {
 
 	sessionReplayCmd.Flags().String("source", "", "Source session ID to replay from")
 	sessionReplayCmd.Flags().Int("up-to-step", -1, "Replay through this step index (default: all steps)")
+
+	sessionExecContainerCmd.Flags().String("workdir", "", "Working directory inside the private container")
+	sessionExecContainerCmd.Flags().Int32("timeout", 0, "Command timeout in seconds (0 means gateway default/no step timeout)")
+	sessionExecContainerCmd.Flags().StringArray("env", nil, "Environment variable in KEY=VALUE form; repeatable")
 
 	sessionLogsCmd.Flags().BoolP("follow", "f", false, "Follow log output")
 	sessionLogsCmd.Flags().Int("tail", 100, "Number of recent lines to show")
@@ -527,6 +585,7 @@ func init() {
 	sessionCmd.AddCommand(sessionHistoryCmd)
 	sessionCmd.AddCommand(sessionTrajectoryCmd)
 	sessionCmd.AddCommand(sessionExecCmd)
+	sessionCmd.AddCommand(sessionExecContainerCmd)
 	sessionCmd.AddCommand(sessionRestoreCmd)
 	sessionCmd.AddCommand(sessionReplayCmd)
 	sessionCmd.AddCommand(sessionShellCmd)

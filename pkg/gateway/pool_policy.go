@@ -239,22 +239,25 @@ func (g *Gateway) ensureImageBackedSessionPool(ctx context.Context, req CreateSe
 	if err != nil {
 		return req, err
 	}
-	for _, pool := range snapshots {
-		if pool.Namespace == namespace && pool.Profile == req.Profile && pool.Image == req.Image {
-			return req, nil
+	if len(req.PrivateContainers) == 0 {
+		for _, pool := range snapshots {
+			if pool.Namespace == namespace && pool.Profile == req.Profile && pool.Image == req.Image {
+				return req, nil
+			}
 		}
 	}
 
-	poolName, err := managedPoolName(req.Image, namespace, req.Profile, nil)
+	poolName, err := managedPoolName(req.Image, namespace, req.Profile, nil, req.PrivateContainers)
 	if err != nil {
 		return req, err
 	}
 	if err := g.CreatePool(ctx, CreatePoolRequest{
-		Name:      poolName,
-		Image:     req.Image,
-		Profile:   req.Profile,
-		Replicas:  1,
-		Namespace: namespace,
+		Name:              poolName,
+		Image:             req.Image,
+		Profile:           req.Profile,
+		Replicas:          1,
+		Namespace:         namespace,
+		PrivateContainers: req.PrivateContainers,
 	}); err != nil && !k8serrors.IsAlreadyExists(err) {
 		return req, fmt.Errorf("ensure sandbox pool for image %q profile %q: %w", req.Image, req.Profile, err)
 	}

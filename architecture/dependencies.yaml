@@ -7,6 +7,11 @@ dependencies:
     description: Creates and reads SandboxTemplate, SandboxWarmPool, SandboxClaim, and Sandbox resources.
 
   - from: gateway
+    to: agent-sandbox
+    type: kubernetes-api
+    description: Uses pods/exec to run evaluator/control-plane commands in configured private containers.
+
+  - from: gateway
     to: sidecar
     type: grpc
     description: Executes commands and file operations through the sidecar AgentService.

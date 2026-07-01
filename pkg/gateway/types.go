@@ -20,15 +20,16 @@ type ManagedSessionInfo struct {
 
 // CreateSessionRequest is the body for POST /v1/sessions
 type CreateSessionRequest struct {
-	Image              string            `json:"image,omitempty"`
-	Profile            string            `json:"profile,omitempty"`
-	Namespace          string            `json:"namespace,omitempty"`
-	IdleTimeoutSeconds int               `json:"idleTimeoutSeconds,omitempty"`
-	MaxLifetimeSeconds int               `json:"maxLifetimeSeconds,omitempty"`
-	PoolName           string            `json:"-"` // internal pinned SandboxWarmPool, not part of the public API
-	ExtraLabels        map[string]string `json:"-"` // internal use only, not exposed via JSON
-	Managed            bool              `json:"-"`
-	ExperimentID       string            `json:"-"`
+	Image              string                 `json:"image,omitempty"`
+	Profile            string                 `json:"profile,omitempty"`
+	Namespace          string                 `json:"namespace,omitempty"`
+	IdleTimeoutSeconds int                    `json:"idleTimeoutSeconds,omitempty"`
+	MaxLifetimeSeconds int                    `json:"maxLifetimeSeconds,omitempty"`
+	PrivateContainers  []PrivateContainerSpec `json:"privateContainers,omitempty"`
+	PoolName           string                 `json:"-"` // internal pinned SandboxWarmPool, not part of the public API
+	ExtraLabels        map[string]string      `json:"-"` // internal use only, not exposed via JSON
+	Managed            bool                   `json:"-"`
+	ExperimentID       string                 `json:"-"`
 }
 
 func hasJSONPayload(raw json.RawMessage) bool {
@@ -65,6 +66,7 @@ type CreateManagedSessionRequest struct {
 	WorkspaceDir       string                       `json:"workspaceDir,omitempty"`
 	IdleTimeoutSeconds int                          `json:"idleTimeoutSeconds,omitempty"`
 	MaxLifetimeSeconds int                          `json:"maxLifetimeSeconds,omitempty"`
+	PrivateContainers  []PrivateContainerSpec       `json:"privateContainers,omitempty"`
 }
 
 // ExecuteRequest is the body for POST /v1/sessions/{id}/execute
@@ -82,6 +84,26 @@ type StepRequest struct {
 	WorkDir        string            `json:"workDir,omitempty"`
 	TimeoutSeconds int32             `json:"timeoutSeconds,omitempty"`
 	Timeout        int32             `json:"timeout,omitempty"`
+}
+
+// PrivateContainerSpec describes a gateway-managed container that is not part
+// of the agent-facing executor environment.
+type PrivateContainerSpec struct {
+	Name               string                       `json:"name"`
+	Image              string                       `json:"image"`
+	MountWorkspace     bool                         `json:"mountWorkspace,omitempty"`
+	WorkspaceMountPath string                       `json:"workspaceMountPath,omitempty"`
+	WorkspaceAccess    string                       `json:"workspaceAccess,omitempty"`
+	Command            []string                     `json:"command,omitempty"`
+	Args               []string                     `json:"args,omitempty"`
+	Env                map[string]string            `json:"env,omitempty"`
+	Resources          *corev1.ResourceRequirements `json:"resources,omitempty"`
+	ImagePullPolicy    string                       `json:"imagePullPolicy,omitempty"`
+}
+
+// ContainerExecuteRequest is the body for running steps in a private container.
+type ContainerExecuteRequest struct {
+	Steps []StepRequest `json:"steps"`
 }
 
 // UploadFileResponse is the response for PUT /v1/sessions/{id}/files/{path...}
@@ -110,16 +132,17 @@ type ReplayResponse struct {
 
 // CreatePoolRequest is the body for POST /v1/pools
 type CreatePoolRequest struct {
-	Name          string                       `json:"name"`
-	Image         string                       `json:"image"`
-	Profile       string                       `json:"profile,omitempty"`
-	Replicas      int32                        `json:"replicas,omitempty"`
-	Namespace     string                       `json:"namespace,omitempty"`
-	ConfigEnv     json.RawMessage              `json:"configEnv,omitempty"`
-	Tools         json.RawMessage              `json:"tools,omitempty"`
-	Resources     *corev1.ResourceRequirements `json:"resources,omitempty"`
-	WorkspaceDir  string                       `json:"workspaceDir,omitempty"`
-	ImageLocality json.RawMessage              `json:"imageLocality,omitempty"`
+	Name              string                       `json:"name"`
+	Image             string                       `json:"image"`
+	Profile           string                       `json:"profile,omitempty"`
+	Replicas          int32                        `json:"replicas,omitempty"`
+	Namespace         string                       `json:"namespace,omitempty"`
+	ConfigEnv         json.RawMessage              `json:"configEnv,omitempty"`
+	Tools             json.RawMessage              `json:"tools,omitempty"`
+	Resources         *corev1.ResourceRequirements `json:"resources,omitempty"`
+	WorkspaceDir      string                       `json:"workspaceDir,omitempty"`
+	ImageLocality     json.RawMessage              `json:"imageLocality,omitempty"`
+	PrivateContainers []PrivateContainerSpec       `json:"privateContainers,omitempty"`
 }
 
 // ScalePoolRequest is the body for PATCH /v1/pools/{name}
@@ -153,6 +176,14 @@ type ExecuteResponse struct {
 	Results         []StepResult `json:"results"`
 	TotalDurationMs int64        `json:"totalDurationMs"`
 	OperationID     string       `json:"operationID,omitempty"`
+}
+
+// ContainerExecuteResponse is returned from private container execution.
+type ContainerExecuteResponse struct {
+	SessionID       string       `json:"sessionID"`
+	Container       string       `json:"container"`
+	Results         []StepResult `json:"results"`
+	TotalDurationMs int64        `json:"totalDurationMs"`
 }
 
 // ExecuteOperationInfo describes an idempotent execute operation.

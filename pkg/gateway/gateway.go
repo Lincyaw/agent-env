@@ -23,6 +23,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	k8slabels "k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/rest"
 	sandboxv1beta1 "sigs.k8s.io/agent-sandbox/api/v1beta1"
 	extensionsv1beta1 "sigs.k8s.io/agent-sandbox/extensions/api/v1beta1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -67,6 +68,7 @@ type GatewayConfig struct {
 	SandboxSeccompProfileType       string
 	SandboxSeccompLocalhostProfile  string
 	SandboxAllowPrivilegeEscalation bool
+	K8sRESTConfig                   *rest.Config
 }
 
 // session holds internal session state.
@@ -88,6 +90,7 @@ type session struct {
 	createdAt           time.Time
 	activeExecs         int32 // atomic; >0 means execution in progress, sweep must not kill
 	operations          map[string]*executeOperation
+	privateContainers   map[string]PrivateContainerSpec
 }
 
 func (s *session) runtimeAllocation() RuntimeAllocation {
@@ -116,6 +119,7 @@ func (s *session) runtimeAllocation() RuntimeAllocation {
 // Gateway manages sessions and forwards execution to sidecars.
 type Gateway struct {
 	k8sClient           client.Client
+	k8sRESTConfig       *rest.Config
 	runtimeAllocator    RuntimeAllocator
 	poolSelector        PoolSelector
 	admissionController AdmissionController
@@ -144,6 +148,7 @@ func New(k8sClient client.Client, runtimeAllocator RuntimeAllocator, sidecarClie
 	}
 	gw := &Gateway{
 		k8sClient:           k8sClient,
+		k8sRESTConfig:       copyRESTConfig(gwConfig.K8sRESTConfig),
 		runtimeAllocator:    runtimeAllocator,
 		poolSelector:        DefaultPoolSelector{},
 		admissionController: NewDefaultAdmissionController(),
@@ -157,6 +162,13 @@ func New(k8sClient client.Client, runtimeAllocator RuntimeAllocator, sidecarClie
 		admissionQueueDepth: make(map[types.NamespacedName]int32),
 	}
 	return gw
+}
+
+func copyRESTConfig(cfg *rest.Config) *rest.Config {
+	if cfg == nil {
+		return nil
+	}
+	return rest.CopyConfig(cfg)
 }
 
 func (g *Gateway) runtimeNamespace() string {
@@ -275,6 +287,15 @@ func (g *Gateway) CreateSession(ctx context.Context, req CreateSessionRequest) (
 		recordSpanErr(span, err)
 		return nil, err
 	}
+	if len(req.PrivateContainers) > 0 && strings.TrimSpace(req.Image) == "" && strings.TrimSpace(req.PoolName) == "" {
+		err := fmt.Errorf("privateContainers require image-backed pool creation or an explicit poolName")
+		recordSpanErr(span, err)
+		return nil, err
+	}
+	if err := validatePrivateContainers(req.PrivateContainers); err != nil {
+		recordSpanErr(span, err)
+		return nil, err
+	}
 	req, err = g.ensureImageBackedSessionPool(ctx, req, ns)
 	if err != nil {
 		recordSpanErr(span, err)
@@ -348,17 +369,18 @@ func (g *Gateway) CreateSession(ctx context.Context, req CreateSessionRequest) (
 	}
 
 	g.store.Set(sessionID, &session{
-		Info:         info,
-		Runtime:      *allocation,
-		History:      NewStepHistory(),
-		managed:      req.Managed,
-		experimentID: req.ExperimentID,
-		ownerKeyHash: ownerHash,
-		lastTaskTime: time.Now(),
-		createdAt:    time.Now(),
-		idleTimeout:  g.resolveIdleTimeout(req),
-		maxLifetime:  g.resolveMaxLifetime(req),
-		operations:   make(map[string]*executeOperation),
+		Info:              info,
+		Runtime:           *allocation,
+		History:           NewStepHistory(),
+		managed:           req.Managed,
+		experimentID:      req.ExperimentID,
+		ownerKeyHash:      ownerHash,
+		lastTaskTime:      time.Now(),
+		createdAt:         time.Now(),
+		idleTimeout:       g.resolveIdleTimeout(req),
+		maxLifetime:       g.resolveMaxLifetime(req),
+		operations:        make(map[string]*executeOperation),
+		privateContainers: privateContainerMap(req.PrivateContainers),
 	})
 
 	if g.metrics != nil {
@@ -1249,6 +1271,9 @@ func (g *Gateway) CreatePool(ctx context.Context, req CreatePoolRequest) error {
 	if hasJSONPayload(req.Tools) {
 		return fmt.Errorf("tools are not supported by SandboxWarmPool-backed pools yet")
 	}
+	if err := validatePrivateContainers(req.PrivateContainers); err != nil {
+		return err
+	}
 	if err := g.ensureSandboxRuntimeSecret(ctx, ns); err != nil {
 		return err
 	}
@@ -1296,7 +1321,7 @@ func (g *Gateway) CreatePool(ctx context.Context, req CreatePoolRequest) error {
 			Service:                 boolPtr(false),
 			PodTemplate: sandboxv1beta1.PodTemplate{
 				ObjectMeta: podMetadata,
-				Spec:       g.sandboxPodSpec(req.Image, workspaceDir, *resources),
+				Spec:       g.sandboxPodSpec(req.Image, workspaceDir, *resources, req.PrivateContainers),
 			},
 		},
 	}
@@ -1613,21 +1638,26 @@ func (g *Gateway) CreateManagedSession(ctx context.Context, req CreateManagedSes
 		recordSpanErr(span, err)
 		return nil, err
 	}
+	if err := validatePrivateContainers(req.PrivateContainers); err != nil {
+		recordSpanErr(span, err)
+		return nil, err
+	}
 	image := normalizeImage(req.Image)
 	profile := normalizeProfile(req.Profile)
-	poolName, err := managedPoolName(image, ns, profile, nil)
+	poolName, err := managedPoolName(image, ns, profile, nil, req.PrivateContainers)
 	if err != nil {
 		recordSpanErr(span, err)
 		return nil, fmt.Errorf("derive managed pool name: %w", err)
 	}
 	if err := g.CreatePool(ctx, CreatePoolRequest{
-		Name:         poolName,
-		Image:        image,
-		Profile:      profile,
-		Replicas:     1,
-		Namespace:    ns,
-		Resources:    req.Resources,
-		WorkspaceDir: req.WorkspaceDir,
+		Name:              poolName,
+		Image:             image,
+		Profile:           profile,
+		Replicas:          1,
+		Namespace:         ns,
+		Resources:         req.Resources,
+		WorkspaceDir:      req.WorkspaceDir,
+		PrivateContainers: req.PrivateContainers,
 	}); err != nil && !errors.IsAlreadyExists(err) {
 		recordSpanErr(span, err)
 		return nil, fmt.Errorf("ensure managed sandbox pool: %w", err)
@@ -1643,6 +1673,7 @@ func (g *Gateway) CreateManagedSession(ctx context.Context, req CreateManagedSes
 		MaxLifetimeSeconds: req.MaxLifetimeSeconds,
 		Managed:            true,
 		ExperimentID:       req.ExperimentID,
+		PrivateContainers:  req.PrivateContainers,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("create session: %w", err)

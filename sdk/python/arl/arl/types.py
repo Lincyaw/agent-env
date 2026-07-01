@@ -130,6 +130,17 @@ class ExecuteResponse(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+class ContainerExecuteResponse(BaseModel):
+    """Response from executing steps in a private container."""
+
+    session_id: str = Field(alias="sessionID")
+    container: str
+    results: list[StepResult] = []
+    total_duration_ms: int = Field(0, alias="totalDurationMs")
+
+    model_config = {"populate_by_name": True}
+
+
 class ExecuteOperationInfo(BaseModel):
     """Status for an idempotent execute operation."""
 
@@ -427,6 +438,39 @@ class ResourceRequirements(BaseModel):
                         )
 
         return v
+
+
+class PrivateContainerSpec(BaseModel):
+    """Gateway-managed container hidden from the agent-facing executor.
+
+    Attributes:
+        name: Kubernetes container name, excluding reserved executor/sidecar names.
+        image: Container image containing private evaluator assets or scripts.
+        mount_workspace: Whether to mount the session workspace volume.
+        workspace_mount_path: Mount path inside the private container.
+        workspace_access: readWrite or readOnly.
+        command: Optional long-running container command.
+        args: Optional container args.
+        env: Static environment variables for the container.
+        resources: Optional Kubernetes resource requirements.
+        image_pull_policy: Optional Kubernetes image pull policy.
+    """
+
+    name: Annotated[str, Field(pattern=r"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$")]
+    image: str
+    mount_workspace: bool = Field(False, alias="mountWorkspace")
+    workspace_mount_path: str = Field("", alias="workspaceMountPath")
+    workspace_access: Literal["readWrite", "readOnly", ""] = Field("", alias="workspaceAccess")
+    command: list[str] = []
+    args: list[str] = []
+    env: dict[str, str] = {}
+    resources: ResourceRequirements | None = None
+    image_pull_policy: Literal["Always", "IfNotPresent", "Never", ""] = Field(
+        "",
+        alias="imagePullPolicy",
+    )
+
+    model_config = {"populate_by_name": True}
 
 
 class ToolsSpec(BaseModel):

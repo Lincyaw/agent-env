@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"fmt"
+	"sort"
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
@@ -58,7 +59,12 @@ func primarySandboxTemplateImage(template *extensionsv1beta1.SandboxTemplate) st
 	return ""
 }
 
-func (g *Gateway) sandboxPodSpec(image, workspaceDir string, resources corev1.ResourceRequirements) corev1.PodSpec {
+func (g *Gateway) sandboxPodSpec(
+	image string,
+	workspaceDir string,
+	resources corev1.ResourceRequirements,
+	privateContainers []PrivateContainerSpec,
+) corev1.PodSpec {
 	if workspaceDir == "" {
 		workspaceDir = defaultSandboxWorkspaceDir
 	}
@@ -169,6 +175,12 @@ func (g *Gateway) sandboxPodSpec(image, workspaceDir string, resources corev1.Re
 	if schedulerName := strings.TrimSpace(g.gwConfig.SchedulerName); schedulerName != "" {
 		pod.SchedulerName = schedulerName
 	}
+	for _, privateContainer := range privateContainers {
+		pod.Containers = append(
+			pod.Containers,
+			g.sandboxPrivateContainer(privateContainer, workspaceDir),
+		)
+	}
 	if runtimeClassName := strings.TrimSpace(g.gwConfig.SandboxRuntimeClassName); runtimeClassName != "" {
 		pod.RuntimeClassName = &runtimeClassName
 	}
@@ -178,6 +190,64 @@ func (g *Gateway) sandboxPodSpec(image, workspaceDir string, resources corev1.Re
 	g.applyContainerSecurityPolicy(&pod)
 	g.injectProxyEnv(&pod)
 	return pod
+}
+
+func (g *Gateway) sandboxPrivateContainer(spec PrivateContainerSpec, workspaceDir string) corev1.Container {
+	container := corev1.Container{
+		Name:            spec.Name,
+		Image:           spec.Image,
+		ImagePullPolicy: privateContainerPullPolicy(spec.ImagePullPolicy, g.injectedPullPolicy()),
+		Command:         spec.Command,
+		Args:            spec.Args,
+		Env:             privateContainerEnv(spec.Env),
+	}
+	if len(container.Command) == 0 && len(container.Args) == 0 {
+		container.Command = []string{"sh", "-c", "sleep infinity"}
+	}
+	if spec.Resources != nil {
+		container.Resources = ensureEphemeralStorage(*spec.Resources)
+	}
+	if spec.MountWorkspace {
+		mountPath := strings.TrimSpace(spec.WorkspaceMountPath)
+		if mountPath == "" {
+			mountPath = workspaceDir
+		}
+		container.VolumeMounts = append(container.VolumeMounts, corev1.VolumeMount{
+			Name:      "workspace",
+			MountPath: mountPath,
+			ReadOnly:  strings.EqualFold(strings.TrimSpace(spec.WorkspaceAccess), "readonly"),
+		})
+	}
+	return container
+}
+
+func privateContainerPullPolicy(value string, fallback corev1.PullPolicy) corev1.PullPolicy {
+	switch corev1.PullPolicy(strings.TrimSpace(value)) {
+	case corev1.PullAlways:
+		return corev1.PullAlways
+	case corev1.PullIfNotPresent:
+		return corev1.PullIfNotPresent
+	case corev1.PullNever:
+		return corev1.PullNever
+	default:
+		return fallback
+	}
+}
+
+func privateContainerEnv(env map[string]string) []corev1.EnvVar {
+	if len(env) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(env))
+	for key := range env {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	out := make([]corev1.EnvVar, 0, len(env))
+	for _, key := range keys {
+		out = append(out, corev1.EnvVar{Name: key, Value: env[key]})
+	}
+	return out
 }
 
 func (g *Gateway) sandboxSeccompProfile() *corev1.SeccompProfile {

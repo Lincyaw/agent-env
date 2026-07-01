@@ -204,7 +204,7 @@ func TestCreateSessionWithImageEnsuresProfiledPool(t *testing.T) {
 		t.Fatalf("CreateSession returned error: %v", err)
 	}
 
-	wantPool, err := managedPoolName("python:3.12", "default", "code", nil)
+	wantPool, err := managedPoolName("python:3.12", "default", "code", nil, nil)
 	if err != nil {
 		t.Fatalf("managedPoolName returned error: %v", err)
 	}

@@ -128,6 +128,12 @@ func (c *Client) Execute(sessionID string, req ExecuteRequest) (*ExecuteResponse
 	return &resp, c.do("POST", "/v1/sessions/"+sessionID+"/execute", req, &resp)
 }
 
+func (c *Client) ExecuteContainer(sessionID, container string, req ContainerExecuteRequest) (*ContainerExecuteResponse, error) {
+	var resp ContainerExecuteResponse
+	path := "/v1/sessions/" + url.PathEscape(sessionID) + "/containers/" + url.PathEscape(container) + "/execute"
+	return &resp, c.do("POST", path, req, &resp)
+}
+
 func (c *Client) GetExecuteOperation(sessionID, operationID string) (*ExecuteOperationInfo, error) {
 	var info ExecuteOperationInfo
 	path := "/v1/sessions/" + url.PathEscape(sessionID) + "/operations/" + url.PathEscape(operationID)

@@ -10,6 +10,7 @@ components:
       - Expose session, execute, file, replay, pool, and managed-session REST APIs
       - Create SandboxTemplate, SandboxWarmPool, and SandboxClaim resources
       - Resolve ready SandboxClaims to sidecar endpoints
+      - Execute evaluator/control-plane commands in gateway-managed private containers
       - Persist sessions in memory or Redis
       - Write trajectory/audit records to ClickHouse
       - Expose Prometheus metrics on the internal HTTP port
@@ -19,6 +20,7 @@ components:
         - Internal /metrics and debug endpoints on gateway.internalPort
       calls:
         - Kubernetes API for agent-sandbox CRDs
+        - Kubernetes pods/exec subresource for private container execution
         - Sidecar gRPC AgentService
         - Redis
         - ClickHouse
@@ -86,6 +88,7 @@ components:
       - Provide Python clients for gateway APIs
       - Provide SandboxSession and ManagedSession user workflows
       - Upload/download files, execute commands, restore, replay, and export trajectories
+      - Declare private containers and run private-container commands through the gateway
 
   - name: helm-chart
     type: deployment

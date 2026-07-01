@@ -101,6 +101,10 @@ var poolCreateCmd = &cobra.Command{
 		wait, _ := cmd.Flags().GetBool("wait")
 		timeout, _ := cmd.Flags().GetDuration("timeout")
 		minReady, _ := cmd.Flags().GetInt32("min-ready")
+		privateContainers, err := privateContainersFromFlags(cmd)
+		if err != nil {
+			return err
+		}
 
 		if image == "" {
 			return usageError("--image is required")
@@ -111,11 +115,12 @@ var poolCreateCmd = &cobra.Command{
 
 		c := newClient()
 		if err := c.CreatePool(CreatePoolRequest{
-			Name:         args[0],
-			Image:        image,
-			Profile:      profile,
-			Replicas:     replicas,
-			WorkspaceDir: workspaceDir,
+			Name:              args[0],
+			Image:             image,
+			Profile:           profile,
+			Replicas:          replicas,
+			WorkspaceDir:      workspaceDir,
+			PrivateContainers: privateContainers,
 		}); err != nil {
 			return err
 		}
@@ -353,6 +358,7 @@ func init() {
 	poolCreateCmd.Flags().Bool("wait", false, "Wait until the pool has ready capacity")
 	poolCreateCmd.Flags().Duration("timeout", 10*time.Minute, "Maximum time to wait with --wait")
 	poolCreateCmd.Flags().Int32("min-ready", -1, "Minimum ready sandboxes to wait for (-1 means desired replicas)")
+	addPrivateContainerFlags(poolCreateCmd)
 
 	poolScaleCmd.Flags().Int32("replicas", 0, "Target replica count")
 	poolScaleCmd.MarkFlagRequired("replicas")

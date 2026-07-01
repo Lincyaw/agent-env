@@ -13,6 +13,7 @@ This directory contains structured YAML files documenting the ARL-Infra architec
 | `components.yaml` | Component catalog with responsibilities, interfaces, and configuration |
 | `dependencies.yaml` | Technical and logical dependency graph between components |
 | `propagation-rules.yaml` | Change impact analysis rules and required actions |
+| `private-containers.md` | Draft design for gateway-managed private/eval containers |
 
 ## Usage
 

@@ -37,6 +37,7 @@ func SetupRoutes(mux *http.ServeMux, gw *Gateway, authCfg *AuthConfig) {
 
 	// Execution (user role)
 	mux.HandleFunc("POST /v1/sessions/{id}/execute", user(handleExecute(gw)))
+	mux.HandleFunc("POST /v1/sessions/{id}/containers/{container}/execute", user(handleExecuteContainer(gw)))
 	mux.HandleFunc("GET /v1/sessions/{id}/operations/{operationID}", user(handleGetExecuteOperation(gw)))
 	mux.HandleFunc("PUT /v1/sessions/{id}/files/{path...}", user(handleUploadFile(gw)))
 	mux.HandleFunc("GET /v1/sessions/{id}/files/{path...}", user(handleDownloadFile(gw)))
@@ -258,6 +259,36 @@ func handleGetExecuteOperation(gw *Gateway) http.HandlerFunc {
 			return
 		}
 		writeJSON(w, http.StatusOK, info)
+	}
+}
+
+func handleExecuteContainer(gw *Gateway) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		if checkOwnership(gw, w, r, id) == nil {
+			return
+		}
+		container := r.PathValue("container")
+		if container == "" {
+			writeError(w, http.StatusBadRequest, "container is required")
+			return
+		}
+
+		var req ContainerExecuteRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if len(req.Steps) == 0 {
+			writeError(w, http.StatusBadRequest, "steps is required")
+			return
+		}
+		resp, err := gw.ExecuteContainerSteps(r.Context(), id, container, req)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, resp)
 	}
 }
 

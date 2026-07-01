@@ -25,6 +25,10 @@ var expCreateCmd = &cobra.Command{
 		workspaceDir, _ := cmd.Flags().GetString("workspace-dir")
 		idleTimeout, _ := cmd.Flags().GetInt("idle-timeout")
 		maxLifetime, _ := cmd.Flags().GetInt("max-lifetime")
+		privateContainers, err := privateContainersFromFlags(cmd)
+		if err != nil {
+			return err
+		}
 
 		if image == "" {
 			return usageError("--image is required")
@@ -44,6 +48,7 @@ var expCreateCmd = &cobra.Command{
 				WorkspaceDir:       workspaceDir,
 				IdleTimeoutSeconds: idleTimeout,
 				MaxLifetimeSeconds: maxLifetime,
+				PrivateContainers:  privateContainers,
 			})
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Session %d/%d failed: %v\n", i+1, count, err)
@@ -199,6 +204,7 @@ func init() {
 	expCreateCmd.Flags().String("workspace-dir", "", "Workspace directory inside each sandbox")
 	expCreateCmd.Flags().Int("idle-timeout", 0, "Idle timeout in seconds (0 uses gateway default)")
 	expCreateCmd.Flags().Int("max-lifetime", 0, "Maximum lifetime in seconds (0 uses gateway default)")
+	addPrivateContainerFlags(expCreateCmd)
 
 	expDeleteCmd.Flags().Bool("force", false, "Skip confirmation")
 

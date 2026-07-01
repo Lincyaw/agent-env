@@ -16,6 +16,7 @@ from pydantic import BaseModel
 from arl.auth import resolve_auth
 from arl.configenv import ConfigEnvSpec
 from arl.types import (
+    ContainerExecuteResponse,
     DeleteExperimentResponse,
     ErrorResponse,
     ExecuteOperationInfo,
@@ -26,6 +27,7 @@ from arl.types import (
     PoolCondition,
     PoolInfo,
     PoolLogEntry,
+    PrivateContainerSpec,
     ReplayResponse,
     ResourceRequirements,
     SessionInfo,
@@ -53,6 +55,20 @@ def _quote_file_path(path: str) -> str:
     if not normalized:
         raise ValueError("path is required")
     return quote(normalized, safe="/")
+
+
+def _serialize_private_containers(
+    private_containers: Iterable[PrivateContainerSpec | dict[str, Any]] | None,
+) -> list[dict[str, Any]] | None:
+    if private_containers is None:
+        return None
+    payload: list[dict[str, Any]] = []
+    for container in private_containers:
+        if isinstance(container, PrivateContainerSpec):
+            payload.append(container.model_dump(by_alias=True, exclude_none=True))
+        else:
+            payload.append(container)
+    return payload
 
 
 class GatewayError(Exception):
@@ -155,6 +171,7 @@ class GatewayClient:
         profile: str | None = "default",
         idle_timeout_seconds: int | None = None,
         max_lifetime_seconds: int | None = None,
+        private_containers: Iterable[PrivateContainerSpec | dict[str, Any]] | None = None,
     ) -> SessionInfo:
         if not image and not profile:
             raise ValueError("image or profile is required")
@@ -167,6 +184,9 @@ class GatewayClient:
             body["idleTimeoutSeconds"] = idle_timeout_seconds
         if max_lifetime_seconds is not None:
             body["maxLifetimeSeconds"] = max_lifetime_seconds
+        private_container_payload = _serialize_private_containers(private_containers)
+        if private_container_payload is not None:
+            body["privateContainers"] = private_container_payload
         resp = self._client.post("/v1/sessions", json=body)
         self._handle_error(resp)
         return SessionInfo.model_validate(resp.json())
@@ -216,6 +236,20 @@ class GatewayClient:
         resp = self._client.get(f"/v1/sessions/{session_id}/operations/{operation_id}")
         self._handle_error(resp)
         return ExecuteOperationInfo.model_validate(resp.json())
+
+    def execute_container(
+        self,
+        session_id: str,
+        container: str,
+        steps: list[dict[str, Any]],
+    ) -> ContainerExecuteResponse:
+        body: dict[str, Any] = {"steps": steps}
+        resp = self._client.post(
+            f"/v1/sessions/{session_id}/containers/{container}/execute",
+            json=body,
+        )
+        self._handle_error(resp)
+        return ContainerExecuteResponse.model_validate(resp.json())
 
     def _execute_sse(
         self,
@@ -451,6 +485,7 @@ class GatewayClient:
         workspace_dir: str = "/workspace",
         config_env: ConfigEnvSpec | dict[str, Any] | None = None,
         image_locality: dict[str, Any] | bool | None = None,
+        private_containers: Iterable[PrivateContainerSpec | dict[str, Any]] | None = None,
     ) -> None:
         body: dict[str, Any] = {
             "name": name,
@@ -468,6 +503,9 @@ class GatewayClient:
             body["resources"] = resources.model_dump(exclude_none=True)
         if image_locality is not None:
             body["imageLocality"] = image_locality
+        private_container_payload = _serialize_private_containers(private_containers)
+        if private_container_payload is not None:
+            body["privateContainers"] = private_container_payload
         resp = self._client.post("/v1/pools", json=body)
         self._handle_error(resp)
 
@@ -550,6 +588,7 @@ class GatewayClient:
         idle_timeout_seconds: int | None = None,
         max_lifetime_seconds: int | None = None,
         config_env: ConfigEnvSpec | dict[str, Any] | None = None,
+        private_containers: Iterable[PrivateContainerSpec | dict[str, Any]] | None = None,
     ) -> ManagedSessionInfo:
         """Create a managed session with automatic pool management.
 
@@ -586,6 +625,9 @@ class GatewayClient:
             body["idleTimeoutSeconds"] = idle_timeout_seconds
         if max_lifetime_seconds is not None:
             body["maxLifetimeSeconds"] = max_lifetime_seconds
+        private_container_payload = _serialize_private_containers(private_containers)
+        if private_container_payload is not None:
+            body["privateContainers"] = private_container_payload
         resp = self._client.post("/v1/managed/sessions", json=body)
         self._handle_error(resp)
         return ManagedSessionInfo.model_validate(resp.json())
