@@ -113,6 +113,13 @@ func TestSandboxClaimRuntimeAllocatorAllocate(t *testing.T) {
 		Namespace:   namespace,
 		SessionID:   sessionID,
 		SandboxName: sandboxName,
+		Lifecycle: RuntimeLifecycle{
+			CreatedAt:      time.Now(),
+			LastActivityAt: time.Now(),
+			IdleTimeout:    10 * time.Minute,
+			MaxLifetime:    time.Hour,
+			FinishedTTL:    5 * time.Minute,
+		},
 	})
 	if err != nil {
 		t.Fatalf("Allocate returned error: %v", err)
@@ -147,6 +154,61 @@ func TestSandboxClaimRuntimeAllocatorAllocate(t *testing.T) {
 	}
 	if len(claim.Spec.AdditionalPodMetadata.Labels) != 0 {
 		t.Fatalf("pod metadata labels = %#v, want none", claim.Spec.AdditionalPodMetadata.Labels)
+	}
+	if claim.Spec.Lifecycle == nil || claim.Spec.Lifecycle.ShutdownTime == nil {
+		t.Fatalf("claim lifecycle = %#v, want shutdownTime", claim.Spec.Lifecycle)
+	}
+	if claim.Spec.Lifecycle.ShutdownPolicy != extensionsv1beta1.ShutdownPolicyDeleteForeground {
+		t.Fatalf("shutdown policy = %q, want DeleteForeground", claim.Spec.Lifecycle.ShutdownPolicy)
+	}
+	if claim.Spec.Lifecycle.TTLSecondsAfterFinished == nil || *claim.Spec.Lifecycle.TTLSecondsAfterFinished != 300 {
+		t.Fatalf("finished TTL = %#v, want 300", claim.Spec.Lifecycle.TTLSecondsAfterFinished)
+	}
+	if got := claim.Annotations[labels.IdleTimeoutAnnotation]; got != "600" {
+		t.Fatalf("idle timeout annotation = %q, want 600", got)
+	}
+}
+
+func TestSandboxClaimRuntimeAllocatorCleansUpCreatedClaimOnTimeout(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := clientgoscheme.AddToScheme(scheme); err != nil {
+		t.Fatalf("add client-go scheme: %v", err)
+	}
+	if err := sandboxv1beta1.AddToScheme(scheme); err != nil {
+		t.Fatalf("add sandbox scheme: %v", err)
+	}
+	if err := extensionsv1beta1.AddToScheme(scheme); err != nil {
+		t.Fatalf("add sandbox extension scheme: %v", err)
+	}
+
+	namespace := "arl"
+	poolName := "small"
+	claimName := "gw-timeout"
+	k8sClient := fake.NewClientBuilder().
+		WithScheme(scheme).
+		WithObjects(&extensionsv1beta1.SandboxWarmPool{
+			ObjectMeta: metav1.ObjectMeta{Name: poolName, Namespace: namespace},
+		}).
+		Build()
+	allocator := NewSandboxClaimRuntimeAllocator(k8sClient)
+	allocator.pollInterval = time.Millisecond
+
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
+	defer cancel()
+	_, err := allocator.Allocate(ctx, RuntimeAllocateRequest{
+		PoolRef:     poolName,
+		Namespace:   namespace,
+		SessionID:   claimName,
+		SandboxName: claimName,
+	})
+	if err == nil {
+		t.Fatal("Allocate returned nil error, want timeout")
+	}
+
+	claim := &extensionsv1beta1.SandboxClaim{}
+	err = k8sClient.Get(context.Background(), types.NamespacedName{Name: claimName, Namespace: namespace}, claim)
+	if !apierrors.IsNotFound(err) {
+		t.Fatalf("created claim still exists or unexpected error: %v", err)
 	}
 }
 
@@ -207,7 +269,7 @@ func TestSandboxClaimRuntimeAllocatorTouchReturnsNotFound(t *testing.T) {
 	err := allocator.Touch(context.Background(), RuntimeAllocation{
 		Namespace: "default",
 		ClaimName: "missing-claim",
-	}, "gw-missing", time.Now())
+	}, "gw-missing", time.Now(), RuntimeLifecycle{})
 	if !apierrors.IsNotFound(err) {
 		t.Fatalf("Touch error = %v, want NotFound", err)
 	}

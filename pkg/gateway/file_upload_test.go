@@ -181,7 +181,7 @@ func (a staticRuntimeAllocator) Resolve(ctx context.Context, allocation RuntimeA
 	return &resolved, nil
 }
 
-func (a staticRuntimeAllocator) Touch(ctx context.Context, allocation RuntimeAllocation, sessionID string, at time.Time) error {
+func (a staticRuntimeAllocator) Touch(ctx context.Context, allocation RuntimeAllocation, sessionID string, at time.Time, lifecycle RuntimeLifecycle) error {
 	return nil
 }
 

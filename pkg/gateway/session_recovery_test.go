@@ -346,7 +346,7 @@ func (a *recoveryRuntimeAllocator) Resolve(ctx context.Context, allocation Runti
 	return &allocation, nil
 }
 
-func (a *recoveryRuntimeAllocator) Touch(ctx context.Context, allocation RuntimeAllocation, sessionID string, at time.Time) error {
+func (a *recoveryRuntimeAllocator) Touch(ctx context.Context, allocation RuntimeAllocation, sessionID string, at time.Time, lifecycle RuntimeLifecycle) error {
 	return nil
 }
 

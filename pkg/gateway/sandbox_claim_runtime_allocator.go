@@ -92,6 +92,7 @@ func (a *SandboxClaimRuntimeAllocator) Allocate(ctx context.Context, req Runtime
 		annotations[labels.ManagedAnnotation] = "true"
 		podAnnotations[labels.ManagedAnnotation] = "true"
 	}
+	annotateLifecycle(annotations, req.Lifecycle)
 	claim := &extensionsv1beta1.SandboxClaim{
 		ObjectMeta: metav1.ObjectMeta{
 			Name:      claimName,
@@ -103,16 +104,31 @@ func (a *SandboxClaimRuntimeAllocator) Allocate(ctx context.Context, req Runtime
 		},
 		Spec: extensionsv1beta1.SandboxClaimSpec{
 			WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: req.PoolRef},
+			Lifecycle:   sandboxClaimLifecycle(now, req.Lifecycle),
 			AdditionalPodMetadata: sandboxv1beta1.PodMetadata{
 				Annotations: podAnnotations,
 			},
 		},
 	}
 
+	createdClaim := false
 	if err := a.k8sClient.Create(ctx, claim); err != nil {
 		if !apierrors.IsAlreadyExists(err) {
 			return nil, fmt.Errorf("create sandbox claim %s/%s: %w", req.Namespace, claimName, err)
 		}
+	} else {
+		createdClaim = true
+	}
+	cleanupCreatedClaim := func(cause error) (*RuntimeAllocation, error) {
+		if createdClaim {
+			cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			_ = a.Release(cleanupCtx, RuntimeAllocation{
+				Namespace: req.Namespace,
+				ClaimName: claimName,
+			})
+		}
+		return nil, cause
 	}
 
 	ticker := time.NewTicker(a.pollInterval)
@@ -120,14 +136,14 @@ func (a *SandboxClaimRuntimeAllocator) Allocate(ctx context.Context, req Runtime
 	for {
 		latest := &extensionsv1beta1.SandboxClaim{}
 		if err := a.k8sClient.Get(ctx, types.NamespacedName{Name: claimName, Namespace: req.Namespace}, latest); err != nil {
-			return nil, fmt.Errorf("get sandbox claim %s/%s: %w", req.Namespace, claimName, err)
+			return cleanupCreatedClaim(fmt.Errorf("get sandbox claim %s/%s: %w", req.Namespace, claimName, err))
 		}
 		if got := latest.Annotations[labels.SessionAnnotation]; got != "" && got != req.SessionID {
-			return nil, fmt.Errorf("sandbox claim %s/%s is owned by session %q, not %q", req.Namespace, claimName, got, req.SessionID)
+			return cleanupCreatedClaim(fmt.Errorf("sandbox claim %s/%s is owned by session %q, not %q", req.Namespace, claimName, got, req.SessionID))
 		}
 		allocation, ready, err := a.allocationFromClaim(ctx, req.PoolRef, latest)
 		if err != nil {
-			return nil, err
+			return cleanupCreatedClaim(err)
 		}
 		if ready {
 			return allocation, nil
@@ -135,7 +151,7 @@ func (a *SandboxClaimRuntimeAllocator) Allocate(ctx context.Context, req Runtime
 
 		select {
 		case <-ctx.Done():
-			return nil, fmt.Errorf("wait for sandbox claim %s/%s ready: %w", req.Namespace, claimName, ctx.Err())
+			return cleanupCreatedClaim(fmt.Errorf("wait for sandbox claim %s/%s ready: %w", req.Namespace, claimName, ctx.Err()))
 		case <-ticker.C:
 		}
 	}
@@ -186,7 +202,7 @@ func (a *SandboxClaimRuntimeAllocator) Resolve(ctx context.Context, allocation R
 	return resolved, nil
 }
 
-func (a *SandboxClaimRuntimeAllocator) Touch(ctx context.Context, allocation RuntimeAllocation, sessionID string, at time.Time) error {
+func (a *SandboxClaimRuntimeAllocator) Touch(ctx context.Context, allocation RuntimeAllocation, sessionID string, at time.Time, lifecycle RuntimeLifecycle) error {
 	if allocation.ClaimName == "" || allocation.Namespace == "" {
 		return fmt.Errorf("session %s has incomplete sandboxclaim binding", sessionID)
 	}
@@ -207,6 +223,8 @@ func (a *SandboxClaimRuntimeAllocator) Touch(ctx context.Context, allocation Run
 		claim.Annotations = make(map[string]string)
 	}
 	claim.Annotations[labels.LastActivityAnnotation] = at.UTC().Format(time.RFC3339)
+	annotateLifecycle(claim.Annotations, lifecycle)
+	claim.Spec.Lifecycle = sandboxClaimLifecycle(at.UTC(), lifecycle)
 	if err := a.k8sClient.Patch(ctx, claim, patch); err != nil {
 		if apierrors.IsNotFound(err) {
 			return err
@@ -356,4 +374,72 @@ func runtimeDNSLabel(value string) string {
 	sum := sha256.Sum256([]byte(cleaned))
 	suffix := hex.EncodeToString(sum[:])[:10]
 	return strings.Trim(cleaned[:52], "-") + "-" + suffix
+}
+
+func annotateLifecycle(annotations map[string]string, lifecycle RuntimeLifecycle) {
+	if annotations == nil {
+		return
+	}
+	if lifecycle.IdleTimeout > 0 {
+		annotations[labels.IdleTimeoutAnnotation] = durationSecondsString(lifecycle.IdleTimeout)
+	}
+	if lifecycle.MaxLifetime > 0 {
+		annotations[labels.MaxLifetimeAnnotation] = durationSecondsString(lifecycle.MaxLifetime)
+	}
+	if lifecycle.FinishedTTL > 0 {
+		annotations[labels.FinishedTTLAnnotation] = durationSecondsString(lifecycle.FinishedTTL)
+	}
+}
+
+func sandboxClaimLifecycle(now time.Time, lifecycle RuntimeLifecycle) *extensionsv1beta1.Lifecycle {
+	shutdownAt := runtimeShutdownTime(now, lifecycle)
+	var ttl *int32
+	if lifecycle.FinishedTTL > 0 {
+		seconds := int32(lifecycle.FinishedTTL.Seconds())
+		if seconds < 0 {
+			seconds = 0
+		}
+		ttl = &seconds
+	}
+	if shutdownAt == nil && ttl == nil {
+		return nil
+	}
+	lc := &extensionsv1beta1.Lifecycle{
+		TTLSecondsAfterFinished: ttl,
+		ShutdownPolicy:          extensionsv1beta1.ShutdownPolicyDeleteForeground,
+	}
+	if shutdownAt != nil {
+		lc.ShutdownTime = &metav1.Time{Time: shutdownAt.UTC()}
+	}
+	return lc
+}
+
+func runtimeShutdownTime(now time.Time, lifecycle RuntimeLifecycle) *time.Time {
+	var deadline *time.Time
+	createdAt := lifecycle.CreatedAt
+	if createdAt.IsZero() {
+		createdAt = now
+	}
+	lastActivityAt := lifecycle.LastActivityAt
+	if lastActivityAt.IsZero() {
+		lastActivityAt = now
+	}
+	if lifecycle.IdleTimeout > 0 {
+		t := lastActivityAt.Add(lifecycle.IdleTimeout)
+		deadline = &t
+	}
+	if lifecycle.MaxLifetime > 0 {
+		t := createdAt.Add(lifecycle.MaxLifetime)
+		if deadline == nil || t.Before(*deadline) {
+			deadline = &t
+		}
+	}
+	return deadline
+}
+
+func durationSecondsString(d time.Duration) string {
+	if d <= 0 {
+		return ""
+	}
+	return fmt.Sprintf("%d", int64(d.Round(time.Second)/time.Second))
 }

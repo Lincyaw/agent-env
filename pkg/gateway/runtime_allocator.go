@@ -27,6 +27,18 @@ type RuntimeAllocateRequest struct {
 	OwnerKeyHash string
 	Managed      bool
 	ExperimentID string
+	Lifecycle    RuntimeLifecycle
+}
+
+// RuntimeLifecycle describes the claim-level lifecycle mirror for a session.
+// Redis/session storage is the hot path for activity; this low-frequency
+// lifecycle is the Kubernetes-side fallback when the gateway is unavailable.
+type RuntimeLifecycle struct {
+	CreatedAt      time.Time
+	LastActivityAt time.Time
+	IdleTimeout    time.Duration
+	MaxLifetime    time.Duration
+	FinishedTTL    time.Duration
 }
 
 // AllocatorPoolStats holds diagnostic statistics for a pool allocator.
@@ -42,6 +54,6 @@ type RuntimeAllocator interface {
 	Allocate(ctx context.Context, req RuntimeAllocateRequest) (*RuntimeAllocation, error)
 	Release(ctx context.Context, allocation RuntimeAllocation) error
 	Resolve(ctx context.Context, allocation RuntimeAllocation, sessionID string) (*RuntimeAllocation, error)
-	Touch(ctx context.Context, allocation RuntimeAllocation, sessionID string, at time.Time) error
+	Touch(ctx context.Context, allocation RuntimeAllocation, sessionID string, at time.Time, lifecycle RuntimeLifecycle) error
 	DiagnosticStats() map[string]AllocatorPoolStats
 }

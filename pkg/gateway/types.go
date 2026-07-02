@@ -143,6 +143,7 @@ type CreatePoolRequest struct {
 	WorkspaceDir      string                       `json:"workspaceDir,omitempty"`
 	ImageLocality     json.RawMessage              `json:"imageLocality,omitempty"`
 	PrivateContainers []PrivateContainerSpec       `json:"privateContainers,omitempty"`
+	Managed           bool                         `json:"-"`
 }
 
 // ScalePoolRequest is the body for PATCH /v1/pools/{name}

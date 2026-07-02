@@ -96,7 +96,7 @@ func (a *operationRuntimeAllocator) Resolve(ctx context.Context, allocation Runt
 	return &allocation, nil
 }
 
-func (a *operationRuntimeAllocator) Touch(ctx context.Context, allocation RuntimeAllocation, sessionID string, at time.Time) error {
+func (a *operationRuntimeAllocator) Touch(ctx context.Context, allocation RuntimeAllocation, sessionID string, at time.Time, lifecycle RuntimeLifecycle) error {
 	return nil
 }
 

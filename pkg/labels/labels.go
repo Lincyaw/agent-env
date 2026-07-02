@@ -31,6 +31,22 @@ const (
 	// least-recently-used idle pods first.
 	LastReleasedAnnotation = "arl.infra.io/last-released"
 
+	// IdleTimeoutAnnotation records the per-session idle timeout in seconds.
+	// It is stored on SandboxClaims as low-frequency lifecycle metadata; Redis
+	// remains the hot-path source for frequent activity updates.
+	IdleTimeoutAnnotation = "arl.infra.io/idle-timeout-seconds"
+
+	// MaxLifetimeAnnotation records the per-session maximum lifetime in seconds.
+	MaxLifetimeAnnotation = "arl.infra.io/max-lifetime-seconds"
+
+	// FinishedTTLAnnotation records how long terminal runtimes should be kept
+	// before they are eligible for deletion.
+	FinishedTTLAnnotation = "arl.infra.io/finished-ttl-seconds"
+
+	// ManagedPoolAnnotation marks gateway-created image-backed pools that may
+	// be deleted automatically once no session or claim references them.
+	ManagedPoolAnnotation = "arl.infra.io/managed-pool"
+
 	RoleLabelKey = "arl.infra.io/role"
 	RolePrePull  = "pre-pull"
 )

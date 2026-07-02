@@ -222,35 +222,36 @@ func (g *Gateway) resourceIntentFromCreateSession(ctx context.Context, req Creat
 	}
 }
 
-func (g *Gateway) ensureImageBackedSessionPool(ctx context.Context, req CreateSessionRequest, namespace string) (CreateSessionRequest, error) {
+func (g *Gateway) ensureImageBackedSessionPool(ctx context.Context, req CreateSessionRequest, namespace string) (CreateSessionRequest, string, error) {
 	req.Image = normalizedOptionalImage(req.Image)
 	if req.Image == "" {
 		if req.Profile != "" {
 			req.Profile = normalizeProfile(req.Profile)
 		}
-		return req, nil
+		return req, "", nil
 	}
 	req.Profile = normalizeProfile(req.Profile)
 	if req.PoolName != "" {
-		return req, nil
+		return req, "", nil
 	}
 
 	snapshots, err := g.snapshotPools(ctx, namespace)
 	if err != nil {
-		return req, err
+		return req, "", err
 	}
 	if len(req.PrivateContainers) == 0 {
 		for _, pool := range snapshots {
 			if pool.Namespace == namespace && pool.Profile == req.Profile && pool.Image == req.Image {
-				return req, nil
+				return req, "", nil
 			}
 		}
 	}
 
 	poolName, err := managedPoolName(req.Image, namespace, req.Profile, nil, req.PrivateContainers)
 	if err != nil {
-		return req, err
+		return req, "", err
 	}
+	createdPool := ""
 	if err := g.CreatePool(ctx, CreatePoolRequest{
 		Name:              poolName,
 		Image:             req.Image,
@@ -258,11 +259,14 @@ func (g *Gateway) ensureImageBackedSessionPool(ctx context.Context, req CreateSe
 		Replicas:          1,
 		Namespace:         namespace,
 		PrivateContainers: req.PrivateContainers,
+		Managed:           true,
 	}); err != nil && !k8serrors.IsAlreadyExists(err) {
-		return req, fmt.Errorf("ensure sandbox pool for image %q profile %q: %w", req.Image, req.Profile, err)
+		return req, "", fmt.Errorf("ensure sandbox pool for image %q profile %q: %w", req.Image, req.Profile, err)
+	} else if err == nil {
+		createdPool = poolName
 	}
 	req.PoolName = poolName
-	return req, nil
+	return req, createdPool, nil
 }
 
 func (g *Gateway) planSessionAllocation(ctx context.Context, intent ResourceIntent) (PoolSelection, AdmissionDecision, error) {

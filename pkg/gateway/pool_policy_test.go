@@ -352,7 +352,7 @@ func (a *recordingRuntimeAllocator) Resolve(ctx context.Context, allocation Runt
 	return &resolved, nil
 }
 
-func (a *recordingRuntimeAllocator) Touch(ctx context.Context, allocation RuntimeAllocation, sessionID string, at time.Time) error {
+func (a *recordingRuntimeAllocator) Touch(ctx context.Context, allocation RuntimeAllocation, sessionID string, at time.Time, lifecycle RuntimeLifecycle) error {
 	return nil
 }
 
