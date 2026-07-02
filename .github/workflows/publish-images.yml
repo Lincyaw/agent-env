@@ -2,17 +2,15 @@ name: Publish Images
 
 on:
   push:
+    branches:
+      - "**"
     tags:
       - "v[0-9]+.[0-9]+.[0-9]+*"
   workflow_dispatch:
     inputs:
       tag:
-        description: "Image tag to publish (e.g., v0.1.0 or 0.1.0)"
-        required: true
-      registry:
-        description: "Image registry/repository prefix"
-        required: true
-        default: "docker.io/opspai"
+        description: "Optional image tag override (e.g., v0.1.0, 0.1.0, or test-tag)"
+        required: false
 
 permissions:
   contents: read
@@ -35,72 +33,103 @@ jobs:
           - image: arl-image-locality-scheduler
             dockerfile: Dockerfile.image-locality-scheduler
 
-    env:
-      DEFAULT_REGISTRY: docker.io/opspai
-
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Resolve release metadata
+      - name: Resolve image metadata
         id: meta
+        env:
+          DOCKERHUB_IMAGE_PREFIX: docker.io/opspai
+          PAIR_IMAGE_PREFIX: pair-diag-cn-guangzhou.cr.volces.com/pair
+          INPUT_TAG: ${{ github.event.inputs.tag || '' }}
+          REF_TYPE: ${{ github.ref_type }}
         run: |
           set -euo pipefail
 
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            RAW_TAG="${{ github.event.inputs.tag }}"
-            REGISTRY="${{ github.event.inputs.registry }}"
-          else
+          SHORT_SHA="${GITHUB_SHA::7}"
+          declare -a IMAGE_TAGS
+
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ] && [ -n "${INPUT_TAG}" ]; then
+            RAW_TAG="${INPUT_TAG}"
+            VERSION="${RAW_TAG#v}"
+            if [[ "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+              IMAGE_TAGS=("v${VERSION}" "${VERSION}")
+            elif [[ "${RAW_TAG}" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
+              IMAGE_TAGS=("${RAW_TAG}")
+            else
+              echo "Invalid image tag: ${RAW_TAG}" >&2
+              exit 1
+            fi
+          elif [ "${REF_TYPE}" = "tag" ]; then
             RAW_TAG="${GITHUB_REF_NAME}"
-            REGISTRY="${DEFAULT_REGISTRY}"
-          fi
-
-          VERSION="${RAW_TAG#v}"
-          TAG="v${VERSION}"
-          IMAGE_PREFIX="${REGISTRY%/}"
-          REGISTRY_HOST="${IMAGE_PREFIX%%/*}"
-
-          if [[ ! "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
-            echo "Invalid release version: ${RAW_TAG}" >&2
-            exit 1
+            VERSION="${RAW_TAG#v}"
+            if [[ ! "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+              echo "Invalid release version: ${RAW_TAG}" >&2
+              exit 1
+            fi
+            IMAGE_TAGS=("v${VERSION}" "${VERSION}")
+          else
+            SAFE_REF="$(printf '%s' "${GITHUB_REF_NAME}" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9_.-]+/-/g; s/^-+//; s/-+$//')"
+            SAFE_REF="${SAFE_REF:0:80}"
+            SAFE_REF="${SAFE_REF:-branch}"
+            IMAGE_TAGS=("${SAFE_REF}-${SHORT_SHA}" "${SHORT_SHA}")
           fi
 
           {
-            echo "tag=${TAG}"
-            echo "version=${VERSION}"
-            echo "image_prefix=${IMAGE_PREFIX}"
-            echo "registry_host=${REGISTRY_HOST}"
+            echo "tags<<EOF"
+            for prefix in "${DOCKERHUB_IMAGE_PREFIX}" "${PAIR_IMAGE_PREFIX}"; do
+              for tag in "${IMAGE_TAGS[@]}"; do
+                echo "${prefix}/${{ matrix.image }}:${tag}"
+              done
+            done
+            echo "EOF"
+            echo "image_tags=${IMAGE_TAGS[*]}"
+            echo "dockerhub_image_prefix=${DOCKERHUB_IMAGE_PREFIX}"
+            echo "pair_image_prefix=${PAIR_IMAGE_PREFIX}"
           } >> "${GITHUB_OUTPUT}"
 
-          echo "Publishing ${IMAGE_PREFIX}/${{ matrix.image }}:${TAG}"
-          echo "Publishing ${IMAGE_PREFIX}/${{ matrix.image }}:${VERSION}"
+          echo "Publishing ${{ matrix.image }} with tags: ${IMAGE_TAGS[*]}"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
       - name: Validate registry credentials
-        if: ${{ steps.meta.outputs.registry_host != 'ghcr.io' }}
         env:
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
           DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
           DOCKERHUB_PASSWORD: ${{ secrets.DOCKERHUB_PASSWORD }}
+          PAIR_REGISTRY_USERNAME: ${{ secrets.PAIR_REGISTRY_USERNAME }}
+          PAIR_REGISTRY_PASSWORD: ${{ secrets.PAIR_REGISTRY_PASSWORD }}
           REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
           REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
         run: |
-          USERNAME="${DOCKERHUB_USERNAME:-${REGISTRY_USERNAME}}"
-          PASSWORD="${DOCKERHUB_TOKEN:-${DOCKERHUB_PASSWORD:-${REGISTRY_PASSWORD}}}"
+          DOCKERHUB_SECRET="${DOCKERHUB_TOKEN:-${DOCKERHUB_PASSWORD:-}}"
+          PAIR_USERNAME="${PAIR_REGISTRY_USERNAME:-${REGISTRY_USERNAME:-}}"
+          PAIR_PASSWORD="${PAIR_REGISTRY_PASSWORD:-${REGISTRY_PASSWORD:-}}"
 
-          if [ -z "${USERNAME}" ] || [ -z "${PASSWORD}" ]; then
-            echo "DOCKERHUB_USERNAME plus DOCKERHUB_TOKEN, or REGISTRY_USERNAME plus REGISTRY_PASSWORD, are required for ${{ steps.meta.outputs.registry_host }}" >&2
+          if [ -z "${DOCKERHUB_USERNAME}" ] || [ -z "${DOCKERHUB_SECRET}" ]; then
+            echo "DOCKERHUB_USERNAME plus DOCKERHUB_TOKEN or DOCKERHUB_PASSWORD are required" >&2
+            exit 1
+          fi
+          if [ -z "${PAIR_USERNAME}" ] || [ -z "${PAIR_PASSWORD}" ]; then
+            echo "PAIR_REGISTRY_USERNAME plus PAIR_REGISTRY_PASSWORD, or REGISTRY_USERNAME plus REGISTRY_PASSWORD, are required" >&2
             exit 1
           fi
 
-      - name: Log in to registry
+      - name: Log in to Docker Hub
         uses: docker/login-action@v3
         with:
-          registry: ${{ steps.meta.outputs.registry_host }}
-          username: ${{ secrets.DOCKERHUB_USERNAME || secrets.REGISTRY_USERNAME || github.actor }}
-          password: ${{ secrets.DOCKERHUB_TOKEN || secrets.DOCKERHUB_PASSWORD || secrets.REGISTRY_PASSWORD || github.token }}
+          registry: docker.io
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN || secrets.DOCKERHUB_PASSWORD }}
+
+      - name: Log in to pair registry
+        uses: docker/login-action@v3
+        with:
+          registry: pair-diag-cn-guangzhou.cr.volces.com
+          username: ${{ secrets.PAIR_REGISTRY_USERNAME || secrets.REGISTRY_USERNAME }}
+          password: ${{ secrets.PAIR_REGISTRY_PASSWORD || secrets.REGISTRY_PASSWORD }}
 
       - name: Build and push image
         uses: docker/build-push-action@v6
@@ -110,17 +139,15 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: |
-            ${{ steps.meta.outputs.image_prefix }}/${{ matrix.image }}:${{ steps.meta.outputs.tag }}
-            ${{ steps.meta.outputs.image_prefix }}/${{ matrix.image }}:${{ steps.meta.outputs.version }}
+            ${{ steps.meta.outputs.tags }}
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
-            org.opencontainers.image.version=${{ steps.meta.outputs.version }}
+            org.opencontainers.image.version=${{ steps.meta.outputs.image_tags }}
 
       - name: Summarize published image
         run: |
           {
             echo "### Published image"
-            echo "- ${{ steps.meta.outputs.image_prefix }}/${{ matrix.image }}:${{ steps.meta.outputs.tag }}"
-            echo "- ${{ steps.meta.outputs.image_prefix }}/${{ matrix.image }}:${{ steps.meta.outputs.version }}"
+            printf '%s\n' '${{ steps.meta.outputs.tags }}' | sed 's/^/- /'
           } >> "${GITHUB_STEP_SUMMARY}"
