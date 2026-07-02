@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-07-02
+
+### Added
+- Gateway runtime cleanup for sandbox claims, managed pools, and templates when
+  sessions fail allocation or lose their runtime binding.
+
+### Changed
+- Release version aligned across Python SDK, Helm chart, CLI artifacts, and
+  gateway/container images.
+
 ## [0.15.6] - 2026-06-29
 
 ### Added
@@ -93,6 +103,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - MyPy for type checking
 - Hatchling build backend
 
+[0.17.0]: https://github.com/Lincyaw/agent-env/releases/tag/v0.17.0
 [0.15.6]: https://github.com/Lincyaw/agent-env/releases/tag/v0.15.6
 [0.15.5]: https://github.com/Lincyaw/agent-env/releases/tag/v0.15.5
 [0.14.1]: https://github.com/Lincyaw/agent-env/releases/tag/v0.14.1

@@ -1,15 +1,18 @@
-# arl-env Python SDK 0.15.6 Release Notes
+# arl-env Python SDK 0.17.0 Release Notes
 
-Release date: 2026-06-29
+Release date: 2026-07-02
 
-This release updates the Python SDK for the sandbox-backed gateway runtime. The
-main user-facing change is that sessions are now selected by executor `image`
-and an optional pool-selection `profile` instead of the older `pool_ref` field.
-It also adds operation recovery for long executions, binary file streaming,
-session and pool logs, and broader gateway endpoint coverage.
+This release aligns the Python SDK, gateway images, CLI artifacts, and Helm
+chart on version `0.17.0`. It includes the sandbox runtime lifecycle cleanup
+fixes deployed to `arl2`, including automatic cleanup of managed pools and
+templates after allocation failures, runtime loss, and image pull failures.
 
 ## Highlights
 
+- Managed image-backed pools are cleaned when session allocation fails.
+- Runtime-loss cleanup now removes unused managed pools and templates.
+- `ImagePullBackOff` and `ErrImagePull` failures do not leave managed
+  pool/template/claim/sandbox/pod resources behind.
 - Session creation now uses `image` and `profile`.
 - Non-streaming `execute()` calls are idempotent through `operationID`.
 - `GatewayOperationTimeout` exposes the operation ID after an HTTP timeout.
