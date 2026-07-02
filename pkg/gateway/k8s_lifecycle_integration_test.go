@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Lincyaw/agent-env/pkg/labels"
+	"github.com/Lincyaw/agent-env/pkg/scheduling"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -22,11 +23,11 @@ import (
 func TestK8sLifecycleIntegration(t *testing.T) {
 	k8sClient, namespace := setupK8sLifecycleIntegration(t)
 
-	t.Run("DeletePoolCascadesSessionClaimPoolAndTemplate", func(t *testing.T) {
+	t.Run("DeletePoolDrainsSessionsClaimsAndStopsPool", func(t *testing.T) {
 		ctx := context.Background()
-		poolName := "pool-cascade"
-		claimName := "claim-cascade"
-		sessionID := "session-cascade"
+		poolName := "pool-drain"
+		claimName := "claim-drain"
+		sessionID := "session-drain"
 		gw := newIntegrationGateway(k8sClient, namespace)
 
 		if err := gw.CreatePool(ctx, CreatePoolRequest{
@@ -64,6 +65,28 @@ func TestK8sLifecycleIntegration(t *testing.T) {
 
 		assertActiveSessionGone(t, gw.store, sessionID, "pool_deleted")
 		assertK8sNotFoundEventually(t, k8sClient, namespace, claimName, &extensionsv1beta1.SandboxClaim{})
+		assertK8sPoolStopped(t, k8sClient, namespace, poolName)
+		assertK8sExists(t, k8sClient, namespace, sandboxTemplateName(poolName), &extensionsv1beta1.SandboxTemplate{})
+	})
+
+	t.Run("DestroyPoolDeletesStoppedPoolAndOwnedTemplate", func(t *testing.T) {
+		ctx := context.Background()
+		poolName := "pool-destroy"
+		gw := newIntegrationGateway(k8sClient, namespace)
+
+		if err := gw.CreatePool(ctx, CreatePoolRequest{
+			Name:      poolName,
+			Namespace: namespace,
+			Image:     "busybox:1.36",
+			Replicas:  0,
+		}); err != nil {
+			t.Fatalf("CreatePool returned error: %v", err)
+		}
+
+		if err := gw.DestroyPool(ctx, poolName, namespace); err != nil {
+			t.Fatalf("DestroyPool returned error: %v", err)
+		}
+
 		assertK8sNotFoundEventually(t, k8sClient, namespace, poolName, &extensionsv1beta1.SandboxWarmPool{})
 		assertK8sNotFoundEventually(t, k8sClient, namespace, sandboxTemplateName(poolName), &extensionsv1beta1.SandboxTemplate{})
 	})
@@ -100,7 +123,7 @@ func TestK8sLifecycleIntegration(t *testing.T) {
 		assertK8sExists(t, k8sClient, namespace, poolName, &extensionsv1beta1.SandboxWarmPool{})
 	})
 
-	t.Run("DeleteExperimentCleansUnusedManagedPool", func(t *testing.T) {
+	t.Run("DeleteExperimentStopsUnusedManagedPool", func(t *testing.T) {
 		ctx := context.Background()
 		poolName := "managed-exp-clean"
 		claimName := "claim-exp-clean"
@@ -128,8 +151,8 @@ func TestK8sLifecycleIntegration(t *testing.T) {
 		}
 
 		assertK8sNotFoundEventually(t, k8sClient, namespace, claimName, &extensionsv1beta1.SandboxClaim{})
-		assertK8sNotFoundEventually(t, k8sClient, namespace, poolName, &extensionsv1beta1.SandboxWarmPool{})
-		assertK8sNotFoundEventually(t, k8sClient, namespace, sandboxTemplateName(poolName), &extensionsv1beta1.SandboxTemplate{})
+		assertK8sPoolStopped(t, k8sClient, namespace, poolName)
+		assertK8sExists(t, k8sClient, namespace, sandboxTemplateName(poolName), &extensionsv1beta1.SandboxTemplate{})
 	})
 
 	t.Run("DeleteExperimentKeepsManagedPoolStillInUse", func(t *testing.T) {
@@ -318,5 +341,20 @@ func assertK8sExists(t *testing.T, k8sClient client.Client, namespace, name stri
 	t.Helper()
 	if err := k8sClient.Get(context.Background(), types.NamespacedName{Name: name, Namespace: namespace}, obj); err != nil {
 		t.Fatalf("expected %T %s/%s to exist: %v", obj, namespace, name, err)
+	}
+}
+
+func assertK8sPoolStopped(t *testing.T, k8sClient client.Client, namespace, name string) {
+	t.Helper()
+	pool := &extensionsv1beta1.SandboxWarmPool{}
+	assertK8sExists(t, k8sClient, namespace, name, pool)
+	if got := desiredSandboxWarmPoolReplicas(pool); got != 0 {
+		t.Fatalf("pool %s/%s replicas = %d, want 0", namespace, name, got)
+	}
+	if got := pool.Annotations[labels.PoolStateAnnotation]; got != labels.PoolStateStopped {
+		t.Fatalf("pool %s/%s state = %q, want %q", namespace, name, got, labels.PoolStateStopped)
+	}
+	if got := pool.Annotations[scheduling.PoolAutoscaleAnnotation]; got != "false" {
+		t.Fatalf("pool %s/%s autoscale annotation = %q, want false", namespace, name, got)
 	}
 }

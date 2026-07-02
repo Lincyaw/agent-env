@@ -248,8 +248,8 @@ func TestSandboxClaimRuntimeAllocatorDiagnosticStats(t *testing.T) {
 
 	stats := NewSandboxClaimRuntimeAllocator(k8sClient).DiagnosticStats()
 	got := stats["default/code"]
-	if got.IdleCount != 2 {
-		t.Fatalf("IdleCount = %d, want 2", got.IdleCount)
+	if got.IdleCount != 3 {
+		t.Fatalf("IdleCount = %d, want 3", got.IdleCount)
 	}
 }
 

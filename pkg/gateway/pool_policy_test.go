@@ -12,6 +12,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	sandboxv1beta1 "sigs.k8s.io/agent-sandbox/api/v1beta1"
 	extensionsv1beta1 "sigs.k8s.io/agent-sandbox/extensions/api/v1beta1"
+	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 )
 
@@ -55,32 +56,29 @@ func TestDefaultPoolSelectorChoosesProfileWithMostWarmCapacity(t *testing.T) {
 	if selection.PoolName != "code-b" {
 		t.Fatalf("PoolName = %q, want code-b", selection.PoolName)
 	}
-	if selection.Pool.WarmAvailable() != 2 {
-		t.Fatalf("WarmAvailable = %d, want 2", selection.Pool.WarmAvailable())
+	if selection.Pool.WarmAvailable() != 3 {
+		t.Fatalf("WarmAvailable = %d, want 3", selection.Pool.WarmAvailable())
 	}
 }
 
-func TestDefaultAdmissionControllerPrefersWarmAndAllowsColdFallback(t *testing.T) {
+func TestDefaultAdmissionControllerRequiresWarmCapacityByDefault(t *testing.T) {
 	admission := NewDefaultAdmissionController()
 
-	warm, err := admission.Admit(context.Background(), ResourceIntent{ColdStartAllowed: true}, PoolSelection{
+	warm, err := admission.Admit(context.Background(), ResourceIntent{}, PoolSelection{
 		Pool: PoolSnapshot{ReadyReplicas: 2, AllocatedReplicas: 1},
 	})
 	if err != nil {
 		t.Fatalf("warm Admit returned error: %v", err)
 	}
-	if !warm.Admitted || warm.ColdStartExpected {
+	if !warm.Admitted {
 		t.Fatalf("warm decision = %#v, want admitted warm path", warm)
 	}
 
-	cold, err := admission.Admit(context.Background(), ResourceIntent{ColdStartAllowed: true}, PoolSelection{
-		Pool: PoolSnapshot{ReadyReplicas: 1, AllocatedReplicas: 1},
+	_, err = admission.Admit(context.Background(), ResourceIntent{}, PoolSelection{
+		Pool: PoolSnapshot{ReadyReplicas: 0},
 	})
-	if err != nil {
-		t.Fatalf("cold Admit returned error: %v", err)
-	}
-	if !cold.Admitted || !cold.ColdStartExpected {
-		t.Fatalf("cold decision = %#v, want admitted cold fallback", cold)
+	if !errors.Is(err, ErrPoolAtCapacity) {
+		t.Fatalf("empty-capacity Admit error = %v, want ErrPoolAtCapacity", err)
 	}
 }
 
@@ -114,14 +112,14 @@ func TestSnapshotPoolsIncludesProfileImageAndClaims(t *testing.T) {
 	if got.AllocatedReplicas != 1 {
 		t.Fatalf("AllocatedReplicas = %d, want 1", got.AllocatedReplicas)
 	}
-	if got.WarmAvailable() != 1 {
-		t.Fatalf("WarmAvailable = %d, want 1", got.WarmAvailable())
+	if got.WarmAvailable() != 2 {
+		t.Fatalf("WarmAvailable = %d, want 2", got.WarmAvailable())
 	}
 }
 
 func TestPlanSessionAllocationQueuesThenRejectsWhenWarmCapacityDoesNotFree(t *testing.T) {
 	scheme := newGatewayTestScheme(t)
-	pool := testSandboxWarmPool("code", "default", "code-template", 1, 1, "code")
+	pool := testSandboxWarmPool("code", "default", "code-template", 1, 0, "code")
 	template := testSandboxTemplate("code-template", "default", "python:3.12", "code")
 	claim := &extensionsv1beta1.SandboxClaim{
 		ObjectMeta: metav1.ObjectMeta{Name: "claim-1", Namespace: "default"},
@@ -131,15 +129,13 @@ func TestPlanSessionAllocationQueuesThenRejectsWhenWarmCapacityDoesNotFree(t *te
 	}
 	k8sClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(pool, template, claim).Build()
 	gw := New(k8sClient, &recordingRuntimeAllocator{}, nil, nil, nil, GatewayConfig{
-		AdmissionDisableColdStart:  true,
 		AdmissionQueueTimeout:      time.Millisecond,
 		AdmissionQueuePollInterval: time.Millisecond,
 	}, NewMemoryStore())
 
 	_, _, err := gw.planSessionAllocation(context.Background(), ResourceIntent{
-		Scope:            RequestScope{Namespace: "default"},
-		Profile:          "code",
-		ColdStartAllowed: false,
+		Scope:   RequestScope{Namespace: "default"},
+		Profile: "code",
 	})
 	if !errors.Is(err, ErrPoolAtCapacity) {
 		t.Fatalf("planSessionAllocation error = %v, want ErrPoolAtCapacity", err)
@@ -180,42 +176,36 @@ func TestCreateSessionUsesProfilePolicySelection(t *testing.T) {
 	}
 }
 
-func TestCreateSessionWithImageEnsuresProfiledPool(t *testing.T) {
+func TestEnsureImageBackedSessionPoolCreatesProfiledPool(t *testing.T) {
 	scheme := newGatewayTestScheme(t)
 	k8sClient := fake.NewClientBuilder().WithScheme(scheme).Build()
-	allocator := &recordingRuntimeAllocator{
-		allocation: RuntimeAllocation{
-			Backend:     runtimeBackendSandboxClaim,
-			Namespace:   "default",
-			PodName:     "pod-1",
-			PodIP:       "10.0.0.1",
-			ClaimName:   "claim-1",
-			SandboxName: "sandbox-1",
-		},
-	}
-	gw := New(k8sClient, allocator, nil, nil, nil, GatewayConfig{GRPCAuthToken: "token"}, NewMemoryStore())
+	gw := New(k8sClient, &recordingRuntimeAllocator{}, nil, nil, nil, GatewayConfig{GRPCAuthToken: "token"}, NewMemoryStore())
 
-	info, err := gw.CreateSession(context.Background(), CreateSessionRequest{
+	req, createdPool, err := gw.ensureImageBackedSessionPool(context.Background(), CreateSessionRequest{
 		Namespace: "default",
 		Image:     "docker.io/library/python:3.12",
 		Profile:   "code",
-	})
+	}, "default")
 	if err != nil {
-		t.Fatalf("CreateSession returned error: %v", err)
+		t.Fatalf("ensureImageBackedSessionPool returned error: %v", err)
 	}
 
 	wantPool, err := managedPoolName("python:3.12", "default", "code", nil, nil)
 	if err != nil {
 		t.Fatalf("managedPoolName returned error: %v", err)
 	}
-	if allocator.lastRequest.PoolRef != wantPool {
-		t.Fatalf("allocator PoolRef = %q, want %q", allocator.lastRequest.PoolRef, wantPool)
+	if req.PoolName != wantPool {
+		t.Fatalf("PoolName = %q, want %q", req.PoolName, wantPool)
 	}
-	if info.Image != "python:3.12" {
-		t.Fatalf("Image = %q, want python:3.12", info.Image)
+	if createdPool != wantPool {
+		t.Fatalf("createdPool = %q, want %q", createdPool, wantPool)
 	}
-	if info.Profile != "code" {
-		t.Fatalf("Profile = %q, want code", info.Profile)
+	pool := &extensionsv1beta1.SandboxWarmPool{}
+	if err := k8sClient.Get(context.Background(), client.ObjectKey{Name: wantPool, Namespace: "default"}, pool); err != nil {
+		t.Fatalf("created pool get error: %v", err)
+	}
+	if pool.Annotations[poolProfileAnnotation] != "code" {
+		t.Fatalf("pool profile annotation = %q, want code", pool.Annotations[poolProfileAnnotation])
 	}
 }
 

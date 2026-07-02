@@ -30,7 +30,7 @@ Usage:
     # Limit number of pools (for testing)
     python scripts/batch_prefetch.py --limit 5
 
-    # Delete all pools instead of creating
+    # Drain and stop all pools instead of creating
     python scripts/batch_prefetch.py --delete
 """
 
@@ -366,7 +366,7 @@ def main():
     parser.add_argument(
         "--delete",
         action="store_true",
-        help="Delete all matching pools instead of creating them",
+        help="Drain and stop all matching pools instead of creating them",
     )
     parser.add_argument(
         "--create-retries",
@@ -465,25 +465,25 @@ def main():
         return
 
     # --- Import ARL (only needed for non-dry-run) ---
-    # --- Delete mode ---
+    # --- Drain/stop mode ---
     if args.delete:
         _lock = threading.Lock()
-        counters = {"deleted": 0, "skipped": 0, "failed": 0}
+        counters = {"stopped": 0, "skipped": 0, "failed": 0}
 
         def _delete_one(pool: dict[str, str]) -> None:
             mgr = WarmPoolManager(gateway_url=args.gateway)
             try:
                 mgr.delete_warmpool(pool["name"])
                 with _lock:
-                    counters["deleted"] += 1
-                logger.info(f"Deleted: {pool['name']}")
+                    counters["stopped"] += 1
+                logger.info(f"Stopped: {pool['name']}")
             except GatewayError as e:
                 with _lock:
                     if e.status_code == 404:
                         counters["skipped"] += 1
                     else:
                         counters["failed"] += 1
-                        logger.error(f"Failed to delete {pool['name']}: {e}")
+                        logger.error(f"Failed to stop {pool['name']}: {e}")
             finally:
                 mgr.close()
 
@@ -491,7 +491,7 @@ def main():
             list(executor.map(_delete_one, pools))
 
         logger.info(
-            f"Delete done: {counters['deleted']} deleted, "
+            f"Stop done: {counters['stopped']} stopped, "
             f"{counters['skipped']} not found, {counters['failed']} failed"
         )
         return

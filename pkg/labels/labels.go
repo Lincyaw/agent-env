@@ -44,8 +44,14 @@ const (
 	FinishedTTLAnnotation = "arl.infra.io/finished-ttl-seconds"
 
 	// ManagedPoolAnnotation marks gateway-created image-backed pools that may
-	// be deleted automatically once no session or claim references them.
+	// be stopped automatically once no session or claim references them.
 	ManagedPoolAnnotation = "arl.infra.io/managed-pool"
+
+	// PoolStateAnnotation records the ARL lifecycle state for a pool.
+	PoolStateAnnotation = "arl.infra.io/pool-state"
+	PoolStateRunning    = "running"
+	PoolStateDraining   = "draining"
+	PoolStateStopped    = "stopped"
 
 	RoleLabelKey = "arl.infra.io/role"
 	RolePrePull  = "pre-pull"

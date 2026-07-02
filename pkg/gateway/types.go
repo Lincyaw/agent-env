@@ -226,6 +226,7 @@ type PoolInfo struct {
 	Replicas          int32           `json:"replicas"`
 	ReadyReplicas     int32           `json:"readyReplicas"`
 	AllocatedReplicas int32           `json:"allocatedReplicas"`
+	State             string          `json:"state,omitempty"`
 	CreatedAt         time.Time       `json:"createdAt,omitempty"`
 	Conditions        []PoolCondition `json:"conditions,omitempty"`
 }

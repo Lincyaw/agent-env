@@ -2,6 +2,27 @@
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-07-03
+
+### Added
+- Add explicit WarmPool destroy support through `arl pool destroy`, the gateway
+  `/v1/pools/{name}/destroy` endpoint, and Python SDK helpers.
+- Report pool lifecycle state in CLI and SDK pool responses.
+
+### Changed
+- Route all session allocation through a matching WarmPool. When capacity is
+  empty, the gateway queues the request, scales the selected WarmPool up, and
+  waits for ready capacity before assigning a claim.
+- Change WarmPool delete semantics to drain and stop: active sessions and
+  pool-bound claims are removed, then the WarmPool is scaled to zero and kept
+  for later scale-up.
+- Stop managed pools during cleanup instead of deleting WarmPool and template
+  objects.
+
+### Removed
+- Remove user-facing cold-start controls from the CLI, SDK, gateway request
+  payloads, and Helm configuration.
+
 ## [0.14.1] - 2026-06-29
 
 ### Fixed

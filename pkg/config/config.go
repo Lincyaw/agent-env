@@ -77,7 +77,6 @@ type Config struct {
 	PodNoProxy   string
 
 	// Admission control and warm-pool autoscaling.
-	AdmissionDisableColdStart  bool
 	AdmissionQueueTimeout      time.Duration
 	AdmissionQueuePollInterval time.Duration
 	PoolAutoscalerEnabled      bool
@@ -139,7 +138,6 @@ func DefaultConfig() *Config {
 		RateLimitBurst: 4096,
 		AllowedOrigins: "",
 
-		AdmissionDisableColdStart:       false,
 		AdmissionQueueTimeout:           0,
 		AdmissionQueuePollInterval:      500 * time.Millisecond,
 		PoolAutoscalerEnabled:           false,
@@ -342,11 +340,6 @@ func LoadFromEnv() *Config {
 		cfg.PodNoProxy = v
 	}
 
-	if v := os.Getenv("ADMISSION_DISABLE_COLD_START"); v != "" {
-		if b, err := strconv.ParseBool(v); err == nil {
-			cfg.AdmissionDisableColdStart = b
-		}
-	}
 	if v := os.Getenv("ADMISSION_QUEUE_TIMEOUT"); v != "" {
 		if d, err := time.ParseDuration(v); err == nil {
 			cfg.AdmissionQueueTimeout = d

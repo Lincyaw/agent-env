@@ -47,6 +47,7 @@ def test_gateway_public_routes_have_python_sdk_entrypoints() -> None:
         (GatewayClient, "get_pool"),
         (GatewayClient, "scale_pool"),
         (GatewayClient, "delete_pool"),
+        (GatewayClient, "destroy_pool"),
         (GatewayClient, "iter_pool_logs"),
         (GatewayClient, "list_pool_logs"),
         (GatewayClient, "create_managed_session"),
@@ -59,6 +60,8 @@ def test_gateway_public_routes_have_python_sdk_entrypoints() -> None:
         (SandboxSession, "iter_logs"),
         (SandboxSession, "get_logs"),
         (WarmPoolManager, "list_warmpools"),
+        (WarmPoolManager, "drain_warmpool"),
+        (WarmPoolManager, "destroy_warmpool"),
         (WarmPoolManager, "iter_logs"),
         (WarmPoolManager, "get_logs"),
     ]
@@ -102,6 +105,7 @@ def test_list_endpoints_parse_models() -> None:
                         "replicas": 2,
                         "readyReplicas": 1,
                         "allocatedReplicas": 1,
+                        "state": "running",
                     }
                 ],
             )
@@ -129,6 +133,7 @@ def test_list_endpoints_parse_models() -> None:
         pools = client.list_pools()
         assert pools[0].name == "pool-1"
         assert pools[0].ready_replicas == 1
+        assert pools[0].state == "running"
 
         experiments = client.list_experiments()
         assert experiments[0].experiment_id == "exp-1"
@@ -193,6 +198,7 @@ def test_create_session_omits_namespace_by_default() -> None:
         assert request.url.path == "/v1/sessions"
         body = json.loads(request.content)
         assert "namespace" not in body
+        assert "allowColdStart" not in body
         return httpx.Response(
             201,
             json={
@@ -210,6 +216,23 @@ def test_create_session_omits_namespace_by_default() -> None:
     with _client_with_handler(handler) as client:
         session = client.create_session(image="python:3.12")
         assert session.namespace == "arl"
+
+
+def test_pool_delete_drains_and_destroy_uses_explicit_endpoint() -> None:
+    seen: list[tuple[str, str]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append((request.method, request.url.path))
+        return httpx.Response(204)
+
+    with _client_with_handler(handler) as client:
+        client.delete_pool("pool-1")
+        client.destroy_pool("pool-1")
+
+    assert seen == [
+        ("DELETE", "/v1/pools/pool-1"),
+        ("POST", "/v1/pools/pool-1/destroy"),
+    ]
 
 
 def test_execute_uses_operation_id_without_sse_by_default() -> None:

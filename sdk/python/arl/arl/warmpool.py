@@ -177,12 +177,20 @@ class WarmPoolManager:
         raise TimeoutError(f"Pool '{name}' not ready after {timeout}s: {diag}")
 
     def delete_warmpool(self, name: str) -> None:
-        """Delete a WarmPool.
+        """Drain and stop a WarmPool.
 
         Args:
-            name: Name of the WarmPool to delete.
+            name: Name of the WarmPool to drain.
         """
         self._client.delete_pool(name)
+
+    def drain_warmpool(self, name: str) -> None:
+        """Drain and stop a WarmPool."""
+        self.delete_warmpool(name)
+
+    def destroy_warmpool(self, name: str) -> None:
+        """Permanently delete a WarmPool and its owned template."""
+        self._client.destroy_pool(name)
 
     def scale_warmpool(
         self,

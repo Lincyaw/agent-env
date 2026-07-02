@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-07-03
+
+### Added
+- Explicit WarmPool destroy helpers and endpoint support:
+  `GatewayClient.destroy_pool()`, `WarmPoolManager.destroy_warmpool()`, and
+  `arl pool destroy`.
+- `PoolInfo.state` so clients can distinguish running, draining, and stopped
+  pools.
+
+### Changed
+- Session creation always allocates through a matching WarmPool. When capacity
+  is empty, the gateway scales the selected WarmPool up and waits for ready
+  capacity before assigning a claim.
+- WarmPool delete semantics now mean drain and stop: active sessions and
+  pool-bound claims are removed, then the WarmPool is scaled to zero and kept
+  for future scale-up.
+- Managed pool cleanup now stops unused pools instead of deleting the WarmPool
+  and template objects.
+- Warm capacity accounting now treats `SandboxWarmPool.status.readyReplicas` as
+  idle capacity, matching the agent-sandbox ownership model.
+
+### Removed
+- User-facing cold-start controls, including SDK/CLI request fields and the
+  Helm `gateway.admission.disableColdStart` setting.
+
 ## [0.17.0] - 2026-07-02
 
 ### Added
@@ -103,6 +128,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - MyPy for type checking
 - Hatchling build backend
 
+[0.18.0]: https://github.com/Lincyaw/agent-env/releases/tag/v0.18.0
 [0.17.0]: https://github.com/Lincyaw/agent-env/releases/tag/v0.17.0
 [0.15.6]: https://github.com/Lincyaw/agent-env/releases/tag/v0.15.6
 [0.15.5]: https://github.com/Lincyaw/agent-env/releases/tag/v0.15.5

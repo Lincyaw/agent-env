@@ -102,14 +102,10 @@ gateway:
   sweepInterval: "30s"      # How often to check for expired sessions
   sidecarClientTimeout: "300s" # Gateway -> sidecar gRPC call timeout
   writeTimeout: "0s"        # Public HTTP write timeout; 0 disables it for long streaming execs
-  # Admission control for managed session allocation.
+  # Admission control for session allocation.
   admission:
-    # When true, requests wait/reject instead of creating a cold sandbox when
-    # the selected warm pool has no ready capacity.
-    disableColdStart: false
-    # Max time a request may wait for ready capacity when cold start is
-    # disabled. With disableColdStart=false, requests can still fall back to a
-    # cold sandbox instead of entering this queue.
+    # Max time a request may wait for ready capacity while the gateway scales
+    # the selected WarmPool up.
     queueTimeout: "30s"
     queuePollInterval: "500ms"
   # Warm pool autoscaling policy. When enabled, the gateway adjusts

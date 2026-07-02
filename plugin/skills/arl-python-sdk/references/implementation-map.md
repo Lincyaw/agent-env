@@ -6,7 +6,7 @@
 | --- | --- | --- |
 | `SandboxSession` | High-level session lifecycle, command execution, files, history, replay, tools, trajectory export | `sdk/python/arl/arl/session.py`, `sdk/python/arl/arl/gateway_client.py` |
 | `ManagedSession` | Experiment-scoped sessions with server-managed pool creation and cleanup metadata | `sdk/python/arl/arl/session.py`, `pkg/gateway/managed_pool.go`, `pkg/gateway/gateway.go` |
-| `WarmPoolManager` | Explicit warm pool create/list/wait/scale/delete/logs | `sdk/python/arl/arl/warmpool.py`, `sdk/python/arl/arl/gateway_client.py`, `pkg/gateway/gateway.go` |
+| `WarmPoolManager` | Explicit warm pool create/list/wait/scale/drain/destroy/logs | `sdk/python/arl/arl/warmpool.py`, `sdk/python/arl/arl/gateway_client.py`, `pkg/gateway/gateway.go` |
 | `GatewayClient` | Low-level typed HTTP client used by the higher-level classes | `sdk/python/arl/arl/gateway_client.py`, `pkg/gateway/router.go` |
 | `InteractiveShellClient` | WebSocket shell / PTY access to a session | `sdk/python/arl/arl/interactive_shell_client.py`, `pkg/gateway/ws_shell.go` |
 | Pydantic types | SDK response/request models and validation | `sdk/python/arl/arl/types.py` |
@@ -19,7 +19,7 @@
 | Feature | Behavior | Files to inspect |
 | --- | --- | --- |
 | Session creation | Create or attach to sandbox-backed sessions through gateway; image-backed sessions can trigger managed pool creation server-side | `sdk/python/arl/arl/session.py`, `sdk/python/arl/arl/gateway_client.py`, `pkg/gateway/gateway.go`, `pkg/gateway/pool_policy.go` |
-| Warm pool selection | Gateway selects a matching scoped pool by profile/image and prefers available warm capacity; cold start policy is server-side | `pkg/gateway/pool_policy.go`, `pkg/gateway/sandbox_claim_runtime_allocator.go`, `pkg/gateway/pool_autoscaler.go` |
+| Warm pool selection | Gateway selects a matching scoped pool by profile/image, queues requests when capacity is empty, and scales the selected WarmPool up | `pkg/gateway/pool_policy.go`, `pkg/gateway/sandbox_claim_runtime_allocator.go`, `pkg/gateway/pool_autoscaler.go` |
 | Managed experiments | Group sessions by `experiment_id`; gateway ensures a stable image/profile pool and records experiment metadata | `sdk/python/arl/arl/session.py`, `pkg/gateway/managed_pool.go`, `pkg/gateway/gateway.go` |
 | Command execution | Execute one or more steps in the sidecar; non-streaming calls use operation IDs for timeout recovery | `sdk/python/arl/arl/session.py`, `sdk/python/arl/arl/gateway_client.py`, `pkg/gateway/gateway.go`, `pkg/gateway/operations.go` |
 | Streaming output | SDK switches to SSE when an output callback is provided | `sdk/python/arl/arl/gateway_client.py`, `pkg/gateway/router.go`, `pkg/gateway/gateway.go` |

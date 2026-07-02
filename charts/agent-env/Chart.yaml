@@ -2,8 +2,8 @@ apiVersion: v2
 name: agent-env
 description: A Helm chart for deploying the agent-env gateway stack
 type: application
-version: 0.17.0
-appVersion: "0.17.0"
+version: 0.18.0
+appVersion: "0.18.0"
 keywords:
   - kubernetes
   - gateway

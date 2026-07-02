@@ -62,6 +62,7 @@ func SetupRoutes(mux *http.ServeMux, gw *Gateway, authCfg *AuthConfig) {
 	mux.HandleFunc("GET /v1/pools/{name}", admin(handleGetPool(gw)))
 	mux.HandleFunc("PATCH /v1/pools/{name}", admin(handleScalePool(gw)))
 	mux.HandleFunc("DELETE /v1/pools/{name}", admin(handleDeletePool(gw)))
+	mux.HandleFunc("POST /v1/pools/{name}/destroy", admin(handleDestroyPool(gw)))
 	mux.HandleFunc("GET /v1/pools/{name}/logs", admin(handlePoolLogs(gw)))
 
 	// Managed sessions (admin role — creates infrastructure)
@@ -537,6 +538,20 @@ func handleDeletePool(gw *Gateway) http.HandlerFunc {
 		ns := r.URL.Query().Get("namespace")
 
 		if err := gw.DeletePool(r.Context(), name, ns); err != nil {
+			writeGatewayError(w, err)
+			return
+		}
+
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+func handleDestroyPool(gw *Gateway) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		name := r.PathValue("name")
+		ns := r.URL.Query().Get("namespace")
+
+		if err := gw.DestroyPool(r.Context(), name, ns); err != nil {
 			writeGatewayError(w, err)
 			return
 		}

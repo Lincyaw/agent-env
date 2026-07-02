@@ -203,6 +203,8 @@ manager.create_warmpool(
 info = manager.wait_for_ready("python-pool", min_ready=1)
 print(info.ready_replicas)
 manager.scale_warmpool("python-pool", replicas=3)
+manager.delete_warmpool("python-pool")   # drain sessions/claims and scale to zero
+# manager.destroy_warmpool("python-pool")  # physically delete the WarmPool/template
 ```
 
 Current sandbox-backed pools reject `tools` and `config_env` provisioning
@@ -242,5 +244,5 @@ deleted = client.delete_experiment("exp-1")
 - `SandboxSession`: session lifecycle, execute, replay, restore, files, logs, history, trajectory.
 - `ManagedSession`: image + experiment session flow with server-side pool creation.
 - `GatewayClient`: low-level HTTP client for all public gateway REST endpoints.
-- `WarmPoolManager`: pool create/list/get/wait/scale/logs/delete helpers.
+- `WarmPoolManager`: pool create/list/get/wait/scale/logs/drain/destroy helpers.
 - `InteractiveShellClient`: WebSocket shell client.

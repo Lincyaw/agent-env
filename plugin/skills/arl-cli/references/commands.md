@@ -48,7 +48,10 @@ arl pool get <name>
 arl pool create <name> --image python:3.12 --profile <profile> --replicas 2
 arl pool create <name> --image python:3.12 --workspace-dir /workspace
 arl pool scale <name> --replicas 5
+# Drains sessions/claims and scales the WarmPool to zero.
 arl pool delete <name> --force
+# Physically deletes the WarmPool and its owned template.
+arl pool destroy <name> --force
 
 # Creates a temporary session, runs the command, then deletes the session.
 arl pool exec <name> -- python -c "print('ok')"

@@ -137,7 +137,6 @@ func main() {
 		GRPCAuthSecretName:              cfg.GRPCAuthSecretName,
 		PodHTTPProxy:                    cfg.PodHTTPProxy,
 		PodNoProxy:                      cfg.PodNoProxy,
-		AdmissionDisableColdStart:       cfg.AdmissionDisableColdStart,
 		AdmissionQueueTimeout:           cfg.AdmissionQueueTimeout,
 		AdmissionQueuePollInterval:      cfg.AdmissionQueuePollInterval,
 		PoolAutoscalerEnabled:           cfg.PoolAutoscalerEnabled,

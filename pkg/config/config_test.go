@@ -190,9 +190,6 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.GRPCAuthSecretName != "agent-env-grpc-token" {
 		t.Errorf("GRPCAuthSecretName = %q, want agent-env-grpc-token", cfg.GRPCAuthSecretName)
 	}
-	if cfg.AdmissionDisableColdStart {
-		t.Error("AdmissionDisableColdStart = true, want false")
-	}
 	if cfg.AdmissionQueueTimeout != 0 {
 		t.Errorf("AdmissionQueueTimeout = %v, want 0", cfg.AdmissionQueueTimeout)
 	}
@@ -244,7 +241,6 @@ func TestLoadFromEnvGatewaySettings(t *testing.T) {
 	t.Setenv("K8S_CLIENT_QPS", "123")
 	t.Setenv("K8S_CLIENT_BURST", "456")
 	t.Setenv("GRPC_AUTH_SECRET_NAME", "custom-grpc-token")
-	t.Setenv("ADMISSION_DISABLE_COLD_START", "true")
 	t.Setenv("ADMISSION_QUEUE_TIMEOUT", "2s")
 	t.Setenv("ADMISSION_QUEUE_POLL_INTERVAL", "100ms")
 	t.Setenv("POOL_AUTOSCALER_ENABLED", "true")
@@ -278,9 +274,6 @@ func TestLoadFromEnvGatewaySettings(t *testing.T) {
 	}
 	if cfg.GRPCAuthSecretName != "custom-grpc-token" {
 		t.Fatalf("GRPCAuthSecretName = %q, want custom-grpc-token", cfg.GRPCAuthSecretName)
-	}
-	if !cfg.AdmissionDisableColdStart {
-		t.Fatal("AdmissionDisableColdStart = false, want true")
 	}
 	if cfg.AdmissionQueueTimeout != 2*time.Second {
 		t.Fatalf("AdmissionQueueTimeout = %v, want 2s", cfg.AdmissionQueueTimeout)

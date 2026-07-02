@@ -191,6 +191,7 @@ class PoolInfo(BaseModel):
         replicas: Desired number of warm pods
         ready_replicas: Number of ready idle pods
         allocated_replicas: Number of pods currently allocated to sessions
+        state: ARL lifecycle state for the pool
         conditions: Kubernetes status conditions
     """
 
@@ -201,6 +202,7 @@ class PoolInfo(BaseModel):
     replicas: Annotated[int, Field(ge=0)] = 0
     ready_replicas: Annotated[int, Field(ge=0)] = Field(0, alias="readyReplicas")
     allocated_replicas: Annotated[int, Field(ge=0)] = Field(0, alias="allocatedReplicas")
+    state: str = ""
     conditions: list[PoolCondition] = []
 
     model_config = {"populate_by_name": True}

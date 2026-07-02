@@ -12,7 +12,7 @@ import (
 	"github.com/Lincyaw/agent-env/pkg/scheduling"
 )
 
-func TestReconcilePoolAutoscalingSizesPoolFromActiveClaimsAndBuffer(t *testing.T) {
+func TestReconcilePoolAutoscalingSizesIdlePoolFromBufferOnly(t *testing.T) {
 	scheme := newGatewayTestScheme(t)
 	pool := testSandboxWarmPool("code", "default", "code-template", 1, 1, "code")
 	claims := []extensionsv1beta1.SandboxClaim{
@@ -47,8 +47,8 @@ func TestReconcilePoolAutoscalingSizesPoolFromActiveClaimsAndBuffer(t *testing.T
 	if err := k8sClient.Get(context.Background(), types.NamespacedName{Name: "code", Namespace: "default"}, got); err != nil {
 		t.Fatalf("get pool: %v", err)
 	}
-	if got.Spec.Replicas == nil || *got.Spec.Replicas != 3 {
-		t.Fatalf("Replicas = %v, want 3", got.Spec.Replicas)
+	if got.Spec.Replicas == nil || *got.Spec.Replicas != 1 {
+		t.Fatalf("Replicas = %v, want 1", got.Spec.Replicas)
 	}
 }
 
@@ -81,8 +81,8 @@ func TestReconcilePoolAutoscalingIncludesAdmissionQueueDepth(t *testing.T) {
 	if err := k8sClient.Get(context.Background(), types.NamespacedName{Name: "code", Namespace: "default"}, got); err != nil {
 		t.Fatalf("get pool: %v", err)
 	}
-	if got.Spec.Replicas == nil || *got.Spec.Replicas != 4 {
-		t.Fatalf("Replicas = %v, want active 1 + queued 2 + buffer 1 = 4", got.Spec.Replicas)
+	if got.Spec.Replicas == nil || *got.Spec.Replicas != 3 {
+		t.Fatalf("Replicas = %v, want queued 2 + buffer 1 = 3", got.Spec.Replicas)
 	}
 }
 

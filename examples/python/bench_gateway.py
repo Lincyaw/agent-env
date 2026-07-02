@@ -206,7 +206,7 @@ def stats_table(title: str, rows: list[tuple[str, list[float]]]) -> Table:
 
 
 def safe_cleanup_pool(pool_mgr: WarmPoolManager, name: str) -> None:
-    """Delete a pool, ignoring errors if it doesn't exist."""
+    """Drain and stop a pool, ignoring errors if it doesn't exist."""
     try:
         pool_mgr.delete_warmpool(name)
         time.sleep(2)
@@ -350,7 +350,7 @@ def warmpool_scale(
     ),
     gateway_url: str = typer.Option(DEFAULT_GATEWAY, "--gateway", "-g", help="Gateway URL."),
     timeout: float = typer.Option(600.0, "--timeout", help="Max wait seconds per pool."),
-    cleanup: bool = typer.Option(True, "--cleanup/--no-cleanup", help="Delete pools after test."),
+    cleanup: bool = typer.Option(True, "--cleanup/--no-cleanup", help="Stop pools after test."),
     port_forward: bool = typer.Option(
         True, "--port-forward/--no-port-forward", help="Auto kubectl port-forward."
     ),

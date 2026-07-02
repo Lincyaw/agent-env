@@ -29,7 +29,7 @@ kubectl get sandboxwarmpools,sandboxclaims,sandboxes -A
 ```
 
 Check conditions for failing pods, image pull errors, zero ready replicas, or
-allocated replicas consuming all warm capacity.
+unexpected allocated replicas.
 
 ## Test an Image
 
@@ -81,7 +81,8 @@ done < session_ids.txt
 - Capture `snapshot_id` values from exec results if a run may need rollback or replay.
 - Pass workspace-relative file paths to upload/download; avoid absolute paths unless the gateway-side behavior is intentional.
 - Use `--verify` or `--sha256` for file uploads where corruption would invalidate an experiment.
-- Clean up debug sessions and test pools with `arl session delete`, `arl exp delete --force`, and `arl pool delete --force`.
+- Clean up debug sessions and stop test pools with `arl session delete`, `arl exp delete --force`, and `arl pool delete --force`.
+- Use `arl pool destroy --force` only when the WarmPool object and owned template should be physically removed.
 - Pool management, global session listing, and managed session creation require an admin key when auth is enabled.
 - User keys can create/delete owned sessions, execute commands, transfer files, restore/replay, open shells, and read owned history/trajectory.
 - Gateway auth is enabled by default in Helm. Set `auth.apiKeys` or explicitly set `auth.enabled=false` only for trusted local deployments.

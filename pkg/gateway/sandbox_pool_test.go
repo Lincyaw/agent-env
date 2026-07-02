@@ -280,10 +280,15 @@ func TestCreatePoolDoesNotCreateTemplateWhenWarmPoolAlreadyExists(t *testing.T) 
 	}
 }
 
-func TestCreateManagedSessionCleansNewPoolOnSessionCreateFailure(t *testing.T) {
+func TestCreateManagedSessionStopsNewPoolOnSessionCreateFailure(t *testing.T) {
 	scheme := newGatewayTestScheme(t)
 	k8sClient := fake.NewClientBuilder().WithScheme(scheme).Build()
-	gw := New(k8sClient, failingRuntimeAllocator{}, nil, nil, nil, GatewayConfig{Namespace: "default", GRPCAuthToken: "test-token"}, NewMemoryStore())
+	gw := New(k8sClient, failingRuntimeAllocator{}, nil, nil, nil, GatewayConfig{
+		Namespace:                  "default",
+		GRPCAuthToken:              "test-token",
+		AdmissionQueueTimeout:      time.Millisecond,
+		AdmissionQueuePollInterval: time.Millisecond,
+	}, NewMemoryStore())
 
 	_, err := gw.CreateManagedSession(context.Background(), CreateManagedSessionRequest{
 		Image:        "python:3.12",
@@ -298,21 +303,13 @@ func TestCreateManagedSessionCleansNewPoolOnSessionCreateFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("managedPoolName returned error: %v", err)
 	}
-	for _, obj := range []struct {
-		name string
-		obj  client.Object
-	}{
-		{name: poolName, obj: &extensionsv1beta1.SandboxWarmPool{}},
-		{name: sandboxTemplateName(poolName), obj: &extensionsv1beta1.SandboxTemplate{}},
-	} {
-		err := k8sClient.Get(context.Background(), types.NamespacedName{Name: obj.name, Namespace: "default"}, obj.obj)
-		if !apierrors.IsNotFound(err) {
-			t.Fatalf("get %s error = %v, want not found after cleanup", obj.name, err)
-		}
+	assertPoolStopped(t, k8sClient, poolName, "default")
+	if err := k8sClient.Get(context.Background(), types.NamespacedName{Name: sandboxTemplateName(poolName), Namespace: "default"}, &extensionsv1beta1.SandboxTemplate{}); err != nil {
+		t.Fatalf("managed template was deleted after create failure cleanup: %v", err)
 	}
 }
 
-func TestDeleteSessionCleansUnusedManagedPool(t *testing.T) {
+func TestDeleteSessionStopsUnusedManagedPool(t *testing.T) {
 	scheme := newGatewayTestScheme(t)
 	poolName := "managed-pool"
 	pool := managedPoolObject(poolName, "default")
@@ -331,22 +328,16 @@ func TestDeleteSessionCleansUnusedManagedPool(t *testing.T) {
 	if err := gw.DeleteSession(context.Background(), "session-clean"); err != nil {
 		t.Fatalf("DeleteSession returned error: %v", err)
 	}
-	for _, obj := range []struct {
-		name string
-		obj  client.Object
-	}{
-		{name: "claim-session", obj: &extensionsv1beta1.SandboxClaim{}},
-		{name: poolName, obj: &extensionsv1beta1.SandboxWarmPool{}},
-		{name: sandboxTemplateName(poolName), obj: &extensionsv1beta1.SandboxTemplate{}},
-	} {
-		err := k8sClient.Get(context.Background(), types.NamespacedName{Name: obj.name, Namespace: "default"}, obj.obj)
-		if !apierrors.IsNotFound(err) {
-			t.Fatalf("get %s error = %v, want not found", obj.name, err)
-		}
+	if err := k8sClient.Get(context.Background(), types.NamespacedName{Name: "claim-session", Namespace: "default"}, &extensionsv1beta1.SandboxClaim{}); !apierrors.IsNotFound(err) {
+		t.Fatalf("claim get error = %v, want not found", err)
+	}
+	assertPoolStopped(t, k8sClient, poolName, "default")
+	if err := k8sClient.Get(context.Background(), types.NamespacedName{Name: sandboxTemplateName(poolName), Namespace: "default"}, &extensionsv1beta1.SandboxTemplate{}); err != nil {
+		t.Fatalf("managed template was deleted after session cleanup: %v", err)
 	}
 }
 
-func TestDropSessionCleansUnusedManagedPool(t *testing.T) {
+func TestDropSessionStopsUnusedManagedPool(t *testing.T) {
 	scheme := newGatewayTestScheme(t)
 	poolName := "managed-pool"
 	pool := managedPoolObject(poolName, "default")
@@ -371,18 +362,12 @@ func TestDropSessionCleansUnusedManagedPool(t *testing.T) {
 	if _, ok := store.Get("session-clean"); ok {
 		t.Fatal("session is still active after dropSession")
 	}
-	for _, obj := range []struct {
-		name string
-		obj  client.Object
-	}{
-		{name: "claim-session", obj: &extensionsv1beta1.SandboxClaim{}},
-		{name: poolName, obj: &extensionsv1beta1.SandboxWarmPool{}},
-		{name: sandboxTemplateName(poolName), obj: &extensionsv1beta1.SandboxTemplate{}},
-	} {
-		err := k8sClient.Get(context.Background(), types.NamespacedName{Name: obj.name, Namespace: "default"}, obj.obj)
-		if !apierrors.IsNotFound(err) {
-			t.Fatalf("get %s error = %v, want not found", obj.name, err)
-		}
+	if err := k8sClient.Get(context.Background(), types.NamespacedName{Name: "claim-session", Namespace: "default"}, &extensionsv1beta1.SandboxClaim{}); !apierrors.IsNotFound(err) {
+		t.Fatalf("claim get error = %v, want not found", err)
+	}
+	assertPoolStopped(t, k8sClient, poolName, "default")
+	if err := k8sClient.Get(context.Background(), types.NamespacedName{Name: sandboxTemplateName(poolName), Namespace: "default"}, &extensionsv1beta1.SandboxTemplate{}); err != nil {
+		t.Fatalf("managed template was deleted after drop cleanup: %v", err)
 	}
 }
 
@@ -424,7 +409,7 @@ func TestDeleteSessionContinuesWhenManagedPoolCleanupCheckFails(t *testing.T) {
 	}
 }
 
-func TestDeletePoolDeletesBoundSandboxClaims(t *testing.T) {
+func TestDeletePoolStopsPoolAndDeletesBoundSandboxClaims(t *testing.T) {
 	scheme := newGatewayTestScheme(t)
 	pool := &extensionsv1beta1.SandboxWarmPool{
 		ObjectMeta: metav1.ObjectMeta{Name: "pool", Namespace: "default"},
@@ -451,26 +436,19 @@ func TestDeletePoolDeletesBoundSandboxClaims(t *testing.T) {
 		t.Fatalf("DeletePool returned error: %v", err)
 	}
 
-	for _, obj := range []struct {
-		name string
-		obj  client.Object
-	}{
-		{name: "pool", obj: &extensionsv1beta1.SandboxWarmPool{}},
-		{name: "pool-template", obj: &extensionsv1beta1.SandboxTemplate{}},
-		{name: "claim-bound", obj: &extensionsv1beta1.SandboxClaim{}},
-	} {
-		err := k8sClient.Get(context.Background(), types.NamespacedName{Name: obj.name, Namespace: "default"}, obj.obj)
-		if !apierrors.IsNotFound(err) {
-			t.Fatalf("get %s error = %v, want not found", obj.name, err)
-		}
+	if err := k8sClient.Get(context.Background(), types.NamespacedName{Name: "claim-bound", Namespace: "default"}, &extensionsv1beta1.SandboxClaim{}); !apierrors.IsNotFound(err) {
+		t.Fatalf("get bound claim error = %v, want not found", err)
 	}
-
+	assertPoolStopped(t, k8sClient, "pool", "default")
+	if err := k8sClient.Get(context.Background(), types.NamespacedName{Name: "pool-template", Namespace: "default"}, &extensionsv1beta1.SandboxTemplate{}); err != nil {
+		t.Fatalf("pool template was deleted by drain: %v", err)
+	}
 	if err := k8sClient.Get(context.Background(), types.NamespacedName{Name: "claim-other", Namespace: "default"}, &extensionsv1beta1.SandboxClaim{}); err != nil {
 		t.Fatalf("get unrelated claim: %v", err)
 	}
 }
 
-func TestDeletePoolDeletesActiveSessionsForPool(t *testing.T) {
+func TestDeletePoolDrainsActiveSessionsForPool(t *testing.T) {
 	scheme := newGatewayTestScheme(t)
 	pool := &extensionsv1beta1.SandboxWarmPool{
 		ObjectMeta: metav1.ObjectMeta{Name: "pool", Namespace: "default"},
@@ -561,6 +539,10 @@ func TestDeletePoolDeletesActiveSessionsForPool(t *testing.T) {
 	if err := k8sClient.Get(context.Background(), types.NamespacedName{Name: "claim-other", Namespace: "default"}, &extensionsv1beta1.SandboxClaim{}); err != nil {
 		t.Fatalf("get unrelated claim: %v", err)
 	}
+	assertPoolStopped(t, k8sClient, "pool", "default")
+	if err := k8sClient.Get(context.Background(), types.NamespacedName{Name: "pool-template", Namespace: "default"}, &extensionsv1beta1.SandboxTemplate{}); err != nil {
+		t.Fatalf("pool template was deleted by drain: %v", err)
+	}
 }
 
 func TestDeletePoolFallsBackToDirectClaimDeleteWhenRuntimeReleaseFails(t *testing.T) {
@@ -606,22 +588,16 @@ func TestDeletePoolFallsBackToDirectClaimDeleteWhenRuntimeReleaseFails(t *testin
 	if _, ok := store.Get("session-bound"); ok {
 		t.Fatal("session is still active after pool delete")
 	}
-	for _, obj := range []struct {
-		name string
-		obj  client.Object
-	}{
-		{name: "claim-bound", obj: &extensionsv1beta1.SandboxClaim{}},
-		{name: "pool", obj: &extensionsv1beta1.SandboxWarmPool{}},
-		{name: "pool-template", obj: &extensionsv1beta1.SandboxTemplate{}},
-	} {
-		err := k8sClient.Get(context.Background(), types.NamespacedName{Name: obj.name, Namespace: "default"}, obj.obj)
-		if !apierrors.IsNotFound(err) {
-			t.Fatalf("get %s error = %v, want not found", obj.name, err)
-		}
+	if err := k8sClient.Get(context.Background(), types.NamespacedName{Name: "claim-bound", Namespace: "default"}, &extensionsv1beta1.SandboxClaim{}); !apierrors.IsNotFound(err) {
+		t.Fatalf("get bound claim error = %v, want not found", err)
+	}
+	assertPoolStopped(t, k8sClient, "pool", "default")
+	if err := k8sClient.Get(context.Background(), types.NamespacedName{Name: "pool-template", Namespace: "default"}, &extensionsv1beta1.SandboxTemplate{}); err != nil {
+		t.Fatalf("pool template was deleted by drain: %v", err)
 	}
 }
 
-func TestDeleteExperimentCleansUnusedManagedPool(t *testing.T) {
+func TestDeleteExperimentStopsUnusedManagedPool(t *testing.T) {
 	scheme := newGatewayTestScheme(t)
 	poolName := "managed-pool"
 	pool := managedPoolObject(poolName, "default")
@@ -670,18 +646,12 @@ func TestDeleteExperimentCleansUnusedManagedPool(t *testing.T) {
 	if deleted != 1 {
 		t.Fatalf("deleted = %d, want 1", deleted)
 	}
-	for _, obj := range []struct {
-		name string
-		obj  client.Object
-	}{
-		{name: poolName, obj: &extensionsv1beta1.SandboxWarmPool{}},
-		{name: sandboxTemplateName(poolName), obj: &extensionsv1beta1.SandboxTemplate{}},
-		{name: "claim-exp", obj: &extensionsv1beta1.SandboxClaim{}},
-	} {
-		err := k8sClient.Get(context.Background(), types.NamespacedName{Name: obj.name, Namespace: "default"}, obj.obj)
-		if !apierrors.IsNotFound(err) {
-			t.Fatalf("get %s error = %v, want not found", obj.name, err)
-		}
+	if err := k8sClient.Get(context.Background(), types.NamespacedName{Name: "claim-exp", Namespace: "default"}, &extensionsv1beta1.SandboxClaim{}); !apierrors.IsNotFound(err) {
+		t.Fatalf("deleted experiment claim error = %v, want not found", err)
+	}
+	assertPoolStopped(t, k8sClient, poolName, "default")
+	if err := k8sClient.Get(context.Background(), types.NamespacedName{Name: sandboxTemplateName(poolName), Namespace: "default"}, &extensionsv1beta1.SandboxTemplate{}); err != nil {
+		t.Fatalf("managed template was deleted by experiment cleanup: %v", err)
 	}
 }
 
@@ -772,7 +742,7 @@ func TestDeleteExperimentKeepsManagedPoolStillInUse(t *testing.T) {
 	}
 }
 
-func TestDeleteManagedPoolIfUnusedReturnsErrorWhenClaimListFails(t *testing.T) {
+func TestStopManagedPoolIfUnusedReturnsErrorWhenClaimListFails(t *testing.T) {
 	scheme := newGatewayTestScheme(t)
 	poolName := "managed-pool"
 	pool := managedPoolObject(poolName, "default")
@@ -788,73 +758,72 @@ func TestDeleteManagedPoolIfUnusedReturnsErrorWhenClaimListFails(t *testing.T) {
 	})
 	gw := New(k8sClient, NewSandboxClaimRuntimeAllocator(k8sClient, "default"), nil, nil, nil, GatewayConfig{Namespace: "default"}, NewMemoryStore())
 
-	deleted, err := gw.deleteManagedPoolIfUnused(context.Background(), poolName, "default")
+	stopped, err := gw.stopManagedPoolIfUnused(context.Background(), poolName, "default")
 	if err == nil {
-		t.Fatal("deleteManagedPoolIfUnused succeeded, want list error")
+		t.Fatal("stopManagedPoolIfUnused succeeded, want list error")
 	}
-	if deleted {
-		t.Fatal("deleteManagedPoolIfUnused deleted pool despite list error")
+	if stopped {
+		t.Fatal("stopManagedPoolIfUnused stopped pool despite list error")
 	}
 	if err := k8sClient.Get(context.Background(), types.NamespacedName{Name: poolName, Namespace: "default"}, &extensionsv1beta1.SandboxWarmPool{}); err != nil {
-		t.Fatalf("managed pool was deleted despite list failure: %v", err)
+		t.Fatalf("managed pool disappeared despite list failure: %v", err)
 	}
 	if err := k8sClient.Get(context.Background(), types.NamespacedName{Name: sandboxTemplateName(poolName), Namespace: "default"}, &extensionsv1beta1.SandboxTemplate{}); err != nil {
-		t.Fatalf("managed template was deleted despite list failure: %v", err)
+		t.Fatalf("managed template disappeared despite list failure: %v", err)
 	}
 }
 
-func TestDeleteManagedPoolIfUnusedReturnsErrorWhenPoolDeleteFails(t *testing.T) {
+func TestStopManagedPoolIfUnusedReturnsErrorWhenPoolPatchFails(t *testing.T) {
 	scheme := newGatewayTestScheme(t)
 	poolName := "managed-pool"
 	pool := managedPoolObject(poolName, "default")
 	template := managedTemplateObject(sandboxTemplateName(poolName), "default")
 	baseClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(pool, template).Build()
 	k8sClient := interceptor.NewClient(baseClient, interceptor.Funcs{
-		Delete: func(ctx context.Context, c client.WithWatch, obj client.Object, opts ...client.DeleteOption) error {
+		Patch: func(ctx context.Context, c client.WithWatch, obj client.Object, patch client.Patch, opts ...client.PatchOption) error {
 			if _, ok := obj.(*extensionsv1beta1.SandboxWarmPool); ok {
-				return fmt.Errorf("injected warm pool delete failure")
+				return fmt.Errorf("injected warm pool patch failure")
 			}
-			return c.Delete(ctx, obj, opts...)
+			return c.Patch(ctx, obj, patch, opts...)
 		},
 	})
 	gw := New(k8sClient, NewSandboxClaimRuntimeAllocator(k8sClient, "default"), nil, nil, nil, GatewayConfig{Namespace: "default"}, NewMemoryStore())
 
-	deleted, err := gw.deleteManagedPoolIfUnused(context.Background(), poolName, "default")
+	stopped, err := gw.stopManagedPoolIfUnused(context.Background(), poolName, "default")
 	if err == nil {
-		t.Fatal("deleteManagedPoolIfUnused succeeded, want pool delete error")
+		t.Fatal("stopManagedPoolIfUnused succeeded, want pool patch error")
 	}
-	if deleted {
-		t.Fatal("deleteManagedPoolIfUnused reported deletion despite pool delete failure")
+	if stopped {
+		t.Fatal("stopManagedPoolIfUnused reported stop despite pool patch failure")
 	}
 	if err := k8sClient.Get(context.Background(), types.NamespacedName{Name: poolName, Namespace: "default"}, &extensionsv1beta1.SandboxWarmPool{}); err != nil {
-		t.Fatalf("managed pool disappeared despite delete failure: %v", err)
+		t.Fatalf("managed pool disappeared despite patch failure: %v", err)
 	}
 	if err := k8sClient.Get(context.Background(), types.NamespacedName{Name: sandboxTemplateName(poolName), Namespace: "default"}, &extensionsv1beta1.SandboxTemplate{}); err != nil {
-		t.Fatalf("managed template disappeared despite pool delete failure: %v", err)
+		t.Fatalf("managed template disappeared despite pool patch failure: %v", err)
 	}
 }
 
-func TestDeleteManagedPoolIfUnusedCanRetryTemplateCleanupAfterPoolGone(t *testing.T) {
+func TestStopManagedPoolIfUnusedIgnoresAlreadyGonePool(t *testing.T) {
 	scheme := newGatewayTestScheme(t)
 	poolName := "managed-pool"
 	template := managedTemplateObject(sandboxTemplateName(poolName), "default")
 	k8sClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(template).Build()
 	gw := New(k8sClient, NewSandboxClaimRuntimeAllocator(k8sClient, "default"), nil, nil, nil, GatewayConfig{Namespace: "default"}, NewMemoryStore())
 
-	deleted, err := gw.deleteManagedPoolIfUnused(context.Background(), poolName, "default")
+	stopped, err := gw.stopManagedPoolIfUnused(context.Background(), poolName, "default")
 	if err != nil {
-		t.Fatalf("deleteManagedPoolIfUnused returned error: %v", err)
+		t.Fatalf("stopManagedPoolIfUnused returned error: %v", err)
 	}
-	if !deleted {
-		t.Fatal("deleteManagedPoolIfUnused did not delete managed template after pool was already gone")
+	if stopped {
+		t.Fatal("stopManagedPoolIfUnused reported stop after pool was already gone")
 	}
-	err = k8sClient.Get(context.Background(), types.NamespacedName{Name: sandboxTemplateName(poolName), Namespace: "default"}, &extensionsv1beta1.SandboxTemplate{})
-	if !apierrors.IsNotFound(err) {
-		t.Fatalf("template get error = %v, want not found", err)
+	if err := k8sClient.Get(context.Background(), types.NamespacedName{Name: sandboxTemplateName(poolName), Namespace: "default"}, &extensionsv1beta1.SandboxTemplate{}); err != nil {
+		t.Fatalf("managed template should not be touched after pool is gone: %v", err)
 	}
 }
 
-func TestDeleteManagedPoolIfUnusedDoesNotDeleteUnmarkedTemplateAfterPoolGone(t *testing.T) {
+func TestStopManagedPoolIfUnusedDoesNotTouchUnmarkedTemplateAfterPoolGone(t *testing.T) {
 	scheme := newGatewayTestScheme(t)
 	poolName := "managed-pool"
 	template := &extensionsv1beta1.SandboxTemplate{
@@ -863,15 +832,15 @@ func TestDeleteManagedPoolIfUnusedDoesNotDeleteUnmarkedTemplateAfterPoolGone(t *
 	k8sClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(template).Build()
 	gw := New(k8sClient, NewSandboxClaimRuntimeAllocator(k8sClient, "default"), nil, nil, nil, GatewayConfig{Namespace: "default"}, NewMemoryStore())
 
-	deleted, err := gw.deleteManagedPoolIfUnused(context.Background(), poolName, "default")
+	stopped, err := gw.stopManagedPoolIfUnused(context.Background(), poolName, "default")
 	if err != nil {
-		t.Fatalf("deleteManagedPoolIfUnused returned error: %v", err)
+		t.Fatalf("stopManagedPoolIfUnused returned error: %v", err)
 	}
-	if deleted {
-		t.Fatal("deleteManagedPoolIfUnused deleted unmarked template after pool was gone")
+	if stopped {
+		t.Fatal("stopManagedPoolIfUnused reported stop after pool was already gone")
 	}
 	if err := k8sClient.Get(context.Background(), types.NamespacedName{Name: sandboxTemplateName(poolName), Namespace: "default"}, &extensionsv1beta1.SandboxTemplate{}); err != nil {
-		t.Fatalf("unmarked template was deleted: %v", err)
+		t.Fatalf("unmarked template was touched: %v", err)
 	}
 }
 
@@ -932,6 +901,23 @@ func managedTemplateObject(name, namespace string) *extensionsv1beta1.SandboxTem
 				labels.ManagedPoolAnnotation: "true",
 			},
 		},
+	}
+}
+
+func assertPoolStopped(t *testing.T, k8sClient client.Client, name, namespace string) {
+	t.Helper()
+	pool := &extensionsv1beta1.SandboxWarmPool{}
+	if err := k8sClient.Get(context.Background(), types.NamespacedName{Name: name, Namespace: namespace}, pool); err != nil {
+		t.Fatalf("expected stopped pool %s/%s to exist: %v", namespace, name, err)
+	}
+	if got := desiredSandboxWarmPoolReplicas(pool); got != 0 {
+		t.Fatalf("pool %s/%s replicas = %d, want 0", namespace, name, got)
+	}
+	if got := pool.Annotations[labels.PoolStateAnnotation]; got != labels.PoolStateStopped {
+		t.Fatalf("pool %s/%s state = %q, want %q", namespace, name, got, labels.PoolStateStopped)
+	}
+	if got := pool.Annotations[scheduling.PoolAutoscaleAnnotation]; got != "false" {
+		t.Fatalf("pool %s/%s autoscale annotation = %q, want false", namespace, name, got)
 	}
 }
 

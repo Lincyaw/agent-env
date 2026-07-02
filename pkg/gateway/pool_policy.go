@@ -13,6 +13,9 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	extensionsv1beta1 "sigs.k8s.io/agent-sandbox/extensions/api/v1beta1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/Lincyaw/agent-env/pkg/labels"
+	"github.com/Lincyaw/agent-env/pkg/scheduling"
 )
 
 const (
@@ -43,13 +46,12 @@ func (s RequestScope) normalized() RequestScope {
 
 // ResourceIntent is the normalized "what do I need?" input to pool policy.
 type ResourceIntent struct {
-	Scope            RequestScope
-	Profile          string
-	Image            string
-	PinnedPoolName   string
-	Managed          bool
-	ExperimentID     string
-	ColdStartAllowed bool
+	Scope          RequestScope
+	Profile        string
+	Image          string
+	PinnedPoolName string
+	Managed        bool
+	ExperimentID   string
 }
 
 // PoolSnapshot is the selector/admission view of a SandboxWarmPool.
@@ -64,11 +66,10 @@ type PoolSnapshot struct {
 }
 
 func (p PoolSnapshot) WarmAvailable() int32 {
-	available := p.ReadyReplicas - p.AllocatedReplicas
-	if available < 0 {
+	if p.ReadyReplicas < 0 {
 		return 0
 	}
-	return available
+	return p.ReadyReplicas
 }
 
 // PoolSelection records which pool policy selected and why.
@@ -160,10 +161,9 @@ func (DefaultPoolSelector) SelectPool(_ context.Context, intent ResourceIntent, 
 
 // AdmissionDecision captures the bounded decision made before creating a Claim.
 type AdmissionDecision struct {
-	Admitted          bool
-	Reason            string
-	WarmAvailable     int32
-	ColdStartExpected bool
+	Admitted      bool
+	Reason        string
+	WarmAvailable int32
 }
 
 // AdmissionController decides whether a selected pool should accept a request.
@@ -171,31 +171,22 @@ type AdmissionController interface {
 	Admit(ctx context.Context, intent ResourceIntent, selection PoolSelection) (AdmissionDecision, error)
 }
 
-// DefaultAdmissionController preserves today's behavior: warm capacity is
-// preferred, but cold start is allowed when the warm pool is saturated.
-type DefaultAdmissionController struct {
-	AllowColdStart bool
-}
+// DefaultAdmissionController only admits requests when warm capacity is
+// available. Empty capacity is handled by the queue, which scales the selected
+// WarmPool up and waits for ready capacity before allocation.
+type DefaultAdmissionController struct{}
 
 func NewDefaultAdmissionController() DefaultAdmissionController {
-	return DefaultAdmissionController{AllowColdStart: true}
+	return DefaultAdmissionController{}
 }
 
-func (a DefaultAdmissionController) Admit(_ context.Context, intent ResourceIntent, selection PoolSelection) (AdmissionDecision, error) {
+func (a DefaultAdmissionController) Admit(_ context.Context, _ ResourceIntent, selection PoolSelection) (AdmissionDecision, error) {
 	warmAvailable := selection.Pool.WarmAvailable()
 	if warmAvailable > 0 {
 		return AdmissionDecision{
 			Admitted:      true,
 			Reason:        "warm_capacity_available",
 			WarmAvailable: warmAvailable,
-		}, nil
-	}
-	if intent.ColdStartAllowed && a.AllowColdStart {
-		return AdmissionDecision{
-			Admitted:          true,
-			Reason:            "cold_start_allowed",
-			WarmAvailable:     0,
-			ColdStartExpected: true,
 		}, nil
 	}
 	return AdmissionDecision{
@@ -213,12 +204,11 @@ func (g *Gateway) resourceIntentFromCreateSession(ctx context.Context, req Creat
 			Principal: principal,
 			Tenant:    defaultPolicyTenant,
 		},
-		Profile:          normalizeProfile(req.Profile),
-		Image:            normalizedOptionalImage(req.Image),
-		PinnedPoolName:   req.PoolName,
-		Managed:          req.Managed,
-		ExperimentID:     req.ExperimentID,
-		ColdStartAllowed: !g.gwConfig.AdmissionDisableColdStart,
+		Profile:        normalizeProfile(req.Profile),
+		Image:          normalizedOptionalImage(req.Image),
+		PinnedPoolName: req.PoolName,
+		Managed:        req.Managed,
+		ExperimentID:   req.ExperimentID,
 	}
 }
 
@@ -271,18 +261,32 @@ func (g *Gateway) ensureImageBackedSessionPool(ctx context.Context, req CreateSe
 
 func (g *Gateway) planSessionAllocation(ctx context.Context, intent ResourceIntent) (PoolSelection, AdmissionDecision, error) {
 	selection, decision, err := g.tryPlanSessionAllocation(ctx, intent)
-	if err == nil || g.gwConfig.AdmissionQueueTimeout <= 0 || ctx.Err() != nil {
+	if err == nil || ctx.Err() != nil {
 		return selection, decision, err
 	}
 	if !errors.Is(err, ErrPoolAtCapacity) {
 		return selection, decision, err
+	}
+	return g.waitForWarmCapacity(ctx, intent, selection, decision)
+}
+
+func (g *Gateway) waitForWarmCapacity(ctx context.Context, intent ResourceIntent, selection PoolSelection, decision AdmissionDecision) (PoolSelection, AdmissionDecision, error) {
+	if selection.PoolName == "" {
+		return selection, decision, fmt.Errorf("%w: %s", ErrPoolAtCapacity, decision.Reason)
 	}
 
 	queueKey := types.NamespacedName{Name: selection.PoolName, Namespace: selection.Namespace}
 	g.incrementAdmissionQueue(queueKey)
 	defer g.decrementAdmissionQueue(queueKey)
 
+	if err := g.scalePoolForQueuedDemand(ctx, queueKey); err != nil {
+		return selection, decision, err
+	}
+
 	timeout := g.gwConfig.AdmissionQueueTimeout
+	if timeout <= 0 {
+		timeout = 5 * time.Minute
+	}
 	poll := g.gwConfig.AdmissionQueuePollInterval
 	if poll <= 0 {
 		poll = 500 * time.Millisecond
@@ -308,8 +312,51 @@ func (g *Gateway) planSessionAllocation(ctx context.Context, intent ResourceInte
 			if !errors.Is(nextErr, ErrPoolAtCapacity) {
 				return nextSelection, nextDecision, nextErr
 			}
+			if err := g.scalePoolForQueuedDemand(waitCtx, queueKey); err != nil {
+				return nextSelection, nextDecision, err
+			}
 		}
 	}
+}
+
+func (g *Gateway) scalePoolForQueuedDemand(ctx context.Context, key types.NamespacedName) error {
+	pool := &extensionsv1beta1.SandboxWarmPool{}
+	if err := g.k8sClient.Get(ctx, key, pool); err != nil {
+		return fmt.Errorf("get sandbox warm pool %s/%s for queued demand: %w", key.Namespace, key.Name, err)
+	}
+
+	claimCounts, err := g.activeClaimCountsByPool(ctx)
+	if err != nil {
+		return err
+	}
+	queuedCounts := g.admissionQueueSnapshot()
+	target := g.poolAutoscaleTarget(claimCounts[key], queuedCounts[key])
+	if target < 1 {
+		target = 1
+	}
+
+	current := desiredSandboxWarmPoolReplicas(pool)
+	needsPatch := target > current
+	state := strings.ToLower(strings.TrimSpace(pool.Annotations[labels.PoolStateAnnotation]))
+	autoscale := strings.ToLower(strings.TrimSpace(pool.Annotations[scheduling.PoolAutoscaleAnnotation]))
+	if state == labels.PoolStateStopped || state == labels.PoolStateDraining || autoscale == "false" || autoscale == "disabled" || autoscale == "off" {
+		needsPatch = true
+	}
+	if !needsPatch {
+		return nil
+	}
+
+	before := pool.DeepCopy()
+	if pool.Annotations == nil {
+		pool.Annotations = make(map[string]string)
+	}
+	pool.Spec.Replicas = int32Ptr(target)
+	pool.Annotations[labels.PoolStateAnnotation] = labels.PoolStateRunning
+	delete(pool.Annotations, scheduling.PoolAutoscaleAnnotation)
+	if err := g.k8sClient.Patch(ctx, pool, client.MergeFrom(before)); err != nil {
+		return fmt.Errorf("scale sandbox warm pool %s/%s for queued demand: %w", key.Namespace, key.Name, err)
+	}
+	return nil
 }
 
 func (g *Gateway) incrementAdmissionQueue(key types.NamespacedName) {

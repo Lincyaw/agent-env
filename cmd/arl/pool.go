@@ -36,18 +36,20 @@ var poolListCmd = &cobra.Command{
 
 		w := newTabWriter()
 		if flagOutput == "wide" {
-			fmt.Fprintln(w, "NAME\tPROFILE\tIMAGE\tREPLICAS\tREADY\tALLOCATED\tSTATUS\tAGE")
+			fmt.Fprintln(w, "NAME\tPROFILE\tIMAGE\tREPLICAS\tREADY\tALLOCATED\tSTATE\tSTATUS\tAGE")
 			for _, p := range pools {
-				fmt.Fprintf(w, "%s\t%s\t%s\t%d\t%d\t%d\t%s\t%s\n",
+				fmt.Fprintf(w, "%s\t%s\t%s\t%d\t%d\t%d\t%s\t%s\t%s\n",
 					p.Name, p.Profile, shortImage(p.Image),
 					p.Replicas, p.ReadyReplicas, p.AllocatedReplicas,
+					p.State,
 					conditionSummary(p.Conditions), age(p.CreatedAt))
 			}
 		} else {
-			fmt.Fprintln(w, "NAME\tPROFILE\tREPLICAS\tREADY\tALLOCATED\tSTATUS\tAGE")
+			fmt.Fprintln(w, "NAME\tPROFILE\tREPLICAS\tREADY\tALLOCATED\tSTATE\tSTATUS\tAGE")
 			for _, p := range pools {
-				fmt.Fprintf(w, "%s\t%s\t%d\t%d\t%d\t%s\t%s\n",
+				fmt.Fprintf(w, "%s\t%s\t%d\t%d\t%d\t%s\t%s\t%s\n",
 					p.Name, p.Profile, p.Replicas, p.ReadyReplicas, p.AllocatedReplicas,
+					p.State,
 					conditionSummary(p.Conditions), age(p.CreatedAt))
 			}
 		}
@@ -74,6 +76,7 @@ var poolGetCmd = &cobra.Command{
 		fmt.Printf("Name:       %s\n", p.Name)
 		fmt.Printf("Profile:    %s\n", p.Profile)
 		fmt.Printf("Image:      %s\n", p.Image)
+		fmt.Printf("State:      %s\n", p.State)
 		fmt.Printf("Replicas:   %d (ready=%d, allocated=%d)\n", p.Replicas, p.ReadyReplicas, p.AllocatedReplicas)
 		fmt.Printf("Age:        %s\n", age(p.CreatedAt))
 		if len(p.Conditions) > 0 {
@@ -218,12 +221,12 @@ var poolWaitCmd = &cobra.Command{
 
 var poolDeleteCmd = &cobra.Command{
 	Use:   "delete <name>",
-	Short: "Delete a WarmPool",
+	Short: "Drain and stop a WarmPool",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		force, _ := cmd.Flags().GetBool("force")
 		if !force {
-			fmt.Fprintf(os.Stderr, "Delete pool %q? Use --force to confirm.\n", args[0])
+			fmt.Fprintf(os.Stderr, "Drain and stop pool %q? Use --force to confirm.\n", args[0])
 			return fmt.Errorf("aborted (use --force)")
 		}
 
@@ -232,7 +235,28 @@ var poolDeleteCmd = &cobra.Command{
 			return err
 		}
 
-		fmt.Printf("Pool %s deleted.\n", args[0])
+		fmt.Printf("Pool %s drained and stopped.\n", args[0])
+		return nil
+	},
+}
+
+var poolDestroyCmd = &cobra.Command{
+	Use:   "destroy <name>",
+	Short: "Permanently delete a WarmPool and its owned template",
+	Args:  cobra.ExactArgs(1),
+	RunE: func(cmd *cobra.Command, args []string) error {
+		force, _ := cmd.Flags().GetBool("force")
+		if !force {
+			fmt.Fprintf(os.Stderr, "Permanently delete pool %q and its owned template? Use --force to confirm.\n", args[0])
+			return fmt.Errorf("aborted (use --force)")
+		}
+
+		c := newClient()
+		if err := c.DestroyPool(args[0]); err != nil {
+			return err
+		}
+
+		fmt.Printf("Pool %s destroyed.\n", args[0])
 		return nil
 	},
 }
@@ -370,6 +394,7 @@ func init() {
 	poolWaitCmd.Flags().Int32("min-ready", -1, "Minimum ready sandboxes to wait for (-1 means desired replicas)")
 
 	poolDeleteCmd.Flags().Bool("force", false, "Skip confirmation")
+	poolDestroyCmd.Flags().Bool("force", false, "Skip confirmation")
 
 	poolCmd.AddCommand(poolListCmd)
 	poolCmd.AddCommand(poolGetCmd)
@@ -380,6 +405,7 @@ func init() {
 	poolLogsCmd.Flags().Int("tail", 100, "Number of recent lines to show")
 
 	poolCmd.AddCommand(poolDeleteCmd)
+	poolCmd.AddCommand(poolDestroyCmd)
 	poolCmd.AddCommand(poolExecCmd)
 	poolCmd.AddCommand(poolLogsCmd)
 }

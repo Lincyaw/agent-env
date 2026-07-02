@@ -9,8 +9,9 @@
 - `ManagedSession`: gateway derives a stable `managed-...` pool from the
   scoped profile/image identity, creates it if needed, and tags the session with
   experiment metadata.
-- Warm capacity is preferred. If no warm sandbox is available, gateway policy
-  decides whether to allow cold start or queue/reject.
+- Session creation always goes through a matching WarmPool. If no ready sandbox
+  is available, the gateway queues the request, scales the selected WarmPool up,
+  and waits for ready capacity before allocating a claim.
 
 ## Error and Recovery Semantics
 
@@ -22,8 +23,10 @@
   SDK exceptions.
 - If gateway detects that a session lost its `SandboxClaim`/pod binding, it
   tombstones the session as runtime-lost and closes stale sidecar connections.
-- Deleting a warm pool removes pool-bound `SandboxClaim` objects before
-  deleting the pool/template.
+- Deleting a warm pool drains active sessions, removes pool-bound
+  `SandboxClaim` objects, and scales the WarmPool to zero. Use the explicit
+  destroy endpoint/helper only when the WarmPool and owned template should be
+  physically removed.
 
 ## Change Guidance
 

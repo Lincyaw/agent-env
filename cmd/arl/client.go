@@ -274,6 +274,10 @@ func (c *Client) DeletePool(name string) error {
 	return c.do("DELETE", "/v1/pools/"+name, nil, nil)
 }
 
+func (c *Client) DestroyPool(name string) error {
+	return c.do("POST", "/v1/pools/"+name+"/destroy", nil, nil)
+}
+
 // --- Experiment API ---
 
 func (c *Client) ListExperiments() ([]ExperimentSummary, error) {

@@ -268,26 +268,11 @@ func (a *SandboxClaimRuntimeAllocator) DiagnosticStats() map[string]AllocatorPoo
 	if err := a.k8sClient.List(ctx, &pools, opts...); err != nil {
 		return map[string]AllocatorPoolStats{}
 	}
-	var claims extensionsv1beta1.SandboxClaimList
-	if err := a.k8sClient.List(ctx, &claims, opts...); err != nil {
-		return map[string]AllocatorPoolStats{}
-	}
-
-	claimCounts := make(map[types.NamespacedName]int32)
-	for i := range claims.Items {
-		claim := &claims.Items[i]
-		if claim.DeletionTimestamp != nil || claim.Spec.WarmPoolRef.Name == "" {
-			continue
-		}
-		key := types.NamespacedName{Name: claim.Spec.WarmPoolRef.Name, Namespace: claim.Namespace}
-		claimCounts[key]++
-	}
 
 	stats := make(map[string]AllocatorPoolStats, len(pools.Items))
 	for i := range pools.Items {
 		pool := &pools.Items[i]
-		key := types.NamespacedName{Name: pool.Name, Namespace: pool.Namespace}
-		idle := pool.Status.ReadyReplicas - claimCounts[key]
+		idle := pool.Status.ReadyReplicas
 		if idle < 0 {
 			idle = 0
 		}

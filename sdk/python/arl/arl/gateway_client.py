@@ -526,6 +526,10 @@ class GatewayClient:
         resp = self._client.delete(f"/v1/pools/{name}")
         self._handle_error(resp)
 
+    def destroy_pool(self, name: str) -> None:
+        resp = self._client.post(f"/v1/pools/{name}/destroy")
+        self._handle_error(resp)
+
     def scale_pool(
         self,
         name: str,

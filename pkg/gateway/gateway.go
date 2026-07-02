@@ -38,23 +38,20 @@ import (
 
 // GatewayConfig holds Gateway-level configuration.
 type GatewayConfig struct {
-	IdleTimeout        time.Duration
-	MaxLifetime        time.Duration
-	SweepInterval      time.Duration
-	Namespace          string
-	SidecarImage       string
-	SidecarHTTPPort    int
-	SidecarGRPCPort    int
-	WorkspaceDir       string
-	ExecutorAgentImage string
-	ImagePullPolicy    string
-	GRPCAuthToken      string
-	GRPCAuthSecretName string
-	PodHTTPProxy       string
-	PodNoProxy         string
-	// AdmissionDisableColdStart forces requests to wait/reject when a selected
-	// pool has no warm capacity instead of relying on agent-sandbox cold create.
-	AdmissionDisableColdStart       bool
+	IdleTimeout                     time.Duration
+	MaxLifetime                     time.Duration
+	SweepInterval                   time.Duration
+	Namespace                       string
+	SidecarImage                    string
+	SidecarHTTPPort                 int
+	SidecarGRPCPort                 int
+	WorkspaceDir                    string
+	ExecutorAgentImage              string
+	ImagePullPolicy                 string
+	GRPCAuthToken                   string
+	GRPCAuthSecretName              string
+	PodHTTPProxy                    string
+	PodNoProxy                      string
 	AdmissionQueueTimeout           time.Duration
 	AdmissionQueuePollInterval      time.Duration
 	PoolAutoscalerEnabled           bool
@@ -307,10 +304,10 @@ func (g *Gateway) CreateSession(ctx context.Context, req CreateSessionRequest) (
 		if autoCreatedPool == "" {
 			return
 		}
-		if deleted, cleanupErr := g.deleteManagedPoolIfUnused(ctx, autoCreatedPool, ns); cleanupErr != nil {
+		if stopped, cleanupErr := g.stopManagedPoolIfUnused(ctx, autoCreatedPool, ns); cleanupErr != nil {
 			log.Printf("Warning: failed to cleanup unused managed pool %s/%s after session create failure: %v", ns, autoCreatedPool, cleanupErr)
-		} else if deleted {
-			log.Printf("Cleaned up unused managed pool %s/%s after session create failure", ns, autoCreatedPool)
+		} else if stopped {
+			log.Printf("Stopped unused managed pool %s/%s after session create failure", ns, autoCreatedPool)
 		}
 	}
 
@@ -336,7 +333,6 @@ func (g *Gateway) CreateSession(ctx context.Context, req CreateSessionRequest) (
 		attribute.String("pool.selected", poolRef),
 		attribute.String("pool.selection_reason", selection.Reason),
 		attribute.String("admission.reason", admission.Reason),
-		attribute.Bool("admission.cold_start_expected", admission.ColdStartExpected),
 		attribute.Int("admission.warm_available", int(admission.WarmAvailable)),
 	)
 
@@ -507,10 +503,10 @@ func (g *Gateway) cleanupManagedPoolAfterSessionDelete(ctx context.Context, allo
 	if namespace == "" {
 		namespace = g.runtimeNamespace()
 	}
-	if deleted, err := g.deleteManagedPoolIfUnused(ctx, allocation.PoolRef, namespace); err != nil {
+	if stopped, err := g.stopManagedPoolIfUnused(ctx, allocation.PoolRef, namespace); err != nil {
 		log.Printf("Warning: failed to cleanup unused managed pool %s/%s after session delete: %v", namespace, allocation.PoolRef, err)
-	} else if deleted {
-		log.Printf("Deleted unused managed pool %s/%s after session delete", namespace, allocation.PoolRef)
+	} else if stopped {
+		log.Printf("Stopped unused managed pool %s/%s after session delete", namespace, allocation.PoolRef)
 	}
 }
 
@@ -1372,6 +1368,7 @@ func (g *Gateway) CreatePool(ctx context.Context, req CreatePoolRequest) error {
 		templateAnnotations[labels.ManagedPoolAnnotation] = "true"
 		poolAnnotations[labels.ManagedPoolAnnotation] = "true"
 	}
+	poolAnnotations[labels.PoolStateAnnotation] = labels.PoolStateRunning
 	imageLocalityEnabled := g.gwConfig.ImageLocalityEnabled || hasJSONPayload(req.ImageLocality)
 	if imageLocalityEnabled {
 		templateAnnotations[scheduling.ImageLocalityAnnotation] = scheduling.ImageLocalityEnabledValue
@@ -1465,6 +1462,16 @@ func (g *Gateway) ScalePool(ctx context.Context, name string, req ScalePoolReque
 		return nil, fmt.Errorf("updating resources requires updating the SandboxTemplate and is not supported by ScalePool")
 	}
 	pool.Spec.Replicas = int32Ptr(req.Replicas)
+	if pool.Annotations == nil {
+		pool.Annotations = make(map[string]string)
+	}
+	if req.Replicas > 0 {
+		pool.Annotations[labels.PoolStateAnnotation] = labels.PoolStateRunning
+		delete(pool.Annotations, scheduling.PoolAutoscaleAnnotation)
+	} else {
+		pool.Annotations[labels.PoolStateAnnotation] = labels.PoolStateStopped
+		pool.Annotations[scheduling.PoolAutoscaleAnnotation] = "false"
+	}
 
 	if err := g.k8sClient.Update(ctx, pool); err != nil {
 		return nil, fmt.Errorf("update pool: %w", err)
@@ -1473,49 +1480,124 @@ func (g *Gateway) ScalePool(ctx context.Context, name string, req ScalePoolReque
 	return g.GetPool(ctx, name, ns)
 }
 
-// DeletePool deletes active sessions and SandboxClaims bound to the pool, the
-// SandboxWarmPool, and the default SandboxTemplate created by CreatePool.
+// DeletePool drains a pool without deleting its SandboxWarmPool or template.
+// It deletes active sessions and SandboxClaims bound to the pool, then sets
+// SandboxWarmPool.spec.replicas to 0 so idle warm capacity is torn down by
+// agent-sandbox.
 func (g *Gateway) DeletePool(ctx context.Context, name, namespace string) error {
 	namespace, err := g.resolveNamespace(namespace)
 	if err != nil {
 		return err
 	}
 
+	if err := g.markPoolDraining(ctx, name, namespace); err != nil {
+		return err
+	}
 	if err := g.deleteSessionsForPool(ctx, name, namespace); err != nil {
 		return err
 	}
+	if err := g.deleteClaimsForPool(ctx, name, namespace); err != nil {
+		return err
+	}
+	return g.markPoolStopped(ctx, name, namespace)
+}
 
+// DestroyPool drains a pool, then deletes the SandboxWarmPool and the template
+// it references when that template is owned by the ARL-created pool contract.
+func (g *Gateway) DestroyPool(ctx context.Context, name, namespace string) error {
+	namespace, err := g.resolveNamespace(namespace)
+	if err != nil {
+		return err
+	}
+
+	pool := &extensionsv1beta1.SandboxWarmPool{}
+	if err := g.k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, pool); err != nil {
+		if errors.IsNotFound(err) {
+			return nil
+		}
+		return fmt.Errorf("get pool for destroy: %w", err)
+	}
+	templateName := pool.Spec.TemplateRef.Name
+
+	if err := g.DeletePool(ctx, name, namespace); err != nil {
+		return err
+	}
+
+	if err := g.k8sClient.Delete(ctx, pool); err != nil && !errors.IsNotFound(err) {
+		return fmt.Errorf("delete sandbox warm pool %s/%s: %w", namespace, name, err)
+	}
+	if templateName == "" {
+		return nil
+	}
+	if err := g.deletePoolTemplateIfOwned(ctx, templateName, name, namespace); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (g *Gateway) deleteClaimsForPool(ctx context.Context, poolName, namespace string) error {
 	var claims extensionsv1beta1.SandboxClaimList
 	if err := g.k8sClient.List(ctx, &claims, client.InNamespace(namespace)); err != nil {
 		return fmt.Errorf("list sandbox claims for pool delete: %w", err)
 	}
 	for i := range claims.Items {
 		claim := &claims.Items[i]
-		if claim.Spec.WarmPoolRef.Name != name {
+		if claim.Spec.WarmPoolRef.Name != poolName {
 			continue
 		}
-		if err := g.k8sClient.Delete(ctx, claim); err != nil && !errors.IsNotFound(err) {
-			return fmt.Errorf("delete sandbox claim %s/%s for pool %s: %w", namespace, claim.Name, name, err)
+		if err := g.k8sClient.Delete(ctx, claim, client.PropagationPolicy(metav1.DeletePropagationForeground)); err != nil && !errors.IsNotFound(err) {
+			return fmt.Errorf("delete sandbox claim %s/%s for pool %s: %w", namespace, claim.Name, poolName, err)
 		}
 	}
+	return nil
+}
 
-	pool := &extensionsv1beta1.SandboxWarmPool{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      name,
-			Namespace: namespace,
-		},
+func (g *Gateway) markPoolDraining(ctx context.Context, name, namespace string) error {
+	return g.patchPoolLifecycle(ctx, name, namespace, 0, labels.PoolStateDraining, true)
+}
+
+func (g *Gateway) markPoolStopped(ctx context.Context, name, namespace string) error {
+	return g.patchPoolLifecycle(ctx, name, namespace, 0, labels.PoolStateStopped, true)
+}
+
+func (g *Gateway) patchPoolLifecycle(ctx context.Context, name, namespace string, replicas int32, state string, disableAutoscale bool) error {
+	pool := &extensionsv1beta1.SandboxWarmPool{}
+	if err := g.k8sClient.Get(ctx, types.NamespacedName{Name: name, Namespace: namespace}, pool); err != nil {
+		if errors.IsNotFound(err) {
+			return nil
+		}
+		return fmt.Errorf("get pool %s/%s: %w", namespace, name, err)
 	}
-	if err := g.k8sClient.Delete(ctx, pool); err != nil && !errors.IsNotFound(err) {
-		return err
+	before := pool.DeepCopy()
+	if pool.Annotations == nil {
+		pool.Annotations = make(map[string]string)
 	}
-	template := &extensionsv1beta1.SandboxTemplate{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      sandboxTemplateName(name),
-			Namespace: namespace,
-		},
+	pool.Spec.Replicas = int32Ptr(replicas)
+	pool.Annotations[labels.PoolStateAnnotation] = state
+	if disableAutoscale {
+		pool.Annotations[scheduling.PoolAutoscaleAnnotation] = "false"
+	}
+	if err := g.k8sClient.Patch(ctx, pool, client.MergeFrom(before)); err != nil {
+		return fmt.Errorf("patch pool %s/%s lifecycle: %w", namespace, name, err)
+	}
+	return nil
+}
+
+func (g *Gateway) deletePoolTemplateIfOwned(ctx context.Context, templateName, poolName, namespace string) error {
+	template := &extensionsv1beta1.SandboxTemplate{}
+	if err := g.k8sClient.Get(ctx, types.NamespacedName{Name: templateName, Namespace: namespace}, template); err != nil {
+		if errors.IsNotFound(err) {
+			return nil
+		}
+		return fmt.Errorf("get sandbox template %s/%s for pool destroy: %w", namespace, templateName, err)
+	}
+	managed := strings.EqualFold(strings.TrimSpace(template.Annotations[labels.ManagedPoolAnnotation]), "true")
+	defaultName := templateName == sandboxTemplateName(poolName)
+	if !managed && !defaultName {
+		return nil
 	}
 	if err := g.k8sClient.Delete(ctx, template); err != nil && !errors.IsNotFound(err) {
-		return err
+		return fmt.Errorf("delete sandbox template %s/%s: %w", namespace, templateName, err)
 	}
 	return nil
 }
@@ -2104,10 +2186,10 @@ func (g *Gateway) CreateManagedSession(ctx context.Context, req CreateManagedSes
 	})
 	if err != nil {
 		if createdPool {
-			if deleted, cleanupErr := g.deleteManagedPoolIfUnused(ctx, poolName, ns); cleanupErr != nil {
+			if stopped, cleanupErr := g.stopManagedPoolIfUnused(ctx, poolName, ns); cleanupErr != nil {
 				log.Printf("Warning: failed to cleanup unused managed pool %s/%s after managed session create failure: %v", ns, poolName, cleanupErr)
-			} else if deleted {
-				log.Printf("Cleaned up unused managed pool %s/%s after managed session create failure", ns, poolName)
+			} else if stopped {
+				log.Printf("Stopped unused managed pool %s/%s after managed session create failure", ns, poolName)
 			}
 		}
 		return nil, fmt.Errorf("create session: %w", err)
@@ -2337,6 +2419,7 @@ func (g *Gateway) poolInfoFromSandboxWarmPool(ctx context.Context, pool *extensi
 		Profile:       firstNonEmpty(profileFromObjectMeta(pool.ObjectMeta), defaultPoolProfile),
 		Replicas:      desiredSandboxWarmPoolReplicas(pool),
 		ReadyReplicas: pool.Status.ReadyReplicas,
+		State:         firstNonEmpty(pool.Annotations[labels.PoolStateAnnotation], labels.PoolStateRunning),
 		CreatedAt:     pool.CreationTimestamp.Time,
 	}
 	template := &extensionsv1beta1.SandboxTemplate{}
@@ -2385,18 +2468,18 @@ func (g *Gateway) DeleteExperiment(ctx context.Context, experimentID string) (in
 	}
 
 	for pool := range pools {
-		if deletedPool, err := g.deleteManagedPoolIfUnused(ctx, pool.Name, pool.Namespace); err != nil {
+		if stoppedPool, err := g.stopManagedPoolIfUnused(ctx, pool.Name, pool.Namespace); err != nil {
 			lastErr = err
-			log.Printf("Warning: failed to delete unused managed pool %s/%s after deleting experiment %s: %v", pool.Namespace, pool.Name, experimentID, err)
-		} else if deletedPool {
-			log.Printf("Deleted unused managed pool %s/%s after deleting experiment %s", pool.Namespace, pool.Name, experimentID)
+			log.Printf("Warning: failed to stop unused managed pool %s/%s after deleting experiment %s: %v", pool.Namespace, pool.Name, experimentID, err)
+		} else if stoppedPool {
+			log.Printf("Stopped unused managed pool %s/%s after deleting experiment %s", pool.Namespace, pool.Name, experimentID)
 		}
 	}
 
 	return deleted, lastErr
 }
 
-func (g *Gateway) deleteManagedPoolIfUnused(ctx context.Context, poolName, namespace string) (bool, error) {
+func (g *Gateway) stopManagedPoolIfUnused(ctx context.Context, poolName, namespace string) (bool, error) {
 	if g.k8sClient == nil || strings.TrimSpace(poolName) == "" {
 		return false, nil
 	}
@@ -2408,7 +2491,7 @@ func (g *Gateway) deleteManagedPoolIfUnused(ctx context.Context, poolName, names
 	pool := &extensionsv1beta1.SandboxWarmPool{}
 	if err := g.k8sClient.Get(ctx, types.NamespacedName{Name: poolName, Namespace: namespace}, pool); err != nil {
 		if errors.IsNotFound(err) {
-			return g.deleteManagedPoolTemplate(ctx, sandboxTemplateName(poolName), namespace, true)
+			return false, nil
 		}
 		return false, fmt.Errorf("get managed pool %s/%s: %w", namespace, poolName, err)
 	}
@@ -2423,43 +2506,23 @@ func (g *Gateway) deleteManagedPoolIfUnused(ctx context.Context, poolName, names
 	if inUse {
 		return false, nil
 	}
-
-	if err := g.k8sClient.Delete(ctx, pool); err != nil && !errors.IsNotFound(err) {
-		return false, fmt.Errorf("delete managed pool %s/%s: %w", namespace, poolName, err)
-	}
-
-	templateName := pool.Spec.TemplateRef.Name
-	if templateName == "" {
-		templateName = sandboxTemplateName(poolName)
-	}
-	return g.deleteManagedPoolTemplate(ctx, templateName, namespace, false)
-}
-
-func (g *Gateway) deleteManagedPoolTemplate(ctx context.Context, templateName, namespace string, requireManagedAnnotation bool) (bool, error) {
-	if strings.TrimSpace(templateName) == "" {
+	if poolLifecycleStopped(pool) {
 		return false, nil
 	}
-	template := &extensionsv1beta1.SandboxTemplate{
-		ObjectMeta: metav1.ObjectMeta{
-			Name:      templateName,
-			Namespace: namespace,
-		},
-	}
-	if requireManagedAnnotation {
-		if err := g.k8sClient.Get(ctx, types.NamespacedName{Name: templateName, Namespace: namespace}, template); err != nil {
-			if errors.IsNotFound(err) {
-				return false, nil
-			}
-			return false, fmt.Errorf("get managed pool template %s/%s: %w", namespace, templateName, err)
-		}
-		if !strings.EqualFold(strings.TrimSpace(template.Annotations[labels.ManagedPoolAnnotation]), "true") {
-			return false, nil
-		}
-	}
-	if err := g.k8sClient.Delete(ctx, template); err != nil && !errors.IsNotFound(err) {
-		return false, fmt.Errorf("delete managed pool template %s/%s: %w", namespace, templateName, err)
+
+	if err := g.markPoolStopped(ctx, poolName, namespace); err != nil {
+		return false, err
 	}
 	return true, nil
+}
+
+func poolLifecycleStopped(pool *extensionsv1beta1.SandboxWarmPool) bool {
+	if pool == nil {
+		return false
+	}
+	state := strings.ToLower(strings.TrimSpace(pool.Annotations[labels.PoolStateAnnotation]))
+	autoscale := strings.ToLower(strings.TrimSpace(pool.Annotations[scheduling.PoolAutoscaleAnnotation]))
+	return desiredSandboxWarmPoolReplicas(pool) == 0 && state == labels.PoolStateStopped && autoscale == "false"
 }
 
 func isManagedPool(pool *extensionsv1beta1.SandboxWarmPool) bool {

@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -48,6 +49,58 @@ func TestClientListMethodsReturnEmptySlices(t *testing.T) {
 	}
 	if managed == nil || len(managed) != 0 {
 		t.Fatalf("ListExperimentSessions = %#v, want empty non-nil slice", managed)
+	}
+}
+
+func TestClientPoolDeleteAndDestroyUseDistinctEndpoints(t *testing.T) {
+	var seen []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = append(seen, r.Method+" "+r.URL.Path)
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "")
+	if err := client.DeletePool("pool-1"); err != nil {
+		t.Fatalf("DeletePool returned error: %v", err)
+	}
+	if err := client.DestroyPool("pool-1"); err != nil {
+		t.Fatalf("DestroyPool returned error: %v", err)
+	}
+
+	want := []string{
+		"DELETE /v1/pools/pool-1",
+		"POST /v1/pools/pool-1/destroy",
+	}
+	if strings.Join(seen, ",") != strings.Join(want, ",") {
+		t.Fatalf("seen endpoints = %#v, want %#v", seen, want)
+	}
+}
+
+func TestClientCreateSessionDoesNotExposeCapacityBypassPolicy(t *testing.T) {
+	var bodies []map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost || r.URL.Path != "/v1/sessions" {
+			t.Fatalf("request = %s %s, want POST /v1/sessions", r.Method, r.URL.Path)
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		bodies = append(bodies, body)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"id":"gw-1","sandboxName":"gw-1","namespace":"default","podIP":"10.0.0.1","podName":"pod-1","createdAt":"2026-01-01T00:00:00Z"}`))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "")
+	if _, err := client.CreateSession(CreateSessionRequest{Image: "python:3.12"}); err != nil {
+		t.Fatalf("CreateSession returned error: %v", err)
+	}
+
+	if _, ok := bodies[0]["allowColdStart"]; ok {
+		t.Fatalf("create session body included allowColdStart: %#v", bodies[0])
 	}
 }
 

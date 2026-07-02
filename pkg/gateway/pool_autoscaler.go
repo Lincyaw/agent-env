@@ -11,6 +11,7 @@ import (
 	"sigs.k8s.io/agent-sandbox/extensions/api/v1beta1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
+	"github.com/Lincyaw/agent-env/pkg/labels"
 	"github.com/Lincyaw/agent-env/pkg/scheduling"
 )
 
@@ -160,7 +161,7 @@ func (g *Gateway) poolAutoscaleTarget(activeClaims, queuedRequests int32) int32 
 		queuedRequests = 0
 	}
 
-	target := activeClaims + queuedRequests + buffer
+	target := queuedRequests + buffer
 	if target < minReplicas {
 		target = minReplicas
 	}
@@ -171,6 +172,10 @@ func (g *Gateway) poolAutoscaleTarget(activeClaims, queuedRequests int32) int32 
 }
 
 func poolAutoscalingDisabled(pool *v1beta1.SandboxWarmPool) bool {
+	state := strings.ToLower(strings.TrimSpace(pool.Annotations[labels.PoolStateAnnotation]))
+	if state == labels.PoolStateStopped || state == labels.PoolStateDraining {
+		return true
+	}
 	value := strings.ToLower(strings.TrimSpace(pool.Annotations[scheduling.PoolAutoscaleAnnotation]))
 	return value == "false" || value == "disabled" || value == "off"
 }

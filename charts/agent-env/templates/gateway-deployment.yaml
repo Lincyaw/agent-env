@@ -81,8 +81,6 @@ spec:
               value: "{{ .Values.gateway.sidecarClientTimeout }}"
             - name: GATEWAY_WRITE_TIMEOUT
               value: "{{ .Values.gateway.writeTimeout }}"
-            - name: ADMISSION_DISABLE_COLD_START
-              value: "{{ .Values.gateway.admission.disableColdStart }}"
             - name: ADMISSION_QUEUE_TIMEOUT
               value: "{{ .Values.gateway.admission.queueTimeout }}"
             - name: ADMISSION_QUEUE_POLL_INTERVAL
