@@ -47,7 +47,11 @@ arl pool list --format wide
 arl pool get <name>
 arl pool create <name> --image python:3.12 --profile <profile> --replicas 2
 arl pool create <name> --image python:3.12 --workspace-dir /workspace
+arl pool create <name> --image python:3.12 --replicas 3 --wait --min-ready 2 --timeout 5m
 arl pool scale <name> --replicas 5
+arl pool scale <name> --replicas 10 --wait --timeout 10m
+arl pool wait <name>
+arl pool wait <name> --min-ready 3 --timeout 5m
 # Drains sessions/claims and scales the WarmPool to zero.
 arl pool delete <name> --force
 # Physically deletes the WarmPool and its owned template.
@@ -59,6 +63,10 @@ arl pool exec <name> -- python -c "print('ok')"
 arl pool logs <name>
 arl pool logs <name> --tail 50 -f
 ```
+
+`pool create` and `pool scale` accept `--wait` to block until `--min-ready`
+sandboxes are ready (default: target replicas). `--timeout` defaults to 10m.
+`pool wait` is the standalone equivalent for an already-existing pool.
 
 Current CLI defaults `arl pool create` to `--replicas 2`. Gateway-created
 image-backed pools use one replica unless the caller provides another value.
@@ -79,6 +87,9 @@ arl session get <id>
 arl session delete <id>
 
 arl session exec <id> -- echo hello
+arl session exec-container <id> <container> -- python -c "print('ok')"
+arl session exec-container <id> <container> -- ls /data \
+  --workdir /app --timeout 30 --env KEY=VALUE
 arl session shell <id>
 
 arl session upload <id> ./local.txt data/local.txt
@@ -109,8 +120,34 @@ is required.
 recorded steps from a source session into an existing target session; use
 `--up-to-step` to stop after a specific zero-based step index.
 
+`exec-container` runs a command in a private sidecar container rather than the
+main sandbox. Accepts `--workdir`, `--timeout` (seconds), and `--env KEY=VALUE`
+(repeatable).
+
 There is no current `arl session list --pool` flag. Filter by `--profile` or
 `--experiment`, or use `--format json` with `jq`.
+
+## Private Containers
+
+`session create`, `pool create`, and `exp create` accept private container
+flags for multi-container sandboxes:
+
+```bash
+arl session create --image python:3.12 \
+  --private-container '{"name":"redis","image":"redis:7"}'
+arl pool create my-pool --image python:3.12 \
+  --private-container '{"name":"db","image":"postgres:16","mountWorkspace":true}' \
+  --private-container '{"name":"cache","image":"redis:7"}'
+arl exp create exp-1 --image python:3.12 --sessions 2 \
+  --private-containers-file containers.json
+```
+
+`--private-container` takes an inline JSON object (repeatable).
+`--private-containers-file` reads a JSON object or array from a file.
+
+Private container spec fields: `name`, `image` (required), `mountWorkspace`,
+`workspaceMountPath`, `workspaceAccess`, `command`, `args`, `env`,
+`resources`, `imagePullPolicy`.
 
 ## Diagnostics
 

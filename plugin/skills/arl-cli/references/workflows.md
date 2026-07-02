@@ -31,11 +31,21 @@ kubectl get sandboxwarmpools,sandboxclaims,sandboxes -A
 Check conditions for failing pods, image pull errors, zero ready replicas, or
 unexpected allocated replicas.
 
+## Wait for Pool Readiness
+
+```bash
+arl pool create my-pool --image python:3.12 --replicas 3 --wait
+arl pool scale my-pool --replicas 10 --wait --min-ready 5 --timeout 5m
+arl pool wait my-pool --min-ready 3
+```
+
+Use `--wait` on create/scale for inline blocking. Use `arl pool wait` as a
+standalone step in scripts that separate creation from readiness checks.
+
 ## Test an Image
 
 ```bash
-arl pool create test-pool --image my-registry/my-image:latest --replicas 1
-arl pool get test-pool
+arl pool create test-pool --image my-registry/my-image:latest --replicas 1 --wait
 arl pool exec test-pool -- sh -c "uname -a && pwd"
 arl pool delete test-pool --force
 ```
@@ -73,6 +83,28 @@ while read sid; do
   arl session trajectory "$sid" -f "trajectories/exp-42/${sid}.jsonl"
 done < session_ids.txt
 ```
+
+## Multi-Container Sandboxes
+
+```bash
+arl pool create ml-pool --image python:3.12 --replicas 2 --wait \
+  --private-container '{"name":"redis","image":"redis:7"}' \
+  --private-container '{"name":"pg","image":"postgres:16","mountWorkspace":true}'
+
+arl session create --image python:3.12 \
+  --private-containers-file containers.json
+
+# Execute in the main sandbox
+arl session exec <id> -- python train.py
+
+# Execute in a private sidecar
+arl session exec-container <id> redis -- redis-cli ping
+arl session exec-container <id> pg -- psql -c "SELECT 1"
+```
+
+Use `--private-container` for inline JSON specs (repeatable) or
+`--private-containers-file` to load from a JSON file. Use
+`arl session exec-container` to run commands in a specific sidecar.
 
 ## Best Practices
 

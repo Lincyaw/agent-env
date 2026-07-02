@@ -1,7 +1,7 @@
 ---
 name: arl-cli
 description: |
-  Guide for using the `arl` CLI to inspect, debug, and manage the ARL (Agentic RL) runtime: experiments, warm pools, sessions, files, snapshots, replay, logs, and metrics. Use this skill whenever the user asks about checking pool status, viewing experiment sessions, creating or debugging sessions, transferring files, restoring snapshots, replaying trajectories, streaming logs, exporting trajectories, or any operational task involving the ARL system. Also trigger when the user mentions `arl` CLI commands, asks "how do I see what's running", "show me the pools", "check experiment X", "debug this session", "看看 pool 状态", "查看实验", "导出 trajectory", or wants to combine multiple arl operations into a workflow.
+  Guide for using the `arl` CLI to inspect, debug, and manage the ARL (Agentic RL) runtime: experiments, warm pools, sessions, files, snapshots, replay, private containers, logs, and metrics. Use this skill whenever the user asks about checking pool status, viewing experiment sessions, creating or debugging sessions, transferring files, restoring snapshots, replaying trajectories, streaming logs, exporting trajectories, waiting for pool readiness, running commands in private sidecar containers, or any operational task involving the ARL system. Also trigger when the user mentions `arl` CLI commands, asks "how do I see what's running", "show me the pools", "check experiment X", "debug this session", "看看 pool 状态", "查看实验", "导出 trajectory", or wants to combine multiple arl operations into a workflow.
 ---
 
 # ARL CLI
