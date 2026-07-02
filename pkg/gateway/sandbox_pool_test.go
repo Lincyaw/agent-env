@@ -346,6 +346,46 @@ func TestDeleteSessionCleansUnusedManagedPool(t *testing.T) {
 	}
 }
 
+func TestDropSessionCleansUnusedManagedPool(t *testing.T) {
+	scheme := newGatewayTestScheme(t)
+	poolName := "managed-pool"
+	pool := managedPoolObject(poolName, "default")
+	template := managedTemplateObject(sandboxTemplateName(poolName), "default")
+	claim := &extensionsv1beta1.SandboxClaim{
+		ObjectMeta: metav1.ObjectMeta{Name: "claim-session", Namespace: "default"},
+		Spec: extensionsv1beta1.SandboxClaimSpec{
+			WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: poolName},
+		},
+	}
+	k8sClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(pool, template, claim).Build()
+	store := NewMemoryStore()
+	putIntegrationSession(store, "default", poolName, "claim-session", "session-clean", "exp-clean")
+	gw := New(k8sClient, NewSandboxClaimRuntimeAllocator(k8sClient, "default"), nil, nil, nil, GatewayConfig{Namespace: "default"}, store)
+	s, ok := store.Get("session-clean")
+	if !ok {
+		t.Fatal("session missing before dropSession")
+	}
+
+	gw.dropSession("session-clean", s)
+
+	if _, ok := store.Get("session-clean"); ok {
+		t.Fatal("session is still active after dropSession")
+	}
+	for _, obj := range []struct {
+		name string
+		obj  client.Object
+	}{
+		{name: "claim-session", obj: &extensionsv1beta1.SandboxClaim{}},
+		{name: poolName, obj: &extensionsv1beta1.SandboxWarmPool{}},
+		{name: sandboxTemplateName(poolName), obj: &extensionsv1beta1.SandboxTemplate{}},
+	} {
+		err := k8sClient.Get(context.Background(), types.NamespacedName{Name: obj.name, Namespace: "default"}, obj.obj)
+		if !apierrors.IsNotFound(err) {
+			t.Fatalf("get %s error = %v, want not found", obj.name, err)
+		}
+	}
+}
+
 func TestDeleteSessionContinuesWhenManagedPoolCleanupCheckFails(t *testing.T) {
 	scheme := newGatewayTestScheme(t)
 	poolName := "managed-pool"

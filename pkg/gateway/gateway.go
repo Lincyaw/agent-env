@@ -810,6 +810,10 @@ func (g *Gateway) dropSession(sessionID string, s *session) {
 		g.metrics.SetActiveSessions(activeSessions)
 		g.metrics.IncrementSessionDeletion("runtime_lost")
 	}
+
+	cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cleanupCancel()
+	g.cleanupManagedPoolAfterSessionDelete(cleanupCtx, allocation)
 }
 
 func (g *Gateway) markSessionDeleted(s *session, reason string) {
