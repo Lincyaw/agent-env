@@ -12,28 +12,29 @@ import (
 	"syscall"
 	"time"
 
+	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
 	clientgoscheme "k8s.io/client-go/kubernetes/scheme"
+	sandboxv1beta1 "sigs.k8s.io/agent-sandbox/api/v1beta1"
+	extensionsv1beta1 "sigs.k8s.io/agent-sandbox/extensions/api/v1beta1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
 
-	arlv1alpha1 "github.com/Lincyaw/agent-env/api/v1alpha1"
 	"github.com/Lincyaw/agent-env/pkg/audit"
 	"github.com/Lincyaw/agent-env/pkg/client"
 	"github.com/Lincyaw/agent-env/pkg/config"
 	"github.com/Lincyaw/agent-env/pkg/gateway"
 	"github.com/Lincyaw/agent-env/pkg/metrics"
 	"github.com/Lincyaw/agent-env/pkg/tracing"
-
-	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 )
 
 var scheme = runtime.NewScheme()
 
 func init() {
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
-	utilruntime.Must(arlv1alpha1.AddToScheme(scheme))
+	utilruntime.Must(sandboxv1beta1.AddToScheme(scheme))
+	utilruntime.Must(extensionsv1beta1.AddToScheme(scheme))
 }
 
 func main() {
@@ -50,6 +51,8 @@ func main() {
 	if err := cfg.Validate(); err != nil {
 		log.Fatalf("invalid configuration: %v", err)
 	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
 	tracingShutdown, err := tracing.Setup(context.Background(), "arl-gateway")
 	if err != nil {
@@ -75,38 +78,21 @@ func main() {
 	// Create sidecar gRPC client
 	sidecarClient := client.NewGRPCSidecarClient(grpcPort, cfg.HTTPClientTimeout, cfg.GRPCAuthToken)
 
-	// Create PodAllocator with Informer-backed pod cache
+	// Create the sandbox runtime allocator backed by agent-sandbox CRDs.
 	metricsCollector := metrics.NewPrometheusCollector()
-	podAllocator, err := gateway.NewPodAllocator(k8sClient, k8sConfig, scheme, metricsCollector)
-	if err != nil {
-		log.Fatalf("Failed to create PodAllocator: %v", err)
-	}
+	runtimeAllocator := gateway.NewSandboxClaimRuntimeAllocator(k8sClient, cfg.GatewayNamespace)
+	log.Println("Runtime allocator backend: sandboxclaim")
 
-	// Create trajectory writer (optional, with retry for startup ordering)
-	var trajectoryWriter *audit.TrajectoryWriter
+	// Trajectory writer is connected asynchronously so ClickHouse startup
+	// ordering never blocks the gateway health endpoint.
+	var trajectoryConfig *audit.TrajectoryConfig
 	if cfg.TrajectoryEnabled {
-		trajCfg := audit.TrajectoryConfig{
+		trajectoryConfig = &audit.TrajectoryConfig{
 			Addr:     cfg.ClickHouseAddr,
 			Database: cfg.ClickHouseDatabase,
 			Username: cfg.ClickHouseUsername,
 			Password: cfg.ClickHousePassword,
 			Debug:    cfg.TrajectoryDebug,
-		}
-		const maxRetries = 5
-		for i := range maxRetries {
-			tw, err := audit.NewTrajectoryWriter(trajCfg)
-			if err == nil {
-				trajectoryWriter = tw
-				log.Println("Trajectory writer enabled")
-				break
-			}
-			if i < maxRetries-1 {
-				wait := time.Duration(i+1) * 5 * time.Second
-				log.Printf("Warning: Trajectory writer init failed (attempt %d/%d): %v; retrying in %v", i+1, maxRetries, err, wait)
-				time.Sleep(wait)
-			} else {
-				log.Printf("Warning: Trajectory writer init failed after %d attempts: %v (trajectory disabled)", maxRetries, err)
-			}
 		}
 	}
 
@@ -136,37 +122,57 @@ func main() {
 		}
 	}
 
-	gw := gateway.New(k8sClient, podAllocator, sidecarClient, metricsCollector, trajectoryWriter, &gateway.PoolManagerConfig{
-		InitialReplicas: cfg.ManagedPoolInitialReplicas,
-		MinReplicas:     cfg.ManagedPoolMinReplicas,
-		MaxReplicas:     cfg.ManagedPoolMaxReplicas,
-		ScaleUpStep:     cfg.ManagedPoolScaleUpStep,
-		IdleCooldown:    cfg.ManagedPoolIdleCooldown,
-		EmptyPoolTTL:    cfg.ManagedPoolEmptyTTL,
-		SweepInterval:   cfg.ManagedPoolSweepInterval,
-	}, gateway.GatewayConfig{
-		IdleTimeout:   cfg.GatewayIdleTimeout,
-		MaxLifetime:   cfg.GatewayMaxLifetime,
-		SweepInterval: cfg.GatewaySweepInterval,
+	gw := gateway.New(k8sClient, runtimeAllocator, sidecarClient, metricsCollector, nil, gateway.GatewayConfig{
+		IdleTimeout:                     cfg.GatewayIdleTimeout,
+		MaxLifetime:                     cfg.GatewayMaxLifetime,
+		SweepInterval:                   cfg.GatewaySweepInterval,
+		Namespace:                       cfg.GatewayNamespace,
+		SidecarImage:                    cfg.SidecarImage,
+		SidecarHTTPPort:                 cfg.SidecarHTTPPort,
+		SidecarGRPCPort:                 cfg.SidecarGRPCPort,
+		WorkspaceDir:                    cfg.WorkspaceDir,
+		ExecutorAgentImage:              cfg.ExecutorAgentImage,
+		ImagePullPolicy:                 cfg.ImagePullPolicy,
+		GRPCAuthToken:                   cfg.GRPCAuthToken,
+		GRPCAuthSecretName:              cfg.GRPCAuthSecretName,
+		PodHTTPProxy:                    cfg.PodHTTPProxy,
+		PodNoProxy:                      cfg.PodNoProxy,
+		AdmissionDisableColdStart:       cfg.AdmissionDisableColdStart,
+		AdmissionQueueTimeout:           cfg.AdmissionQueueTimeout,
+		AdmissionQueuePollInterval:      cfg.AdmissionQueuePollInterval,
+		PoolAutoscalerEnabled:           cfg.PoolAutoscalerEnabled,
+		PoolAutoscalerInterval:          cfg.PoolAutoscalerInterval,
+		PoolAutoscalerBuffer:            cfg.PoolAutoscalerBuffer,
+		PoolAutoscalerMinReplicas:       cfg.PoolAutoscalerMinReplicas,
+		PoolAutoscalerMaxReplicas:       cfg.PoolAutoscalerMaxReplicas,
+		SchedulerName:                   cfg.SchedulerName,
+		ImageLocalityEnabled:            cfg.ImageLocalityEnabled,
+		SandboxNetworkPolicyManagement:  cfg.SandboxNetworkPolicyManagement,
+		SandboxRuntimeClassName:         cfg.SandboxRuntimeClassName,
+		SandboxSeccompProfileType:       cfg.SandboxSeccompProfileType,
+		SandboxSeccompLocalhostProfile:  cfg.SandboxSeccompLocalhostProfile,
+		SandboxAllowPrivilegeEscalation: cfg.SandboxAllowPrivilegeEscalation,
+		K8sRESTConfig:                   k8sConfig,
 	}, sessionStore)
 
-	// Start PodAllocator cache and event handlers
+	// Start runtime allocator cache and event handlers.
 	allocCtx, allocCancel := context.WithCancel(context.Background())
-	if err := podAllocator.Start(allocCtx); err != nil {
+	if err := runtimeAllocator.Start(allocCtx); err != nil {
 		allocCancel()
-		log.Fatalf("Failed to start PodAllocator: %v", err)
+		log.Fatalf("Failed to start runtime allocator: %v", err)
 	}
-
-	// Recover and start pool manager
-	if err := gw.StartPoolManager(context.Background()); err != nil {
-		log.Printf("Warning: pool manager recovery failed: %v (managed sessions disabled until first request)", err)
+	if recovered, err := gw.RecoverSessions(ctx); err != nil {
+		log.Printf("Warning: session recovery failed: %v", err)
+	} else if recovered > 0 {
+		log.Printf("Recovered %d active session(s) from durable store", recovered)
 	}
-
-	// Start trajectory worker (bounded channel for ClickHouse writes)
-	gw.StartTrajectoryWorker()
 
 	// Start session sweep (idle timeout / max lifetime reaper)
 	gw.StartSessionSweep()
+	gw.StartPoolAutoscaler()
+	if trajectoryConfig != nil {
+		startTrajectoryConnector(ctx, gw, *trajectoryConfig)
+	}
 
 	// Start health checker
 	feishuURL := os.Getenv("FEISHU_WEBHOOK_URL")
@@ -254,9 +260,6 @@ func main() {
 		IdleTimeout:  60 * time.Second,
 	}
 
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
 	go func() {
 		log.Printf("Gateway listening on :%d (public)", port)
 		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
@@ -283,18 +286,39 @@ func main() {
 		stopKeyWatcher()
 	}
 	healthChecker.Stop()
+	gw.StopPoolAutoscaler()
 	gw.StopSessionSweep()
-	allocCancel() // Stop PodAllocator cache
-	podAllocator.Stop()
-	gw.StopPoolManager()
+	allocCancel() // Stop runtime allocator cache
+	runtimeAllocator.Stop()
 	gw.StopTrajectoryWorker()
 	sidecarClient.Close()
-	if trajectoryWriter != nil {
-		trajectoryWriter.Close()
-	}
 	if sessionStore != nil {
 		sessionStore.Close()
 	}
 
 	log.Println("Gateway stopped")
+}
+
+func startTrajectoryConnector(ctx context.Context, gw *gateway.Gateway, cfg audit.TrajectoryConfig) {
+	go func() {
+		for attempt := 1; ; attempt++ {
+			tw, err := audit.NewTrajectoryWriter(cfg)
+			if err == nil {
+				gw.SetTrajectoryWriter(tw)
+				log.Println("Trajectory writer enabled")
+				return
+			}
+
+			wait := time.Duration(attempt) * 5 * time.Second
+			if wait > 30*time.Second {
+				wait = 30 * time.Second
+			}
+			log.Printf("Warning: trajectory writer init failed (attempt %d): %v; retrying in %v", attempt, err, wait)
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(wait):
+			}
+		}
+	}()
 }

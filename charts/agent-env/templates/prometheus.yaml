@@ -1,0 +1,282 @@
+{{- if .Values.prometheus.enabled }}
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "agent-env.fullname" . }}-prometheus-config
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "agent-env.labels" . | nindent 4 }}
+    app.kubernetes.io/component: prometheus
+data:
+  prometheus.yml: |
+    global:
+      scrape_interval: 15s
+      evaluation_interval: 15s
+
+    rule_files:
+      - /etc/prometheus/alert-rules.yml
+
+    {{- if .Values.alerting.enabled }}
+    alerting:
+      alertmanagers:
+        - static_configs:
+            - targets: ['{{ include "agent-env.fullname" . }}-alertmanager:9093']
+    {{- end }}
+
+    scrape_configs:
+      - job_name: prometheus
+        static_configs:
+          - targets: ['localhost:9090']
+
+      - job_name: arl
+        kubernetes_sd_configs:
+          - role: endpoints
+        relabel_configs:
+          - source_labels: [__meta_kubernetes_service_label_app_kubernetes_io_name]
+            regex: agent-env
+            action: keep
+          - source_labels: [__meta_kubernetes_service_label_app_kubernetes_io_component]
+            regex: gateway
+            action: keep
+          - source_labels: [__meta_kubernetes_endpoint_port_name]
+            regex: metrics
+            action: keep
+          - source_labels: [__meta_kubernetes_namespace]
+            target_label: namespace
+          - source_labels: [__meta_kubernetes_service_label_app_kubernetes_io_component]
+            target_label: component
+          - source_labels: [__meta_kubernetes_pod_node_name]
+            target_label: node
+
+  alert-rules.yml: |
+    groups:
+      - name: arl-gateway
+        rules:
+          - alert: GoroutineLeaking
+            expr: deriv(arl_gateway_goroutines[15m]) > 2
+            for: 15m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Gateway goroutine count is steadily increasing"
+              description: "Goroutine count derivative > 2/s over 15m, possible goroutine leak."
+
+          - alert: GoroutineHigh
+            expr: arl_gateway_goroutines > 5000
+            for: 5m
+            labels:
+              severity: critical
+            annotations:
+              summary: "Gateway goroutine count exceeds 5000"
+              description: "Current goroutine count: {{ "{{" }} $value {{ "}}" }}."
+
+          - alert: PodAllocationTimeoutHigh
+            expr: |
+              sum by (pool) (rate(arl_gateway_pod_allocation_result_total{result="timeout"}[5m]))
+              / clamp_min(sum by (pool) (rate(arl_gateway_pod_allocation_result_total[5m])), 0.001) > 0.1
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Pod allocation timeout rate > 10% for pool {{ "{{" }} $labels.pool {{ "}}" }}"
+              description: "More than 10% of pod allocation attempts are timing out."
+
+          - alert: SessionRuntimeLost
+            expr: rate(arl_gateway_session_deletion_total{reason=~"runtime_lost|recovery_runtime_lost"}[5m]) > 0
+            for: 2m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Gateway is dropping sessions because runtime bindings disappeared"
+              description: "Sessions are being tombstoned after SandboxClaim/Sandbox validation failed."
+
+          - alert: ExecuteOperationClientDisconnects
+            expr: rate(arl_gateway_execute_operation_result_total{result="client_disconnected"}[5m]) > 0.05
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Clients are disconnecting while execute operations are still running"
+              description: "Check client timeout settings and gateway/sidecar execution latency."
+
+          - alert: ExecuteOperationErrorRateHigh
+            expr: |
+              sum(rate(arl_gateway_execute_operation_result_total{result="error"}[5m]))
+              / clamp_min(sum(rate(arl_gateway_execute_operation_result_total[5m])), 0.001) > 0.2
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Execute operation error rate > 20%"
+              description: "Idempotent execute operations are failing frequently."
+
+          - alert: StepErrorRateHigh
+            expr: |
+              sum by (step_type) (rate(arl_gateway_step_result_total{result="error"}[5m]))
+              / clamp_min(sum by (step_type) (rate(arl_gateway_step_result_total[5m])), 0.001) > 0.3
+            for: 5m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Step error rate > 30% for {{ "{{" }} $labels.step_type {{ "}}" }}"
+              description: "More than 30% of steps are failing."
+
+          - alert: PendingWaitersHigh
+            expr: arl_gateway_pending_waiters > 10
+            for: 3m
+            labels:
+              severity: warning
+            annotations:
+              summary: "Pool {{ "{{" }} $labels.pool {{ "}}" }} has > 10 pending waiters"
+              description: "{{ "{{" }} $value {{ "}}" }} callers are blocked waiting for pods."
+
+          - alert: GatewayDown
+            expr: up{component="gateway"} == 0
+            for: 1m
+            labels:
+              severity: critical
+            annotations:
+              summary: "Gateway is down"
+              description: "The gateway target has been unreachable for > 1 minute."
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "agent-env.fullname" . }}-prometheus
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "agent-env.labels" . | nindent 4 }}
+    app.kubernetes.io/component: prometheus
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      {{- include "agent-env.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: prometheus
+  template:
+    metadata:
+      labels:
+        {{- include "agent-env.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: prometheus
+    spec:
+      serviceAccountName: {{ include "agent-env.fullname" . }}-prometheus
+      securityContext:
+        fsGroup: 65534
+        runAsUser: 65534
+        runAsNonRoot: true
+      containers:
+        - name: prometheus
+          image: {{ .Values.prometheus.image }}
+          imagePullPolicy: IfNotPresent
+          args:
+            - --config.file=/etc/prometheus/prometheus.yml
+            - --storage.tsdb.path=/prometheus
+            - --storage.tsdb.retention.time={{ .Values.prometheus.retentionTime | default "3d" }}
+            - --web.enable-lifecycle
+          ports:
+            - name: http
+              containerPort: 9090
+          livenessProbe:
+            httpGet:
+              path: /-/healthy
+              port: http
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /-/ready
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          resources:
+            {{- toYaml .Values.prometheus.resources | nindent 12 }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/prometheus
+            - name: storage
+              mountPath: /prometheus
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "agent-env.fullname" . }}-prometheus-config
+        - name: storage
+          {{- if .Values.prometheus.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "agent-env.fullname" . }}-prometheus
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: {{ include "agent-env.fullname" . }}-prometheus
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "agent-env.labels" . | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: {{ include "agent-env.fullname" . }}-prometheus
+  labels:
+    {{- include "agent-env.labels" . | nindent 4 }}
+rules:
+  - apiGroups: [""]
+    resources: [nodes, nodes/proxy, nodes/metrics, services, endpoints, pods]
+    verbs: [get, list, watch]
+  - nonResourceURLs: [/metrics, /metrics/cadvisor]
+    verbs: [get]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: {{ include "agent-env.fullname" . }}-prometheus
+  labels:
+    {{- include "agent-env.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: {{ include "agent-env.fullname" . }}-prometheus
+subjects:
+  - kind: ServiceAccount
+    name: {{ include "agent-env.fullname" . }}-prometheus
+    namespace: {{ .Release.Namespace }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "agent-env.fullname" . }}-prometheus
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "agent-env.labels" . | nindent 4 }}
+    app.kubernetes.io/component: prometheus
+spec:
+  type: {{ .Values.prometheus.service.type }}
+  ports:
+    - name: http
+      port: 9090
+      targetPort: http
+      protocol: TCP
+  selector:
+    {{- include "agent-env.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: prometheus
+{{- if .Values.prometheus.persistence.enabled }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "agent-env.fullname" . }}-prometheus
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "agent-env.labels" . | nindent 4 }}
+spec:
+  accessModes: [ReadWriteOnce]
+  storageClassName: {{ .Values.prometheus.persistence.storageClass }}
+  resources:
+    requests:
+      storage: {{ .Values.prometheus.persistence.size }}
+{{- end }}
+{{- end }}

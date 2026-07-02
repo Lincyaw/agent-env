@@ -7,6 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-07-02
+
+### Added
+- Gateway runtime cleanup for sandbox claims, managed pools, and templates when
+  sessions fail allocation or lose their runtime binding.
+
+### Changed
+- Release version aligned across Python SDK, Helm chart, CLI artifacts, and
+  gateway/container images.
+
+## [0.15.6] - 2026-06-29
+
+### Added
+- Idempotent non-streaming `execute()` calls with client-generated operation IDs.
+- `GatewayOperationTimeout` and `get_execute_operation()` for recovering the result of long operations after an HTTP timeout.
+
+### Changed
+- Session lookup errors now include deletion status/reason when the gateway still has tombstone metadata.
+
+## [0.15.5] - 2026-06-29
+
+### Changed
+- Align Python SDK package version with the agent-env `v0.15.5` release.
+
+## [0.14.1] - 2026-06-29
+
+### Added
+- Managed session timeout passthrough (`idle_timeout_seconds` and
+  `max_lifetime_seconds`)
+- File upload/download helpers on `SandboxSession` and `GatewayClient`
+- Cross-session replay through `GatewayClient.replay_from`
+- Keep-alive attach flow through `SandboxSession.attach`
+- Resource requirement models for pool and managed-session creation
+
+### Changed
+- Package version and `arl.__version__` are `0.14.1`
+- `execute()` prefers the gateway SSE endpoint and supports `on_output`
+  callbacks for partial stdout/stderr chunks
+- Tool provisioning request types are exposed, but current sandbox-backed
+  gateway pool creation rejects `tools` payloads; tool calls only work when the
+  executor image already includes `/opt/arl/tools`
+
 ## [0.2.0] - 2026-02-14
 
 ### Added
@@ -39,7 +81,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `SandboxSession` class for high-level sandbox management
 - Context manager support for automatic resource cleanup
 - `TaskStep` TypedDict for type-safe task definitions
-- Support for Command and FilePatch task types
+- Support for command-style task steps
 - Auto-generated OpenAPI client (internal `_client` module)
 - Full type hints with mypy strict mode
 - Comprehensive examples in `examples/python/`
@@ -61,5 +103,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - MyPy for type checking
 - Hatchling build backend
 
+[0.17.0]: https://github.com/Lincyaw/agent-env/releases/tag/v0.17.0
+[0.15.6]: https://github.com/Lincyaw/agent-env/releases/tag/v0.15.6
+[0.15.5]: https://github.com/Lincyaw/agent-env/releases/tag/v0.15.5
+[0.14.1]: https://github.com/Lincyaw/agent-env/releases/tag/v0.14.1
 [0.2.0]: https://github.com/Lincyaw/agent-env/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/Lincyaw/agent-env/releases/tag/v0.1.0

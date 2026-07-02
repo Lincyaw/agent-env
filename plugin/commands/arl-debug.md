@@ -39,7 +39,7 @@ arl session logs <most-recent-session-id> --tail 50
 arl pool get "$TARGET"
 arl pool logs "$TARGET" --tail 50
 ```
-Check conditions for `PodsFailing`, `Ready=False`, or `ConfigEnvReady=False`.
+Check conditions for `PodsFailing`, `Ready=False`, image pull failures, or zero ready replicas.
 
 ## What to report
 

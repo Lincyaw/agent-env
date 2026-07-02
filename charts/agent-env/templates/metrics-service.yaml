@@ -1,0 +1,20 @@
+{{- if and .Values.gateway.enabled .Values.metrics.service.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "agent-env.fullname" . }}-gateway-metrics
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "agent-env.labels" . | nindent 4 }}
+    app.kubernetes.io/component: gateway
+spec:
+  type: ClusterIP
+  ports:
+    - name: metrics
+      port: {{ .Values.gateway.internalPort }}
+      targetPort: internal
+      protocol: TCP
+  selector:
+    {{- include "agent-env.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: gateway
+{{- end }}

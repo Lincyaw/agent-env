@@ -1,0 +1,23 @@
+apiVersion: v2
+name: agent-env
+description: A Helm chart for deploying the agent-env gateway stack
+type: application
+version: 0.17.0
+appVersion: "0.17.0"
+keywords:
+  - kubernetes
+  - gateway
+  - agent
+  - sandbox
+home: https://github.com/Lincyaw/agent-env
+sources:
+  - https://github.com/Lincyaw/agent-env
+maintainers:
+  - name: Lincyaw
+    url: https://github.com/Lincyaw
+dependencies:
+  - name: agent-sandbox
+    alias: agentSandbox
+    version: 0.1.0
+    repository: oci://pair-diag-cn-guangzhou.cr.volces.com/pair
+    condition: agentSandbox.enabled

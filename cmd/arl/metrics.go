@@ -24,7 +24,7 @@ var metricsCmd = &cobra.Command{
 			return fmt.Errorf("fetch metrics: %w", err)
 		}
 		if code >= 400 {
-			return fmt.Errorf("metrics endpoint returned HTTP %d (metrics may be on internal port)", code)
+			return &HTTPError{StatusCode: code, Message: "metrics may be on internal port"}
 		}
 
 		if raw {

@@ -1,2 +1,2 @@
-// Package audit provides audit logging functionality
+// Package audit provides ClickHouse-backed trajectory storage.
 package audit

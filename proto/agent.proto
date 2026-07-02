@@ -9,11 +9,11 @@ service AgentService {
   // Execute runs a command (Job mode) or starts a background service (Service mode)
   rpc Execute(ExecRequest) returns (stream ExecLog);
 
-  // WriteFile writes one file into the executor workspace.
-  rpc WriteFile(WriteFileRequest) returns (WriteFileResponse);
+  // WriteFile streams one file into the executor workspace.
+  rpc WriteFile(stream WriteFileChunk) returns (WriteFileResponse);
 
-  // ReadFile reads one file from the executor workspace.
-  rpc ReadFile(ReadFileRequest) returns (ReadFileResponse);
+  // ReadFile streams one file from the executor workspace.
+  rpc ReadFile(ReadFileRequest) returns (stream FileChunk);
 
   // InteractiveShell provides bidirectional streaming for interactive shell sessions
   rpc InteractiveShell(stream ShellInput) returns (stream ShellOutput);
@@ -39,16 +39,19 @@ message ExecLog {
   bool done = 4;
 }
 
-// WriteFileRequest writes raw bytes to a relative path inside the workspace.
-message WriteFileRequest {
+// WriteFileChunk streams raw bytes to a relative path inside the workspace.
+// The first chunk must set path. expected_sha256 is optional.
+message WriteFileChunk {
   string path = 1;
-  bytes content = 2;
+  bytes data = 2;
+  string expected_sha256 = 3;
 }
 
 // WriteFileResponse reports how many bytes were written.
 message WriteFileResponse {
   string path = 1;
   int64 bytes_written = 2;
+  string sha256 = 3;
 }
 
 // ReadFileRequest reads raw bytes from a relative path inside the workspace.
@@ -56,11 +59,15 @@ message ReadFileRequest {
   string path = 1;
 }
 
-// ReadFileResponse returns the file content.
-message ReadFileResponse {
+// FileChunk streams raw bytes from a file. The final message sets done=true
+// and carries size_bytes and sha256.
+message FileChunk {
   string path = 1;
-  bytes content = 2;
-  int64 size_bytes = 3;
+  bytes data = 2;
+  int64 offset = 3;
+  int64 size_bytes = 4;
+  string sha256 = 5;
+  bool done = 6;
 }
 
 // ShellInput represents input to an interactive shell session

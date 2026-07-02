@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Batch prefetch WarmPool images for SWE RL training.
 
-Reads both R2E-Gym and SWE-Bench Verified parquet datasets, derives pool
-names (matching SWEEnv._derive_pool_ref convention), maps docker images to
+Reads both R2E-Gym and SWE-Bench Verified parquet datasets, derives pool/profile
+names (matching SWEEnv image profile naming), maps docker images to
 the mirror registry, and creates WarmPools via the ARL Gateway API to
 pre-cache container images on K8s nodes.
 
@@ -126,8 +126,8 @@ def _ensure_parquet(ds_name: str, path: Path) -> bool:
 def sanitize_pool_name(repo_name: str, commit_hash: str) -> str:
     """Create a valid K8s DNS label from repo_name + commit_hash.
 
-    Identical to rllm.environments.swe.swe._derive_pool_ref so that the
-    pool names created here match what SWEEnv looks up at training time.
+    Mirrors the profile naming used by SWEEnv so that prewarmed pools match
+    what training requests select at runtime.
     """
     safe_repo = re.sub(r"[^a-z0-9]", "-", repo_name.lower()).strip("-")
     hash_prefix = commit_hash[:8].lower()
@@ -245,9 +245,8 @@ def append_checkpoint(path: Path, name: str, image: str, status: str) -> None:
         "image": image,
         "status": status,
     }
-    with CHECKPOINT_WRITE_LOCK:
-        with path.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(event, ensure_ascii=False) + "\n")
+    with CHECKPOINT_WRITE_LOCK, path.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(event, ensure_ascii=False) + "\n")
 
 
 def create_warmpool_with_retry(
@@ -270,6 +269,7 @@ def create_warmpool_with_retry(
             manager.create_warmpool(
                 name=name,
                 image=pool["image"],
+                profile=name,
                 replicas=replicas,
             )
             return "created", True
@@ -280,7 +280,8 @@ def create_warmpool_with_retry(
             if e.status_code in RETRYABLE_STATUS_CODES and attempt < create_retries:
                 delay = create_backoff_base * (2**attempt)
                 logger.warning(
-                    f"Create retry {attempt + 1}/{create_retries} for {name} after {delay:.1f}s: {e}"
+                    f"Create retry {attempt + 1}/{create_retries} for {name} "
+                    f"after {delay:.1f}s: {e}"
                 )
                 time.sleep(delay)
                 continue
@@ -306,12 +307,6 @@ def main():
         type=str,
         default=os.environ.get("ARL_GATEWAY_URL", "http://localhost:8080"),
         help="ARL Gateway URL (default: $ARL_GATEWAY_URL or http://localhost:8080)",
-    )
-    parser.add_argument(
-        "--namespace",
-        type=str,
-        default="default",
-        help="Kubernetes namespace (default: default)",
     )
     parser.add_argument(
         "--dataset",
@@ -363,7 +358,10 @@ def main():
         "--scale-down-after",
         action=argparse.BooleanOptionalAction,
         default=True,
-        help="Scale pools to 0 after image pull (default: True). Use --no-scale-down-after to keep running.",
+        help=(
+            "Scale pools to 0 after image pull (default: True). "
+            "Use --no-scale-down-after to keep running."
+        ),
     )
     parser.add_argument(
         "--delete",
@@ -423,10 +421,9 @@ def main():
 
     for ds_name in datasets:
         path = PARQUET_FILES[ds_name]
-        if not path.exists():
-            if not _ensure_parquet(ds_name, path):
-                logger.warning(f"Parquet file not found and download failed, skipping: {path}")
-                continue
+        if not path.exists() and not _ensure_parquet(ds_name, path):
+            logger.warning(f"Parquet file not found and download failed, skipping: {path}")
+            continue
         specs = load_pool_specs(path)
         logger.info(f"[{ds_name}] {len(specs)} unique pools from {path.name}")
         for spec in specs:
@@ -474,7 +471,7 @@ def main():
         counters = {"deleted": 0, "skipped": 0, "failed": 0}
 
         def _delete_one(pool: dict[str, str]) -> None:
-            mgr = WarmPoolManager(namespace=args.namespace, gateway_url=args.gateway)
+            mgr = WarmPoolManager(gateway_url=args.gateway)
             try:
                 mgr.delete_warmpool(pool["name"])
                 with _lock:
@@ -505,7 +502,7 @@ def main():
     # `concurrency` pods are pulling images at any time — preventing
     # registry overload from thousands of simultaneous pulls.
     logger.info(f"Prefetching {len(pools)} WarmPools with concurrency={args.concurrency}")
-    logger.info(f"Gateway: {args.gateway}, Namespace: {args.namespace}")
+    logger.info(f"Gateway: {args.gateway}")
     if args.scale_down_after:
         logger.info("Scale-down-after enabled: pools scaled to 0 replicas after image pull")
 
@@ -517,7 +514,6 @@ def main():
         """Full lifecycle for one pool: create/scale-up → wait → scale_down."""
         name = pool["name"]
         mgr = WarmPoolManager(
-            namespace=args.namespace,
             gateway_url=args.gateway,
             timeout=args.pool_timeout,
         )

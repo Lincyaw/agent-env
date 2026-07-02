@@ -4,25 +4,40 @@ from __future__ import annotations
 
 import json
 import os
-from collections.abc import Callable
-from typing import Any, cast
+import uuid
+from collections.abc import Callable, Iterable, Iterator
+from pathlib import Path
+from typing import Any, BinaryIO, TypeVar
+from urllib.parse import quote
 
 import httpx
+from pydantic import BaseModel
 
 from arl.auth import resolve_auth
 from arl.configenv import ConfigEnvSpec
 from arl.types import (
+    ContainerExecuteResponse,
+    DeleteExperimentResponse,
     ErrorResponse,
+    ExecuteOperationInfo,
     ExecuteResponse,
+    ExperimentSummary,
+    LogEntry,
     ManagedSessionInfo,
     PoolCondition,
     PoolInfo,
+    PoolLogEntry,
+    PrivateContainerSpec,
+    ReplayResponse,
     ResourceRequirements,
     SessionInfo,
+    SessionListItem,
     StepResult,
     ToolsSpec,
     UploadFileResponse,
 )
+
+_ModelT = TypeVar("_ModelT", bound=BaseModel)
 
 
 def _serialize_config_env(
@@ -35,6 +50,27 @@ def _serialize_config_env(
     return config_env
 
 
+def _quote_file_path(path: str) -> str:
+    normalized = path.strip().replace("\\", "/").lstrip("/")
+    if not normalized:
+        raise ValueError("path is required")
+    return quote(normalized, safe="/")
+
+
+def _serialize_private_containers(
+    private_containers: Iterable[PrivateContainerSpec | dict[str, Any]] | None,
+) -> list[dict[str, Any]] | None:
+    if private_containers is None:
+        return None
+    payload: list[dict[str, Any]] = []
+    for container in private_containers:
+        if isinstance(container, PrivateContainerSpec):
+            payload.append(container.model_dump(by_alias=True, exclude_none=True))
+        else:
+            payload.append(container)
+    return payload
+
+
 class GatewayError(Exception):
     """Error from gateway API."""
 
@@ -45,6 +81,14 @@ class GatewayError(Exception):
         super().__init__(
             f"Gateway error ({status_code}): {error}" + (f" - {detail}" if detail else "")
         )
+
+
+class GatewayOperationTimeout(TimeoutError):
+    """Raised when an idempotent execute operation outlives the HTTP request."""
+
+    def __init__(self, operation_id: str, message: str) -> None:
+        self.operation_id = operation_id
+        super().__init__(f"{message}; operation_id={operation_id}")
 
 
 class PoolNotReadyError(Exception):
@@ -122,13 +166,27 @@ class GatewayClient:
 
     def create_session(
         self,
-        pool_ref: str,
-        namespace: str = "default",
+        image: str | None = None,
+        *,
+        profile: str | None = "default",
         idle_timeout_seconds: int | None = None,
+        max_lifetime_seconds: int | None = None,
+        private_containers: Iterable[PrivateContainerSpec | dict[str, Any]] | None = None,
     ) -> SessionInfo:
-        body: dict[str, Any] = {"poolRef": pool_ref, "namespace": namespace}
+        if not image and not profile:
+            raise ValueError("image or profile is required")
+        body: dict[str, Any] = {}
+        if image:
+            body["image"] = image
+        if profile:
+            body["profile"] = profile
         if idle_timeout_seconds is not None:
             body["idleTimeoutSeconds"] = idle_timeout_seconds
+        if max_lifetime_seconds is not None:
+            body["maxLifetimeSeconds"] = max_lifetime_seconds
+        private_container_payload = _serialize_private_containers(private_containers)
+        if private_container_payload is not None:
+            body["privateContainers"] = private_container_payload
         resp = self._client.post("/v1/sessions", json=body)
         self._handle_error(resp)
         return SessionInfo.model_validate(resp.json())
@@ -147,22 +205,51 @@ class GatewayClient:
         session_id: str,
         steps: list[dict[str, Any]],
         trace_id: str | None = None,
+        operation_id: str | None = None,
         on_output: Callable[[str, str], None] | None = None,
     ) -> ExecuteResponse:
         body: dict[str, Any] = {"steps": steps}
         if trace_id is not None:
             body["traceID"] = trace_id
 
-        headers = {"Accept": "text/event-stream"}
-        try:
+        if on_output is not None:
+            headers = {"Accept": "text/event-stream"}
             return self._execute_sse(session_id, body, headers, on_output)
-        except (httpx.HTTPStatusError, GatewayError):
-            raise
-        except Exception:
-            # Server does not support SSE (old version) — fall back to non-streaming
+
+        op_id = operation_id or str(uuid.uuid4())
+        body["operationID"] = op_id
+        try:
             resp = self._client.post(f"/v1/sessions/{session_id}/execute", json=body)
-            self._handle_error(resp)
-            return ExecuteResponse.model_validate(resp.json())
+        except httpx.TimeoutException as exc:
+            raise GatewayOperationTimeout(op_id, "execute operation is still pending") from exc
+        self._handle_error(resp)
+        result = ExecuteResponse.model_validate(resp.json())
+        if not result.operation_id:
+            result.operation_id = op_id
+        return result
+
+    def get_execute_operation(
+        self,
+        session_id: str,
+        operation_id: str,
+    ) -> ExecuteOperationInfo:
+        resp = self._client.get(f"/v1/sessions/{session_id}/operations/{operation_id}")
+        self._handle_error(resp)
+        return ExecuteOperationInfo.model_validate(resp.json())
+
+    def execute_container(
+        self,
+        session_id: str,
+        container: str,
+        steps: list[dict[str, Any]],
+    ) -> ContainerExecuteResponse:
+        body: dict[str, Any] = {"steps": steps}
+        resp = self._client.post(
+            f"/v1/sessions/{session_id}/containers/{container}/execute",
+            json=body,
+        )
+        self._handle_error(resp)
+        return ContainerExecuteResponse.model_validate(resp.json())
 
     def _execute_sse(
         self,
@@ -205,9 +292,7 @@ class GatewayClient:
                 elif line == "":
                     # Empty line = end of event
                     if event_type and data_buf:
-                        self._handle_sse_event(
-                            event_type, data_buf, results, on_output
-                        )
+                        self._handle_sse_event(event_type, data_buf, results, on_output)
                     event_type = ""
                     data_buf = ""
 
@@ -245,15 +330,32 @@ class GatewayClient:
             except (json.JSONDecodeError, ValueError):
                 pass
 
+    @staticmethod
+    def _iter_ndjson_models(
+        response: httpx.Response,
+        model: type[_ModelT],
+    ) -> Iterator[_ModelT]:
+        for line in response.iter_lines():
+            line = line.strip()
+            if not line:
+                continue
+            yield model.model_validate(json.loads(line))
+
     def upload_file(
         self,
         session_id: str,
         path: str,
-        content: str,
-        encoding: str = "text",
+        content: str | bytes | Iterable[bytes] | BinaryIO,
+        sha256: str | None = None,
     ) -> UploadFileResponse:
-        body = {"path": path, "content": content, "encoding": encoding}
-        resp = self._client.post(f"/v1/sessions/{session_id}/files", json=body)
+        headers = {"Content-Type": "application/octet-stream"}
+        if sha256:
+            headers["X-ARL-SHA256"] = sha256
+        resp = self._client.put(
+            f"/v1/sessions/{session_id}/files/{_quote_file_path(path)}",
+            content=content,
+            headers=headers,
+        )
         self._handle_error(resp)
         return UploadFileResponse.model_validate(resp.json())
 
@@ -262,22 +364,59 @@ class GatewayClient:
         session_id: str,
         path: str,
     ) -> bytes:
-        resp = self._client.get(f"/v1/sessions/{session_id}/files/{path}")
+        resp = self._client.get(f"/v1/sessions/{session_id}/files/{_quote_file_path(path)}")
         self._handle_error(resp)
         return resp.content
+
+    def iter_download_file(
+        self,
+        session_id: str,
+        path: str,
+        chunk_size: int = 1024 * 1024,
+    ) -> Iterator[bytes]:
+        with self._client.stream(
+            "GET",
+            f"/v1/sessions/{session_id}/files/{_quote_file_path(path)}",
+        ) as resp:
+            self._handle_error(resp)
+            for chunk in resp.iter_bytes(chunk_size=chunk_size):
+                if chunk:
+                    yield chunk
+
+    def upload_path(
+        self,
+        session_id: str,
+        local_path: str | Path,
+        remote_path: str,
+        sha256: str | None = None,
+    ) -> UploadFileResponse:
+        with Path(local_path).open("rb") as file:
+            return self.upload_file(session_id, remote_path, file, sha256=sha256)
+
+    def download_path(
+        self,
+        session_id: str,
+        remote_path: str,
+        local_path: str | Path,
+    ) -> None:
+        target = Path(local_path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with target.open("wb") as file:
+            for chunk in self.iter_download_file(session_id, remote_path):
+                file.write(chunk)
 
     def replay_from(
         self,
         session_id: str,
         source_session_id: str,
         up_to_step: int | None = None,
-    ) -> dict[Any, Any]:
+    ) -> ReplayResponse:
         body: dict[str, Any] = {"sourceSessionID": source_session_id}
         if up_to_step is not None:
             body["upToStep"] = up_to_step
         resp = self._client.post(f"/v1/sessions/{session_id}/replay", json=body)
         self._handle_error(resp)
-        return cast(dict[Any, Any], resp.json())
+        return ReplayResponse.model_validate(resp.json())
 
     def restore(self, session_id: str, snapshot_id: str) -> None:
         resp = self._client.post(
@@ -299,23 +438,59 @@ class GatewayClient:
         self._handle_error(resp)
         return resp.text
 
+    def list_sessions(self) -> list[SessionListItem]:
+        resp = self._client.get("/v1/sessions")
+        self._handle_error(resp)
+        data = resp.json()
+        if isinstance(data, list):
+            return [SessionListItem.model_validate(item) for item in data]
+        return []
+
+    def iter_session_logs(
+        self,
+        session_id: str,
+        *,
+        follow: bool = False,
+        tail: int = 100,
+    ) -> Iterator[LogEntry]:
+        params = {"follow": str(follow).lower(), "tail": str(tail)}
+        with self._client.stream(
+            "GET",
+            f"/v1/sessions/{session_id}/logs",
+            params=params,
+        ) as resp:
+            if resp.status_code >= 400:
+                resp.read()
+                self._handle_error(resp)
+            yield from self._iter_ndjson_models(resp, LogEntry)
+
+    def list_session_logs(
+        self,
+        session_id: str,
+        *,
+        tail: int = 100,
+    ) -> list[LogEntry]:
+        return list(self.iter_session_logs(session_id, follow=False, tail=tail))
+
     # --- Pool APIs ---
 
     def create_pool(
         self,
         name: str,
-        namespace: str,
         image: str,
         replicas: int = 2,
+        profile: str = "default",
         tools: ToolsSpec | None = None,
         resources: ResourceRequirements | None = None,
         workspace_dir: str = "/workspace",
         config_env: ConfigEnvSpec | dict[str, Any] | None = None,
+        image_locality: dict[str, Any] | bool | None = None,
+        private_containers: Iterable[PrivateContainerSpec | dict[str, Any]] | None = None,
     ) -> None:
         body: dict[str, Any] = {
             "name": name,
-            "namespace": namespace,
             "image": image,
+            "profile": profile,
             "replicas": replicas,
             "workspaceDir": workspace_dir,
         }
@@ -326,29 +501,35 @@ class GatewayClient:
             body["tools"] = tools.model_dump(by_alias=True, exclude_none=True)
         if resources is not None:
             body["resources"] = resources.model_dump(exclude_none=True)
+        if image_locality is not None:
+            body["imageLocality"] = image_locality
+        private_container_payload = _serialize_private_containers(private_containers)
+        if private_container_payload is not None:
+            body["privateContainers"] = private_container_payload
         resp = self._client.post("/v1/pools", json=body)
         self._handle_error(resp)
 
-    def get_pool(self, name: str, namespace: str = "") -> PoolInfo:
-        params = {}
-        if namespace:
-            params["namespace"] = namespace
-        resp = self._client.get(f"/v1/pools/{name}", params=params)
+    def list_pools(self) -> list[PoolInfo]:
+        resp = self._client.get("/v1/pools")
+        self._handle_error(resp)
+        data = resp.json()
+        if isinstance(data, list):
+            return [PoolInfo.model_validate(item) for item in data]
+        return []
+
+    def get_pool(self, name: str) -> PoolInfo:
+        resp = self._client.get(f"/v1/pools/{name}")
         self._handle_error(resp)
         return PoolInfo.model_validate(resp.json())
 
-    def delete_pool(self, name: str, namespace: str = "") -> None:
-        params = {}
-        if namespace:
-            params["namespace"] = namespace
-        resp = self._client.delete(f"/v1/pools/{name}", params=params)
+    def delete_pool(self, name: str) -> None:
+        resp = self._client.delete(f"/v1/pools/{name}")
         self._handle_error(resp)
 
     def scale_pool(
         self,
         name: str,
         replicas: int,
-        namespace: str = "",
         resources: ResourceRequirements | None = None,
     ) -> PoolInfo:
         """Scale a WarmPool and optionally update resource requirements.
@@ -356,20 +537,43 @@ class GatewayClient:
         Args:
             name: Name of the WarmPool.
             replicas: Desired number of replicas (non-negative).
-            namespace: Kubernetes namespace (default: "").
             resources: Optional resource requirements (CPU/memory requests and limits).
 
         Returns:
             Updated PoolInfo.
         """
         body: dict[str, Any] = {"replicas": replicas}
-        if namespace:
-            body["namespace"] = namespace
         if resources is not None:
             body["resources"] = resources.model_dump(exclude_none=True)
         resp = self._client.patch(f"/v1/pools/{name}", json=body)
         self._handle_error(resp)
         return PoolInfo.model_validate(resp.json())
+
+    def iter_pool_logs(
+        self,
+        name: str,
+        *,
+        follow: bool = False,
+        tail: int = 100,
+    ) -> Iterator[PoolLogEntry]:
+        params = {"follow": str(follow).lower(), "tail": str(tail)}
+        with self._client.stream(
+            "GET",
+            f"/v1/pools/{name}/logs",
+            params=params,
+        ) as resp:
+            if resp.status_code >= 400:
+                resp.read()
+                self._handle_error(resp)
+            yield from self._iter_ndjson_models(resp, PoolLogEntry)
+
+    def list_pool_logs(
+        self,
+        name: str,
+        *,
+        tail: int = 100,
+    ) -> list[PoolLogEntry]:
+        return list(self.iter_pool_logs(name, follow=False, tail=tail))
 
     # --- Managed Session APIs ---
 
@@ -377,34 +581,26 @@ class GatewayClient:
         self,
         image: str,
         experiment_id: str,
-        namespace: str = "default",
+        profile: str = "default",
         resources: ResourceRequirements | None = None,
         tools: ToolsSpec | None = None,
         workspace_dir: str = "/workspace",
-        max_replicas: int | None = None,
-        min_replicas: int | None = None,
-        scale_up_step: int | None = None,
         idle_timeout_seconds: int | None = None,
         max_lifetime_seconds: int | None = None,
         config_env: ConfigEnvSpec | dict[str, Any] | None = None,
+        private_containers: Iterable[PrivateContainerSpec | dict[str, Any]] | None = None,
     ) -> ManagedSessionInfo:
         """Create a managed session with automatic pool management.
 
-        The server automatically creates and scales WarmPools. Just specify
-        the image and experiment ID.
+        The server automatically creates a sandbox-backed pool when needed.
 
         Args:
             image: Container image for the executor.
             experiment_id: Experiment identifier for grouping and management.
-            namespace: Kubernetes namespace.
+            profile: Resource profile for pool selection.
             resources: Optional CPU/memory requirements (used on first pool creation).
             tools: Optional tools specification (used on first pool creation).
             workspace_dir: Workspace mount path.
-            max_replicas: Per-pool scale ceiling hint.
-            min_replicas: Per-pool scale floor hint. The server will not scale
-                below this value during scale-down (0 = use server default).
-            scale_up_step: Max replicas to add per scale-up event
-                (0 = use server default).
             idle_timeout_seconds: Per-session idle TTL. The gateway deletes the
                 session after this many seconds without execute/file activity.
             max_lifetime_seconds: Per-session maximum lifetime.
@@ -415,7 +611,7 @@ class GatewayClient:
         body: dict[str, Any] = {
             "image": image,
             "experimentId": experiment_id,
-            "namespace": namespace,
+            "profile": profile,
             "workspaceDir": workspace_dir,
         }
         config_env_payload = _serialize_config_env(config_env)
@@ -425,16 +621,13 @@ class GatewayClient:
             body["resources"] = resources.model_dump(exclude_none=True)
         if tools is not None:
             body["tools"] = tools.model_dump(by_alias=True, exclude_none=True)
-        if max_replicas is not None:
-            body["maxReplicas"] = max_replicas
-        if min_replicas is not None:
-            body["minReplicas"] = min_replicas
-        if scale_up_step is not None:
-            body["scaleUpStep"] = scale_up_step
         if idle_timeout_seconds is not None:
             body["idleTimeoutSeconds"] = idle_timeout_seconds
         if max_lifetime_seconds is not None:
             body["maxLifetimeSeconds"] = max_lifetime_seconds
+        private_container_payload = _serialize_private_containers(private_containers)
+        if private_container_payload is not None:
+            body["privateContainers"] = private_container_payload
         resp = self._client.post("/v1/managed/sessions", json=body)
         self._handle_error(resp)
         return ManagedSessionInfo.model_validate(resp.json())
@@ -458,22 +651,44 @@ class GatewayClient:
             return [ManagedSessionInfo.model_validate(item) for item in data]
         return []
 
+    def list_experiments(self) -> list[ExperimentSummary]:
+        """List managed-session experiment summaries."""
+        resp = self._client.get("/v1/managed/experiments")
+        self._handle_error(resp)
+        data = resp.json()
+        if isinstance(data, list):
+            return [ExperimentSummary.model_validate(item) for item in data]
+        return []
+
+    def delete_experiment_info(
+        self,
+        experiment_id: str,
+    ) -> DeleteExperimentResponse:
+        """Delete all sessions for an experiment and return the full response.
+
+        Args:
+            experiment_id: Experiment identifier.
+
+        Returns:
+            DeleteExperimentResponse with deletion count and optional error.
+        """
+        resp = self._client.delete(f"/v1/managed/experiments/{experiment_id}")
+        self._handle_error(resp)
+        result = DeleteExperimentResponse.model_validate(resp.json())
+        if result.error:
+            raise GatewayError(resp.status_code, result.error)
+        return result
+
     def delete_experiment(
         self,
         experiment_id: str,
     ) -> int:
         """Delete all sessions for an experiment.
 
-        Args:
-            experiment_id: Experiment identifier.
-
         Returns:
             Number of sessions deleted.
         """
-        resp = self._client.delete(f"/v1/managed/experiments/{experiment_id}")
-        self._handle_error(resp)
-        data = resp.json()
-        return int(data.get("deleted", 0))
+        return self.delete_experiment_info(experiment_id).deleted
 
     # --- Health ---
 

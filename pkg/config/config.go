@@ -4,10 +4,11 @@ import (
 	"fmt"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
-// Config holds the operator configuration
+// Config holds the gateway configuration.
 type Config struct {
 	// Sidecar configuration
 	SidecarImage      string
@@ -16,41 +17,25 @@ type Config struct {
 	WorkspaceDir      string
 	HTTPClientTimeout time.Duration
 
-	// Pool configuration
-	DefaultPoolReplicas int32
-	DefaultRequeueDelay time.Duration
-
-	// Operator configuration
-	MetricsAddr          string
-	ProbeAddr            string
-	EnableLeaderElection bool
-	EnableWebhooks       bool
-	EnableMetrics        bool
-
-	// Feature flags
-	EnableMiddleware bool
-	EnableValidation bool
-
 	// ClickHouse configuration
-	ClickHouseEnabled       bool
-	ClickHouseAddr          string
-	ClickHouseDatabase      string
-	ClickHouseUsername      string
-	ClickHousePassword      string
-	ClickHouseBatchSize     int
-	ClickHouseFlushInterval time.Duration
+	ClickHouseEnabled  bool
+	ClickHouseAddr     string
+	ClickHouseDatabase string
+	ClickHouseUsername string
+	ClickHousePassword string
 
 	// Trajectory storage configuration (uses ClickHouse with GORM)
 	TrajectoryEnabled bool
 	TrajectoryDebug   bool
 
 	// gRPC authentication token (shared between gateway and sidecar)
-	GRPCAuthToken string
+	GRPCAuthToken      string
+	GRPCAuthSecretName string
 
 	// Executor agent configuration
 	ExecutorAgentImage string
 
-	// ImagePullPolicy is applied to the operator-injected sidecar and
+	// ImagePullPolicy is applied to the gateway-injected sidecar and
 	// executor-agent init containers. Defaults to "Always" (production:
 	// always fetch the latest pushed sidecar). Set to "IfNotPresent" for
 	// local clusters (kind/minikube) where images are side-loaded and never
@@ -59,45 +44,12 @@ type Config struct {
 	ImagePullPolicy string
 
 	// Gateway configuration
-	GatewayPort int
+	GatewayPort      int
+	GatewayNamespace string
 
-	// Control-plane tuning
-	WarmPoolMaxConcurrent  int
-	K8sClientQPS           float32
-	K8sClientBurst         int
-	WarmPoolBaseDelayMs    int
-	WarmPoolMaxDelayMs     int
-	WarmPoolRateLimitQPS   float64
-	WarmPoolRateLimitBurst int
-
-	// Image-locality scheduling defaults.
-	// These are used when the WarmPool CRD does not specify imageLocality fields.
-	//
-	// ImageLocalitySpreadFactor controls how many nodes to prefer:
-	//   k = ceil(replicas × spreadFactor)
-	// A smaller value concentrates pods on fewer nodes, maximising image cache
-	// hits and reducing average pod startup latency (fewer image pulls).
-	// Examples with 8 replicas:
-	//   0.125 → 1 node   (maximum locality, risk of single-node failure)
-	//   0.25  → 2 nodes  (good balance: high cache hit, some spread)
-	//   0.5   → 4 nodes  (moderate spread)
-	//   1.0   → 8 nodes  (one pod per node, most image pulls)
-	//
-	// ImageLocalityWeight is the Kubernetes preferredDuringScheduling weight
-	// (1-100). Higher weight makes the scheduler try harder to place pods on
-	// the preferred nodes, but will still fall back to other nodes if resources
-	// are insufficient (soft affinity).
-	ImageLocalitySpreadFactor float64
-	ImageLocalityWeight       int32
-
-	// Managed pool auto-scaling configuration
-	ManagedPoolInitialReplicas int32
-	ManagedPoolMinReplicas     int32
-	ManagedPoolMaxReplicas     int32
-	ManagedPoolScaleUpStep     int32
-	ManagedPoolIdleCooldown    time.Duration
-	ManagedPoolEmptyTTL        time.Duration
-	ManagedPoolSweepInterval   time.Duration
+	// Kubernetes client tuning.
+	K8sClientQPS   float32
+	K8sClientBurst int
 
 	// Gateway session lifecycle configuration
 	GatewayIdleTimeout   time.Duration
@@ -119,67 +71,56 @@ type Config struct {
 	RateLimitBurst int
 	AllowedOrigins string
 
-	// PodInitTimeout is the maximum time a pod may stay in Pending phase
-	// (e.g. stuck pulling an init container image) before the controller
-	// force-deletes it. Prevents pods from blocking termination indefinitely
-	// when containerd image pulls hang. Env: POD_INIT_TIMEOUT. Default: 10m.
-	PodInitTimeout time.Duration
-
 	// HTTP proxy injected into warm pool pods (all containers).
 	// When non-empty, HTTP_PROXY/HTTPS_PROXY/NO_PROXY env vars are set.
 	PodHTTPProxy string
 	PodNoProxy   string
+
+	// Admission control and warm-pool autoscaling.
+	AdmissionDisableColdStart  bool
+	AdmissionQueueTimeout      time.Duration
+	AdmissionQueuePollInterval time.Duration
+	PoolAutoscalerEnabled      bool
+	PoolAutoscalerInterval     time.Duration
+	PoolAutoscalerBuffer       int32
+	PoolAutoscalerMinReplicas  int32
+	PoolAutoscalerMaxReplicas  int32
+
+	// Scheduler integration.
+	SchedulerName        string
+	ImageLocalityEnabled bool
+
+	// Sandbox security policy applied to generated SandboxTemplates.
+	SandboxNetworkPolicyManagement  string
+	SandboxRuntimeClassName         string
+	SandboxSeccompProfileType       string
+	SandboxSeccompLocalhostProfile  string
+	SandboxAllowPrivilegeEscalation bool
 }
 
 // DefaultConfig returns the default configuration
 func DefaultConfig() *Config {
 	return &Config{
-		SidecarImage:            "arl-sidecar:latest",
-		SidecarHTTPPort:         8080,
-		SidecarGRPCPort:         9090,
-		WorkspaceDir:            "/workspace",
-		HTTPClientTimeout:       30 * time.Second,
-		DefaultPoolReplicas:     0,
-		DefaultRequeueDelay:     10 * time.Second,
-		MetricsAddr:             ":8080",
-		ProbeAddr:               ":8081",
-		EnableLeaderElection:    false,
-		EnableWebhooks:          false,
-		EnableMetrics:           true,
-		EnableMiddleware:        true,
-		EnableValidation:        true,
-		ClickHouseEnabled:       false,
-		ClickHouseAddr:          "localhost:9000",
-		ClickHouseDatabase:      "arl",
-		ClickHouseUsername:      "default",
-		ClickHousePassword:      "",
-		ClickHouseBatchSize:     100,
-		ClickHouseFlushInterval: 10 * time.Second,
-		GRPCAuthToken:           "",
-		TrajectoryEnabled:       false,
-		TrajectoryDebug:         false,
-		ExecutorAgentImage:      "arl-executor-agent:latest",
-		ImagePullPolicy:         "Always",
-		GatewayPort:             8080,
-		WarmPoolMaxConcurrent:   50,
-		K8sClientQPS:            10000,
-		K8sClientBurst:          20000,
-		WarmPoolBaseDelayMs:     200,
-		WarmPoolMaxDelayMs:      15000,
-		WarmPoolRateLimitQPS:    200,
-		WarmPoolRateLimitBurst:  500,
-
-		ImageLocalitySpreadFactor: 0.25,
-		ImageLocalityWeight:       100,
-
-		ManagedPoolInitialReplicas: 0,
-		ManagedPoolMinReplicas:     0,
-		ManagedPoolMaxReplicas:     50,
-		ManagedPoolScaleUpStep:     2,
-		ManagedPoolIdleCooldown:    5 * time.Minute,
-		ManagedPoolEmptyTTL:        10 * time.Minute,
-		ManagedPoolSweepInterval:   30 * time.Second,
-		PodInitTimeout:             10 * time.Minute,
+		SidecarImage:       "arl-sidecar:latest",
+		SidecarHTTPPort:    8080,
+		SidecarGRPCPort:    9090,
+		WorkspaceDir:       "/workspace",
+		HTTPClientTimeout:  5 * time.Minute,
+		ClickHouseEnabled:  false,
+		ClickHouseAddr:     "localhost:9000",
+		ClickHouseDatabase: "arl",
+		ClickHouseUsername: "default",
+		ClickHousePassword: "",
+		GRPCAuthToken:      "",
+		GRPCAuthSecretName: "agent-env-grpc-token",
+		TrajectoryEnabled:  false,
+		TrajectoryDebug:    false,
+		ExecutorAgentImage: "arl-executor-agent:latest",
+		ImagePullPolicy:    "Always",
+		GatewayPort:        8080,
+		GatewayNamespace:   "default",
+		K8sClientQPS:       10000,
+		K8sClientBurst:     20000,
 
 		GatewayIdleTimeout:   600 * time.Second,
 		GatewayMaxLifetime:   3600 * time.Second,
@@ -197,6 +138,22 @@ func DefaultConfig() *Config {
 		RateLimitRPS:   2048,
 		RateLimitBurst: 4096,
 		AllowedOrigins: "",
+
+		AdmissionDisableColdStart:       false,
+		AdmissionQueueTimeout:           0,
+		AdmissionQueuePollInterval:      500 * time.Millisecond,
+		PoolAutoscalerEnabled:           false,
+		PoolAutoscalerInterval:          30 * time.Second,
+		PoolAutoscalerBuffer:            1,
+		PoolAutoscalerMinReplicas:       0,
+		PoolAutoscalerMaxReplicas:       0,
+		SchedulerName:                   "",
+		ImageLocalityEnabled:            false,
+		SandboxNetworkPolicyManagement:  "Unmanaged",
+		SandboxRuntimeClassName:         "",
+		SandboxSeccompProfileType:       "RuntimeDefault",
+		SandboxSeccompLocalhostProfile:  "",
+		SandboxAllowPrivilegeEscalation: false,
 	}
 }
 
@@ -230,36 +187,6 @@ func LoadFromEnv() *Config {
 		}
 	}
 
-	if replicas := os.Getenv("DEFAULT_POOL_REPLICAS"); replicas != "" {
-		if r, err := strconv.ParseInt(replicas, 10, 32); err == nil {
-			cfg.DefaultPoolReplicas = int32(r)
-		}
-	}
-
-	if addr := os.Getenv("METRICS_ADDR"); addr != "" {
-		cfg.MetricsAddr = addr
-	}
-
-	if addr := os.Getenv("PROBE_ADDR"); addr != "" {
-		cfg.ProbeAddr = addr
-	}
-
-	if enable := os.Getenv("ENABLE_LEADER_ELECTION"); enable == "true" {
-		cfg.EnableLeaderElection = true
-	}
-
-	if enable := os.Getenv("ENABLE_WEBHOOKS"); enable == "true" {
-		cfg.EnableWebhooks = true
-	}
-
-	if enable := os.Getenv("ENABLE_METRICS"); enable == "false" {
-		cfg.EnableMetrics = false
-	}
-
-	if enable := os.Getenv("ENABLE_MIDDLEWARE"); enable == "false" {
-		cfg.EnableMiddleware = false
-	}
-
 	// ClickHouse configuration
 	if enable := os.Getenv("CLICKHOUSE_ENABLED"); enable == "true" {
 		cfg.ClickHouseEnabled = true
@@ -281,18 +208,6 @@ func LoadFromEnv() *Config {
 		cfg.ClickHousePassword = pass
 	}
 
-	if batchSize := os.Getenv("CLICKHOUSE_BATCH_SIZE"); batchSize != "" {
-		if b, err := strconv.Atoi(batchSize); err == nil {
-			cfg.ClickHouseBatchSize = b
-		}
-	}
-
-	if interval := os.Getenv("CLICKHOUSE_FLUSH_INTERVAL"); interval != "" {
-		if d, err := time.ParseDuration(interval); err == nil {
-			cfg.ClickHouseFlushInterval = d
-		}
-	}
-
 	// Trajectory configuration
 	if enable := os.Getenv("TRAJECTORY_ENABLED"); enable == "true" {
 		cfg.TrajectoryEnabled = true
@@ -304,6 +219,9 @@ func LoadFromEnv() *Config {
 
 	if v := os.Getenv("GRPC_AUTH_TOKEN"); v != "" {
 		cfg.GRPCAuthToken = v
+	}
+	if v := os.Getenv("GRPC_AUTH_SECRET_NAME"); v != "" {
+		cfg.GRPCAuthSecretName = v
 	}
 
 	// Executor agent configuration
@@ -321,13 +239,11 @@ func LoadFromEnv() *Config {
 			cfg.GatewayPort = p
 		}
 	}
-
-	if v := os.Getenv("WARMPOOL_MAX_CONCURRENT"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			cfg.WarmPoolMaxConcurrent = n
-		}
+	if v := os.Getenv("GATEWAY_NAMESPACE"); v != "" {
+		cfg.GatewayNamespace = v
+	} else if v := os.Getenv("POD_NAMESPACE"); v != "" {
+		cfg.GatewayNamespace = v
 	}
-
 	if v := os.Getenv("K8S_CLIENT_QPS"); v != "" {
 		if f, err := strconv.ParseFloat(v, 32); err == nil {
 			cfg.K8sClientQPS = float32(f)
@@ -337,91 +253,6 @@ func LoadFromEnv() *Config {
 	if v := os.Getenv("K8S_CLIENT_BURST"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
 			cfg.K8sClientBurst = n
-		}
-	}
-
-	if v := os.Getenv("WARMPOOL_BASE_DELAY_MS"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			cfg.WarmPoolBaseDelayMs = n
-		}
-	}
-
-	if v := os.Getenv("WARMPOOL_MAX_DELAY_MS"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			cfg.WarmPoolMaxDelayMs = n
-		}
-	}
-
-	if v := os.Getenv("WARMPOOL_RATE_QPS"); v != "" {
-		if f, err := strconv.ParseFloat(v, 64); err == nil {
-			cfg.WarmPoolRateLimitQPS = f
-		}
-	}
-
-	if v := os.Getenv("WARMPOOL_RATE_BURST"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil {
-			cfg.WarmPoolRateLimitBurst = n
-		}
-	}
-
-	if v := os.Getenv("IMAGE_LOCALITY_SPREAD_FACTOR"); v != "" {
-		if f, err := strconv.ParseFloat(v, 64); err == nil {
-			cfg.ImageLocalitySpreadFactor = f
-		}
-	}
-
-	if v := os.Getenv("IMAGE_LOCALITY_WEIGHT"); v != "" {
-		if n, err := strconv.Atoi(v); err == nil && n >= 1 && n <= 100 {
-			cfg.ImageLocalityWeight = int32(n)
-		}
-	}
-
-	// Managed pool configuration
-	if v := os.Getenv("MANAGED_POOL_INITIAL_REPLICAS"); v != "" {
-		if n, err := strconv.ParseInt(v, 10, 32); err == nil {
-			cfg.ManagedPoolInitialReplicas = int32(n)
-		}
-	}
-
-	if v := os.Getenv("MANAGED_POOL_MIN_REPLICAS"); v != "" {
-		if n, err := strconv.ParseInt(v, 10, 32); err == nil {
-			cfg.ManagedPoolMinReplicas = int32(n)
-		}
-	}
-
-	if v := os.Getenv("MANAGED_POOL_MAX_REPLICAS"); v != "" {
-		if n, err := strconv.ParseInt(v, 10, 32); err == nil {
-			cfg.ManagedPoolMaxReplicas = int32(n)
-		}
-	}
-
-	if v := os.Getenv("MANAGED_POOL_SCALE_UP_STEP"); v != "" {
-		if n, err := strconv.ParseInt(v, 10, 32); err == nil {
-			cfg.ManagedPoolScaleUpStep = int32(n)
-		}
-	}
-
-	if v := os.Getenv("MANAGED_POOL_IDLE_COOLDOWN"); v != "" {
-		if d, err := time.ParseDuration(v); err == nil {
-			cfg.ManagedPoolIdleCooldown = d
-		}
-	}
-
-	if v := os.Getenv("MANAGED_POOL_EMPTY_TTL"); v != "" {
-		if d, err := time.ParseDuration(v); err == nil {
-			cfg.ManagedPoolEmptyTTL = d
-		}
-	}
-
-	if v := os.Getenv("MANAGED_POOL_SWEEP_INTERVAL"); v != "" {
-		if d, err := time.ParseDuration(v); err == nil {
-			cfg.ManagedPoolSweepInterval = d
-		}
-	}
-
-	if v := os.Getenv("POD_INIT_TIMEOUT"); v != "" {
-		if d, err := time.ParseDuration(v); err == nil {
-			cfg.PodInitTimeout = d
 		}
 	}
 
@@ -511,6 +342,72 @@ func LoadFromEnv() *Config {
 		cfg.PodNoProxy = v
 	}
 
+	if v := os.Getenv("ADMISSION_DISABLE_COLD_START"); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			cfg.AdmissionDisableColdStart = b
+		}
+	}
+	if v := os.Getenv("ADMISSION_QUEUE_TIMEOUT"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			cfg.AdmissionQueueTimeout = d
+		}
+	}
+	if v := os.Getenv("ADMISSION_QUEUE_POLL_INTERVAL"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			cfg.AdmissionQueuePollInterval = d
+		}
+	}
+	if v := os.Getenv("POOL_AUTOSCALER_ENABLED"); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			cfg.PoolAutoscalerEnabled = b
+		}
+	}
+	if v := os.Getenv("POOL_AUTOSCALER_INTERVAL"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			cfg.PoolAutoscalerInterval = d
+		}
+	}
+	if v := os.Getenv("POOL_AUTOSCALER_BUFFER"); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 32); err == nil {
+			cfg.PoolAutoscalerBuffer = int32(n)
+		}
+	}
+	if v := os.Getenv("POOL_AUTOSCALER_MIN_REPLICAS"); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 32); err == nil {
+			cfg.PoolAutoscalerMinReplicas = int32(n)
+		}
+	}
+	if v := os.Getenv("POOL_AUTOSCALER_MAX_REPLICAS"); v != "" {
+		if n, err := strconv.ParseInt(v, 10, 32); err == nil {
+			cfg.PoolAutoscalerMaxReplicas = int32(n)
+		}
+	}
+	if v := os.Getenv("SCHEDULER_NAME"); v != "" {
+		cfg.SchedulerName = v
+	}
+	if v := os.Getenv("IMAGE_LOCALITY_ENABLED"); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			cfg.ImageLocalityEnabled = b
+		}
+	}
+	if v := os.Getenv("SANDBOX_NETWORK_POLICY_MANAGEMENT"); v != "" {
+		cfg.SandboxNetworkPolicyManagement = v
+	}
+	if v := os.Getenv("SANDBOX_RUNTIME_CLASS_NAME"); v != "" {
+		cfg.SandboxRuntimeClassName = v
+	}
+	if v := os.Getenv("SANDBOX_SECCOMP_PROFILE_TYPE"); v != "" {
+		cfg.SandboxSeccompProfileType = v
+	}
+	if v := os.Getenv("SANDBOX_SECCOMP_LOCALHOST_PROFILE"); v != "" {
+		cfg.SandboxSeccompLocalhostProfile = v
+	}
+	if v := os.Getenv("SANDBOX_ALLOW_PRIVILEGE_ESCALATION"); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			cfg.SandboxAllowPrivilegeEscalation = b
+		}
+	}
+
 	return cfg
 }
 
@@ -525,18 +422,12 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("invalid sidecar gRPC port: %d (must be 1-65535)", c.SidecarGRPCPort)
 	}
 
-	// Validate replica count
-	if c.DefaultPoolReplicas < 0 {
-		return fmt.Errorf("default pool replicas cannot be negative: %d", c.DefaultPoolReplicas)
-	}
-
 	// Validate timeouts
 	if c.HTTPClientTimeout <= 0 {
 		return fmt.Errorf("HTTP client timeout must be positive: %v", c.HTTPClientTimeout)
 	}
-
-	if c.DefaultRequeueDelay <= 0 {
-		return fmt.Errorf("default requeue delay must be positive: %v", c.DefaultRequeueDelay)
+	if c.GRPCAuthSecretName == "" {
+		return fmt.Errorf("gRPC auth secret name is required")
 	}
 
 	// Validate ClickHouse configuration if enabled
@@ -553,80 +444,21 @@ func (c *Config) Validate() error {
 			return fmt.Errorf("ClickHouse password is required when ClickHouse is enabled (set CLICKHOUSE_PASSWORD)")
 		}
 
-		if c.ClickHouseBatchSize < 1 {
-			return fmt.Errorf("ClickHouse batch size must be positive: %d", c.ClickHouseBatchSize)
-		}
-
-		if c.ClickHouseFlushInterval <= 0 {
-			return fmt.Errorf("ClickHouse flush interval must be positive: %v", c.ClickHouseFlushInterval)
-		}
 	}
 
 	// Validate gateway configuration
 	if c.GatewayPort < 1 || c.GatewayPort > 65535 {
 		return fmt.Errorf("invalid gateway port: %d (must be 1-65535)", c.GatewayPort)
 	}
-
-	if c.WarmPoolMaxConcurrent < 1 {
-		return fmt.Errorf("warm pool max concurrent must be >= 1: %d", c.WarmPoolMaxConcurrent)
+	if strings.TrimSpace(c.GatewayNamespace) == "" {
+		return fmt.Errorf("gateway namespace is required")
 	}
-
 	if c.K8sClientQPS <= 0 {
 		return fmt.Errorf("k8s client QPS must be > 0: %v", c.K8sClientQPS)
 	}
 
 	if c.K8sClientBurst < 1 {
 		return fmt.Errorf("k8s client burst must be >= 1: %d", c.K8sClientBurst)
-	}
-
-	if c.WarmPoolBaseDelayMs < 1 {
-		return fmt.Errorf("warm pool base delay ms must be >= 1: %d", c.WarmPoolBaseDelayMs)
-	}
-
-	if c.WarmPoolMaxDelayMs < c.WarmPoolBaseDelayMs {
-		return fmt.Errorf("warm pool max delay ms must be >= base delay ms: %d < %d", c.WarmPoolMaxDelayMs, c.WarmPoolBaseDelayMs)
-	}
-
-	if c.WarmPoolRateLimitQPS <= 0 {
-		return fmt.Errorf("warm pool rate limit QPS must be > 0: %v", c.WarmPoolRateLimitQPS)
-	}
-
-	if c.WarmPoolRateLimitBurst < 1 {
-		return fmt.Errorf("warm pool rate limit burst must be >= 1: %d", c.WarmPoolRateLimitBurst)
-	}
-
-	if c.ImageLocalitySpreadFactor < 0 || c.ImageLocalitySpreadFactor > 10 {
-		return fmt.Errorf("image locality spread factor must be 0-10: %v", c.ImageLocalitySpreadFactor)
-	}
-
-	if c.ImageLocalityWeight < 1 || c.ImageLocalityWeight > 100 {
-		return fmt.Errorf("image locality weight must be 1-100: %d", c.ImageLocalityWeight)
-	}
-
-	// Validate managed pool configuration
-	if c.ManagedPoolMaxReplicas < 0 {
-		return fmt.Errorf("managed pool max replicas cannot be negative: %d", c.ManagedPoolMaxReplicas)
-	}
-
-	if c.ManagedPoolMinReplicas < 0 {
-		return fmt.Errorf("managed pool min replicas cannot be negative: %d", c.ManagedPoolMinReplicas)
-	}
-
-	if c.ManagedPoolMinReplicas > c.ManagedPoolMaxReplicas {
-		return fmt.Errorf("managed pool min replicas (%d) cannot exceed max replicas (%d)",
-			c.ManagedPoolMinReplicas, c.ManagedPoolMaxReplicas)
-	}
-
-	if c.ManagedPoolScaleUpStep < 1 {
-		return fmt.Errorf("managed pool scale up step must be >= 1: %d", c.ManagedPoolScaleUpStep)
-	}
-
-	if c.ManagedPoolSweepInterval <= 0 {
-		return fmt.Errorf("managed pool sweep interval must be positive: %v", c.ManagedPoolSweepInterval)
-	}
-
-	if c.ManagedPoolEmptyTTL <= 0 {
-		return fmt.Errorf("managed pool empty TTL must be positive: %v", c.ManagedPoolEmptyTTL)
 	}
 
 	// Validate gateway session lifecycle configuration
@@ -663,6 +495,41 @@ func (c *Config) Validate() error {
 
 	if c.RateLimitBurst < 1 {
 		return fmt.Errorf("rate limit burst must be >= 1: %d", c.RateLimitBurst)
+	}
+
+	if c.AdmissionQueueTimeout < 0 {
+		return fmt.Errorf("admission queue timeout cannot be negative: %v", c.AdmissionQueueTimeout)
+	}
+	if c.AdmissionQueuePollInterval <= 0 {
+		return fmt.Errorf("admission queue poll interval must be positive: %v", c.AdmissionQueuePollInterval)
+	}
+	if c.PoolAutoscalerInterval <= 0 {
+		return fmt.Errorf("pool autoscaler interval must be positive: %v", c.PoolAutoscalerInterval)
+	}
+	if c.PoolAutoscalerBuffer < 0 {
+		return fmt.Errorf("pool autoscaler buffer cannot be negative: %d", c.PoolAutoscalerBuffer)
+	}
+	if c.PoolAutoscalerMinReplicas < 0 {
+		return fmt.Errorf("pool autoscaler min replicas cannot be negative: %d", c.PoolAutoscalerMinReplicas)
+	}
+	if c.PoolAutoscalerMaxReplicas < 0 {
+		return fmt.Errorf("pool autoscaler max replicas cannot be negative: %d", c.PoolAutoscalerMaxReplicas)
+	}
+	if c.PoolAutoscalerMaxReplicas > 0 && c.PoolAutoscalerMaxReplicas < c.PoolAutoscalerMinReplicas {
+		return fmt.Errorf("pool autoscaler max replicas (%d) must be >= min replicas (%d)", c.PoolAutoscalerMaxReplicas, c.PoolAutoscalerMinReplicas)
+	}
+	switch strings.ToLower(strings.TrimSpace(c.SandboxNetworkPolicyManagement)) {
+	case "", "managed", "unmanaged":
+	default:
+		return fmt.Errorf("sandbox network policy management must be Managed or Unmanaged: %q", c.SandboxNetworkPolicyManagement)
+	}
+	switch strings.ToLower(strings.TrimSpace(c.SandboxSeccompProfileType)) {
+	case "", "runtimedefault", "unconfined", "localhost":
+	default:
+		return fmt.Errorf("sandbox seccomp profile type must be RuntimeDefault, Unconfined, or Localhost: %q", c.SandboxSeccompProfileType)
+	}
+	if strings.EqualFold(strings.TrimSpace(c.SandboxSeccompProfileType), "Localhost") && strings.TrimSpace(c.SandboxSeccompLocalhostProfile) == "" {
+		return fmt.Errorf("sandbox seccomp localhost profile is required when seccomp profile type is Localhost")
 	}
 
 	return nil

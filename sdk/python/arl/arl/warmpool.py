@@ -4,13 +4,14 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Iterator
 from typing import Any
 
 import httpx
 
 from arl.configenv import ConfigEnvSpec
 from arl.gateway_client import GatewayClient, PoolNotReadyError
-from arl.types import PoolInfo, ResourceRequirements, ToolsSpec
+from arl.types import PoolInfo, PoolLogEntry, ResourceRequirements, ToolsSpec
 
 logger = logging.getLogger(__name__)
 
@@ -31,22 +32,23 @@ class WarmPoolManager:
 
     def __init__(
         self,
-        namespace: str = "default",
         gateway_url: str = "http://localhost:8080",
         timeout: float = 300.0,
+        api_key: str | None = None,
     ) -> None:
-        self.namespace = namespace
-        self._client = GatewayClient(base_url=gateway_url, timeout=timeout)
+        self._client = GatewayClient(base_url=gateway_url, timeout=timeout, api_key=api_key)
 
     def create_warmpool(
         self,
         name: str,
         image: str,
         replicas: int = 2,
+        profile: str = "default",
         tools: ToolsSpec | None = None,
         resources: ResourceRequirements | None = None,
         workspace_dir: str = "/workspace",
         config_env: ConfigEnvSpec | dict[str, Any] | None = None,
+        image_locality: dict[str, Any] | bool | None = None,
     ) -> None:
         """Create a new WarmPool.
 
@@ -54,22 +56,29 @@ class WarmPoolManager:
             name: Name of the WarmPool.
             image: Container image for the executor.
             replicas: Number of warm pods to maintain.
+            profile: Resource profile used by session pool selection.
             tools: Optional tools specification to provision in the executor container.
             resources: Optional resource requirements (CPU/memory requests and limits).
                       If not specified, uses defaults: requests={cpu: 100m, memory: 128Mi},
                       limits={cpu: 1000m, memory: 1Gi}.
             workspace_dir: Workspace directory mount path (default: /workspace).
+            image_locality: Optional payload that enables gateway image-locality hints.
         """
         self._client.create_pool(
             name=name,
-            namespace=self.namespace,
             image=image,
             replicas=replicas,
+            profile=profile,
             config_env=config_env,
             tools=tools,
             resources=resources,
             workspace_dir=workspace_dir,
+            image_locality=image_locality,
         )
+
+    def list_warmpools(self) -> list[PoolInfo]:
+        """List WarmPools in the gateway-scoped namespace."""
+        return self._client.list_pools()
 
     def get_warmpool(self, name: str) -> PoolInfo:
         """Get WarmPool info.
@@ -80,7 +89,7 @@ class WarmPoolManager:
         Returns:
             PoolInfo with current pool status.
         """
-        return self._client.get_pool(name, namespace=self.namespace)
+        return self._client.get_pool(name)
 
     def wait_for_ready(
         self,
@@ -173,7 +182,7 @@ class WarmPoolManager:
         Args:
             name: Name of the WarmPool to delete.
         """
-        self._client.delete_pool(name, namespace=self.namespace)
+        self._client.delete_pool(name)
 
     def scale_warmpool(
         self,
@@ -198,9 +207,26 @@ class WarmPoolManager:
         return self._client.scale_pool(
             name,
             replicas=replicas,
-            namespace=self.namespace,
             resources=resources,
         )
+
+    def iter_logs(
+        self,
+        name: str,
+        *,
+        follow: bool = False,
+        tail: int = 100,
+    ) -> Iterator[PoolLogEntry]:
+        """Iterate over NDJSON log entries from all pods in a WarmPool."""
+        return self._client.iter_pool_logs(
+            name,
+            follow=follow,
+            tail=tail,
+        )
+
+    def get_logs(self, name: str, *, tail: int = 100) -> list[PoolLogEntry]:
+        """Return recent log entries from all pods in a WarmPool."""
+        return self._client.list_pool_logs(name, tail=tail)
 
     def close(self) -> None:
         """Close the underlying HTTP client."""

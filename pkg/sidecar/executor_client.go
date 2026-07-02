@@ -4,12 +4,15 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net"
 	"sync"
 	"time"
 
 	"github.com/Lincyaw/agent-env/pkg/execagent"
 )
+
+const fileTransferChunkSize = 1024 * 1024
 
 // ExecutorClient communicates with the executor agent over a Unix socket.
 type ExecutorClient struct {
@@ -120,11 +123,11 @@ func (c *ExecutorClient) Signal(pid int, signal string) error {
 	return nil
 }
 
-// WriteFile writes one file into the executor workspace.
-func (c *ExecutorClient) WriteFile(ctx context.Context, path string, content []byte) (int64, error) {
+// WriteFile streams one file into the executor workspace.
+func (c *ExecutorClient) WriteFile(ctx context.Context, path string, content io.Reader, expectedSHA256 string) (*FileWriteResult, error) {
 	conn, err := c.dial()
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 	defer conn.Close()
 
@@ -132,38 +135,71 @@ func (c *ExecutorClient) WriteFile(ctx context.Context, path string, content []b
 	decoder := json.NewDecoder(conn)
 
 	req := execagent.Request{
-		ID:      fmt.Sprintf("write-%d", time.Now().UnixNano()),
-		Type:    "write_file",
-		Path:    path,
-		Content: content,
+		ID:             fmt.Sprintf("write-%d", time.Now().UnixNano()),
+		Type:           "write_file_stream",
+		Path:           path,
+		ExpectedSHA256: expectedSHA256,
 	}
 	if err := encoder.Encode(req); err != nil {
-		return 0, fmt.Errorf("send write_file request: %w", err)
+		return nil, fmt.Errorf("send write_file request: %w", err)
+	}
+
+	buf := make([]byte, fileTransferChunkSize)
+	for {
+		n, readErr := content.Read(buf)
+		if n > 0 {
+			if err := encoder.Encode(execagent.Request{
+				ID:      req.ID,
+				Type:    "write_file_chunk",
+				Content: append([]byte(nil), buf[:n]...),
+			}); err != nil {
+				return nil, fmt.Errorf("send write_file chunk: %w", err)
+			}
+		}
+		if readErr == io.EOF {
+			break
+		}
+		if readErr != nil {
+			return nil, fmt.Errorf("read upload content: %w", readErr)
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		default:
+		}
+	}
+
+	if err := encoder.Encode(execagent.Request{ID: req.ID, Type: "write_file_finish"}); err != nil {
+		return nil, fmt.Errorf("send write_file finish: %w", err)
 	}
 
 	for {
 		var resp execagent.Response
 		if err := decoder.Decode(&resp); err != nil {
-			return 0, fmt.Errorf("read write_file response: %w", err)
+			return nil, fmt.Errorf("read write_file response: %w", err)
 		}
 		if resp.Error != "" {
-			return 0, fmt.Errorf("write_file error: %s", resp.Error)
+			return nil, fmt.Errorf("write_file error: %s", resp.Error)
 		}
 		if resp.Done {
 			if resp.BytesWritten == nil {
-				return 0, fmt.Errorf("write_file response missing bytes_written")
+				return nil, fmt.Errorf("write_file response missing bytes_written")
 			}
-			return *resp.BytesWritten, nil
+			return &FileWriteResult{
+				Path:         path,
+				BytesWritten: *resp.BytesWritten,
+				SHA256:       resp.SHA256,
+			}, nil
 		}
 		select {
 		case <-ctx.Done():
-			return 0, ctx.Err()
+			return nil, ctx.Err()
 		default:
 		}
 	}
 }
 
-func (c *ExecutorClient) ReadFile(ctx context.Context, path string) ([]byte, error) {
+func (c *ExecutorClient) ReadFile(ctx context.Context, path string, dst io.Writer) (*FileReadResult, error) {
 	conn, err := c.dial()
 	if err != nil {
 		return nil, err
@@ -175,7 +211,7 @@ func (c *ExecutorClient) ReadFile(ctx context.Context, path string) ([]byte, err
 
 	req := execagent.Request{
 		ID:   fmt.Sprintf("read-%d", time.Now().UnixNano()),
-		Type: "read_file",
+		Type: "read_file_stream",
 		Path: path,
 	}
 	if err := encoder.Encode(req); err != nil {
@@ -190,8 +226,21 @@ func (c *ExecutorClient) ReadFile(ctx context.Context, path string) ([]byte, err
 		if resp.Error != "" {
 			return nil, fmt.Errorf("read_file error: %s", resp.Error)
 		}
+		if len(resp.Content) > 0 {
+			if _, err := dst.Write(resp.Content); err != nil {
+				return nil, fmt.Errorf("write downloaded content: %w", err)
+			}
+		}
 		if resp.Done {
-			return resp.Content, nil
+			var size int64
+			if resp.SizeBytes != nil {
+				size = *resp.SizeBytes
+			}
+			return &FileReadResult{
+				Path:      path,
+				SizeBytes: size,
+				SHA256:    resp.SHA256,
+			}, nil
 		}
 		select {
 		case <-ctx.Done():
@@ -315,6 +364,19 @@ func (s *ShellSession) SendSignal(signal string) error {
 		ID:     s.id,
 		Type:   "signal",
 		Signal: signal,
+	})
+}
+
+// Resize updates the remote shell terminal size.
+func (s *ShellSession) Resize(rows, cols int32) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return s.encoder.Encode(execagent.Request{
+		ID:   s.id,
+		Type: "resize",
+		Rows: rows,
+		Cols: cols,
 	})
 }
 

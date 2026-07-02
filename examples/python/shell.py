@@ -1,15 +1,13 @@
 """ARL Interactive Shell — connect to a remote sandbox terminal.
 
 Usage:
-    uv run python examples/python/test_interactive_shell.py
-    uv run python examples/python/test_interactive_shell.py --gateway-url http://localhost:8080
-    uv run python examples/python/test_interactive_shell.py --pool my-pool --image python:3.11
-    uv run python examples/python/test_interactive_shell.py --keep-alive
+    uv run python examples/python/shell.py
+    uv run python examples/python/shell.py --gateway-url http://localhost:8080
+    uv run python examples/python/shell.py --pool my-pool --image python:3.11
 
 Environment variables (override defaults):
     ARL_GATEWAY_URL   Gateway base URL
     ARL_POOL_NAME     WarmPool name
-    ARL_NAMESPACE     Kubernetes namespace
     ARL_POOL_IMAGE    Container image for auto-created pool
 """
 
@@ -42,8 +40,10 @@ from rich.table import Table
 # ---------------------------------------------------------------------------
 DEFAULT_GATEWAY_URL = "http://localhost:8080"
 DEFAULT_POOL_NAME = "numpy"
-DEFAULT_NAMESPACE = "arl"
-DEFAULT_POOL_IMAGE = "aibrix-docker-mirror-cn-beijing.cr.volces.com/namanjain12/numpy_final:6df0b6e2b79aad40715f933b561660f951693289"
+DEFAULT_POOL_IMAGE = (
+    "aibrix-docker-mirror-cn-beijing.cr.volces.com/namanjain12/"
+    "numpy_final:6df0b6e2b79aad40715f933b561660f951693289"
+)
 
 console = Console(stderr=True)
 
@@ -172,7 +172,7 @@ def _check_gateway(client: GatewayClient) -> bool:
             "  1. Verify the gateway pod is running\n"
             "  2. Start a port-forward:\n"
             "     [cyan]kubectl port-forward -n arl "
-            "svc/arl-operator-gateway 8080:8080[/cyan]",
+            "svc/agent-env-gateway 8080:8080[/cyan]",
             title="Connection Error",
             border_style="red",
         )
@@ -188,7 +188,7 @@ def _ensure_pool(
 ) -> bool:
     """Create the pool if it doesn't exist and wait until ready."""
     try:
-        pool_mgr.create_warmpool(name=name, image=image, replicas=replicas)
+        pool_mgr.create_warmpool(name=name, image=image, replicas=replicas, profile=name)
         console.print(f"  [green]\u2713[/green] Pool [cyan]{name}[/cyan] created")
     except GatewayError as e:
         if "already exists" in str(e):
@@ -229,8 +229,8 @@ def _print_session_banner(info: SessionInfo) -> None:
     table.add_row("Sandbox", info.sandbox_name)
     table.add_row("Pod", info.pod_name or "\u2014")
     table.add_row("Pod IP", info.pod_ip or "\u2014")
-    table.add_row("Namespace", info.namespace)
-    table.add_row("Pool", info.pool_ref)
+    table.add_row("Image", info.image or "\u2014")
+    table.add_row("Profile", info.profile or "\u2014")
     if info.created_at:
         table.add_row("Created", info.created_at.strftime("%Y-%m-%d %H:%M:%S"))
 
@@ -258,7 +258,6 @@ def _build_parser() -> argparse.ArgumentParser:
             "Environment variables:\n"
             "  ARL_GATEWAY_URL   Gateway base URL\n"
             "  ARL_POOL_NAME     WarmPool name\n"
-            "  ARL_NAMESPACE     Kubernetes namespace\n"
             "  ARL_POOL_IMAGE    Container image for auto-created pool\n"
         ),
     )
@@ -273,11 +272,6 @@ def _build_parser() -> argparse.ArgumentParser:
         help=f"WarmPool name (default: {DEFAULT_POOL_NAME})",
     )
     parser.add_argument(
-        "--namespace",
-        default=os.environ.get("ARL_NAMESPACE", DEFAULT_NAMESPACE),
-        help=f"Kubernetes namespace (default: {DEFAULT_NAMESPACE})",
-    )
-    parser.add_argument(
         "--image",
         default=os.environ.get("ARL_POOL_IMAGE", DEFAULT_POOL_IMAGE),
         help="Container image for auto-created pool",
@@ -288,11 +282,6 @@ def _build_parser() -> argparse.ArgumentParser:
         default=1,
         help="Number of warm replicas (default: 1)",
     )
-    parser.add_argument(
-        "--keep-alive",
-        action="store_true",
-        help="Keep sandbox alive after disconnecting",
-    )
     return parser
 
 
@@ -301,7 +290,6 @@ def main() -> None:
 
     gateway_url: str = args.gateway_url
     pool_name: str = args.pool
-    namespace: str = args.namespace
 
     # 1. Gateway health check
     client = GatewayClient(base_url=gateway_url)
@@ -309,7 +297,7 @@ def main() -> None:
         sys.exit(1)
 
     # 2. Ensure warm pool is ready
-    pool_mgr = WarmPoolManager(namespace=namespace, gateway_url=gateway_url)
+    pool_mgr = WarmPoolManager(gateway_url=gateway_url)
     if not _ensure_pool(pool_mgr, pool_name, args.image, args.replicas):
         sys.exit(1)
 
@@ -323,10 +311,9 @@ def main() -> None:
         progress.add_task("Creating sandbox session...", total=None)
 
     with SandboxSession(
-        pool_ref=pool_name,
-        namespace=namespace,
+        image=args.image,
+        profile=pool_name,
         gateway_url=gateway_url,
-        keep_alive=args.keep_alive,
     ) as session:
         sid = session.session_id
         if sid is None:

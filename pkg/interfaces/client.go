@@ -2,6 +2,7 @@ package interfaces
 
 import (
 	"context"
+	"io"
 )
 
 // LogEntry represents a single log line from the sidecar.
@@ -12,6 +13,20 @@ type LogEntry struct {
 	Source    string
 }
 
+// FileWriteResult describes a streamed file upload result.
+type FileWriteResult struct {
+	Path         string
+	BytesWritten int64
+	SHA256       string
+}
+
+// FileReadResult describes a streamed file download result.
+type FileReadResult struct {
+	Path      string
+	SizeBytes int64
+	SHA256    string
+}
+
 // SidecarClient defines the interface for communicating with sidecar containers
 type SidecarClient interface {
 	// Execute sends command execution request to sidecar and returns aggregated result
@@ -20,11 +35,11 @@ type SidecarClient interface {
 	// ExecuteStream sends command execution request and streams output via channel
 	ExecuteStream(ctx context.Context, podIP string, req ExecRequest) (<-chan ExecResponse, error)
 
-	// WriteFile writes one file into the session workspace.
-	WriteFile(ctx context.Context, podIP string, path string, content []byte) (int64, error)
+	// WriteFile streams one file into the session workspace.
+	WriteFile(ctx context.Context, podIP string, path string, content io.Reader, expectedSHA256 string) (*FileWriteResult, error)
 
-	// ReadFile reads one file from the session workspace.
-	ReadFile(ctx context.Context, podIP string, path string) ([]byte, error)
+	// ReadFile streams one file from the session workspace.
+	ReadFile(ctx context.Context, podIP string, path string, dst io.Writer) (*FileReadResult, error)
 
 	// InteractiveShell opens a bidirectional shell session
 	InteractiveShell(ctx context.Context, podIP string) (ShellStream, error)

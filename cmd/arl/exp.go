@@ -16,15 +16,25 @@ var expCmd = &cobra.Command{
 var expCreateCmd = &cobra.Command{
 	Use:   "create <experiment-id>",
 	Short: "Create an experiment with managed sessions",
-	Long:  "Creates one or more managed sessions under an experiment ID. The pool is auto-created and auto-scaled.",
+	Long:  "Creates one or more managed sessions under an experiment ID. The sandbox-backed pool is auto-created.",
 	Args:  cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		image, _ := cmd.Flags().GetString("image")
+		profile, _ := cmd.Flags().GetString("profile")
 		count, _ := cmd.Flags().GetInt("sessions")
-		maxReplicas, _ := cmd.Flags().GetInt32("max-replicas")
+		workspaceDir, _ := cmd.Flags().GetString("workspace-dir")
+		idleTimeout, _ := cmd.Flags().GetInt("idle-timeout")
+		maxLifetime, _ := cmd.Flags().GetInt("max-lifetime")
+		privateContainers, err := privateContainersFromFlags(cmd)
+		if err != nil {
+			return err
+		}
 
 		if image == "" {
-			return fmt.Errorf("--image is required")
+			return usageError("--image is required")
+		}
+		if count < 1 {
+			return usageError("--sessions must be positive")
 		}
 
 		c := newClient()
@@ -32,10 +42,13 @@ var expCreateCmd = &cobra.Command{
 
 		for i := 0; i < count; i++ {
 			info, err := c.CreateManagedSession(CreateManagedSessionRequest{
-				Image:        image,
-				ExperimentID: args[0],
-				Namespace:    flagNamespace,
-				MaxReplicas:  maxReplicas,
+				Image:              image,
+				Profile:            profile,
+				ExperimentID:       args[0],
+				WorkspaceDir:       workspaceDir,
+				IdleTimeoutSeconds: idleTimeout,
+				MaxLifetimeSeconds: maxLifetime,
+				PrivateContainers:  privateContainers,
 			})
 			if err != nil {
 				fmt.Fprintf(os.Stderr, "Session %d/%d failed: %v\n", i+1, count, err)
@@ -53,11 +66,11 @@ var expCreateCmd = &cobra.Command{
 			return fmt.Errorf("no sessions created")
 		}
 
-		fmt.Printf("Experiment %s: created %d session(s), pool=%s\n", args[0], len(sessions), sessions[0].PoolRef)
+		fmt.Printf("Experiment %s: created %d session(s), profile=%s\n", args[0], len(sessions), sessions[0].Profile)
 		w := newTabWriter()
-		fmt.Fprintln(w, "ID\tPOOL\tPOD")
+		fmt.Fprintln(w, "ID\tPROFILE\tIMAGE\tPOD")
 		for _, s := range sessions {
-			fmt.Fprintf(w, "%s\t%s\t%s\n", s.ID, s.PoolRef, s.PodName)
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", s.ID, s.Profile, shortImage(s.Image), s.PodName)
 		}
 		return w.Flush()
 	},
@@ -84,9 +97,9 @@ var expListCmd = &cobra.Command{
 		}
 
 		w := newTabWriter()
-		fmt.Fprintln(w, "EXPERIMENT\tSESSIONS\tPOOL\tNAMESPACE")
+		fmt.Fprintln(w, "EXPERIMENT\tSESSIONS\tPROFILE\tIMAGE")
 		for _, e := range exps {
-			fmt.Fprintf(w, "%s\t%d\t%s\t%s\n", e.ExperimentID, e.SessionCount, e.PoolRef, e.Namespace)
+			fmt.Fprintf(w, "%s\t%d\t%s\t%s\n", e.ExperimentID, e.SessionCount, e.Profile, shortImage(e.Image))
 		}
 		return w.Flush()
 	},
@@ -114,9 +127,9 @@ var expSessionsCmd = &cobra.Command{
 		}
 
 		w := newTabWriter()
-		fmt.Fprintln(w, "ID\tPOOL\tPOD\tAGE")
+		fmt.Fprintln(w, "ID\tPROFILE\tIMAGE\tPOD\tAGE")
 		for _, s := range sessions {
-			fmt.Fprintf(w, "%s\t%s\t%s\t%s\n", s.ID, s.PoolRef, s.PodName, age(s.CreatedAt))
+			fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\n", s.ID, s.Profile, shortImage(s.Image), s.PodName, age(s.CreatedAt))
 		}
 		return w.Flush()
 	},
@@ -139,8 +152,8 @@ var expStatsCmd = &cobra.Command{
 				"sessions":     len(sessions),
 			}
 			if len(sessions) > 0 {
-				stats["poolRef"] = sessions[0].PoolRef
-				stats["namespace"] = sessions[0].Namespace
+				stats["image"] = sessions[0].Image
+				stats["profile"] = sessions[0].Profile
 			}
 			printJSON(stats)
 			return nil
@@ -149,8 +162,8 @@ var expStatsCmd = &cobra.Command{
 		fmt.Printf("Experiment:  %s\n", args[0])
 		fmt.Printf("Sessions:    %d\n", len(sessions))
 		if len(sessions) > 0 {
-			fmt.Printf("Pool:        %s\n", sessions[0].PoolRef)
-			fmt.Printf("Namespace:   %s\n", sessions[0].Namespace)
+			fmt.Printf("Image:       %s\n", sessions[0].Image)
+			fmt.Printf("Profile:     %s\n", sessions[0].Profile)
 		}
 		return nil
 	},
@@ -186,8 +199,12 @@ var expDeleteCmd = &cobra.Command{
 
 func init() {
 	expCreateCmd.Flags().String("image", "", "Container image (required)")
+	expCreateCmd.Flags().String("profile", "default", "Resource profile")
 	expCreateCmd.Flags().Int("sessions", 1, "Number of sessions to create")
-	expCreateCmd.Flags().Int32("max-replicas", 0, "Max replicas hint for auto-scaling (0 = use server default)")
+	expCreateCmd.Flags().String("workspace-dir", "", "Workspace directory inside each sandbox")
+	expCreateCmd.Flags().Int("idle-timeout", 0, "Idle timeout in seconds (0 uses gateway default)")
+	expCreateCmd.Flags().Int("max-lifetime", 0, "Maximum lifetime in seconds (0 uses gateway default)")
+	addPrivateContainerFlags(expCreateCmd)
 
 	expDeleteCmd.Flags().Bool("force", false, "Skip confirmation")
 

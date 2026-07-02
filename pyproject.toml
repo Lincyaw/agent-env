@@ -14,14 +14,13 @@ authors = [
 
 dependencies = [
     "kubernetes>=34.1.0",
-    "mkdocs-material>=9.7.1",
-    "mkdocs-minify-plugin>=0.8.0",
     "pydantic>=2.12.5",
     "python-dateutil>=2.9.0.post0",
     "pyyaml>=6.0.3",
     "urllib3>=2.3.0",
     "arl-env",
     "websockets>=16.0",
+    "typer>=0.16.0",
 ]
 
 [dependency-groups]
@@ -30,7 +29,6 @@ prefetch = [
     "pyarrow>=23.0.0",
     "hf-transfer>=0.1.9",
     "huggingface-hub>=1.4.1",
-    "typer>=0.16.0",
     "datasets>=4.6.0",
 ]
 dev = [

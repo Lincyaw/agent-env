@@ -1,0 +1,218 @@
+{{- if .Values.gateway.enabled }}
+{{- $schedulerName := .Values.gateway.scheduler.name }}
+{{- if and (not $schedulerName) .Values.imageLocalityScheduler.enabled }}
+{{- $schedulerName = .Values.imageLocalityScheduler.schedulerName }}
+{{- end }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "agent-env.fullname" . }}-gateway
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "agent-env.labels" . | nindent 4 }}
+    app.kubernetes.io/component: gateway
+spec:
+  replicas: {{ .Values.gateway.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "agent-env.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: gateway
+  template:
+    metadata:
+      labels:
+        {{- include "agent-env.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: gateway
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ .Values.gateway.serviceAccount.name | default (printf "%s-gateway" (include "agent-env.fullname" .)) }}
+      containers:
+        - name: gateway
+          image: "{{ .Values.gateway.image.repository }}:{{ .Values.gateway.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.gateway.image.pullPolicy }}
+          args:
+            - --port={{ .Values.gateway.port }}
+            - --sidecar-grpc-port={{ .Values.gateway.sidecarGrpcPort }}
+          env:
+            - name: INTERNAL_PORT
+              value: "{{ .Values.gateway.internalPort }}"
+            - name: GATEWAY_NAMESPACE
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.namespace
+            - name: AUTH_ENABLED
+              value: {{ .Values.auth.enabled | quote }}
+            {{- if .Values.auth.enabled }}
+            - name: AUTH_KEY_FILE
+              value: "/etc/arl/keys/api-keys"
+            - name: RATE_LIMIT_RPS
+              value: "{{ .Values.auth.rateLimitRPS }}"
+            - name: RATE_LIMIT_BURST
+              value: "{{ .Values.auth.rateLimitBurst }}"
+            {{- if .Values.auth.allowedOrigins }}
+            - name: ALLOWED_ORIGINS
+              value: "{{ .Values.auth.allowedOrigins }}"
+            {{- end }}
+            {{- end }}
+            - name: GRPC_AUTH_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "agent-env.grpcTokenSecretName" . }}
+                  key: token
+            - name: GRPC_AUTH_SECRET_NAME
+              value: {{ include "agent-env.grpcTokenSecretName" . | quote }}
+            - name: SIDECAR_IMAGE
+              value: "{{ .Values.sidecar.image.repository }}:{{ .Values.sidecar.image.tag | default .Chart.AppVersion }}"
+            - name: SIDECAR_HTTP_PORT
+              value: "{{ .Values.sidecar.httpPort }}"
+            - name: EXECUTOR_AGENT_IMAGE
+              value: "{{ .Values.executorAgent.image.repository }}:{{ .Values.executorAgent.image.tag | default .Chart.AppVersion }}"
+            - name: IMAGE_PULL_POLICY
+              value: "{{ .Values.image.injectedPullPolicy | default "Always" }}"
+            - name: GATEWAY_IDLE_TIMEOUT
+              value: "{{ .Values.gateway.idleTimeout }}"
+            - name: GATEWAY_MAX_LIFETIME
+              value: "{{ .Values.gateway.maxLifetime }}"
+            - name: GATEWAY_SWEEP_INTERVAL
+              value: "{{ .Values.gateway.sweepInterval }}"
+            - name: HTTP_CLIENT_TIMEOUT
+              value: "{{ .Values.gateway.sidecarClientTimeout }}"
+            - name: GATEWAY_WRITE_TIMEOUT
+              value: "{{ .Values.gateway.writeTimeout }}"
+            - name: ADMISSION_DISABLE_COLD_START
+              value: "{{ .Values.gateway.admission.disableColdStart }}"
+            - name: ADMISSION_QUEUE_TIMEOUT
+              value: "{{ .Values.gateway.admission.queueTimeout }}"
+            - name: ADMISSION_QUEUE_POLL_INTERVAL
+              value: "{{ .Values.gateway.admission.queuePollInterval }}"
+            - name: POOL_AUTOSCALER_ENABLED
+              value: "{{ .Values.gateway.autoscaler.enabled }}"
+            - name: POOL_AUTOSCALER_INTERVAL
+              value: "{{ .Values.gateway.autoscaler.interval }}"
+            - name: POOL_AUTOSCALER_BUFFER
+              value: "{{ .Values.gateway.autoscaler.buffer }}"
+            - name: POOL_AUTOSCALER_MIN_REPLICAS
+              value: "{{ .Values.gateway.autoscaler.minReplicas }}"
+            - name: POOL_AUTOSCALER_MAX_REPLICAS
+              value: "{{ .Values.gateway.autoscaler.maxReplicas }}"
+            {{- if $schedulerName }}
+            - name: SCHEDULER_NAME
+              value: "{{ $schedulerName }}"
+            {{- end }}
+            - name: IMAGE_LOCALITY_ENABLED
+              value: "{{ .Values.gateway.scheduler.imageLocality.enabled }}"
+            - name: SANDBOX_NETWORK_POLICY_MANAGEMENT
+              value: "{{ .Values.gateway.sandboxSecurity.networkPolicyManagement }}"
+            {{- if .Values.gateway.sandboxSecurity.runtimeClassName }}
+            - name: SANDBOX_RUNTIME_CLASS_NAME
+              value: "{{ .Values.gateway.sandboxSecurity.runtimeClassName }}"
+            {{- end }}
+            - name: SANDBOX_SECCOMP_PROFILE_TYPE
+              value: "{{ .Values.gateway.sandboxSecurity.seccompProfile.type }}"
+            {{- if .Values.gateway.sandboxSecurity.seccompProfile.localhostProfile }}
+            - name: SANDBOX_SECCOMP_LOCALHOST_PROFILE
+              value: "{{ .Values.gateway.sandboxSecurity.seccompProfile.localhostProfile }}"
+            {{- end }}
+            - name: SANDBOX_ALLOW_PRIVILEGE_ESCALATION
+              value: "{{ .Values.gateway.sandboxSecurity.allowPrivilegeEscalation }}"
+            {{- if .Values.proxy.url }}
+            - name: POD_HTTP_PROXY
+              value: "{{ .Values.proxy.url }}"
+            {{- if .Values.proxy.noProxy }}
+            - name: POD_NO_PROXY
+              value: "{{ .Values.proxy.noProxy }}"
+            {{- end }}
+            {{- end }}
+            {{- if .Values.clickhouse.enabled }}
+            - name: CLICKHOUSE_ENABLED
+              value: "true"
+            - name: TRAJECTORY_ENABLED
+              value: "true"
+            - name: CLICKHOUSE_ADDR
+              value: {{ include "agent-env.clickhouseAddr" . | quote }}
+            - name: CLICKHOUSE_DATABASE
+              value: "{{ .Values.clickhouse.database }}"
+            - name: CLICKHOUSE_USERNAME
+              value: "{{ .Values.clickhouse.username }}"
+            - name: CLICKHOUSE_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "agent-env.fullname" . }}-clickhouse
+                  key: password
+                  optional: false
+            {{- end }}
+            {{- if .Values.redis.enabled }}
+            - name: REDIS_ENABLED
+              value: "true"
+            - name: REDIS_ADDR
+              value: {{ include "agent-env.redisAddr" . | quote }}
+            - name: REDIS_DB
+              value: "{{ .Values.redis.db }}"
+            {{- if .Values.redis.password }}
+            - name: REDIS_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "agent-env.fullname" . }}-redis
+                  key: password
+                  optional: false
+            {{- end }}
+            {{- end }}
+            {{- include "agent-env.otelEnv" . | nindent 12 }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.gateway.port }}
+              protocol: TCP
+            - name: internal
+              containerPort: {{ .Values.gateway.internalPort }}
+              protocol: TCP
+          {{- if .Values.auth.enabled }}
+          volumeMounts:
+            - name: auth-keys
+              mountPath: /etc/arl/keys
+              readOnly: true
+          {{- end }}
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          resources:
+            {{- toYaml .Values.gateway.resources | nindent 12 }}
+      {{- if .Values.auth.enabled }}
+      volumes:
+        - name: auth-keys
+          secret:
+            secretName: {{ include "agent-env.fullname" . }}-auth
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "agent-env.fullname" . }}-gateway
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "agent-env.labels" . | nindent 4 }}
+    app.kubernetes.io/component: gateway
+spec:
+  type: {{ .Values.gateway.service.type }}
+  ports:
+    - port: {{ .Values.gateway.service.port | default .Values.gateway.port }}
+      targetPort: http
+      protocol: TCP
+      name: http
+      {{- if and (eq .Values.gateway.service.type "NodePort") .Values.gateway.service.nodePort }}
+      nodePort: {{ .Values.gateway.service.nodePort }}
+      {{- end }}
+  selector:
+    {{- include "agent-env.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: gateway
+{{- end }}

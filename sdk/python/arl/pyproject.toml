@@ -1,6 +1,6 @@
 [project]
 name = "arl-env"
-version = "0.14.1"
+version = "0.17.0"
 description = "ARL Infrastructure - Python SDK for Kubernetes-based Agent Runtime Layer"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -8,7 +8,7 @@ license = {text = "Apache-2.0"}
 authors = [
     {name = "ARL Infrastructure Team"}
 ]
-keywords = ["kubernetes", "operator", "agent", "runtime", "sandbox", "gateway"]
+keywords = ["kubernetes", "agent", "runtime", "sandbox", "gateway"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -38,7 +38,7 @@ dev = [
 [project.urls]
 Homepage = "https://github.com/Lincyaw/agent-env"
 Repository = "https://github.com/Lincyaw/agent-env"
-Documentation = "https://github.com/Lincyaw/agent-env/tree/main/docs"
+Documentation = "https://github.com/Lincyaw/agent-env/tree/main/sdk/python/arl"
 Issues = "https://github.com/Lincyaw/agent-env/issues"
 
 [build-system]

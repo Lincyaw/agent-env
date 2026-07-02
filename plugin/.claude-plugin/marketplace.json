@@ -4,8 +4,9 @@
   "plugins": [
     {
       "name": "arl",
+      "version": "0.15.6",
       "source": "./",
-      "description": "ARL (Agentic RL) runtime CLI & operations — manage experiments, warm pools, sessions, logs from Claude Code"
+      "description": "ARL (Agentic RL) runtime CLI, Python SDK & operations — manage experiments, warm pools, sessions, files, replay, trajectories, and logs from Claude Code"
     }
   ]
 }

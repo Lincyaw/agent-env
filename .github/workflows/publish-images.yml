@@ -1,0 +1,153 @@
+name: Publish Images
+
+on:
+  push:
+    branches:
+      - "**"
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Optional image tag override (e.g., v0.1.0, 0.1.0, or test-tag)"
+        required: false
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish:
+    name: Publish ${{ matrix.image }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - image: arl-gateway
+            dockerfile: Dockerfile.gateway
+          - image: arl-sidecar
+            dockerfile: Dockerfile.sidecar
+          - image: arl-executor-agent
+            dockerfile: Dockerfile.executor-agent
+          - image: arl-image-locality-scheduler
+            dockerfile: Dockerfile.image-locality-scheduler
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Resolve image metadata
+        id: meta
+        env:
+          DOCKERHUB_IMAGE_PREFIX: docker.io/opspai
+          PAIR_IMAGE_PREFIX: pair-diag-cn-guangzhou.cr.volces.com/pair
+          INPUT_TAG: ${{ github.event.inputs.tag || '' }}
+          REF_TYPE: ${{ github.ref_type }}
+        run: |
+          set -euo pipefail
+
+          SHORT_SHA="${GITHUB_SHA::7}"
+          declare -a IMAGE_TAGS
+
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ] && [ -n "${INPUT_TAG}" ]; then
+            RAW_TAG="${INPUT_TAG}"
+            VERSION="${RAW_TAG#v}"
+            if [[ "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+              IMAGE_TAGS=("v${VERSION}" "${VERSION}")
+            elif [[ "${RAW_TAG}" =~ ^[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}$ ]]; then
+              IMAGE_TAGS=("${RAW_TAG}")
+            else
+              echo "Invalid image tag: ${RAW_TAG}" >&2
+              exit 1
+            fi
+          elif [ "${REF_TYPE}" = "tag" ]; then
+            RAW_TAG="${GITHUB_REF_NAME}"
+            VERSION="${RAW_TAG#v}"
+            if [[ ! "${VERSION}" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+              echo "Invalid release version: ${RAW_TAG}" >&2
+              exit 1
+            fi
+            IMAGE_TAGS=("v${VERSION}" "${VERSION}")
+          else
+            SAFE_REF="$(printf '%s' "${GITHUB_REF_NAME}" | tr '[:upper:]' '[:lower:]' | sed -E 's/[^a-z0-9_.-]+/-/g; s/^-+//; s/-+$//')"
+            SAFE_REF="${SAFE_REF:0:80}"
+            SAFE_REF="${SAFE_REF:-branch}"
+            IMAGE_TAGS=("${SAFE_REF}-${SHORT_SHA}" "${SHORT_SHA}")
+          fi
+
+          {
+            echo "tags<<EOF"
+            for prefix in "${DOCKERHUB_IMAGE_PREFIX}" "${PAIR_IMAGE_PREFIX}"; do
+              for tag in "${IMAGE_TAGS[@]}"; do
+                echo "${prefix}/${{ matrix.image }}:${tag}"
+              done
+            done
+            echo "EOF"
+            echo "image_tags=${IMAGE_TAGS[*]}"
+            echo "dockerhub_image_prefix=${DOCKERHUB_IMAGE_PREFIX}"
+            echo "pair_image_prefix=${PAIR_IMAGE_PREFIX}"
+          } >> "${GITHUB_OUTPUT}"
+
+          echo "Publishing ${{ matrix.image }} with tags: ${IMAGE_TAGS[*]}"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Validate registry credentials
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+          DOCKERHUB_PASSWORD: ${{ secrets.DOCKERHUB_PASSWORD }}
+          PAIR_REGISTRY_USERNAME: ${{ secrets.PAIR_REGISTRY_USERNAME }}
+          PAIR_REGISTRY_PASSWORD: ${{ secrets.PAIR_REGISTRY_PASSWORD }}
+          REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
+          REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
+        run: |
+          DOCKERHUB_SECRET="${DOCKERHUB_TOKEN:-${DOCKERHUB_PASSWORD:-}}"
+          PAIR_USERNAME="${PAIR_REGISTRY_USERNAME:-${REGISTRY_USERNAME:-}}"
+          PAIR_PASSWORD="${PAIR_REGISTRY_PASSWORD:-${REGISTRY_PASSWORD:-}}"
+
+          if [ -z "${DOCKERHUB_USERNAME}" ] || [ -z "${DOCKERHUB_SECRET}" ]; then
+            echo "DOCKERHUB_USERNAME plus DOCKERHUB_TOKEN or DOCKERHUB_PASSWORD are required" >&2
+            exit 1
+          fi
+          if [ -z "${PAIR_USERNAME}" ] || [ -z "${PAIR_PASSWORD}" ]; then
+            echo "PAIR_REGISTRY_USERNAME plus PAIR_REGISTRY_PASSWORD, or REGISTRY_USERNAME plus REGISTRY_PASSWORD, are required" >&2
+            exit 1
+          fi
+
+      - name: Log in to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          registry: docker.io
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN || secrets.DOCKERHUB_PASSWORD }}
+
+      - name: Log in to pair registry
+        uses: docker/login-action@v3
+        with:
+          registry: pair-diag-cn-guangzhou.cr.volces.com
+          username: ${{ secrets.PAIR_REGISTRY_USERNAME || secrets.REGISTRY_USERNAME }}
+          password: ${{ secrets.PAIR_REGISTRY_PASSWORD || secrets.REGISTRY_PASSWORD }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ${{ matrix.dockerfile }}
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ steps.meta.outputs.tags }}
+          labels: |
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ steps.meta.outputs.image_tags }}
+
+      - name: Summarize published image
+        run: |
+          {
+            echo "### Published image"
+            printf '%s\n' '${{ steps.meta.outputs.tags }}' | sed 's/^/- /'
+          } >> "${GITHUB_STEP_SUMMARY}"

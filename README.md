@@ -1,36 +1,13 @@
-# ARL-Infra
+# agent-env
 
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
-[![Go Version](https://img.shields.io/badge/go-1.25+-00ADD8.svg)](https://golang.org/)
+[![Go Version](https://img.shields.io/badge/go-1.26+-00ADD8.svg)](https://golang.org/)
 [![Python Version](https://img.shields.io/badge/python-3.10+-3776AB.svg)](https://python.org/)
 
-**Kubernetes Operator for Agentic Reinforcement Learning environments with warm pool and sidecar injection for ultra-low latency code execution.**
+Gateway and Python SDK for agent-sandbox-backed Agentic Reinforcement Learning
+environments with warm pools and sidecar execution.
 
-## Features
-
-- ⚡ **Ultra-low latency**: Bypasses pod startup time using warm pools
-- 🔒 **Isolation**: Each sandbox runs in an isolated environment
-- 🔄 **Hot code reload**: Update and execute code without pod restarts
-- 🌐 **Gateway API**: REST API for session management and execution
-- ☸️ **Kubernetes-native**: CRD-based API, standard K8s tooling
-- 🐍 **Python SDK**: High-level API for seamless integration
-
-## Documentation
-
-📚 **[Full Documentation](https://lincyaw.github.io/agent-env/)**
-
-| Guide | Description |
-|-------|-------------|
-| [Overview](https://lincyaw.github.io/agent-env/getting-started/overview/) | Introduction to ARL-Infra concepts |
-| [For Developers](https://lincyaw.github.io/agent-env/getting-started/developers/) | Deploy and manage ARL-Infra |
-| [For SDK Users](https://lincyaw.github.io/agent-env/getting-started/sdk-users/) | Use the Python SDK |
-| [Architecture](https://lincyaw.github.io/agent-env/developer-guide/architecture/) | System design and components |
-| [Python SDK](https://lincyaw.github.io/agent-env/user-guide/python-sdk/) | SDK installation and usage |
-| [Examples](https://lincyaw.github.io/agent-env/user-guide/examples/) | Code examples |
-
-## Quick Start
-
-### For SDK Users
+## Python SDK
 
 ```bash
 pip install arl-env
@@ -39,71 +16,60 @@ pip install arl-env
 ```python
 from arl import SandboxSession
 
-with SandboxSession(pool_ref="my-python-pool", gateway_url="http://localhost:8080") as session:
+with SandboxSession(
+    image="python:3.12",
+    profile="my-python-pool",
+    gateway_url="http://localhost:8080",
+) as session:
     result = session.execute([
         {"name": "hello", "command": ["echo", "Hello, World!"]},
     ])
     print(result.results[0].output.stdout)
 ```
 
-### For Developers
+## Local Development
 
 ```bash
-# Clone repository
 git clone https://github.com/Lincyaw/agent-env.git
 cd agent-env
 
-# Enter the pinned local toolchain (recommended)
 devbox shell
-
-# Setup and deploy
-devbox run -- make k8s-setup
-skaffold run --profile=k8s
+make generate
+make check
+make build-sdk
 ```
 
-## Architecture
-
-```
-┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
-│   Python SDK    │────▶│    Gateway      │────▶│   ARL Operator  │
-└─────────────────┘     └─────────────────┘     └─────────────────┘
-                               │                        │
-                               │ gRPC          ┌───────┴───────┐
-                               ▼               ▼               ▼
-                        ┌───────────┐   ┌───────────┐   ┌───────────┐
-                        │  Sidecar  │   │ WarmPool  │   │  Sandbox  │
-                        │  (Pod)    │   │ (CRD)     │   │  (CRD)    │
-                        └───────────┘   └───────────┘   └───────────┘
-```
-
-## Development
+## Deploy
 
 ```bash
-# Use the pinned local toolchain from devbox.json
-devbox run -- go version
-
-# Generate code
-devbox run -- make generate
-
-# Run quality checks
-devbox run -- make check
-
-# View operator logs
-make logs
+helm dependency build charts/agent-env
+helm upgrade --install agent-env charts/agent-env -n arl --create-namespace
 ```
 
-See [Development Guide](https://lincyaw.github.io/agent-env/developer-guide/development/) for details.
+Set production auth, registry, and image tag values explicitly for real
+clusters.
 
 ## Agent Plugin
 
-Install the ARL Codex skills from the pushed repository:
+Install the ARL agent plugin to give Claude Code or Codex ARL-specific skills.
+
+Claude Code:
+
+```text
+/plugin marketplace add Lincyaw/agent-env
+/plugin install arl@arl
+/reload-plugins
+```
+
+Codex:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Lincyaw/agent-env/main/plugin/install.sh | bash
 ```
 
-See `plugin/README.md` for branch/tag install examples and local development commands.
+See `plugin/README.md` for tag-pinned installs, local development commands, and
+the list of included skills.
 
 ## License
 
-This project is open source. See the [LICENSE](LICENSE) file for details
+Apache-2.0. See [LICENSE](LICENSE).

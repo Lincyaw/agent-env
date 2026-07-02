@@ -3,6 +3,8 @@ package execagent
 import (
 	// "bufio" removed: chunk-based I/O replaced line-based Scanner
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -16,7 +18,12 @@ import (
 	"sync"
 	"syscall"
 	"time"
+
+	"github.com/creack/pty"
 )
+
+const fileChunkSize = 1024 * 1024
+const sidecarSocketGID = 65532
 
 // Agent listens on a Unix socket and executes commands in the current container.
 type Agent struct {
@@ -49,8 +56,16 @@ func (a *Agent) Run(ctx context.Context) error {
 	}
 	defer a.listener.Close()
 
-	// Make socket accessible to sidecar container (owner + group only)
-	if err := os.Chmod(a.socketPath, 0660); err != nil {
+	// The sidecar image runs as distroless nonroot (gid 65532). The executor
+	// usually runs as root in the user image, so make the pod-local Unix socket
+	// group-readable by the sidecar. Fall back to a pod-local world-writable
+	// socket if the executor image is non-root and cannot chown.
+	socketMode := os.FileMode(0660)
+	if err := os.Chown(a.socketPath, -1, sidecarSocketGID); err != nil {
+		log.Printf("warning: chown socket group to %d failed: %v; falling back to 0666", sidecarSocketGID, err)
+		socketMode = 0666
+	}
+	if err := os.Chmod(a.socketPath, socketMode); err != nil {
 		return fmt.Errorf("chmod socket: %w", err)
 	}
 
@@ -97,12 +112,12 @@ func (a *Agent) handleConn(ctx context.Context, conn net.Conn) {
 		case "exec":
 			log.Printf("[exec] id=%s cmd=%v workdir=%s", req.ID, req.Cmd, req.WorkDir)
 			a.handleExec(ctx, req, encoder)
-		case "write_file":
-			log.Printf("[write_file] id=%s path=%s bytes=%d", req.ID, req.Path, len(req.Content))
-			a.handleWriteFile(req, encoder)
-		case "read_file":
+		case "write_file_stream":
+			log.Printf("[write_file_stream] id=%s path=%s", req.ID, req.Path)
+			a.handleWriteFileStream(ctx, req, decoder, encoder)
+		case "read_file_stream":
 			log.Printf("[read_file] id=%s path=%s", req.ID, req.Path)
-			a.handleReadFile(req, encoder)
+			a.handleReadFileStream(ctx, req, encoder)
 		case "shell":
 			log.Printf("[shell] id=%s workdir=%s", req.ID, req.WorkDir)
 			a.handleShell(ctx, req, decoder, encoder)
@@ -228,7 +243,7 @@ func (a *Agent) handleExec(ctx context.Context, req Request, encoder *json.Encod
 	send(Response{ID: req.ID, ExitCode: &exitCode, Done: true})
 }
 
-func (a *Agent) handleWriteFile(req Request, encoder *json.Encoder) {
+func (a *Agent) handleWriteFileStream(ctx context.Context, req Request, decoder *json.Decoder, encoder *json.Encoder) {
 	if req.Path == "" {
 		encoder.Encode(Response{ID: req.ID, Error: "path is required", Done: true})
 		return
@@ -240,21 +255,93 @@ func (a *Agent) handleWriteFile(req Request, encoder *json.Encoder) {
 		return
 	}
 
-	if err := os.MkdirAll(filepath.Dir(targetPath), 0755); err != nil {
+	parent := filepath.Dir(targetPath)
+	if err := os.MkdirAll(parent, 0755); err != nil {
 		encoder.Encode(Response{ID: req.ID, Error: fmt.Sprintf("mkdir parent: %v", err), Done: true})
 		return
 	}
 
-	if err := os.WriteFile(targetPath, req.Content, 0644); err != nil {
-		encoder.Encode(Response{ID: req.ID, Error: fmt.Sprintf("write file: %v", err), Done: true})
+	tmp, err := os.CreateTemp(parent, "."+filepath.Base(targetPath)+".*.tmp")
+	if err != nil {
+		encoder.Encode(Response{ID: req.ID, Error: fmt.Sprintf("create temp file: %v", err), Done: true})
 		return
 	}
+	tmpPath := tmp.Name()
+	committed := false
+	defer func() {
+		tmp.Close()
+		if !committed {
+			os.Remove(tmpPath)
+		}
+	}()
 
-	written := int64(len(req.Content))
-	encoder.Encode(Response{ID: req.ID, BytesWritten: &written, Done: true})
+	hash := sha256.New()
+	var written int64
+	for {
+		select {
+		case <-ctx.Done():
+			encoder.Encode(Response{ID: req.ID, Error: ctx.Err().Error(), Done: true})
+			return
+		default:
+		}
+
+		var chunk Request
+		if err := decoder.Decode(&chunk); err != nil {
+			encoder.Encode(Response{ID: req.ID, Error: fmt.Sprintf("read file chunk: %v", err), Done: true})
+			return
+		}
+		if chunk.ID != "" && chunk.ID != req.ID {
+			encoder.Encode(Response{ID: req.ID, Error: "file chunk id mismatch", Done: true})
+			return
+		}
+		switch chunk.Type {
+		case "write_file_chunk":
+			if len(chunk.Content) == 0 {
+				continue
+			}
+			n, err := tmp.Write(chunk.Content)
+			if err != nil {
+				encoder.Encode(Response{ID: req.ID, Error: fmt.Sprintf("write file chunk: %v", err), Done: true})
+				return
+			}
+			if n != len(chunk.Content) {
+				encoder.Encode(Response{ID: req.ID, Error: "short write file chunk", Done: true})
+				return
+			}
+			if _, err := hash.Write(chunk.Content); err != nil {
+				encoder.Encode(Response{ID: req.ID, Error: fmt.Sprintf("hash file chunk: %v", err), Done: true})
+				return
+			}
+			written += int64(n)
+		case "write_file_finish":
+			actualSHA := hex.EncodeToString(hash.Sum(nil))
+			if req.ExpectedSHA256 != "" && !strings.EqualFold(req.ExpectedSHA256, actualSHA) {
+				encoder.Encode(Response{ID: req.ID, Error: fmt.Sprintf("sha256 mismatch: expected %s got %s", req.ExpectedSHA256, actualSHA), Done: true})
+				return
+			}
+			if err := tmp.Chmod(0644); err != nil {
+				encoder.Encode(Response{ID: req.ID, Error: fmt.Sprintf("chmod temp file: %v", err), Done: true})
+				return
+			}
+			if err := tmp.Close(); err != nil {
+				encoder.Encode(Response{ID: req.ID, Error: fmt.Sprintf("close temp file: %v", err), Done: true})
+				return
+			}
+			if err := os.Rename(tmpPath, targetPath); err != nil {
+				encoder.Encode(Response{ID: req.ID, Error: fmt.Sprintf("commit file: %v", err), Done: true})
+				return
+			}
+			committed = true
+			encoder.Encode(Response{ID: req.ID, BytesWritten: &written, SHA256: actualSHA, Done: true})
+			return
+		default:
+			encoder.Encode(Response{ID: req.ID, Error: fmt.Sprintf("unexpected file stream message: %s", chunk.Type), Done: true})
+			return
+		}
+	}
 }
 
-func (a *Agent) handleReadFile(req Request, encoder *json.Encoder) {
+func (a *Agent) handleReadFileStream(ctx context.Context, req Request, encoder *json.Encoder) {
 	if req.Path == "" {
 		encoder.Encode(Response{ID: req.ID, Error: "path is required", Done: true})
 		return
@@ -266,13 +353,51 @@ func (a *Agent) handleReadFile(req Request, encoder *json.Encoder) {
 		return
 	}
 
-	content, err := os.ReadFile(targetPath)
+	file, err := os.Open(targetPath)
 	if err != nil {
-		encoder.Encode(Response{ID: req.ID, Error: fmt.Sprintf("read file: %v", err), Done: true})
+		encoder.Encode(Response{ID: req.ID, Error: fmt.Sprintf("open file: %v", err), Done: true})
 		return
 	}
+	defer file.Close()
 
-	encoder.Encode(Response{ID: req.ID, Content: content, Done: true})
+	hash := sha256.New()
+	buf := make([]byte, fileChunkSize)
+	var offset int64
+	for {
+		select {
+		case <-ctx.Done():
+			encoder.Encode(Response{ID: req.ID, Error: ctx.Err().Error(), Done: true})
+			return
+		default:
+		}
+
+		n, err := file.Read(buf)
+		if n > 0 {
+			chunk := append([]byte(nil), buf[:n]...)
+			if _, hashErr := hash.Write(chunk); hashErr != nil {
+				encoder.Encode(Response{ID: req.ID, Error: fmt.Sprintf("hash file chunk: %v", hashErr), Done: true})
+				return
+			}
+			if encodeErr := encoder.Encode(Response{ID: req.ID, Offset: offset, Content: chunk}); encodeErr != nil {
+				return
+			}
+			offset += int64(n)
+		}
+		if errors.Is(err, io.EOF) {
+			size := offset
+			encoder.Encode(Response{
+				ID:        req.ID,
+				SizeBytes: &size,
+				SHA256:    hex.EncodeToString(hash.Sum(nil)),
+				Done:      true,
+			})
+			return
+		}
+		if err != nil {
+			encoder.Encode(Response{ID: req.ID, Error: fmt.Sprintf("read file: %v", err), Done: true})
+			return
+		}
+	}
 }
 
 func (a *Agent) resolveWorkspacePath(relPath string) (string, error) {
@@ -352,35 +477,29 @@ func (a *Agent) handleShell(ctx context.Context, req Request, decoder *json.Deco
 		workDir = a.workspaceDir
 	}
 
-	cmd := exec.CommandContext(ctx, shellPath)
+	cmd := exec.CommandContext(ctx, shellPath, "-i")
 	cmd.Dir = workDir
 	cmd.Env = os.Environ()
+	if os.Getenv("TERM") == "" {
+		cmd.Env = append(cmd.Env, "TERM=xterm-256color")
+	}
 	for k, v := range req.Env {
 		cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", k, v))
 	}
 
-	stdin, err := cmd.StdinPipe()
-	if err != nil {
-		encoder.Encode(Response{ID: req.ID, Error: fmt.Sprintf("stdin pipe: %v", err), Done: true})
-		return
+	rows, cols := uint16(24), uint16(80)
+	if req.Rows > 0 {
+		rows = uint16(req.Rows)
 	}
-
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		encoder.Encode(Response{ID: req.ID, Error: fmt.Sprintf("stdout pipe: %v", err), Done: true})
-		return
+	if req.Cols > 0 {
+		cols = uint16(req.Cols)
 	}
-
-	stderr, err := cmd.StderrPipe()
+	ptmx, err := pty.StartWithSize(cmd, &pty.Winsize{Rows: rows, Cols: cols})
 	if err != nil {
-		encoder.Encode(Response{ID: req.ID, Error: fmt.Sprintf("stderr pipe: %v", err), Done: true})
-		return
-	}
-
-	if err := cmd.Start(); err != nil {
 		encoder.Encode(Response{ID: req.ID, Error: fmt.Sprintf("start shell: %v", err), Done: true})
 		return
 	}
+	defer ptmx.Close()
 
 	a.mu.Lock()
 	a.processes[cmd.Process.Pid] = cmd
@@ -394,14 +513,13 @@ func (a *Agent) handleShell(ctx context.Context, req Request, decoder *json.Deco
 	}
 
 	var wg sync.WaitGroup
-	wg.Add(2)
+	wg.Add(1)
 
-	// Goroutine 1: stream stdout
 	go func() {
 		defer wg.Done()
 		buf := make([]byte, 4096)
 		for {
-			n, readErr := stdout.Read(buf)
+			n, readErr := ptmx.Read(buf)
 			if n > 0 {
 				send(Response{ID: req.ID, Stdout: string(buf[:n])})
 			}
@@ -411,34 +529,26 @@ func (a *Agent) handleShell(ctx context.Context, req Request, decoder *json.Deco
 		}
 	}()
 
-	// Goroutine 2: stream stderr
-	go func() {
-		defer wg.Done()
-		buf := make([]byte, 4096)
-		for {
-			n, readErr := stderr.Read(buf)
-			if n > 0 {
-				send(Response{ID: req.ID, Stderr: string(buf[:n])})
-			}
-			if readErr != nil {
-				return
-			}
-		}
-	}()
-
-	// Goroutine 3: read subsequent requests (stdin data, signals)
 	go func() {
 		for {
 			var sub Request
 			if err := decoder.Decode(&sub); err != nil {
-				stdin.Close()
+				ptmx.Close()
 				return
 			}
 			switch sub.Type {
 			case "stdin":
-				if _, err := io.WriteString(stdin, sub.Data); err != nil {
+				if _, err := io.WriteString(ptmx, sub.Data); err != nil {
 					return
 				}
+			case "resize":
+				if sub.Rows <= 0 || sub.Cols <= 0 {
+					continue
+				}
+				_ = pty.Setsize(ptmx, &pty.Winsize{
+					Rows: uint16(sub.Rows),
+					Cols: uint16(sub.Cols),
+				})
 			case "signal":
 				var sig syscall.Signal
 				switch strings.ToUpper(sub.Signal) {
@@ -466,6 +576,7 @@ func (a *Agent) handleShell(ctx context.Context, req Request, decoder *json.Deco
 			exitCode = 1
 		}
 	}
+	ptmx.Close()
 
 	wg.Wait()
 

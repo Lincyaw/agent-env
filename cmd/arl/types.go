@@ -9,7 +9,8 @@ type SessionInfo struct {
 	ID          string    `json:"id"`
 	SandboxName string    `json:"sandboxName"`
 	Namespace   string    `json:"namespace"`
-	PoolRef     string    `json:"poolRef"`
+	Image       string    `json:"image,omitempty"`
+	Profile     string    `json:"profile,omitempty"`
 	PodIP       string    `json:"podIP"`
 	PodName     string    `json:"podName"`
 	CreatedAt   time.Time `json:"createdAt"`
@@ -19,6 +20,14 @@ type SessionListItem struct {
 	SessionInfo
 	Managed      bool   `json:"managed,omitempty"`
 	ExperimentID string `json:"experimentId,omitempty"`
+}
+
+type CreateSessionRequest struct {
+	Image              string                 `json:"image,omitempty"`
+	Profile            string                 `json:"profile,omitempty"`
+	IdleTimeoutSeconds int                    `json:"idleTimeoutSeconds,omitempty"`
+	MaxLifetimeSeconds int                    `json:"maxLifetimeSeconds,omitempty"`
+	PrivateContainers  []PrivateContainerSpec `json:"privateContainers,omitempty"`
 }
 
 type ManagedSessionInfo struct {
@@ -31,6 +40,7 @@ type PoolInfo struct {
 	Name              string          `json:"name"`
 	Namespace         string          `json:"namespace"`
 	Image             string          `json:"image,omitempty"`
+	Profile           string          `json:"profile,omitempty"`
 	Replicas          int32           `json:"replicas"`
 	ReadyReplicas     int32           `json:"readyReplicas"`
 	AllocatedReplicas int32           `json:"allocatedReplicas"`
@@ -48,7 +58,8 @@ type PoolCondition struct {
 type ExperimentSummary struct {
 	ExperimentID string `json:"experimentId"`
 	SessionCount int    `json:"sessionCount"`
-	PoolRef      string `json:"poolRef,omitempty"`
+	Image        string `json:"image,omitempty"`
+	Profile      string `json:"profile,omitempty"`
 	Namespace    string `json:"namespace,omitempty"`
 }
 
@@ -67,21 +78,52 @@ type StepOutput struct {
 	ExitCode int32  `json:"exit_code"`
 }
 
+type UploadFileResponse struct {
+	Path         string `json:"path"`
+	BytesWritten int    `json:"bytesWritten"`
+	SHA256       string `json:"sha256,omitempty"`
+}
+
 type ExecuteRequest struct {
-	Steps []StepRequest `json:"steps"`
+	Steps       []StepRequest `json:"steps"`
+	OperationID string        `json:"operationID,omitempty"`
 }
 
 type StepRequest struct {
-	Name    string            `json:"name"`
-	Command []string          `json:"command,omitempty"`
-	Env     map[string]string `json:"env,omitempty"`
-	WorkDir string            `json:"workDir,omitempty"`
+	Name           string            `json:"name"`
+	Command        []string          `json:"command,omitempty"`
+	Env            map[string]string `json:"env,omitempty"`
+	WorkDir        string            `json:"workDir,omitempty"`
+	TimeoutSeconds int32             `json:"timeoutSeconds,omitempty"`
 }
 
 type ExecuteResponse struct {
 	SessionID       string       `json:"sessionID"`
 	Results         []StepResult `json:"results"`
 	TotalDurationMs int64        `json:"totalDurationMs"`
+	OperationID     string       `json:"operationID,omitempty"`
+}
+
+type ContainerExecuteRequest struct {
+	Steps []StepRequest `json:"steps"`
+}
+
+type ContainerExecuteResponse struct {
+	SessionID       string       `json:"sessionID"`
+	Container       string       `json:"container"`
+	Results         []StepResult `json:"results"`
+	TotalDurationMs int64        `json:"totalDurationMs"`
+}
+
+type ExecuteOperationInfo struct {
+	OperationID string           `json:"operationID"`
+	SessionID   string           `json:"sessionID"`
+	Status      string           `json:"status"`
+	Result      *ExecuteResponse `json:"result,omitempty"`
+	Error       string           `json:"error,omitempty"`
+	CreatedAt   time.Time        `json:"createdAt"`
+	StartedAt   time.Time        `json:"startedAt,omitempty"`
+	FinishedAt  *time.Time       `json:"finishedAt,omitempty"`
 }
 
 type StepResult struct {
@@ -94,25 +136,57 @@ type StepResult struct {
 	Input      json.RawMessage `json:"input"`
 }
 
+type RestoreRequest struct {
+	SnapshotID string `json:"snapshotID"`
+}
+
+type ReplayRequest struct {
+	SourceSessionID string `json:"sourceSessionID"`
+	UpToStep        *int   `json:"upToStep,omitempty"`
+}
+
+type ReplayResponse struct {
+	StepsReplayed int `json:"stepsReplayed"`
+	Errors        int `json:"errors"`
+}
+
 type ScalePoolRequest struct {
-	Replicas  int32  `json:"replicas"`
-	Namespace string `json:"namespace,omitempty"`
+	Replicas int32 `json:"replicas"`
 }
 
 type CreatePoolRequest struct {
-	Name      string `json:"name"`
-	Image     string `json:"image"`
-	Replicas  int32  `json:"replicas,omitempty"`
-	Namespace string `json:"namespace,omitempty"`
+	Name              string                 `json:"name"`
+	Image             string                 `json:"image"`
+	Profile           string                 `json:"profile,omitempty"`
+	Replicas          int32                  `json:"replicas,omitempty"`
+	WorkspaceDir      string                 `json:"workspaceDir,omitempty"`
+	PrivateContainers []PrivateContainerSpec `json:"privateContainers,omitempty"`
 }
 
 type CreateManagedSessionRequest struct {
-	Image        string `json:"image"`
-	ExperimentID string `json:"experimentId"`
-	Namespace    string `json:"namespace,omitempty"`
-	MaxReplicas  int32  `json:"maxReplicas,omitempty"`
+	Image              string                 `json:"image"`
+	Profile            string                 `json:"profile,omitempty"`
+	ExperimentID       string                 `json:"experimentId"`
+	WorkspaceDir       string                 `json:"workspaceDir,omitempty"`
+	IdleTimeoutSeconds int                    `json:"idleTimeoutSeconds,omitempty"`
+	MaxLifetimeSeconds int                    `json:"maxLifetimeSeconds,omitempty"`
+	PrivateContainers  []PrivateContainerSpec `json:"privateContainers,omitempty"`
+}
+
+type PrivateContainerSpec struct {
+	Name               string            `json:"name"`
+	Image              string            `json:"image"`
+	MountWorkspace     bool              `json:"mountWorkspace,omitempty"`
+	WorkspaceMountPath string            `json:"workspaceMountPath,omitempty"`
+	WorkspaceAccess    string            `json:"workspaceAccess,omitempty"`
+	Command            []string          `json:"command,omitempty"`
+	Args               []string          `json:"args,omitempty"`
+	Env                map[string]string `json:"env,omitempty"`
+	Resources          json.RawMessage   `json:"resources,omitempty"`
+	ImagePullPolicy    string            `json:"imagePullPolicy,omitempty"`
 }
 
 type ErrorResponse struct {
-	Error string `json:"error"`
+	Error  string `json:"error"`
+	Detail string `json:"detail,omitempty"`
 }

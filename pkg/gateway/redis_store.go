@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"strings"
 	"sync"
 	"time"
 
@@ -22,14 +23,19 @@ const (
 // are managed separately or reconstructed on load.
 type redisSessionData struct {
 	Info                SessionInfo             `json:"info"`
+	Runtime             RuntimeAllocation       `json:"runtime,omitempty"`
 	Managed             bool                    `json:"managed"`
 	ExperimentID        string                  `json:"experimentId"`
+	OwnerKeyHash        string                  `json:"ownerKeyHash,omitempty"`
 	Deleted             bool                    `json:"deleted,omitempty"`
+	DeletedAt           *time.Time              `json:"deletedAt,omitempty"`
+	DeletionReason      string                  `json:"deletionReason,omitempty"`
 	LastTaskTime        time.Time               `json:"lastTaskTime"`
 	LastAnnotationPatch time.Time               `json:"lastAnnotationPatch"`
 	IdleTimeout         time.Duration           `json:"idleTimeout"`
 	MaxLifetime         time.Duration           `json:"maxLifetime"`
 	CreatedAt           time.Time               `json:"createdAt"`
+	PrivateContainers   []PrivateContainerSpec  `json:"privateContainers,omitempty"`
 	HistoryRecords      []StepRecord            `json:"historyRecords"`
 	HistoryReplayInputs map[int]json.RawMessage `json:"historyReplayInputs,omitempty"`
 	HistoryNextIndex    int                     `json:"historyNextIndex"`
@@ -41,13 +47,24 @@ func sessionToRedisData(s *session) redisSessionData {
 
 	data := redisSessionData{
 		Info:                s.Info,
+		Runtime:             s.Runtime,
 		Managed:             s.managed,
 		ExperimentID:        s.experimentID,
+		OwnerKeyHash:        s.ownerKeyHash,
+		Deleted:             s.closed,
+		DeletedAt:           s.deletedAt,
+		DeletionReason:      s.deletionReason,
 		LastTaskTime:        s.lastTaskTime,
 		LastAnnotationPatch: s.lastAnnotationPatch,
 		IdleTimeout:         s.idleTimeout,
 		MaxLifetime:         s.maxLifetime,
 		CreatedAt:           s.createdAt,
+	}
+	if len(s.privateContainers) > 0 {
+		data.PrivateContainers = make([]PrivateContainerSpec, 0, len(s.privateContainers))
+		for _, spec := range s.privateContainers {
+			data.PrivateContainers = append(data.PrivateContainers, spec)
+		}
 	}
 
 	if s.History != nil {
@@ -81,14 +98,21 @@ func redisDataToSession(data redisSessionData) *session {
 
 	return &session{
 		Info:                data.Info,
+		Runtime:             data.Runtime,
 		History:             h,
 		managed:             data.Managed,
 		experimentID:        data.ExperimentID,
+		ownerKeyHash:        data.OwnerKeyHash,
+		closed:              data.Deleted,
+		deletedAt:           data.DeletedAt,
+		deletionReason:      data.DeletionReason,
 		lastTaskTime:        data.LastTaskTime,
 		lastAnnotationPatch: data.LastAnnotationPatch,
 		idleTimeout:         data.IdleTimeout,
 		maxLifetime:         data.MaxLifetime,
 		createdAt:           data.CreatedAt,
+		operations:          make(map[string]*executeOperation),
+		privateContainers:   privateContainerMap(data.PrivateContainers),
 	}
 }
 
@@ -193,6 +217,13 @@ func (rs *RedisStore) Delete(sessionID string) {
 	// Keep a tombstoned Redis record for history/replay, but make active
 	// lookups return "not found" so deleted sessions cannot be resurrected.
 	data.Deleted = true
+	if data.DeletedAt == nil {
+		now := time.Now()
+		data.DeletedAt = &now
+	}
+	if data.DeletionReason == "" {
+		data.DeletionReason = "deleted"
+	}
 	rs.persistDataToRedis(sessionID, *data)
 }
 
@@ -224,7 +255,24 @@ func (rs *RedisStore) IncrCount(delta int64) int64 {
 		log.Printf("Warning: failed to increment session count in Redis: %v", err)
 		return 0
 	}
+	if val < 0 {
+		return rs.SetCount(0)
+	}
 	return val
+}
+
+func (rs *RedisStore) SetCount(count int64) int64 {
+	if count < 0 {
+		count = 0
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	if err := rs.client.Set(ctx, redisCountKey, count, 0).Err(); err != nil {
+		log.Printf("Warning: failed to set session count in Redis: %v", err)
+		return rs.Count()
+	}
+	return count
 }
 
 func (rs *RedisStore) Close() error {
@@ -256,6 +304,10 @@ func (rs *RedisStore) loadRedisData(sessionID string) (redisSessionData, bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
+	return rs.loadRedisDataContext(ctx, sessionID)
+}
+
+func (rs *RedisStore) loadRedisDataContext(ctx context.Context, sessionID string) (redisSessionData, bool) {
 	raw, err := rs.client.Get(ctx, rs.redisKey(sessionID)).Bytes()
 	if err != nil {
 		return redisSessionData{}, false
@@ -267,6 +319,36 @@ func (rs *RedisStore) loadRedisData(sessionID string) (redisSessionData, bool) {
 		return redisSessionData{}, false
 	}
 	return data, true
+}
+
+func (rs *RedisStore) RecoverActiveSessions(ctx context.Context) (map[string]*session, error) {
+	recovered := make(map[string]*session)
+	var cursor uint64
+	for {
+		keys, nextCursor, err := rs.client.Scan(ctx, cursor, redisSessionPrefix+"*", 100).Result()
+		if err != nil {
+			return recovered, fmt.Errorf("scan redis sessions: %w", err)
+		}
+		for _, key := range keys {
+			sessionID := strings.TrimPrefix(key, redisSessionPrefix)
+			if sessionID == "" || sessionID == key {
+				continue
+			}
+			data, ok := rs.loadRedisDataContext(ctx, sessionID)
+			if !ok || data.Deleted {
+				rs.cache.Delete(sessionID)
+				continue
+			}
+			s := redisDataToSession(data)
+			rs.cache.Store(sessionID, s)
+			recovered[sessionID] = s
+		}
+		cursor = nextCursor
+		if cursor == 0 {
+			break
+		}
+	}
+	return recovered, nil
 }
 
 func (rs *RedisStore) persistToRedis(sessionID string, s *session) {

@@ -9,18 +9,32 @@ from arl.configenv import (
     SecretTemplate,
     VolumeInjection,
 )
-from arl.gateway_client import GatewayClient, GatewayError, PoolNotReadyError
+from arl.gateway_client import (
+    GatewayClient,
+    GatewayError,
+    GatewayOperationTimeout,
+    PoolNotReadyError,
+)
 from arl.interactive_shell_client import InteractiveShellClient, create_websocket_proxy
 from arl.session import ManagedSession, SandboxSession
 from arl.types import (
+    ContainerExecuteResponse,
+    DeleteExperimentResponse,
     ErrorResponse,
+    ExecuteOperationInfo,
     ExecuteResponse,
+    ExperimentSummary,
     InlineToolSpec,
+    LogEntry,
     ManagedSessionInfo,
     PoolCondition,
     PoolInfo,
+    PoolLogEntry,
+    PrivateContainerSpec,
+    ReplayResponse,
     ResourceRequirements,
     SessionInfo,
+    SessionListItem,
     ShellMessage,
     StepOutput,
     StepRequest,
@@ -36,28 +50,38 @@ from arl.types import (
 )
 from arl.warmpool import WarmPoolManager
 
-__version__ = "0.14.1"
+__version__ = "0.17.0"
 __all__ = [
     "ApiKeyAuth",
     "ConfigEnvSpec",
     "ConfigMapTemplate",
+    "ContainerExecuteResponse",
+    "DeleteExperimentResponse",
     "ErrorResponse",
+    "ExecuteOperationInfo",
     "ExecuteResponse",
+    "ExperimentSummary",
     "GatewayClient",
     "GatewayError",
+    "GatewayOperationTimeout",
     "InlineToolSpec",
     "InteractiveShellClient",
+    "LogEntry",
     "ManagedSession",
     "ManagedSessionInfo",
     "PoolCondition",
     "PoolInfo",
+    "PoolLogEntry",
     "PoolNotReadyError",
+    "PrivateContainerSpec",
+    "ReplayResponse",
     "ResourceRequirements",
     "SandboxSession",
     "SecretEnvVarRef",
     "SecretInjection",
     "SecretTemplate",
     "SessionInfo",
+    "SessionListItem",
     "ShellMessage",
     "SsoTokenAuth",
     "StepOutput",

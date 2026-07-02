@@ -17,14 +17,18 @@ class StepRequest(BaseModel):
         command: Shell command with arguments, e.g. ["echo", "hello"]
         env: Environment variables to set for this step
         work_dir: Working directory (default: /workspace)
-        timeout: Timeout in seconds (None = no timeout)
+        timeout_seconds: Timeout in seconds (None = no timeout).
+        timeout: Legacy timeout field accepted by the gateway.
     """
 
     name: str
     command: list[str] | None = None
     env: dict[str, str] | None = None
     work_dir: str | None = Field(None, alias="workDir")
+    timeout_seconds: Annotated[int | None, Field(gt=0)] = Field(None, alias="timeoutSeconds")
     timeout: Annotated[int | None, Field(gt=0)] = None  # Must be positive if specified
+
+    model_config = {"populate_by_name": True}
 
 
 class StepOutput(BaseModel):
@@ -51,6 +55,7 @@ class StepResult(BaseModel):
         snapshot_id: Git snapshot ID for workspace state after this step
         duration_ms: Execution duration in milliseconds
         timestamp: Execution timestamp (ISO 8601)
+        input: Original step request recorded by the gateway.
     """
 
     index: Annotated[int, Field(ge=0)]
@@ -59,18 +64,43 @@ class StepResult(BaseModel):
     snapshot_id: str = ""
     duration_ms: Annotated[int, Field(ge=0)] = 0
     timestamp: datetime | None = None
+    input: dict[str, object] | None = None
+
+
+class ReplayResponse(BaseModel):
+    """Response from replaying recorded steps into another session."""
+
+    steps_replayed: Annotated[int, Field(ge=0)] = Field(0, alias="stepsReplayed")
+    errors: Annotated[int, Field(ge=0)] = 0
+
+    model_config = {"populate_by_name": True}
+
+
+class DeleteExperimentResponse(BaseModel):
+    """Response from deleting sessions associated with an experiment."""
+
+    deleted: Annotated[int, Field(ge=0)] = 0
+    error: str = ""
 
 
 class SessionInfo(BaseModel):
-    """Information about an active session."""
+    """Information about an active session.
+
+    The gateway may include its scoped Kubernetes namespace for diagnostics;
+    callers do not choose it during session creation.
+    """
 
     id: str
     sandbox_name: str = Field(alias="sandboxName")
-    namespace: str
-    pool_ref: str = Field(alias="poolRef")
+    namespace: str = ""
+    image: str = ""
+    profile: str = ""
     pod_ip: str = Field("", alias="podIP")
     pod_name: str = Field("", alias="podName")
     created_at: datetime | None = Field(None, alias="createdAt")
+    status: str = ""
+    deleted_at: datetime | None = Field(None, alias="deletedAt")
+    deletion_reason: str = Field("", alias="deletionReason")
 
     model_config = {"populate_by_name": True}
 
@@ -82,12 +112,46 @@ class ManagedSessionInfo(SessionInfo):
     managed: bool = False
 
 
+class SessionListItem(SessionInfo):
+    """Session info returned by the admin session-list endpoint."""
+
+    experiment_id: str = Field("", alias="experimentId")
+    managed: bool = False
+
+
 class ExecuteResponse(BaseModel):
     """Response from executing steps."""
 
     session_id: str = Field(alias="sessionID")
     results: list[StepResult] = []
     total_duration_ms: int = Field(0, alias="totalDurationMs")
+    operation_id: str = Field("", alias="operationID")
+
+    model_config = {"populate_by_name": True}
+
+
+class ContainerExecuteResponse(BaseModel):
+    """Response from executing steps in a private container."""
+
+    session_id: str = Field(alias="sessionID")
+    container: str
+    results: list[StepResult] = []
+    total_duration_ms: int = Field(0, alias="totalDurationMs")
+
+    model_config = {"populate_by_name": True}
+
+
+class ExecuteOperationInfo(BaseModel):
+    """Status for an idempotent execute operation."""
+
+    operation_id: str = Field(alias="operationID")
+    session_id: str = Field(alias="sessionID")
+    status: str
+    result: ExecuteResponse | None = None
+    error: str = ""
+    created_at: datetime | None = Field(None, alias="createdAt")
+    started_at: datetime | None = Field(None, alias="startedAt")
+    finished_at: datetime | None = Field(None, alias="finishedAt")
 
     model_config = {"populate_by_name": True}
 
@@ -97,6 +161,7 @@ class UploadFileResponse(BaseModel):
 
     path: str
     bytes_written: int = Field(alias="bytesWritten")
+    sha256: str = ""
 
     model_config = {"populate_by_name": True}
 
@@ -122,7 +187,7 @@ class PoolInfo(BaseModel):
 
     Attributes:
         name: WarmPool name
-        namespace: Kubernetes namespace
+        namespace: Gateway-scoped Kubernetes namespace, returned for diagnostics
         replicas: Desired number of warm pods
         ready_replicas: Number of ready idle pods
         allocated_replicas: Number of pods currently allocated to sessions
@@ -130,11 +195,42 @@ class PoolInfo(BaseModel):
     """
 
     name: str
-    namespace: str
+    namespace: str = ""
+    image: str = ""
+    profile: str = ""
     replicas: Annotated[int, Field(ge=0)] = 0
     ready_replicas: Annotated[int, Field(ge=0)] = Field(0, alias="readyReplicas")
     allocated_replicas: Annotated[int, Field(ge=0)] = Field(0, alias="allocatedReplicas")
     conditions: list[PoolCondition] = []
+
+    model_config = {"populate_by_name": True}
+
+
+class ExperimentSummary(BaseModel):
+    """Aggregate information for a managed-session experiment."""
+
+    experiment_id: str = Field(alias="experimentId")
+    session_count: Annotated[int, Field(ge=0)] = Field(alias="sessionCount")
+    image: str = ""
+    profile: str = ""
+    namespace: str = ""
+
+    model_config = {"populate_by_name": True}
+
+
+class LogEntry(BaseModel):
+    """A single NDJSON log entry from a session sidecar."""
+
+    timestamp: str = ""
+    level: str = ""
+    message: str = ""
+    source: str = ""
+
+
+class PoolLogEntry(LogEntry):
+    """A log entry returned by the pool log fan-out endpoint."""
+
+    pod_name: str = Field(alias="podName")
 
     model_config = {"populate_by_name": True}
 
@@ -235,9 +331,7 @@ class InlineToolSpec(BaseModel):
     def validate_entrypoint_in_files(self) -> InlineToolSpec:
         """Ensure entrypoint exists in files dict."""
         if self.files and self.entrypoint not in self.files:
-            raise ValueError(
-                f"entrypoint '{self.entrypoint}' must be a key in files"
-            )
+            raise ValueError(f"entrypoint '{self.entrypoint}' must be a key in files")
         return self
 
 
@@ -326,8 +420,8 @@ class ResourceRequirements(BaseModel):
                 if quantity.endswith("m"):
                     try:
                         millicores = int(quantity[:-1])
-                    except ValueError:
-                        raise ValueError(f"Invalid cpu millicore quantity: {quantity}")
+                    except ValueError as err:
+                        raise ValueError(f"Invalid cpu millicore quantity: {quantity}") from err
                     if millicores <= 0 or millicores > 1_000_000:
                         raise ValueError(
                             f"CPU millicores must be between 1 and 1000000, got {millicores}"
@@ -344,6 +438,39 @@ class ResourceRequirements(BaseModel):
                         )
 
         return v
+
+
+class PrivateContainerSpec(BaseModel):
+    """Gateway-managed container hidden from the agent-facing executor.
+
+    Attributes:
+        name: Kubernetes container name, excluding reserved executor/sidecar names.
+        image: Container image containing private evaluator assets or scripts.
+        mount_workspace: Whether to mount the session workspace volume.
+        workspace_mount_path: Mount path inside the private container.
+        workspace_access: readWrite or readOnly.
+        command: Optional long-running container command.
+        args: Optional container args.
+        env: Static environment variables for the container.
+        resources: Optional Kubernetes resource requirements.
+        image_pull_policy: Optional Kubernetes image pull policy.
+    """
+
+    name: Annotated[str, Field(pattern=r"^[a-z0-9]([-a-z0-9]*[a-z0-9])?$")]
+    image: str
+    mount_workspace: bool = Field(False, alias="mountWorkspace")
+    workspace_mount_path: str = Field("", alias="workspaceMountPath")
+    workspace_access: Literal["readWrite", "readOnly", ""] = Field("", alias="workspaceAccess")
+    command: list[str] = []
+    args: list[str] = []
+    env: dict[str, str] = {}
+    resources: ResourceRequirements | None = None
+    image_pull_policy: Literal["Always", "IfNotPresent", "Never", ""] = Field(
+        "",
+        alias="imagePullPolicy",
+    )
+
+    model_config = {"populate_by_name": True}
 
 
 class ToolsSpec(BaseModel):

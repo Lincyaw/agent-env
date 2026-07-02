@@ -3,6 +3,7 @@ package sidecar
 import (
 	"context"
 	"fmt"
+	"io"
 	"os/exec"
 	"strings"
 	"time"
@@ -46,6 +47,20 @@ type ExecLog struct {
 	Stderr   string
 	ExitCode int32
 	Done     bool
+}
+
+// FileWriteResult describes a streamed write result.
+type FileWriteResult struct {
+	Path         string
+	BytesWritten int64
+	SHA256       string
+}
+
+// FileReadResult describes a streamed read result.
+type FileReadResult struct {
+	Path      string
+	SizeBytes int64
+	SHA256    string
 }
 
 // GetStdout implements interfaces.ExecResponse
@@ -217,19 +232,19 @@ func (s *AgentService) ExecuteSync(ctx context.Context, req *ExecRequest) (*Exec
 	return &result, nil
 }
 
-// WriteFile writes one file into the executor container workspace.
-func (s *AgentService) WriteFile(ctx context.Context, path string, content []byte) (int64, error) {
+// WriteFile streams one file into the executor container workspace.
+func (s *AgentService) WriteFile(ctx context.Context, path string, content io.Reader, expectedSHA256 string) (*FileWriteResult, error) {
 	if s.executorClient == nil {
-		return 0, fmt.Errorf("executor agent not configured: sidecar started without --executor-socket")
+		return nil, fmt.Errorf("executor agent not configured: sidecar started without --executor-socket")
 	}
-	s.logInfo("sidecar", fmt.Sprintf("write file: %s (%d bytes)", path, len(content)))
-	return s.executorClient.WriteFile(ctx, path, content)
+	s.logInfo("sidecar", fmt.Sprintf("write file: %s", path))
+	return s.executorClient.WriteFile(ctx, path, content, expectedSHA256)
 }
 
-func (s *AgentService) ReadFile(ctx context.Context, path string) ([]byte, error) {
+func (s *AgentService) ReadFile(ctx context.Context, path string, dst io.Writer) (*FileReadResult, error) {
 	if s.executorClient == nil {
 		return nil, fmt.Errorf("executor agent not configured: sidecar started without --executor-socket")
 	}
 	s.logInfo("sidecar", fmt.Sprintf("read file: %s", path))
-	return s.executorClient.ReadFile(ctx, path)
+	return s.executorClient.ReadFile(ctx, path, dst)
 }

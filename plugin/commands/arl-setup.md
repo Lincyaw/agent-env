@@ -36,10 +36,18 @@ sudo mv "arl-${OS}-${ARCH}" /usr/local/bin/arl
 
 ## Step 2: Configure
 
-Ask the user for their gateway URL and API key, then suggest:
+Ask the user for their gateway URL and API key. Prefer environment variables or
+a key file over passing secrets as CLI arguments:
 ```bash
 export ARL_GATEWAY_URL=http://<gateway-address>:8080
 export ARL_API_KEY=<their-api-key>
+export ARL_FORMAT=json
+
+# Or:
+mkdir -p ~/.config/arl
+printf '%s\n' '<their-api-key>' > ~/.config/arl/api-key
+chmod 600 ~/.config/arl/api-key
+arl --api-key-file ~/.config/arl/api-key status
 ```
 
 Recommend adding to shell profile (`~/.bashrc`, `~/.zshrc`).

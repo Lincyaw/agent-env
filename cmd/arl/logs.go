@@ -26,9 +26,6 @@ func streamLogs(c *Client, path string, follow bool, tail int, showPod bool) err
 	if tail > 0 {
 		params.Set("tail", fmt.Sprintf("%d", tail))
 	}
-	if flagNamespace != "default" {
-		params.Set("namespace", flagNamespace)
-	}
 	fullPath := path
 	if len(params) > 0 {
 		fullPath += "?" + params.Encode()
@@ -51,11 +48,7 @@ func streamLogs(c *Client, path string, follow bool, tail int, showPod bool) err
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= 400 {
-		var errResp ErrorResponse
-		if json.NewDecoder(resp.Body).Decode(&errResp) == nil && errResp.Error != "" {
-			return fmt.Errorf("HTTP %d: %s", resp.StatusCode, errResp.Error)
-		}
-		return fmt.Errorf("HTTP %d", resp.StatusCode)
+		return responseError(resp)
 	}
 
 	if flagOutput == "json" {
@@ -76,7 +69,7 @@ func streamLogs(c *Client, path string, follow bool, tail int, showPod bool) err
 		}
 
 		ts := shortTimestamp(entry.Timestamp)
-		level := colorLevel(entry.Level)
+		level := formatLevel(entry.Level)
 
 		if showPod && entry.PodName != "" {
 			fmt.Printf("%s %s [%s] %s: %s\n", ts, level, entry.Source, entry.PodName, entry.Message)
@@ -94,11 +87,21 @@ func shortTimestamp(ts string) string {
 	return ts
 }
 
-func colorLevel(level string) string {
+func formatLevel(level string) string {
+	label := "INF"
 	switch strings.ToLower(level) {
 	case "error":
-		return "\033[31mERR\033[0m"
+		label = "ERR"
 	case "warn":
+		label = "WRN"
+	}
+	if !colorEnabled() {
+		return label
+	}
+	switch label {
+	case "ERR":
+		return "\033[31mERR\033[0m"
+	case "WRN":
 		return "\033[33mWRN\033[0m"
 	default:
 		return "\033[36mINF\033[0m"
