@@ -59,6 +59,10 @@ type Config struct {
 	GatewaySweepInterval time.Duration
 	GatewayWriteTimeout  time.Duration
 
+	// Devbox session lifecycle defaults (longer-lived development environments)
+	DevboxIdleTimeout time.Duration
+	DevboxMaxLifetime time.Duration
+
 	// Redis session store configuration
 	RedisEnabled  bool
 	RedisAddr     string
@@ -133,6 +137,9 @@ func DefaultConfig() *Config {
 		GatewayMaxLifetime:   3600 * time.Second,
 		GatewaySweepInterval: 30 * time.Second,
 		GatewayWriteTimeout:  0,
+
+		DevboxIdleTimeout: 4 * time.Hour,
+		DevboxMaxLifetime: 0,
 
 		RedisEnabled:  false,
 		RedisAddr:     "localhost:6379",
@@ -288,6 +295,18 @@ func LoadFromEnv() *Config {
 	if v := os.Getenv("GATEWAY_WRITE_TIMEOUT"); v != "" {
 		if d, err := time.ParseDuration(v); err == nil {
 			cfg.GatewayWriteTimeout = d
+		}
+	}
+
+	if v := os.Getenv("DEVBOX_IDLE_TIMEOUT"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			cfg.DevboxIdleTimeout = d
+		}
+	}
+
+	if v := os.Getenv("DEVBOX_MAX_LIFETIME"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			cfg.DevboxMaxLifetime = d
 		}
 	}
 
@@ -493,6 +512,13 @@ func (c *Config) Validate() error {
 
 	if c.GatewaySweepInterval <= 0 {
 		return fmt.Errorf("gateway sweep interval must be positive: %v", c.GatewaySweepInterval)
+	}
+
+	if c.DevboxIdleTimeout < 0 {
+		return fmt.Errorf("devbox idle timeout cannot be negative: %v", c.DevboxIdleTimeout)
+	}
+	if c.DevboxMaxLifetime < 0 {
+		return fmt.Errorf("devbox max lifetime cannot be negative: %v", c.DevboxMaxLifetime)
 	}
 
 	// Auth key validation is deferred to cmd/gateway/main.go which checks

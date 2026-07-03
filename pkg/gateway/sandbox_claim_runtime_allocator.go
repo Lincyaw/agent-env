@@ -92,6 +92,10 @@ func (a *SandboxClaimRuntimeAllocator) Allocate(ctx context.Context, req Runtime
 		annotations[labels.ManagedAnnotation] = "true"
 		podAnnotations[labels.ManagedAnnotation] = "true"
 	}
+	if req.Mode != "" {
+		annotations[labels.ModeAnnotation] = req.Mode
+		podAnnotations[labels.ModeAnnotation] = req.Mode
+	}
 	annotateLifecycle(annotations, req.Lifecycle)
 	claim := &extensionsv1beta1.SandboxClaim{
 		ObjectMeta: metav1.ObjectMeta{

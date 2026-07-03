@@ -3,6 +3,7 @@ package gateway
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"path"
 	"strconv"
@@ -121,6 +122,10 @@ func handleCreateSession(gw *Gateway) http.HandlerFunc {
 
 		if req.Image == "" && req.Profile == "" {
 			writeError(w, http.StatusBadRequest, "image or profile is required")
+			return
+		}
+		if req.Mode != "" && !validSessionMode(req.Mode) {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid session mode: %q", req.Mode))
 			return
 		}
 
@@ -709,6 +714,10 @@ func handleCreateManagedSession(gw *Gateway) http.HandlerFunc {
 		}
 		if req.ExperimentID == "" {
 			writeError(w, http.StatusBadRequest, "experimentId is required")
+			return
+		}
+		if req.Mode != "" && !validSessionMode(req.Mode) {
+			writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid session mode: %q", req.Mode))
 			return
 		}
 

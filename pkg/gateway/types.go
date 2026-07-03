@@ -9,6 +9,19 @@ import (
 	corev1 "k8s.io/api/core/v1"
 )
 
+const (
+	SessionModeDefault = ""
+	SessionModeDevbox  = "devbox"
+)
+
+func validSessionMode(mode string) bool {
+	switch mode {
+	case SessionModeDefault, SessionModeDevbox:
+		return true
+	}
+	return false
+}
+
 // ManagedSessionInfo extends SessionInfo with experiment metadata.
 type ManagedSessionInfo struct {
 	SessionInfo
@@ -23,6 +36,7 @@ type CreateSessionRequest struct {
 	Image              string                 `json:"image,omitempty"`
 	Profile            string                 `json:"profile,omitempty"`
 	Namespace          string                 `json:"namespace,omitempty"`
+	Mode               string                 `json:"mode,omitempty"`
 	ConfigEnv          json.RawMessage        `json:"configEnv,omitempty"`
 	IdleTimeoutSeconds int                    `json:"idleTimeoutSeconds,omitempty"`
 	MaxLifetimeSeconds int                    `json:"maxLifetimeSeconds,omitempty"`
@@ -61,6 +75,7 @@ type CreateManagedSessionRequest struct {
 	Profile            string                       `json:"profile,omitempty"`
 	ExperimentID       string                       `json:"experimentId"`
 	Namespace          string                       `json:"namespace,omitempty"`
+	Mode               string                       `json:"mode,omitempty"`
 	ConfigEnv          json.RawMessage              `json:"configEnv,omitempty"`
 	Resources          *corev1.ResourceRequirements `json:"resources,omitempty"`
 	Tools              json.RawMessage              `json:"tools,omitempty"`
@@ -163,6 +178,7 @@ type SessionInfo struct {
 	Namespace      string     `json:"namespace"`
 	Image          string     `json:"image,omitempty"`
 	Profile        string     `json:"profile,omitempty"`
+	Mode           string     `json:"mode,omitempty"`
 	PoolRef        string     `json:"-"`
 	PodIP          string     `json:"podIP"`
 	PodName        string     `json:"podName"`

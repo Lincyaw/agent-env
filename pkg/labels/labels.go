@@ -53,6 +53,9 @@ const (
 	PoolStateDraining   = "draining"
 	PoolStateStopped    = "stopped"
 
+	// ModeAnnotation records the session mode (e.g. "devbox") for recovery.
+	ModeAnnotation = "arl.infra.io/mode"
+
 	RoleLabelKey = "arl.infra.io/role"
 	RolePrePull  = "pre-pull"
 )

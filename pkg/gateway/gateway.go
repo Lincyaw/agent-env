@@ -40,6 +40,8 @@ import (
 type GatewayConfig struct {
 	IdleTimeout                     time.Duration
 	MaxLifetime                     time.Duration
+	DevboxIdleTimeout               time.Duration
+	DevboxMaxLifetime               time.Duration
 	SweepInterval                   time.Duration
 	Namespace                       string
 	SidecarImage                    string
@@ -88,6 +90,7 @@ type session struct {
 	History             *StepHistory
 	managed             bool
 	experimentID        string
+	mode                string
 	ownerKeyHash        string
 	closed              bool
 	deletionReason      string
@@ -305,6 +308,11 @@ func (g *Gateway) CreateSession(ctx context.Context, req CreateSessionRequest) (
 		recordSpanErr(span, err)
 		return nil, err
 	}
+	if !validSessionMode(req.Mode) {
+		err := fmt.Errorf("invalid session mode: %q (valid: \"\", \"devbox\")", req.Mode)
+		recordSpanErr(span, err)
+		return nil, err
+	}
 	claimEnv, err := parseConfigEnvVars(req.ConfigEnv)
 	if err != nil {
 		recordSpanErr(span, err)
@@ -373,6 +381,7 @@ func (g *Gateway) CreateSession(ctx context.Context, req CreateSessionRequest) (
 		OwnerKeyHash: ownerHash,
 		Managed:      req.Managed,
 		ExperimentID: req.ExperimentID,
+		Mode:         req.Mode,
 		Lifecycle:    lifecycle,
 		Env:          claimEnv,
 	})
@@ -402,6 +411,7 @@ func (g *Gateway) CreateSession(ctx context.Context, req CreateSessionRequest) (
 		Image:       selection.Pool.Image,
 		PoolRef:     poolRef,
 		Profile:     selection.Pool.Profile,
+		Mode:        req.Mode,
 		PodIP:       allocation.PodIP,
 		PodName:     allocation.PodName,
 		CreatedAt:   createdAt,
@@ -414,6 +424,7 @@ func (g *Gateway) CreateSession(ctx context.Context, req CreateSessionRequest) (
 		History:             NewStepHistory(),
 		managed:             req.Managed,
 		experimentID:        req.ExperimentID,
+		mode:                req.Mode,
 		ownerKeyHash:        ownerHash,
 		lastTaskTime:        createdAt,
 		lastAnnotationPatch: createdAt,
@@ -725,17 +736,26 @@ func (g *Gateway) newRecoveredSessionFromClaim(ctx context.Context, sessionID st
 	info := g.recoveredSessionInfo(ctx, sessionID, resolved, claim)
 	lastTask := recoveredLastActivity(claim, info.CreatedAt)
 	managed := strings.EqualFold(claim.Annotations[labels.ManagedAnnotation], "true")
+	recoveredMode := claim.Annotations[labels.ModeAnnotation]
+	idleTimeout := g.gwConfig.IdleTimeout
+	maxLifetime := g.gwConfig.MaxLifetime
+	if recoveredMode == SessionModeDevbox {
+		idleTimeout = g.gwConfig.DevboxIdleTimeout
+		maxLifetime = g.gwConfig.DevboxMaxLifetime
+	}
+	info.Mode = recoveredMode
 	return &session{
 		Info:         info,
 		Runtime:      resolved,
 		History:      NewStepHistory(),
 		managed:      managed,
 		experimentID: claim.Annotations[labels.ExperimentAnnotation],
+		mode:         recoveredMode,
 		ownerKeyHash: claim.Annotations[labels.OwnerKeyHashAnnotation],
 		lastTaskTime: lastTask,
 		createdAt:    info.CreatedAt,
-		idleTimeout:  g.gwConfig.IdleTimeout,
-		maxLifetime:  g.gwConfig.MaxLifetime,
+		idleTimeout:  idleTimeout,
+		maxLifetime:  maxLifetime,
 		operations:   make(map[string]*executeOperation),
 	}
 }
@@ -1965,19 +1985,25 @@ func (g *Gateway) touchLastTaskTime(sessionID string) {
 }
 
 // resolveIdleTimeout returns the idle timeout for a session request,
-// falling back to the gateway-wide default.
+// falling back to devbox or gateway-wide defaults based on mode.
 func (g *Gateway) resolveIdleTimeout(req CreateSessionRequest) time.Duration {
 	if req.IdleTimeoutSeconds > 0 {
 		return time.Duration(req.IdleTimeoutSeconds) * time.Second
+	}
+	if req.Mode == SessionModeDevbox {
+		return g.gwConfig.DevboxIdleTimeout
 	}
 	return g.gwConfig.IdleTimeout
 }
 
 // resolveMaxLifetime returns the max lifetime for a session request,
-// falling back to the gateway-wide default.
+// falling back to devbox or gateway-wide defaults based on mode.
 func (g *Gateway) resolveMaxLifetime(req CreateSessionRequest) time.Duration {
 	if req.MaxLifetimeSeconds > 0 {
 		return time.Duration(req.MaxLifetimeSeconds) * time.Second
+	}
+	if req.Mode == SessionModeDevbox {
+		return g.gwConfig.DevboxMaxLifetime
 	}
 	return g.gwConfig.MaxLifetime
 }
@@ -2368,6 +2394,7 @@ func (g *Gateway) CreateManagedSession(ctx context.Context, req CreateManagedSes
 		Profile:            profile,
 		PoolName:           poolName,
 		Namespace:          ns,
+		Mode:               req.Mode,
 		IdleTimeoutSeconds: req.IdleTimeoutSeconds,
 		MaxLifetimeSeconds: req.MaxLifetimeSeconds,
 		ConfigEnv:          req.ConfigEnv,

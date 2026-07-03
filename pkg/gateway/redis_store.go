@@ -26,6 +26,7 @@ type redisSessionData struct {
 	Runtime             RuntimeAllocation       `json:"runtime,omitempty"`
 	Managed             bool                    `json:"managed"`
 	ExperimentID        string                  `json:"experimentId"`
+	Mode                string                  `json:"mode,omitempty"`
 	OwnerKeyHash        string                  `json:"ownerKeyHash,omitempty"`
 	Deleted             bool                    `json:"deleted,omitempty"`
 	DeletedAt           *time.Time              `json:"deletedAt,omitempty"`
@@ -50,6 +51,7 @@ func sessionToRedisData(s *session) redisSessionData {
 		Runtime:             s.Runtime,
 		Managed:             s.managed,
 		ExperimentID:        s.experimentID,
+		Mode:                s.mode,
 		OwnerKeyHash:        s.ownerKeyHash,
 		Deleted:             s.closed,
 		DeletedAt:           s.deletedAt,
@@ -102,6 +104,7 @@ func redisDataToSession(data redisSessionData) *session {
 		History:             h,
 		managed:             data.Managed,
 		experimentID:        data.ExperimentID,
+		mode:                data.Mode,
 		ownerKeyHash:        data.OwnerKeyHash,
 		closed:              data.Deleted,
 		deletedAt:           data.DeletedAt,

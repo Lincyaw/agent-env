@@ -125,6 +125,8 @@ func main() {
 	gw := gateway.New(k8sClient, runtimeAllocator, sidecarClient, metricsCollector, nil, gateway.GatewayConfig{
 		IdleTimeout:                     cfg.GatewayIdleTimeout,
 		MaxLifetime:                     cfg.GatewayMaxLifetime,
+		DevboxIdleTimeout:               cfg.DevboxIdleTimeout,
+		DevboxMaxLifetime:               cfg.DevboxMaxLifetime,
 		SweepInterval:                   cfg.GatewaySweepInterval,
 		Namespace:                       cfg.GatewayNamespace,
 		SidecarImage:                    cfg.SidecarImage,

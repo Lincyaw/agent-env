@@ -27,6 +27,7 @@ type RuntimeAllocateRequest struct {
 	OwnerKeyHash string
 	Managed      bool
 	ExperimentID string
+	Mode         string
 	Lifecycle    RuntimeLifecycle
 	Env          []RuntimeEnvVar
 }
