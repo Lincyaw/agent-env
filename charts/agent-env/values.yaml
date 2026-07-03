@@ -123,6 +123,15 @@ gateway:
     name: ""
     imageLocality:
       enabled: true
+  # Default executor container resources for sandbox pools when the API
+  # request does not provide resources explicitly.
+  sandboxResources:
+    requests:
+      cpu: "500m"
+      memory: 512Mi
+    limits:
+      cpu: "8"
+      memory: 16Gi
   # Security policy applied to generated sandbox templates.
   sandboxSecurity:
     # Supported values: Managed, Unmanaged.

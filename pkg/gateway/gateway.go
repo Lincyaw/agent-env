@@ -61,6 +61,10 @@ type GatewayConfig struct {
 	PoolAutoscalerMaxReplicas       int32
 	SchedulerName                   string
 	ImageLocalityEnabled            bool
+	DefaultSandboxRequestCPU        string
+	DefaultSandboxRequestMemory     string
+	DefaultSandboxLimitCPU          string
+	DefaultSandboxLimitMemory       string
 	SandboxNetworkPolicyManagement  string
 	SandboxRuntimeClassName         string
 	SandboxSeccompProfileType       string
@@ -68,6 +72,13 @@ type GatewayConfig struct {
 	SandboxAllowPrivilegeEscalation bool
 	K8sRESTConfig                   *rest.Config
 }
+
+const (
+	defaultSandboxRequestCPU    = "500m"
+	defaultSandboxRequestMemory = "512Mi"
+	defaultSandboxLimitCPU      = "8"
+	defaultSandboxLimitMemory   = "16Gi"
+)
 
 // session holds internal session state.
 type session struct {
@@ -1307,19 +1318,13 @@ func (g *Gateway) CreatePool(ctx context.Context, req CreatePoolRequest) error {
 		replicas = 0
 	}
 
-	// Set default resources if not specified
 	resources := req.Resources
 	if resources == nil {
-		resources = &corev1.ResourceRequirements{
-			Requests: corev1.ResourceList{
-				corev1.ResourceCPU:    resource.MustParse("100m"),
-				corev1.ResourceMemory: resource.MustParse("128Mi"),
-			},
-			Limits: corev1.ResourceList{
-				corev1.ResourceCPU:    resource.MustParse("1000m"),
-				corev1.ResourceMemory: resource.MustParse("1Gi"),
-			},
+		defaultResources, err := g.defaultSandboxResources()
+		if err != nil {
+			return err
 		}
+		resources = &defaultResources
 	}
 
 	// Set default workspace dir if not specified
@@ -1428,6 +1433,50 @@ func (g *Gateway) CreatePool(ctx context.Context, req CreatePoolRequest) error {
 		return fmt.Errorf("create sandbox warm pool: %w", err)
 	}
 	return nil
+}
+
+func (g *Gateway) defaultSandboxResources() (corev1.ResourceRequirements, error) {
+	requestCPU, err := parseDefaultSandboxQuantity("sandbox default request cpu", g.gwConfig.DefaultSandboxRequestCPU, defaultSandboxRequestCPU)
+	if err != nil {
+		return corev1.ResourceRequirements{}, err
+	}
+	requestMemory, err := parseDefaultSandboxQuantity("sandbox default request memory", g.gwConfig.DefaultSandboxRequestMemory, defaultSandboxRequestMemory)
+	if err != nil {
+		return corev1.ResourceRequirements{}, err
+	}
+	limitCPU, err := parseDefaultSandboxQuantity("sandbox default limit cpu", g.gwConfig.DefaultSandboxLimitCPU, defaultSandboxLimitCPU)
+	if err != nil {
+		return corev1.ResourceRequirements{}, err
+	}
+	limitMemory, err := parseDefaultSandboxQuantity("sandbox default limit memory", g.gwConfig.DefaultSandboxLimitMemory, defaultSandboxLimitMemory)
+	if err != nil {
+		return corev1.ResourceRequirements{}, err
+	}
+	return corev1.ResourceRequirements{
+		Requests: corev1.ResourceList{
+			corev1.ResourceCPU:    requestCPU,
+			corev1.ResourceMemory: requestMemory,
+		},
+		Limits: corev1.ResourceList{
+			corev1.ResourceCPU:    limitCPU,
+			corev1.ResourceMemory: limitMemory,
+		},
+	}, nil
+}
+
+func parseDefaultSandboxQuantity(name, configured, fallback string) (resource.Quantity, error) {
+	value := strings.TrimSpace(configured)
+	if value == "" {
+		value = fallback
+	}
+	q, err := resource.ParseQuantity(value)
+	if err != nil {
+		return resource.Quantity{}, fmt.Errorf("%s must be a valid Kubernetes quantity: %q", name, configured)
+	}
+	if q.Sign() <= 0 {
+		return resource.Quantity{}, fmt.Errorf("%s must be positive: %q", name, value)
+	}
+	return q, nil
 }
 
 // GetPool returns SandboxWarmPool info.

@@ -10,6 +10,7 @@ import (
 	"github.com/Lincyaw/agent-env/pkg/labels"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
@@ -126,6 +127,11 @@ func TestCreatePoolCreatesSandboxWarmPoolAndExecutableTemplate(t *testing.T) {
 	if !hasContainer(podSpec.Containers, "sidecar") {
 		t.Fatal("template missing sidecar container")
 	}
+	executor := findContainer(podSpec.Containers, "executor")
+	assertResourceQuantity(t, executor.Resources.Requests[corev1.ResourceCPU], "500m")
+	assertResourceQuantity(t, executor.Resources.Requests[corev1.ResourceMemory], "512Mi")
+	assertResourceQuantity(t, executor.Resources.Limits[corev1.ResourceCPU], "8")
+	assertResourceQuantity(t, executor.Resources.Limits[corev1.ResourceMemory], "16Gi")
 	sidecar := findContainer(podSpec.Containers, "sidecar")
 	if got := sidecar.Command; len(got) != 1 || got[0] != "/sidecar" {
 		t.Fatalf("sidecar command = %#v, want /sidecar", got)
@@ -221,6 +227,40 @@ func TestCreatePoolAppliesSchedulerNameAndImageLocalityHints(t *testing.T) {
 	if got := template.Spec.PodTemplate.ObjectMeta.Annotations[scheduling.ExecutorImageAnnotation]; got != "python:3.12" {
 		t.Fatalf("pod executor image annotation = %q, want python:3.12", got)
 	}
+}
+
+func TestCreatePoolUsesConfiguredDefaultSandboxResources(t *testing.T) {
+	scheme := newGatewayTestScheme(t)
+	k8sClient := fake.NewClientBuilder().WithScheme(scheme).Build()
+	gw := &Gateway{
+		k8sClient: k8sClient,
+		gwConfig: GatewayConfig{
+			GRPCAuthToken:               "test-token",
+			DefaultSandboxRequestCPU:    "250m",
+			DefaultSandboxRequestMemory: "256Mi",
+			DefaultSandboxLimitCPU:      "8",
+			DefaultSandboxLimitMemory:   "16Gi",
+		},
+	}
+
+	if err := gw.CreatePool(context.Background(), CreatePoolRequest{
+		Name:      "pool",
+		Namespace: "default",
+		Image:     "python:3.12",
+		Replicas:  1,
+	}); err != nil {
+		t.Fatalf("CreatePool returned error: %v", err)
+	}
+
+	template := &extensionsv1beta1.SandboxTemplate{}
+	if err := k8sClient.Get(context.Background(), types.NamespacedName{Name: "pool-template", Namespace: "default"}, template); err != nil {
+		t.Fatalf("get sandbox template: %v", err)
+	}
+	executor := findContainer(template.Spec.PodTemplate.Spec.Containers, "executor")
+	assertResourceQuantity(t, executor.Resources.Requests[corev1.ResourceCPU], "250m")
+	assertResourceQuantity(t, executor.Resources.Requests[corev1.ResourceMemory], "256Mi")
+	assertResourceQuantity(t, executor.Resources.Limits[corev1.ResourceCPU], "8")
+	assertResourceQuantity(t, executor.Resources.Limits[corev1.ResourceMemory], "16Gi")
 }
 
 func TestCreatePoolCleansTemplateWhenWarmPoolCreateFails(t *testing.T) {
@@ -855,6 +895,14 @@ func findContainer(containers []corev1.Container, name string) corev1.Container 
 		}
 	}
 	return corev1.Container{}
+}
+
+func assertResourceQuantity(t *testing.T, got resource.Quantity, want string) {
+	t.Helper()
+	wantQuantity := resource.MustParse(want)
+	if got.Cmp(wantQuantity) != 0 {
+		t.Fatalf("resource quantity = %s, want %s", got.String(), wantQuantity.String())
+	}
 }
 
 func hasVolumeMount(mounts []corev1.VolumeMount, name, mountPath string) bool {

@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"k8s.io/apimachinery/pkg/api/resource"
 )
 
 // Config holds the gateway configuration.
@@ -89,6 +91,12 @@ type Config struct {
 	SchedulerName        string
 	ImageLocalityEnabled bool
 
+	// Sandbox resource defaults used when a CreatePool request omits resources.
+	DefaultSandboxRequestCPU    string
+	DefaultSandboxRequestMemory string
+	DefaultSandboxLimitCPU      string
+	DefaultSandboxLimitMemory   string
+
 	// Sandbox security policy applied to generated SandboxTemplates.
 	SandboxNetworkPolicyManagement  string
 	SandboxRuntimeClassName         string
@@ -147,6 +155,10 @@ func DefaultConfig() *Config {
 		PoolAutoscalerMaxReplicas:       0,
 		SchedulerName:                   "",
 		ImageLocalityEnabled:            false,
+		DefaultSandboxRequestCPU:        "500m",
+		DefaultSandboxRequestMemory:     "512Mi",
+		DefaultSandboxLimitCPU:          "8",
+		DefaultSandboxLimitMemory:       "16Gi",
 		SandboxNetworkPolicyManagement:  "Unmanaged",
 		SandboxRuntimeClassName:         "",
 		SandboxSeccompProfileType:       "RuntimeDefault",
@@ -383,6 +395,18 @@ func LoadFromEnv() *Config {
 			cfg.ImageLocalityEnabled = b
 		}
 	}
+	if v := os.Getenv("SANDBOX_DEFAULT_REQUEST_CPU"); v != "" {
+		cfg.DefaultSandboxRequestCPU = v
+	}
+	if v := os.Getenv("SANDBOX_DEFAULT_REQUEST_MEMORY"); v != "" {
+		cfg.DefaultSandboxRequestMemory = v
+	}
+	if v := os.Getenv("SANDBOX_DEFAULT_LIMIT_CPU"); v != "" {
+		cfg.DefaultSandboxLimitCPU = v
+	}
+	if v := os.Getenv("SANDBOX_DEFAULT_LIMIT_MEMORY"); v != "" {
+		cfg.DefaultSandboxLimitMemory = v
+	}
 	if v := os.Getenv("SANDBOX_NETWORK_POLICY_MANAGEMENT"); v != "" {
 		cfg.SandboxNetworkPolicyManagement = v
 	}
@@ -511,6 +535,19 @@ func (c *Config) Validate() error {
 	if c.PoolAutoscalerMaxReplicas > 0 && c.PoolAutoscalerMaxReplicas < c.PoolAutoscalerMinReplicas {
 		return fmt.Errorf("pool autoscaler max replicas (%d) must be >= min replicas (%d)", c.PoolAutoscalerMaxReplicas, c.PoolAutoscalerMinReplicas)
 	}
+	for _, item := range []struct {
+		name  string
+		value string
+	}{
+		{name: "sandbox default request cpu", value: c.DefaultSandboxRequestCPU},
+		{name: "sandbox default request memory", value: c.DefaultSandboxRequestMemory},
+		{name: "sandbox default limit cpu", value: c.DefaultSandboxLimitCPU},
+		{name: "sandbox default limit memory", value: c.DefaultSandboxLimitMemory},
+	} {
+		if err := validatePositiveQuantity(item.name, item.value); err != nil {
+			return err
+		}
+	}
 	switch strings.ToLower(strings.TrimSpace(c.SandboxNetworkPolicyManagement)) {
 	case "", "managed", "unmanaged":
 	default:
@@ -525,5 +562,19 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("sandbox seccomp localhost profile is required when seccomp profile type is Localhost")
 	}
 
+	return nil
+}
+
+func validatePositiveQuantity(name, value string) error {
+	if strings.TrimSpace(value) == "" {
+		return fmt.Errorf("%s is required", name)
+	}
+	q, err := resource.ParseQuantity(value)
+	if err != nil {
+		return fmt.Errorf("%s must be a valid Kubernetes quantity: %q", name, value)
+	}
+	if q.Sign() <= 0 {
+		return fmt.Errorf("%s must be positive: %q", name, value)
+	}
 	return nil
 }

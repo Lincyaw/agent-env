@@ -59,8 +59,8 @@ class WarmPoolManager:
             profile: Resource profile used by session pool selection.
             tools: Optional tools specification to provision in the executor container.
             resources: Optional resource requirements (CPU/memory requests and limits).
-                      If not specified, uses defaults: requests={cpu: 100m, memory: 128Mi},
-                      limits={cpu: 1000m, memory: 1Gi}.
+                      If not specified, the gateway defaults to requests={cpu: 500m, memory: 512Mi},
+                      limits={cpu: 8, memory: 16Gi}.
             workspace_dir: Workspace directory mount path (default: /workspace).
             image_locality: Optional payload that enables gateway image-locality hints.
         """

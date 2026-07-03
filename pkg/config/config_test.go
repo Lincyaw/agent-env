@@ -131,6 +131,20 @@ func TestConfigValidate(t *testing.T) {
 			wantErr: "sandbox network policy management",
 		},
 		{
+			name: "invalid sandbox default resource quantity",
+			mutate: func(cfg *Config) {
+				cfg.DefaultSandboxLimitMemory = "lots"
+			},
+			wantErr: "sandbox default limit memory",
+		},
+		{
+			name: "non-positive sandbox default resource quantity",
+			mutate: func(cfg *Config) {
+				cfg.DefaultSandboxRequestCPU = "0"
+			},
+			wantErr: "sandbox default request cpu must be positive",
+		},
+		{
 			name: "invalid sandbox seccomp profile type",
 			mutate: func(cfg *Config) {
 				cfg.SandboxSeccompProfileType = "custom"
@@ -202,6 +216,18 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.PoolAutoscalerBuffer != 1 {
 		t.Errorf("PoolAutoscalerBuffer = %d, want 1", cfg.PoolAutoscalerBuffer)
 	}
+	if cfg.DefaultSandboxRequestCPU != "500m" {
+		t.Errorf("DefaultSandboxRequestCPU = %q, want 500m", cfg.DefaultSandboxRequestCPU)
+	}
+	if cfg.DefaultSandboxRequestMemory != "512Mi" {
+		t.Errorf("DefaultSandboxRequestMemory = %q, want 512Mi", cfg.DefaultSandboxRequestMemory)
+	}
+	if cfg.DefaultSandboxLimitCPU != "8" {
+		t.Errorf("DefaultSandboxLimitCPU = %q, want 8", cfg.DefaultSandboxLimitCPU)
+	}
+	if cfg.DefaultSandboxLimitMemory != "16Gi" {
+		t.Errorf("DefaultSandboxLimitMemory = %q, want 16Gi", cfg.DefaultSandboxLimitMemory)
+	}
 	if cfg.SandboxNetworkPolicyManagement != "Unmanaged" {
 		t.Errorf("SandboxNetworkPolicyManagement = %q, want Unmanaged", cfg.SandboxNetworkPolicyManagement)
 	}
@@ -250,6 +276,10 @@ func TestLoadFromEnvGatewaySettings(t *testing.T) {
 	t.Setenv("POOL_AUTOSCALER_MAX_REPLICAS", "20")
 	t.Setenv("SCHEDULER_NAME", "agent-env-image-locality")
 	t.Setenv("IMAGE_LOCALITY_ENABLED", "true")
+	t.Setenv("SANDBOX_DEFAULT_REQUEST_CPU", "250m")
+	t.Setenv("SANDBOX_DEFAULT_REQUEST_MEMORY", "256Mi")
+	t.Setenv("SANDBOX_DEFAULT_LIMIT_CPU", "8")
+	t.Setenv("SANDBOX_DEFAULT_LIMIT_MEMORY", "16Gi")
 	t.Setenv("SANDBOX_NETWORK_POLICY_MANAGEMENT", "Managed")
 	t.Setenv("SANDBOX_RUNTIME_CLASS_NAME", "kata")
 	t.Setenv("SANDBOX_SECCOMP_PROFILE_TYPE", "Localhost")
@@ -301,6 +331,18 @@ func TestLoadFromEnvGatewaySettings(t *testing.T) {
 	}
 	if !cfg.ImageLocalityEnabled {
 		t.Fatal("ImageLocalityEnabled = false, want true")
+	}
+	if cfg.DefaultSandboxRequestCPU != "250m" {
+		t.Fatalf("DefaultSandboxRequestCPU = %q, want 250m", cfg.DefaultSandboxRequestCPU)
+	}
+	if cfg.DefaultSandboxRequestMemory != "256Mi" {
+		t.Fatalf("DefaultSandboxRequestMemory = %q, want 256Mi", cfg.DefaultSandboxRequestMemory)
+	}
+	if cfg.DefaultSandboxLimitCPU != "8" {
+		t.Fatalf("DefaultSandboxLimitCPU = %q, want 8", cfg.DefaultSandboxLimitCPU)
+	}
+	if cfg.DefaultSandboxLimitMemory != "16Gi" {
+		t.Fatalf("DefaultSandboxLimitMemory = %q, want 16Gi", cfg.DefaultSandboxLimitMemory)
 	}
 	if cfg.SandboxNetworkPolicyManagement != "Managed" {
 		t.Fatalf("SandboxNetworkPolicyManagement = %q, want Managed", cfg.SandboxNetworkPolicyManagement)

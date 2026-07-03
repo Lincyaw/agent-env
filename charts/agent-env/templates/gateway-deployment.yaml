@@ -101,6 +101,14 @@ spec:
             {{- end }}
             - name: IMAGE_LOCALITY_ENABLED
               value: "{{ .Values.gateway.scheduler.imageLocality.enabled }}"
+            - name: SANDBOX_DEFAULT_REQUEST_CPU
+              value: {{ .Values.gateway.sandboxResources.requests.cpu | quote }}
+            - name: SANDBOX_DEFAULT_REQUEST_MEMORY
+              value: {{ .Values.gateway.sandboxResources.requests.memory | quote }}
+            - name: SANDBOX_DEFAULT_LIMIT_CPU
+              value: {{ .Values.gateway.sandboxResources.limits.cpu | quote }}
+            - name: SANDBOX_DEFAULT_LIMIT_MEMORY
+              value: {{ .Values.gateway.sandboxResources.limits.memory | quote }}
             - name: SANDBOX_NETWORK_POLICY_MANAGEMENT
               value: "{{ .Values.gateway.sandboxSecurity.networkPolicyManagement }}"
             {{- if .Values.gateway.sandboxSecurity.runtimeClassName }}
