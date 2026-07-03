@@ -169,6 +169,7 @@ class GatewayClient:
         image: str | None = None,
         *,
         profile: str | None = "default",
+        mode: str | None = None,
         config_env: ConfigEnvSpec | dict[str, Any] | None = None,
         idle_timeout_seconds: int | None = None,
         max_lifetime_seconds: int | None = None,
@@ -181,6 +182,8 @@ class GatewayClient:
             body["image"] = image
         if profile:
             body["profile"] = profile
+        if mode:
+            body["mode"] = mode
         config_env_payload = _serialize_config_env(config_env)
         if config_env_payload is not None:
             body["configEnv"] = config_env_payload
@@ -590,6 +593,7 @@ class GatewayClient:
         image: str,
         experiment_id: str,
         profile: str = "default",
+        mode: str | None = None,
         resources: ResourceRequirements | None = None,
         tools: ToolsSpec | None = None,
         workspace_dir: str = "/workspace",
@@ -622,6 +626,8 @@ class GatewayClient:
             "profile": profile,
             "workspaceDir": workspace_dir,
         }
+        if mode:
+            body["mode"] = mode
         config_env_payload = _serialize_config_env(config_env)
         if config_env_payload is not None:
             body["configEnv"] = config_env_payload

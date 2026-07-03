@@ -16,7 +16,7 @@ from arl.gateway_client import (
     PoolNotReadyError,
 )
 from arl.interactive_shell_client import InteractiveShellClient, create_websocket_proxy
-from arl.session import ManagedSession, SandboxSession
+from arl.session import DevboxSession, ManagedSession, SandboxSession
 from arl.types import (
     ContainerExecuteResponse,
     DeleteExperimentResponse,
@@ -57,6 +57,7 @@ __all__ = [
     "ConfigMapTemplate",
     "ContainerExecuteResponse",
     "DeleteExperimentResponse",
+    "DevboxSession",
     "ErrorResponse",
     "ExecuteOperationInfo",
     "ExecuteResponse",

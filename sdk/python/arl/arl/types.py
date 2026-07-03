@@ -99,6 +99,7 @@ class SessionInfo(BaseModel):
     pod_name: str = Field("", alias="podName")
     created_at: datetime | None = Field(None, alias="createdAt")
     status: str = ""
+    mode: str = ""
     deleted_at: datetime | None = Field(None, alias="deletedAt")
     deletion_reason: str = Field("", alias="deletionReason")
 

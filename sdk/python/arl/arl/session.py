@@ -74,6 +74,7 @@ class SandboxSession:
         self,
         image: str | None = None,
         *,
+        mode: str | None = None,
         profile: str | None = "default",
         gateway_url: str = "http://localhost:8080",
         timeout: float = 300.0,
@@ -84,6 +85,7 @@ class SandboxSession:
     ) -> None:
         self.image = image or ""
         self.profile = profile or ""
+        self.mode = mode
         self.idle_timeout_seconds = idle_timeout_seconds
         self.max_lifetime_seconds = max_lifetime_seconds
         self.private_containers = private_containers
@@ -155,6 +157,7 @@ class SandboxSession:
         info = self._client.create_session(
             image=self.image or None,
             profile=self.profile or None,
+            mode=self.mode,
             idle_timeout_seconds=self.idle_timeout_seconds,
             max_lifetime_seconds=self.max_lifetime_seconds,
             private_containers=self.private_containers,
@@ -484,10 +487,12 @@ class ManagedSession(SandboxSession):
         profile: str = "default",
         api_key: str | None = None,
         private_containers: Iterable[PrivateContainerSpec | dict[str, Any]] | None = None,
+        mode: str | None = None,
     ) -> None:
         super().__init__(
             image=image,
             profile=profile,
+            mode=mode,
             gateway_url=gateway_url,
             timeout=timeout,
             api_key=api_key,
@@ -495,6 +500,7 @@ class ManagedSession(SandboxSession):
         )
         self._image = image
         self._profile = profile
+        self._mode = mode
         self._experiment_id = experiment_id
         self._resources = resources
         self._config_env = config_env
@@ -520,6 +526,7 @@ class ManagedSession(SandboxSession):
             image=self._image,
             experiment_id=self._experiment_id,
             profile=self._profile,
+            mode=self._mode,
             config_env=self._config_env,
             resources=self._resources,
             tools=self._tools,
@@ -533,3 +540,47 @@ class ManagedSession(SandboxSession):
         self.image = info.image
         self.profile = info.profile
         return info
+
+
+class DevboxSession(SandboxSession):
+    """Long-lived development sandbox session.
+
+    Creates a devbox-mode session with extended lifecycle defaults:
+    - 4-hour idle timeout (vs 10 minutes for regular sessions)
+    - No maximum lifetime (vs 1 hour for regular sessions)
+
+    All execution, file, and shell APIs work identically to regular sessions.
+
+    Examples:
+        >>> with DevboxSession(image="ubuntu:22.04") as devbox:
+        ...     devbox.execute([{"name": "setup", "command": ["apt-get", "update"]}])
+        ...     devbox.upload_file("main.py", "print('hello')")
+        ...     devbox.execute([{"name": "run", "command": ["python", "main.py"]}])
+
+        Attach to an existing devbox:
+        >>> devbox = DevboxSession.attach("gw-12345", gateway_url="...")
+    """
+
+    def __init__(
+        self,
+        image: str | None = None,
+        *,
+        profile: str | None = "default",
+        gateway_url: str = "http://localhost:8080",
+        timeout: float = 300.0,
+        idle_timeout_seconds: int | None = None,
+        max_lifetime_seconds: int | None = None,
+        api_key: str | None = None,
+        private_containers: Iterable[PrivateContainerSpec | dict[str, Any]] | None = None,
+    ) -> None:
+        super().__init__(
+            image=image,
+            mode="devbox",
+            profile=profile,
+            gateway_url=gateway_url,
+            timeout=timeout,
+            idle_timeout_seconds=idle_timeout_seconds,
+            max_lifetime_seconds=max_lifetime_seconds,
+            api_key=api_key,
+            private_containers=private_containers,
+        )
