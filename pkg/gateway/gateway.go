@@ -345,7 +345,7 @@ func (g *Gateway) CreateSession(ctx context.Context, req CreateSessionRequest) (
 		}
 	}
 
-	sessionID := fmt.Sprintf("gw-%d-%s", time.Now().UnixMilli(), randomSuffix(8))
+	sessionID := sessionName(req.Image, randomSuffix(8))
 	sandboxName := sessionID
 	ownerHash, _ := KeyHashFromContext(ctx)
 	createdAt := time.Now()

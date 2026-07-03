@@ -67,6 +67,16 @@ func managedPoolImageSlug(image string) string {
 	return slug
 }
 
+func sessionName(image, suffix string) string {
+	slug := managedPoolImageSlug(image)
+	const maxLabelBytes = 63
+	maxSlug := maxLabelBytes - 1 - len(suffix)
+	if len(slug) > maxSlug {
+		slug = strings.Trim(slug[:maxSlug], "-")
+	}
+	return slug + "-" + suffix
+}
+
 func normalizeImage(image string) string {
 	image = strings.TrimPrefix(image, "docker.io/library/")
 	image = strings.TrimPrefix(image, "docker.io/")
