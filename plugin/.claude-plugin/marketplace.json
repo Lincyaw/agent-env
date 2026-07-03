@@ -1,10 +1,12 @@
 {
   "name": "arl",
-  "owner": { "name": "lincyaw" },
+  "owner": {
+    "name": "lincyaw"
+  },
   "plugins": [
     {
       "name": "arl",
-      "version": "0.15.6",
+      "version": "0.18.4",
       "source": "./",
       "description": "ARL (Agentic RL) runtime CLI, Python SDK & operations — manage experiments, warm pools, sessions, files, replay, trajectories, and logs from Claude Code"
     }

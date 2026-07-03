@@ -68,7 +68,8 @@ if [ "$DRY_RUN" -eq 0 ]; then
   mkdir -p "$SKILLS_DST_DIR"
 fi
 
-declare -A SEEN_SOURCES=()
+SEEN_SOURCE_NAMES=()
+SEEN_SOURCE_PATHS=()
 INSTALLED=()
 UPDATED=()
 SKIPPED=()
@@ -97,6 +98,25 @@ can_update() {
   fi
 
   return 1
+}
+
+find_seen_source() {
+  local needle="$1"
+  local index
+
+  for ((index = 0; index < ${#SEEN_SOURCE_NAMES[@]}; index++)); do
+    if [ "${SEEN_SOURCE_NAMES[$index]}" = "$needle" ]; then
+      printf '%s' "${SEEN_SOURCE_PATHS[$index]}"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
+remember_source() {
+  SEEN_SOURCE_NAMES+=("$1")
+  SEEN_SOURCE_PATHS+=("$2")
 }
 
 write_marker() {
@@ -142,11 +162,12 @@ install_from_root() {
 
     local name
     name="$(basename "$src")"
-    if [ -n "${SEEN_SOURCES[$name]:-}" ]; then
-      SKIPPED+=("$name: duplicate-source-name: ${SEEN_SOURCES[$name]}")
+    local seen_src
+    if seen_src="$(find_seen_source "$name")"; then
+      SKIPPED+=("$name: duplicate-source-name: $seen_src")
       continue
     fi
-    SEEN_SOURCES[$name]="$src"
+    remember_source "$name" "$src"
 
     local dst="$SKILLS_DST_DIR/$name"
     if [ -e "$dst" ] && [ ! -f "$dst/SKILL.md" ]; then
@@ -193,8 +214,16 @@ if [ "$DRY_RUN" -eq 1 ]; then
 else
   echo "Installed ARL Codex skills into: $SKILLS_DST_DIR"
 fi
-echo "Installed: $(join_or_none "${INSTALLED[@]}")"
-echo "Updated: $(join_or_none "${UPDATED[@]}")"
+if [ "${#INSTALLED[@]}" -eq 0 ]; then
+  echo "Installed: <none>"
+else
+  echo "Installed: $(join_or_none "${INSTALLED[@]}")"
+fi
+if [ "${#UPDATED[@]}" -eq 0 ]; then
+  echo "Updated: <none>"
+else
+  echo "Updated: $(join_or_none "${UPDATED[@]}")"
+fi
 if [ "${#SKIPPED[@]}" -eq 0 ]; then
   echo "Skipped: <none>"
 else
