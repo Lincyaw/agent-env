@@ -51,11 +51,11 @@ imageLocalityScheduler:
   logLevel: 2
   resources:
     requests:
-      cpu: "100m"
-      memory: 128Mi
+      cpu: "500m"
+      memory: 512Mi
     limits:
-      cpu: "1"
-      memory: 1Gi
+      cpu: "2"
+      memory: 2Gi
 
 sidecar:
   image:
@@ -91,8 +91,8 @@ gateway:
     name: ""
   resources:
     limits:
-      cpu: "4"
-      memory: 8Gi
+      cpu: "8"
+      memory: 16Gi
     requests:
       cpu: "1"
       memory: 2Gi
@@ -171,13 +171,17 @@ redis:
   addr: "redis:6379"       # Only used when deploy=false (external Redis)
   password: ""             # Redis password (stored in Secret)
   db: 0                    # Redis database number
+  # Keep Redis below the container limit so large write bursts return Redis
+  # memory errors instead of triggering cgroup OOM kills.
+  maxmemory: "7gb"
+  maxmemoryPolicy: "noeviction"
   resources:
     requests:
-      cpu: "100m"
-      memory: 128Mi
-    limits:
       cpu: "500m"
       memory: 512Mi
+    limits:
+      cpu: "4"
+      memory: 8Gi
 
 imagePullSecrets: []
 nameOverride: ""
@@ -209,11 +213,11 @@ mihomo:
   subscriptionURL: ""   # your Clash subscription URL
   resources:
     requests:
-      cpu: 50m
-      memory: 64Mi
-    limits:
       cpu: 500m
-      memory: 256Mi
+      memory: 512Mi
+    limits:
+      cpu: "2"
+      memory: 2Gi
 
 # ClickHouse configuration (for trajectory storage)
 clickhouse:
@@ -265,11 +269,11 @@ alerting:
     webhookURL: ""  # 飞书自定义机器人 Webhook URL
   resources:
     requests:
-      cpu: "100m"
-      memory: 128Mi
-    limits:
       cpu: "500m"
-      memory: 256Mi
+      memory: 512Mi
+    limits:
+      cpu: "2"
+      memory: 2Gi
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Prometheus

@@ -1,4 +1,17 @@
 {{- if and .Values.redis.enabled .Values.redis.deploy }}
+{{- $redisArgs := list }}
+{{- if .Values.redis.password }}
+{{- $redisArgs = append $redisArgs "--requirepass" }}
+{{- $redisArgs = append $redisArgs "$(REDIS_PASSWORD)" }}
+{{- end }}
+{{- if .Values.redis.maxmemory }}
+{{- $redisArgs = append $redisArgs "--maxmemory" }}
+{{- $redisArgs = append $redisArgs .Values.redis.maxmemory }}
+{{- end }}
+{{- if .Values.redis.maxmemoryPolicy }}
+{{- $redisArgs = append $redisArgs "--maxmemory-policy" }}
+{{- $redisArgs = append $redisArgs .Values.redis.maxmemoryPolicy }}
+{{- end }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -27,8 +40,13 @@ spec:
         - name: redis
           image: "{{ .Values.redis.image.repository }}:{{ .Values.redis.image.tag }}"
           imagePullPolicy: {{ .Values.redis.image.pullPolicy | default "IfNotPresent" }}
+          {{- if $redisArgs }}
+          args:
+            {{- range $redisArgs }}
+            - {{ . | quote }}
+            {{- end }}
+          {{- end }}
           {{- if .Values.redis.password }}
-          args: ["--requirepass", "$(REDIS_PASSWORD)"]
           env:
             - name: REDIS_PASSWORD
               valueFrom:
