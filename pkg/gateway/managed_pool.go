@@ -18,7 +18,11 @@ func managedPoolName(
 	profile string,
 	privateContainers []PrivateContainerSpec,
 ) (string, error) {
-	identity := namespace + "/" + normalizeProfile(profile) + "/" + image
+	image = strings.TrimSpace(image)
+	if image != "" {
+		image = normalizeImage(image)
+	}
+	identity := strings.TrimSpace(namespace) + "/" + normalizeProfile(profile) + "/" + image
 	if len(privateContainers) > 0 {
 		raw, err := json.Marshal(privateContainers)
 		if err != nil {
@@ -27,7 +31,40 @@ func managedPoolName(
 		identity += "/privateContainers=" + string(raw)
 	}
 	h := sha256.Sum256([]byte(identity))
-	return "managed-" + hex.EncodeToString(h[:6]), nil
+	hash := hex.EncodeToString(h[:6])
+	slug := managedPoolImageSlug(image)
+	const (
+		separator     = "-"
+		maxLabelBytes = 63
+	)
+	maxSlugBytes := maxLabelBytes - len(separator) - len(hash)
+	if len(slug) > maxSlugBytes {
+		slug = strings.Trim(slug[:maxSlugBytes], "-")
+	}
+	if slug == "" {
+		slug = "image"
+	}
+	return slug + separator + hash, nil
+}
+
+func managedPoolImageSlug(image string) string {
+	image = strings.TrimSpace(image)
+	if image == "" {
+		return "image"
+	}
+	if at := strings.Index(image, "@"); at >= 0 {
+		image = image[:at] + "-digest"
+	}
+	if slash := strings.LastIndex(image, "/"); slash >= 0 {
+		image = image[slash+1:]
+	}
+	slug := strings.ToLower(image)
+	slug = dnsLabelCleaner.ReplaceAllString(slug, "-")
+	slug = strings.Trim(slug, "-")
+	if slug == "" {
+		return "image"
+	}
+	return slug
 }
 
 func normalizeImage(image string) string {

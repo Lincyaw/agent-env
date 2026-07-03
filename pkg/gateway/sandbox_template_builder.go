@@ -2,6 +2,8 @@ package gateway
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"sort"
 	"strings"
@@ -23,7 +25,31 @@ const (
 )
 
 func sandboxTemplateName(poolName string) string {
-	return poolName + "-template"
+	return dnsLabelWithSuffix(poolName, "-template")
+}
+
+func dnsLabelWithSuffix(base, suffix string) string {
+	const maxLabelBytes = 63
+	base = strings.Trim(base, "-")
+	if base == "" {
+		base = "sandbox"
+	}
+	name := base + suffix
+	if len(name) <= maxLabelBytes {
+		return name
+	}
+
+	sum := sha256.Sum256([]byte(base))
+	hash := hex.EncodeToString(sum[:])[:10]
+	maxBaseBytes := maxLabelBytes - len(suffix) - len(hash) - 1
+	if maxBaseBytes < 1 {
+		return strings.Trim(hash+suffix, "-")
+	}
+	base = strings.Trim(base[:maxBaseBytes], "-")
+	if base == "" {
+		base = "sandbox"
+	}
+	return base + "-" + hash + suffix
 }
 
 func boolPtr(v bool) *bool {
