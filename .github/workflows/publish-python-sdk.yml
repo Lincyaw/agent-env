@@ -71,6 +71,15 @@ jobs:
           echo "🔨 Building package..."
           uv build --out-dir dist
 
+          echo "🧪 Verifying built wheel imports..."
+          python -m venv /tmp/arl-sdk-verify
+          /tmp/arl-sdk-verify/bin/python -m pip install --upgrade pip
+          /tmp/arl-sdk-verify/bin/python -m pip install dist/*.whl
+          /tmp/arl-sdk-verify/bin/python - <<'PY'
+          import arl
+          print(f"✅ imported arl from {arl.__file__}")
+          PY
+
           echo "📦 Publishing to PyPI..."
           uv publish dist/* --trusted-publishing always
 
