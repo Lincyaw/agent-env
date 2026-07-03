@@ -82,6 +82,7 @@ jobs:
           PY
 
           echo "📦 Publishing to PyPI..."
+          cd "${GITHUB_WORKSPACE}/${SDK_DIR}"
           uv publish dist/* --trusted-publishing always
 
           echo "✅ Successfully published arl==${{ steps.version.outputs.version }} to PyPI!"
