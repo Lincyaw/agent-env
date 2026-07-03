@@ -75,6 +75,7 @@ jobs:
           python -m venv /tmp/arl-sdk-verify
           /tmp/arl-sdk-verify/bin/python -m pip install --upgrade pip
           /tmp/arl-sdk-verify/bin/python -m pip install dist/*.whl
+          cd /tmp
           /tmp/arl-sdk-verify/bin/python - <<'PY'
           import arl
           print(f"✅ imported arl from {arl.__file__}")
