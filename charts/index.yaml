@@ -2,8 +2,35 @@ apiVersion: v1
 entries:
   agent-env:
   - apiVersion: v2
+    appVersion: 0.18.3
+    created: "2026-07-03T09:00:57.466630312Z"
+    dependencies:
+    - alias: agentSandbox
+      condition: agentSandbox.enabled
+      name: agent-sandbox
+      repository: oci://pair-diag-cn-guangzhou.cr.volces.com/pair
+      version: 0.1.0
+    description: A Helm chart for deploying the agent-env gateway stack
+    digest: c1745ed3a15e88faf5b7e8f92203fb8e42dd97f3139afd8e2035be642aa4a1b8
+    home: https://github.com/Lincyaw/agent-env
+    keywords:
+    - kubernetes
+    - gateway
+    - agent
+    - sandbox
+    maintainers:
+    - name: Lincyaw
+      url: https://github.com/Lincyaw
+    name: agent-env
+    sources:
+    - https://github.com/Lincyaw/agent-env
+    type: application
+    urls:
+    - https://lincyaw.github.io/agent-env/charts/agent-env-0.18.3.tgz
+    version: 0.18.3
+  - apiVersion: v2
     appVersion: 0.18.2
-    created: "2026-07-03T08:48:38.30102855Z"
+    created: "2026-07-03T09:00:57.463269326Z"
     dependencies:
     - alias: agentSandbox
       condition: agentSandbox.enabled
@@ -30,7 +57,7 @@ entries:
     version: 0.18.2
   - apiVersion: v2
     appVersion: 0.18.1
-    created: "2026-07-03T08:48:38.297535268Z"
+    created: "2026-07-03T09:00:57.460481022Z"
     dependencies:
     - alias: agentSandbox
       condition: agentSandbox.enabled
@@ -57,7 +84,7 @@ entries:
     version: 0.18.1
   - apiVersion: v2
     appVersion: 0.18.0
-    created: "2026-07-03T08:48:38.294584578Z"
+    created: "2026-07-03T09:00:57.457271694Z"
     dependencies:
     - alias: agentSandbox
       condition: agentSandbox.enabled
@@ -84,7 +111,7 @@ entries:
     version: 0.18.0
   - apiVersion: v2
     appVersion: 0.17.0
-    created: "2026-07-03T08:48:38.290957637Z"
+    created: "2026-07-03T09:00:57.454718861Z"
     dependencies:
     - alias: agentSandbox
       condition: agentSandbox.enabled
@@ -111,7 +138,7 @@ entries:
     version: 0.17.0
   - apiVersion: v2
     appVersion: 0.16.0
-    created: "2026-07-03T08:48:38.286753157Z"
+    created: "2026-07-03T09:00:57.451619195Z"
     dependencies:
     - alias: agentSandbox
       condition: agentSandbox.enabled
@@ -138,7 +165,7 @@ entries:
     version: 0.16.0
   - apiVersion: v2
     appVersion: 0.15.6
-    created: "2026-07-03T08:48:38.283847484Z"
+    created: "2026-07-03T09:00:57.448754549Z"
     dependencies:
     - alias: agentSandbox
       condition: agentSandbox.enabled
@@ -166,7 +193,7 @@ entries:
   arl-operator:
   - apiVersion: v2
     appVersion: 0.14.1
-    created: "2026-07-03T08:48:38.313182413Z"
+    created: "2026-07-03T09:00:57.478681143Z"
     description: A Helm chart for deploying the ARL (Agent Runtime Layer) Operator
     digest: 13360f7845fd14534801e1855aa589014e10bc19fba17d64e4ff6d41217eb43b
     home: https://github.com/Lincyaw/agent-env
@@ -187,7 +214,7 @@ entries:
     version: 0.14.1
   - apiVersion: v2
     appVersion: 0.14.0
-    created: "2026-07-03T08:48:38.31176133Z"
+    created: "2026-07-03T09:00:57.476795547Z"
     description: A Helm chart for deploying the ARL (Agent Runtime Layer) Operator
     digest: ce6eeb946982c28460e2a7f7019abafbda2c8b94b489546244453dfd6366fcf4
     home: https://github.com/Lincyaw/agent-env
@@ -208,7 +235,7 @@ entries:
     version: 0.14.0
   - apiVersion: v2
     appVersion: 0.13.0
-    created: "2026-07-03T08:48:38.309071062Z"
+    created: "2026-07-03T09:00:57.475440173Z"
     description: A Helm chart for deploying the ARL (Agent Runtime Layer) Operator
     digest: c62216d9b7ecac7878c339e8591745e357bcff7f1b5440dc9ce3db482d10cd1c
     home: https://github.com/Lincyaw/agent-env
@@ -229,7 +256,7 @@ entries:
     version: 0.13.0
   - apiVersion: v2
     appVersion: 0.12.1
-    created: "2026-07-03T08:48:38.307615716Z"
+    created: "2026-07-03T09:00:57.473772905Z"
     description: A Helm chart for deploying the ARL (Agent Runtime Layer) Operator
     digest: 05eec9e147785a29dd6b8c6c7a0f4d93d1afc00bf6c923f37b6eaa6113cf9e35
     home: https://github.com/Lincyaw/agent-env
@@ -250,7 +277,7 @@ entries:
     version: 0.12.1
   - apiVersion: v2
     appVersion: 0.12.0
-    created: "2026-07-03T08:48:38.306202488Z"
+    created: "2026-07-03T09:00:57.471859447Z"
     description: A Helm chart for deploying the ARL (Agent Runtime Layer) Operator
     digest: f56f11706b5492d7e5d9e4db594dae9b0cc0e92df0879337d5dde2ee3ef0fe8e
     home: https://github.com/Lincyaw/agent-env
@@ -271,7 +298,7 @@ entries:
     version: 0.12.0
   - apiVersion: v2
     appVersion: 0.11.0
-    created: "2026-07-03T08:48:38.303889479Z"
+    created: "2026-07-03T09:00:57.470564936Z"
     description: A Helm chart for deploying the ARL (Agent Runtime Layer) Operator
     digest: e11a48d64e9dd01679e8b4d00e5d46aeccde03d6c8401d45c49e5e3256730108
     home: https://github.com/Lincyaw/agent-env
@@ -292,7 +319,7 @@ entries:
     version: 0.11.0
   - apiVersion: v2
     appVersion: 0.10.0
-    created: "2026-07-03T08:48:38.302397404Z"
+    created: "2026-07-03T09:00:57.469182321Z"
     description: A Helm chart for deploying the ARL (Agent Runtime Layer) Operator
     digest: 105c1afd3c8bcf9899fc775f051fe5743e149e0b6913df00bf519422e0993a81
     home: https://github.com/Lincyaw/agent-env
@@ -313,7 +340,7 @@ entries:
     version: 0.10.0
   - apiVersion: v2
     appVersion: 0.9.0
-    created: "2026-07-03T08:48:38.319876188Z"
+    created: "2026-07-03T09:00:57.485197006Z"
     description: A Helm chart for deploying the ARL (Agent Runtime Layer) Operator
     digest: 929fc4af6df0071f686d4b37b5c77178edb9af59c3fb8166692fe93afd5b5792
     home: https://github.com/Lincyaw/agent-env
@@ -334,7 +361,7 @@ entries:
     version: 0.9.0
   - apiVersion: v2
     appVersion: 0.8.0
-    created: "2026-07-03T08:48:38.318432794Z"
+    created: "2026-07-03T09:00:57.482998166Z"
     description: A Helm chart for deploying the ARL (Agent Runtime Layer) Operator
     digest: 01f8b5daa5cbb4e595afb0c1c39b9d92d286dfbe71c2e3f88fd3c114ab99ff5b
     home: https://github.com/Lincyaw/agent-env
@@ -355,7 +382,7 @@ entries:
     version: 0.8.0
   - apiVersion: v2
     appVersion: 0.7.0
-    created: "2026-07-03T08:48:38.317059771Z"
+    created: "2026-07-03T09:00:57.481709777Z"
     description: A Helm chart for deploying the ARL (Agent Runtime Layer) Operator
     digest: 17da1ce8c9b8a0e4d7ef3c0fae80fe3fb68d475ca3c31b6996a213038583eef7
     home: https://github.com/Lincyaw/agent-env
@@ -376,7 +403,7 @@ entries:
     version: 0.7.0
   - apiVersion: v2
     appVersion: 0.6.0
-    created: "2026-07-03T08:48:38.314521371Z"
+    created: "2026-07-03T09:00:57.480413694Z"
     description: A Helm chart for deploying the ARL (Agent Runtime Layer) Operator
     digest: 6153bca8b205d0f615b3c023cba8dd8bf57c7351c481ede83ad7f69c1b7c8b35
     home: https://github.com/Lincyaw/agent-env
@@ -395,4 +422,4 @@ entries:
     urls:
     - https://lincyaw.github.io/agent-env/charts/arl-operator-0.6.0.tgz
     version: 0.6.0
-generated: "2026-07-03T08:48:38.279121637Z"
+generated: "2026-07-03T09:00:57.445391551Z"
