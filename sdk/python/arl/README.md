@@ -207,9 +207,12 @@ manager.delete_warmpool("python-pool")   # drain sessions/claims and scale to ze
 # manager.destroy_warmpool("python-pool")  # physically delete the WarmPool/template
 ```
 
-Current sandbox-backed pools reject `tools` and `config_env` provisioning
-requests. `list_tools()` and `call_tool()` only work when the executor image
-already contains `/opt/arl/tools/registry.json` and matching tool files.
+Current sandbox-backed sessions support claim-scoped `config_env.vars` and
+string-valued `config_env.envVars` environment injection. Pool creation still
+rejects `config_env`, and sandbox-backed sessions still reject `tools`
+provisioning and `config_env` ConfigMap/Secret/valueFrom provisioning requests.
+`list_tools()` and `call_tool()` only work when the executor image already
+contains `/opt/arl/tools/registry.json` and matching tool files.
 
 ## Managed Sessions
 

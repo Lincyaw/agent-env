@@ -16,21 +16,9 @@ func managedPoolName(
 	image string,
 	namespace string,
 	profile string,
-	configEnv json.RawMessage,
 	privateContainers []PrivateContainerSpec,
 ) (string, error) {
 	identity := namespace + "/" + normalizeProfile(profile) + "/" + image
-	cfg, err := decodeConfigEnv(configEnv)
-	if err != nil {
-		return "", err
-	}
-	if cfg != nil {
-		raw, err := json.Marshal(cfg)
-		if err != nil {
-			return "", fmt.Errorf("marshal configEnv identity: %w", err)
-		}
-		identity += "/" + string(raw)
-	}
 	if len(privateContainers) > 0 {
 		raw, err := json.Marshal(privateContainers)
 		if err != nil {

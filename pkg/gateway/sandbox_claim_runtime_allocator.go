@@ -108,6 +108,7 @@ func (a *SandboxClaimRuntimeAllocator) Allocate(ctx context.Context, req Runtime
 			AdditionalPodMetadata: sandboxv1beta1.PodMetadata{
 				Annotations: podAnnotations,
 			},
+			Env: sandboxClaimEnv(req.Env),
 		},
 	}
 
@@ -155,6 +156,21 @@ func (a *SandboxClaimRuntimeAllocator) Allocate(ctx context.Context, req Runtime
 		case <-ticker.C:
 		}
 	}
+}
+
+func sandboxClaimEnv(env []RuntimeEnvVar) []extensionsv1beta1.EnvVar {
+	if len(env) == 0 {
+		return nil
+	}
+	out := make([]extensionsv1beta1.EnvVar, 0, len(env))
+	for _, ev := range env {
+		out = append(out, extensionsv1beta1.EnvVar{
+			Name:          ev.Name,
+			Value:         ev.Value,
+			ContainerName: ev.ContainerName,
+		})
+	}
+	return out
 }
 
 func (a *SandboxClaimRuntimeAllocator) Release(ctx context.Context, allocation RuntimeAllocation) error {

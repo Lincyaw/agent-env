@@ -23,6 +23,7 @@ type CreateSessionRequest struct {
 	Image              string                 `json:"image,omitempty"`
 	Profile            string                 `json:"profile,omitempty"`
 	Namespace          string                 `json:"namespace,omitempty"`
+	ConfigEnv          json.RawMessage        `json:"configEnv,omitempty"`
 	IdleTimeoutSeconds int                    `json:"idleTimeoutSeconds,omitempty"`
 	MaxLifetimeSeconds int                    `json:"maxLifetimeSeconds,omitempty"`
 	PrivateContainers  []PrivateContainerSpec `json:"privateContainers,omitempty"`

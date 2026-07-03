@@ -28,6 +28,14 @@ type RuntimeAllocateRequest struct {
 	Managed      bool
 	ExperimentID string
 	Lifecycle    RuntimeLifecycle
+	Env          []RuntimeEnvVar
+}
+
+// RuntimeEnvVar is a session-scoped environment variable request.
+type RuntimeEnvVar struct {
+	Name          string
+	Value         string
+	ContainerName string
 }
 
 // RuntimeLifecycle describes the claim-level lifecycle mirror for a session.

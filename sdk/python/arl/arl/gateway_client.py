@@ -169,6 +169,7 @@ class GatewayClient:
         image: str | None = None,
         *,
         profile: str | None = "default",
+        config_env: ConfigEnvSpec | dict[str, Any] | None = None,
         idle_timeout_seconds: int | None = None,
         max_lifetime_seconds: int | None = None,
         private_containers: Iterable[PrivateContainerSpec | dict[str, Any]] | None = None,
@@ -180,6 +181,9 @@ class GatewayClient:
             body["image"] = image
         if profile:
             body["profile"] = profile
+        config_env_payload = _serialize_config_env(config_env)
+        if config_env_payload is not None:
+            body["configEnv"] = config_env_payload
         if idle_timeout_seconds is not None:
             body["idleTimeoutSeconds"] = idle_timeout_seconds
         if max_lifetime_seconds is not None:

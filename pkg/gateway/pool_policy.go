@@ -52,6 +52,7 @@ type ResourceIntent struct {
 	PinnedPoolName string
 	Managed        bool
 	ExperimentID   string
+	ClaimEnv       bool
 }
 
 // PoolSnapshot is the selector/admission view of a SandboxWarmPool.
@@ -180,8 +181,15 @@ func NewDefaultAdmissionController() DefaultAdmissionController {
 	return DefaultAdmissionController{}
 }
 
-func (a DefaultAdmissionController) Admit(_ context.Context, _ ResourceIntent, selection PoolSelection) (AdmissionDecision, error) {
+func (a DefaultAdmissionController) Admit(_ context.Context, intent ResourceIntent, selection PoolSelection) (AdmissionDecision, error) {
 	warmAvailable := selection.Pool.WarmAvailable()
+	if intent.ClaimEnv {
+		return AdmissionDecision{
+			Admitted:      true,
+			Reason:        "claim_env_cold_start",
+			WarmAvailable: warmAvailable,
+		}, nil
+	}
 	if warmAvailable > 0 {
 		return AdmissionDecision{
 			Admitted:      true,
@@ -209,6 +217,7 @@ func (g *Gateway) resourceIntentFromCreateSession(ctx context.Context, req Creat
 		PinnedPoolName: req.PoolName,
 		Managed:        req.Managed,
 		ExperimentID:   req.ExperimentID,
+		ClaimEnv:       hasJSONPayload(req.ConfigEnv),
 	}
 }
 
@@ -237,7 +246,7 @@ func (g *Gateway) ensureImageBackedSessionPool(ctx context.Context, req CreateSe
 		}
 	}
 
-	poolName, err := managedPoolName(req.Image, namespace, req.Profile, nil, req.PrivateContainers)
+	poolName, err := managedPoolName(req.Image, namespace, req.Profile, req.PrivateContainers)
 	if err != nil {
 		return req, "", err
 	}

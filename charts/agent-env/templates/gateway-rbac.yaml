@@ -34,6 +34,7 @@ rules:
     verbs:
       - get
       - create
+      - patch
       - delete
   - apiGroups:
       - extensions.agents.x-k8s.io

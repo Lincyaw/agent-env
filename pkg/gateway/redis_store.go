@@ -117,9 +117,8 @@ func redisDataToSession(data redisSessionData) *session {
 }
 
 // RedisStore is a SessionStore backed by Redis.
-// It keeps a local cache (sync.Map) for hot-path reads (avoiding
-// Redis round-trips on every GetSession/ExecuteSteps) and persists
-// mutations to Redis for cross-replica consistency.
+// It keeps a local cache (sync.Map) for active hot-path reads and persists
+// mutations to Redis for durable history/recovery.
 type RedisStore struct {
 	client *redis.Client
 	ttl    time.Duration
@@ -167,32 +166,10 @@ func (rs *RedisStore) redisKey(sessionID string) string {
 }
 
 func (rs *RedisStore) Get(sessionID string) (*session, bool) {
-	// Check local cache first (hot path)
 	if val, ok := rs.cache.Load(sessionID); ok {
 		return val.(*session), true
 	}
-
-	// Fall back to Redis
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-
-	raw, err := rs.client.Get(ctx, rs.redisKey(sessionID)).Bytes()
-	if err != nil {
-		return nil, false
-	}
-
-	var data redisSessionData
-	if err := json.Unmarshal(raw, &data); err != nil {
-		log.Printf("Warning: failed to unmarshal session %s from Redis: %v", sessionID, err)
-		return nil, false
-	}
-	if data.Deleted {
-		return nil, false
-	}
-
-	s := redisDataToSession(data)
-	rs.cache.Store(sessionID, s)
-	return s, true
+	return nil, false
 }
 
 func (rs *RedisStore) Set(sessionID string, s *session) {
@@ -308,17 +285,47 @@ func (rs *RedisStore) loadRedisData(sessionID string) (redisSessionData, bool) {
 }
 
 func (rs *RedisStore) loadRedisDataContext(ctx context.Context, sessionID string) (redisSessionData, bool) {
+	data, found, err := rs.loadRedisDataContextResult(ctx, sessionID)
+	if err != nil {
+		log.Printf("Warning: failed to load session %s from Redis: %v", sessionID, err)
+		return redisSessionData{}, false
+	}
+	return data, found
+}
+
+func (rs *RedisStore) loadRedisDataContextResult(ctx context.Context, sessionID string) (redisSessionData, bool, error) {
 	raw, err := rs.client.Get(ctx, rs.redisKey(sessionID)).Bytes()
 	if err != nil {
-		return redisSessionData{}, false
+		if err == redis.Nil {
+			return redisSessionData{}, false, nil
+		}
+		return redisSessionData{}, false, err
 	}
 
 	var data redisSessionData
 	if err := json.Unmarshal(raw, &data); err != nil {
-		log.Printf("Warning: failed to unmarshal session %s from Redis: %v", sessionID, err)
-		return redisSessionData{}, false
+		return redisSessionData{}, false, err
 	}
-	return data, true
+	return data, true, nil
+}
+
+func (rs *RedisStore) RecoverSession(ctx context.Context, sessionID string) (sessionRecoveryRecord, error) {
+	data, found, err := rs.loadRedisDataContextResult(ctx, sessionID)
+	if err != nil {
+		return sessionRecoveryRecord{}, err
+	}
+	if !found {
+		rs.cache.Delete(sessionID)
+		return sessionRecoveryRecord{}, nil
+	}
+	if data.Deleted {
+		rs.cache.Delete(sessionID)
+		return sessionRecoveryRecord{found: true, deleted: true}, nil
+	}
+
+	s := redisDataToSession(data)
+	rs.cache.Store(sessionID, s)
+	return sessionRecoveryRecord{session: s, found: true}, nil
 }
 
 func (rs *RedisStore) RecoverActiveSessions(ctx context.Context) (map[string]*session, error) {

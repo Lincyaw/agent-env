@@ -102,6 +102,12 @@ gateway:
   sweepInterval: "30s"      # How often to check for expired sessions
   sidecarClientTimeout: "300s" # Gateway -> sidecar gRPC call timeout
   writeTimeout: "0s"        # Public HTTP write timeout; 0 disables it for long streaming execs
+  startupProbe:
+    enabled: true
+    initialDelaySeconds: 0
+    periodSeconds: 5
+    failureThreshold: 60
+    timeoutSeconds: 1
   # Admission control for session allocation.
   admission:
     # Max time a request may wait for ready capacity while the gateway scales

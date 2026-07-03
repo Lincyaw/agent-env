@@ -34,6 +34,19 @@ type RecoverableSessionStore interface {
 	RecoverActiveSessions(ctx context.Context) (map[string]*session, error)
 }
 
+type sessionRecoveryRecord struct {
+	session *session
+	found   bool
+	deleted bool
+}
+
+// targetedRecoverableSessionStore hydrates a single session record for startup
+// recovery. Kubernetes-backed deployments use live SandboxClaims as the active
+// source of truth, then call this only for those live session IDs.
+type targetedRecoverableSessionStore interface {
+	RecoverSession(ctx context.Context, sessionID string) (sessionRecoveryRecord, error)
+}
+
 // SessionCountSetter lets recovery repair a durable active-session counter
 // after validating which persisted sessions still have live runtimes.
 type SessionCountSetter interface {

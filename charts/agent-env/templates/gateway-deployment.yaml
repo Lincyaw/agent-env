@@ -179,6 +179,16 @@ spec:
               mountPath: /etc/arl/keys
               readOnly: true
           {{- end }}
+          {{- if .Values.gateway.startupProbe.enabled }}
+          startupProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: {{ .Values.gateway.startupProbe.initialDelaySeconds }}
+            periodSeconds: {{ .Values.gateway.startupProbe.periodSeconds }}
+            failureThreshold: {{ .Values.gateway.startupProbe.failureThreshold }}
+            timeoutSeconds: {{ .Values.gateway.startupProbe.timeoutSeconds }}
+          {{- end }}
           livenessProbe:
             httpGet:
               path: /healthz

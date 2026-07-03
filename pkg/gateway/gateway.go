@@ -305,6 +305,11 @@ func (g *Gateway) CreateSession(ctx context.Context, req CreateSessionRequest) (
 		recordSpanErr(span, err)
 		return nil, err
 	}
+	claimEnv, err := parseConfigEnvVars(req.ConfigEnv)
+	if err != nil {
+		recordSpanErr(span, err)
+		return nil, err
+	}
 	var autoCreatedPool string
 	req, autoCreatedPool, err = g.ensureImageBackedSessionPool(ctx, req, ns)
 	if err != nil {
@@ -331,6 +336,14 @@ func (g *Gateway) CreateSession(ctx context.Context, req CreateSessionRequest) (
 	}
 	poolRef := selection.PoolName
 	ns = selection.Namespace
+
+	if len(claimEnv) > 0 {
+		if err := g.ensureClaimEnvInjectionPolicy(ctx, poolRef, ns); err != nil {
+			cleanupAutoCreatedPool()
+			recordSpanErr(span, err)
+			return nil, err
+		}
+	}
 
 	sessionID := fmt.Sprintf("gw-%d-%s", time.Now().UnixMilli(), randomSuffix(8))
 	sandboxName := sessionID
@@ -361,6 +374,7 @@ func (g *Gateway) CreateSession(ctx context.Context, req CreateSessionRequest) (
 		Managed:      req.Managed,
 		ExperimentID: req.ExperimentID,
 		Lifecycle:    lifecycle,
+		Env:          claimEnv,
 	})
 	if err != nil {
 		recordSpanErr(span, err)
@@ -521,13 +535,22 @@ func (g *Gateway) cleanupManagedPoolAfterSessionDelete(ctx context.Context, allo
 	}
 }
 
-// RecoverSessions hydrates durable session records and keeps only those whose
-// SandboxClaim/Sandbox binding can still be resolved through the runtime
-// allocator. Stale records are tombstoned so they cannot be resurrected.
+// RecoverSessions rebuilds the active in-memory session cache after a gateway
+// restart. Kubernetes SandboxClaims are the source of truth for active sessions;
+// durable store records are loaded only for those live runtimes. Historical
+// records remain available through GetHistoricalSession/replay without being
+// promoted back to active sessions.
 func (g *Gateway) RecoverSessions(ctx context.Context) (int, error) {
+	if g.k8sClient != nil && g.runtimeAllocator != nil {
+		return g.recoverSessionsFromRuntimeBindings(ctx)
+	}
+	return g.recoverSessionsFromDurableStore(ctx)
+}
+
+func (g *Gateway) recoverSessionsFromDurableStore(ctx context.Context) (int, error) {
 	recoverable, ok := g.store.(RecoverableSessionStore)
 	if !ok {
-		return g.recoverSessionsFromRuntimeBindings(ctx)
+		return 0, nil
 	}
 	recovered, err := recoverable.RecoverActiveSessions(ctx)
 	if err != nil {
@@ -623,9 +646,6 @@ func (g *Gateway) recoverSessionsFromRuntimeBindings(ctx context.Context) (int, 
 		if sessionID == "" {
 			continue
 		}
-		if _, exists := g.store.Get(sessionID); exists {
-			continue
-		}
 		poolRef := claim.Spec.WarmPoolRef.Name
 		allocation := RuntimeAllocation{
 			Backend:     runtimeBackendSandboxClaim,
@@ -640,27 +660,15 @@ func (g *Gateway) recoverSessionsFromRuntimeBindings(ctx context.Context) (int, 
 			log.Printf("Warning: cannot recover session %s from claim %s/%s: %v", sessionID, claim.Namespace, claim.Name, err)
 			continue
 		}
-		info := g.recoveredSessionInfo(ctx, sessionID, *resolved, claim)
-		lastTask := info.CreatedAt
-		if raw := strings.TrimSpace(claim.Annotations[labels.LastActivityAnnotation]); raw != "" {
-			if parsed, err := time.Parse(time.RFC3339, raw); err == nil {
-				lastTask = parsed
-			}
+
+		s, ok, err := g.recoverSessionFromLiveClaim(ctx, sessionID, *resolved, claim)
+		if err != nil {
+			return active, err
 		}
-		managed := strings.EqualFold(claim.Annotations[labels.ManagedAnnotation], "true")
-		s := &session{
-			Info:         info,
-			Runtime:      *resolved,
-			History:      NewStepHistory(),
-			managed:      managed,
-			experimentID: claim.Annotations[labels.ExperimentAnnotation],
-			ownerKeyHash: claim.Annotations[labels.OwnerKeyHashAnnotation],
-			lastTaskTime: lastTask,
-			createdAt:    info.CreatedAt,
-			idleTimeout:  g.gwConfig.IdleTimeout,
-			maxLifetime:  g.gwConfig.MaxLifetime,
-			operations:   make(map[string]*executeOperation),
+		if !ok {
+			continue
 		}
+
 		g.store.Set(sessionID, s)
 		active++
 	}
@@ -673,6 +681,115 @@ func (g *Gateway) recoverSessionsFromRuntimeBindings(ctx context.Context) (int, 
 		g.metrics.SetActiveSessions(g.store.Count())
 	}
 	return active, nil
+}
+
+func (g *Gateway) recoverSessionFromLiveClaim(ctx context.Context, sessionID string, resolved RuntimeAllocation, claim *extensionsv1beta1.SandboxClaim) (*session, bool, error) {
+	var s *session
+	if targeted, ok := g.store.(targetedRecoverableSessionStore); ok {
+		record, err := targeted.RecoverSession(ctx, sessionID)
+		if err != nil {
+			return nil, false, fmt.Errorf("recover session %s from durable store: %w", sessionID, err)
+		}
+		if record.deleted {
+			log.Printf("Warning: skipping live claim %s/%s for deleted session %s", claim.Namespace, claim.Name, sessionID)
+			if releaseErr := g.runtimeAllocator.Release(ctx, resolved); releaseErr != nil && !errors.IsNotFound(releaseErr) {
+				log.Printf("Warning: failed to release live claim for deleted session %s: %v", sessionID, releaseErr)
+			}
+			return nil, false, nil
+		}
+		s = record.session
+	} else if existing, ok := g.store.Get(sessionID); ok {
+		s = existing
+	}
+
+	if s == nil {
+		s = g.newRecoveredSessionFromClaim(ctx, sessionID, resolved, claim)
+	}
+	if recoveredSessionClosed(s) {
+		g.markSessionDeleted(s, "recovery_closed")
+		g.store.Delete(sessionID)
+		return nil, false, nil
+	}
+
+	g.applyRecoveredRuntime(ctx, s, sessionID, resolved, claim)
+	return s, true, nil
+}
+
+func recoveredSessionClosed(s *session) bool {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.closed
+}
+
+func (g *Gateway) newRecoveredSessionFromClaim(ctx context.Context, sessionID string, resolved RuntimeAllocation, claim *extensionsv1beta1.SandboxClaim) *session {
+	info := g.recoveredSessionInfo(ctx, sessionID, resolved, claim)
+	lastTask := recoveredLastActivity(claim, info.CreatedAt)
+	managed := strings.EqualFold(claim.Annotations[labels.ManagedAnnotation], "true")
+	return &session{
+		Info:         info,
+		Runtime:      resolved,
+		History:      NewStepHistory(),
+		managed:      managed,
+		experimentID: claim.Annotations[labels.ExperimentAnnotation],
+		ownerKeyHash: claim.Annotations[labels.OwnerKeyHashAnnotation],
+		lastTaskTime: lastTask,
+		createdAt:    info.CreatedAt,
+		idleTimeout:  g.gwConfig.IdleTimeout,
+		maxLifetime:  g.gwConfig.MaxLifetime,
+		operations:   make(map[string]*executeOperation),
+	}
+}
+
+func (g *Gateway) applyRecoveredRuntime(ctx context.Context, s *session, sessionID string, resolved RuntimeAllocation, claim *extensionsv1beta1.SandboxClaim) {
+	info := g.recoveredSessionInfo(ctx, sessionID, resolved, claim)
+	lastTask := recoveredLastActivity(claim, info.CreatedAt)
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.Runtime = resolved
+	s.Info.ID = sessionID
+	s.Info.Namespace = resolved.Namespace
+	s.Info.PoolRef = resolved.PoolRef
+	s.Info.PodName = resolved.PodName
+	s.Info.PodIP = resolved.PodIP
+	s.Info.SandboxName = resolved.SandboxName
+	s.Info.Status = "active"
+	if s.Info.CreatedAt.IsZero() {
+		s.Info.CreatedAt = info.CreatedAt
+	}
+	if info.Image != "" {
+		s.Info.Image = info.Image
+	}
+	if info.Profile != "" {
+		s.Info.Profile = info.Profile
+	}
+	if s.History == nil {
+		s.History = NewStepHistory()
+	}
+	if s.operations == nil {
+		s.operations = make(map[string]*executeOperation)
+	}
+	if s.createdAt.IsZero() {
+		s.createdAt = s.Info.CreatedAt
+	}
+	if s.lastTaskTime.IsZero() {
+		s.lastTaskTime = lastTask
+	}
+	if s.idleTimeout == 0 {
+		s.idleTimeout = g.gwConfig.IdleTimeout
+	}
+	if s.maxLifetime == 0 {
+		s.maxLifetime = g.gwConfig.MaxLifetime
+	}
+}
+
+func recoveredLastActivity(claim *extensionsv1beta1.SandboxClaim, fallback time.Time) time.Time {
+	if raw := strings.TrimSpace(claim.Annotations[labels.LastActivityAnnotation]); raw != "" {
+		if parsed, err := time.Parse(time.RFC3339, raw); err == nil {
+			return parsed
+		}
+	}
+	return fallback
 }
 
 func (g *Gateway) recoveredSessionInfo(ctx context.Context, sessionID string, allocation RuntimeAllocation, claim *extensionsv1beta1.SandboxClaim) SessionInfo {
@@ -1334,7 +1451,7 @@ func (g *Gateway) CreatePool(ctx context.Context, req CreatePoolRequest) error {
 	}
 
 	if hasJSONPayload(req.ConfigEnv) {
-		return fmt.Errorf("configEnv is not supported by SandboxWarmPool-backed pools yet")
+		return fmt.Errorf("pool configEnv is not supported by SandboxWarmPool-backed pools; pass configEnv when creating a session")
 	}
 	if hasJSONPayload(req.Tools) {
 		return fmt.Errorf("tools are not supported by SandboxWarmPool-backed pools yet")
@@ -1398,6 +1515,7 @@ func (g *Gateway) CreatePool(ctx context.Context, req CreatePoolRequest) error {
 		ObjectMeta: templateMeta,
 		Spec: extensionsv1beta1.SandboxTemplateSpec{
 			NetworkPolicyManagement: g.sandboxNetworkPolicyManagement(),
+			EnvVarsInjectionPolicy:  extensionsv1beta1.EnvVarsInjectionPolicyOverrides,
 			Service:                 boolPtr(false),
 			PodTemplate: sandboxv1beta1.PodTemplate{
 				ObjectMeta: podMetadata,
@@ -1431,6 +1549,30 @@ func (g *Gateway) CreatePool(ctx context.Context, req CreatePoolRequest) error {
 			}
 		}
 		return fmt.Errorf("create sandbox warm pool: %w", err)
+	}
+	return nil
+}
+
+func (g *Gateway) ensureClaimEnvInjectionPolicy(ctx context.Context, poolName, namespace string) error {
+	pool := &extensionsv1beta1.SandboxWarmPool{}
+	if err := g.k8sClient.Get(ctx, types.NamespacedName{Name: poolName, Namespace: namespace}, pool); err != nil {
+		return fmt.Errorf("get sandbox warm pool %s/%s for configEnv: %w", namespace, poolName, err)
+	}
+	templateName := pool.Spec.TemplateRef.Name
+	if templateName == "" {
+		return fmt.Errorf("sandbox warm pool %s/%s has no templateRef for configEnv", namespace, poolName)
+	}
+	template := &extensionsv1beta1.SandboxTemplate{}
+	if err := g.k8sClient.Get(ctx, types.NamespacedName{Name: templateName, Namespace: namespace}, template); err != nil {
+		return fmt.Errorf("get sandbox template %s/%s for configEnv: %w", namespace, templateName, err)
+	}
+	if template.Spec.EnvVarsInjectionPolicy == extensionsv1beta1.EnvVarsInjectionPolicyOverrides {
+		return nil
+	}
+	patch := client.MergeFrom(template.DeepCopy())
+	template.Spec.EnvVarsInjectionPolicy = extensionsv1beta1.EnvVarsInjectionPolicyOverrides
+	if err := g.k8sClient.Patch(ctx, template, patch); err != nil {
+		return fmt.Errorf("patch sandbox template %s/%s env injection policy: %w", namespace, templateName, err)
 	}
 	return nil
 }
@@ -2182,11 +2324,6 @@ func (g *Gateway) CreateManagedSession(ctx context.Context, req CreateManagedSes
 		return nil, err
 	}
 
-	if hasJSONPayload(req.ConfigEnv) {
-		err := fmt.Errorf("managed session configEnv is not supported by sandbox-backed pools yet")
-		recordSpanErr(span, err)
-		return nil, err
-	}
 	if hasJSONPayload(req.Tools) {
 		err := fmt.Errorf("managed session tools are not supported by sandbox-backed pools yet")
 		recordSpanErr(span, err)
@@ -2196,9 +2333,13 @@ func (g *Gateway) CreateManagedSession(ctx context.Context, req CreateManagedSes
 		recordSpanErr(span, err)
 		return nil, err
 	}
+	if _, err := parseConfigEnvVars(req.ConfigEnv); err != nil {
+		recordSpanErr(span, err)
+		return nil, err
+	}
 	image := normalizeImage(req.Image)
 	profile := normalizeProfile(req.Profile)
-	poolName, err := managedPoolName(image, ns, profile, nil, req.PrivateContainers)
+	poolName, err := managedPoolName(image, ns, profile, req.PrivateContainers)
 	if err != nil {
 		recordSpanErr(span, err)
 		return nil, fmt.Errorf("derive managed pool name: %w", err)
@@ -2229,6 +2370,7 @@ func (g *Gateway) CreateManagedSession(ctx context.Context, req CreateManagedSes
 		Namespace:          ns,
 		IdleTimeoutSeconds: req.IdleTimeoutSeconds,
 		MaxLifetimeSeconds: req.MaxLifetimeSeconds,
+		ConfigEnv:          req.ConfigEnv,
 		Managed:            true,
 		ExperimentID:       req.ExperimentID,
 		PrivateContainers:  req.PrivateContainers,

@@ -113,6 +113,10 @@ func TestSandboxClaimRuntimeAllocatorAllocate(t *testing.T) {
 		Namespace:   namespace,
 		SessionID:   sessionID,
 		SandboxName: sandboxName,
+		Env: []RuntimeEnvVar{
+			{Name: "AGENT_CONFIG_PATH", Value: "/workspace/agent.yaml"},
+			{Name: "PRIVATE_MODE", Value: "enabled", ContainerName: "private"},
+		},
 		Lifecycle: RuntimeLifecycle{
 			CreatedAt:      time.Now(),
 			LastActivityAt: time.Now(),
@@ -163,6 +167,15 @@ func TestSandboxClaimRuntimeAllocatorAllocate(t *testing.T) {
 	}
 	if claim.Spec.Lifecycle.TTLSecondsAfterFinished == nil || *claim.Spec.Lifecycle.TTLSecondsAfterFinished != 300 {
 		t.Fatalf("finished TTL = %#v, want 300", claim.Spec.Lifecycle.TTLSecondsAfterFinished)
+	}
+	if len(claim.Spec.Env) != 2 {
+		t.Fatalf("claim env = %#v, want two env vars", claim.Spec.Env)
+	}
+	if got := claim.Spec.Env[0]; got.Name != "AGENT_CONFIG_PATH" || got.Value != "/workspace/agent.yaml" || got.ContainerName != "" {
+		t.Fatalf("claim env[0] = %#v, want AGENT_CONFIG_PATH default container", got)
+	}
+	if got := claim.Spec.Env[1]; got.Name != "PRIVATE_MODE" || got.Value != "enabled" || got.ContainerName != "private" {
+		t.Fatalf("claim env[1] = %#v, want PRIVATE_MODE private container", got)
 	}
 	if got := claim.Annotations[labels.IdleTimeoutAnnotation]; got != "600" {
 		t.Fatalf("idle timeout annotation = %q, want 600", got)

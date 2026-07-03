@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"testing"
@@ -192,6 +193,58 @@ func TestCreatePoolCreatesSandboxWarmPoolAndExecutableTemplate(t *testing.T) {
 	}
 }
 
+func TestCreatePoolAllowsClaimEnvInjection(t *testing.T) {
+	scheme := newGatewayTestScheme(t)
+	k8sClient := fake.NewClientBuilder().WithScheme(scheme).Build()
+	gw := &Gateway{
+		k8sClient: k8sClient,
+		gwConfig: GatewayConfig{
+			GRPCAuthToken: "test-token",
+		},
+	}
+
+	err := gw.CreatePool(context.Background(), CreatePoolRequest{
+		Name:      "pool",
+		Namespace: "default",
+		Image:     "busybox:1.36.1",
+		Replicas:  1,
+	})
+	if err != nil {
+		t.Fatalf("CreatePool returned error: %v", err)
+	}
+
+	template := &extensionsv1beta1.SandboxTemplate{}
+	if err := k8sClient.Get(context.Background(), types.NamespacedName{Name: "pool-template", Namespace: "default"}, template); err != nil {
+		t.Fatalf("get sandbox template: %v", err)
+	}
+	if got := template.Spec.EnvVarsInjectionPolicy; got != extensionsv1beta1.EnvVarsInjectionPolicyOverrides {
+		t.Fatalf("EnvVarsInjectionPolicy = %q, want Overrides", got)
+	}
+}
+
+func TestCreatePoolRejectsConfigEnv(t *testing.T) {
+	scheme := newGatewayTestScheme(t)
+	k8sClient := fake.NewClientBuilder().WithScheme(scheme).Build()
+	gw := &Gateway{
+		k8sClient: k8sClient,
+		gwConfig:  GatewayConfig{GRPCAuthToken: "test-token"},
+	}
+
+	err := gw.CreatePool(context.Background(), CreatePoolRequest{
+		Name:      "pool",
+		Namespace: "default",
+		Image:     "busybox:1.36.1",
+		Replicas:  1,
+		ConfigEnv: json.RawMessage(`{"vars":{"AGENT_CONFIG_PATH":"/workspace/agent.yaml"}}`),
+	})
+	if err == nil {
+		t.Fatal("CreatePool succeeded, want unsupported configEnv error")
+	}
+	if !strings.Contains(err.Error(), "pool configEnv is not supported") {
+		t.Fatalf("CreatePool error = %q, want pool configEnv unsupported", err)
+	}
+}
+
 func TestCreatePoolAppliesSchedulerNameAndImageLocalityHints(t *testing.T) {
 	scheme := newGatewayTestScheme(t)
 	k8sClient := fake.NewClientBuilder().WithScheme(scheme).Build()
@@ -339,13 +392,111 @@ func TestCreateManagedSessionStopsNewPoolOnSessionCreateFailure(t *testing.T) {
 		t.Fatal("CreateManagedSession succeeded, want allocation error")
 	}
 
-	poolName, err := managedPoolName("python:3.12", "default", "code", nil, nil)
+	poolName, err := managedPoolName("python:3.12", "default", "code", nil)
 	if err != nil {
 		t.Fatalf("managedPoolName returned error: %v", err)
 	}
 	assertPoolStopped(t, k8sClient, poolName, "default")
 	if err := k8sClient.Get(context.Background(), types.NamespacedName{Name: sandboxTemplateName(poolName), Namespace: "default"}, &extensionsv1beta1.SandboxTemplate{}); err != nil {
 		t.Fatalf("managed template was deleted after create failure cleanup: %v", err)
+	}
+}
+
+func TestCreateManagedSessionPassesConfigEnvToRuntimeAllocation(t *testing.T) {
+	scheme := newGatewayTestScheme(t)
+	k8sClient := fake.NewClientBuilder().WithScheme(scheme).Build()
+	allocator := &recordingRuntimeAllocator{
+		allocation: RuntimeAllocation{
+			Backend:   runtimeBackendSandboxClaim,
+			PodName:   "pod-1",
+			PodIP:     "10.0.0.7",
+			ClaimName: "claim-1",
+		},
+	}
+	gw := New(k8sClient, allocator, nil, nil, nil, GatewayConfig{
+		Namespace:                  "default",
+		GRPCAuthToken:              "test-token",
+		AdmissionQueueTimeout:      time.Millisecond,
+		AdmissionQueuePollInterval: time.Millisecond,
+	}, NewMemoryStore())
+	configEnv := json.RawMessage(`{"vars":{"AGENT_CONFIG_PATH":"/workspace/agent.yaml"}}`)
+
+	_, err := gw.CreateManagedSession(context.Background(), CreateManagedSessionRequest{
+		Image:        "python:3.12",
+		Profile:      "code",
+		ExperimentID: "exp-config-env",
+		ConfigEnv:    configEnv,
+	})
+	if err != nil {
+		t.Fatalf("CreateManagedSession returned error: %v", err)
+	}
+	poolName, err := managedPoolName("python:3.12", "default", "code", nil)
+	if err != nil {
+		t.Fatalf("managedPoolName returned error: %v", err)
+	}
+	if allocator.lastRequest.PoolRef != poolName {
+		t.Fatalf("Allocate PoolRef = %q, want %q", allocator.lastRequest.PoolRef, poolName)
+	}
+	if len(allocator.lastRequest.Env) != 1 {
+		t.Fatalf("Allocate Env = %#v, want one env var", allocator.lastRequest.Env)
+	}
+	if got := allocator.lastRequest.Env[0]; got != (RuntimeEnvVar{Name: "AGENT_CONFIG_PATH", Value: "/workspace/agent.yaml"}) {
+		t.Fatalf("Allocate Env[0] = %#v, want AGENT_CONFIG_PATH", got)
+	}
+
+	template := &extensionsv1beta1.SandboxTemplate{}
+	if err := k8sClient.Get(context.Background(), types.NamespacedName{Name: sandboxTemplateName(poolName), Namespace: "default"}, template); err != nil {
+		t.Fatalf("get managed sandbox template: %v", err)
+	}
+	if got := template.Spec.EnvVarsInjectionPolicy; got != extensionsv1beta1.EnvVarsInjectionPolicyOverrides {
+		t.Fatalf("EnvVarsInjectionPolicy = %q, want Overrides", got)
+	}
+}
+
+func TestCreateManagedSessionPatchesExistingPoolForClaimEnv(t *testing.T) {
+	scheme := newGatewayTestScheme(t)
+	poolName, err := managedPoolName("python:3.12", "default", "code", nil)
+	if err != nil {
+		t.Fatalf("managedPoolName returned error: %v", err)
+	}
+	pool := managedPoolObject(poolName, "default")
+	template := managedTemplateObject(sandboxTemplateName(poolName), "default")
+	pool.Annotations[poolProfileAnnotation] = "code"
+	template.Annotations[poolProfileAnnotation] = "code"
+	template.Spec.EnvVarsInjectionPolicy = extensionsv1beta1.EnvVarsInjectionPolicyDisallowed
+	template.Spec.PodTemplate.Spec.Containers = []corev1.Container{{
+		Name:  "executor",
+		Image: "python:3.12",
+	}}
+	k8sClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(pool, template).Build()
+	allocator := &recordingRuntimeAllocator{
+		allocation: RuntimeAllocation{
+			Backend:   runtimeBackendSandboxClaim,
+			PodName:   "pod-1",
+			PodIP:     "10.0.0.7",
+			ClaimName: "claim-1",
+		},
+	}
+	gw := New(k8sClient, allocator, nil, nil, nil, GatewayConfig{
+		Namespace: "default",
+	}, NewMemoryStore())
+
+	_, err = gw.CreateManagedSession(context.Background(), CreateManagedSessionRequest{
+		Image:        "python:3.12",
+		Profile:      "code",
+		ExperimentID: "exp-existing-config-env",
+		ConfigEnv:    json.RawMessage(`{"vars":{"AGENT_CONFIG_PATH":"/workspace/agent.yaml"}}`),
+	})
+	if err != nil {
+		t.Fatalf("CreateManagedSession returned error: %v", err)
+	}
+
+	gotTemplate := &extensionsv1beta1.SandboxTemplate{}
+	if err := k8sClient.Get(context.Background(), types.NamespacedName{Name: sandboxTemplateName(poolName), Namespace: "default"}, gotTemplate); err != nil {
+		t.Fatalf("get managed sandbox template: %v", err)
+	}
+	if got := gotTemplate.Spec.EnvVarsInjectionPolicy; got != extensionsv1beta1.EnvVarsInjectionPolicyOverrides {
+		t.Fatalf("EnvVarsInjectionPolicy = %q, want Overrides", got)
 	}
 }
 
