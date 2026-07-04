@@ -580,6 +580,16 @@ func (c *Config) Validate() error {
 			return err
 		}
 	}
+	switch strings.TrimSpace(c.ImagePullPolicy) {
+	case "Always", "IfNotPresent", "Never", "":
+	default:
+		return fmt.Errorf("image pull policy must be Always, IfNotPresent, or Never: %q", c.ImagePullPolicy)
+	}
+
+	if c.RedisEnabled && strings.TrimSpace(c.RedisAddr) == "" {
+		return fmt.Errorf("Redis address is required when Redis is enabled")
+	}
+
 	switch strings.ToLower(strings.TrimSpace(c.SandboxNetworkPolicyManagement)) {
 	case "", "managed", "unmanaged":
 	default:

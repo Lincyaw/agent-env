@@ -213,7 +213,7 @@ func handleDeleteSession(gw *Gateway) http.HandlerFunc {
 			return
 		}
 		if err := gw.DeleteSession(r.Context(), id); err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
+			writeError(w, httpStatusForError(err), err.Error())
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
@@ -227,7 +227,7 @@ func handleSuspendSession(gw *Gateway) http.HandlerFunc {
 			return
 		}
 		if err := gw.SuspendSession(r.Context(), id); err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
+			writeError(w, httpStatusForError(err), err.Error())
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]string{"status": "suspended"})
@@ -241,7 +241,7 @@ func handleResumeSession(gw *Gateway) http.HandlerFunc {
 			return
 		}
 		if err := gw.ResumeSession(r.Context(), id); err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
+			writeError(w, httpStatusForError(err), err.Error())
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]string{"status": "active"})
