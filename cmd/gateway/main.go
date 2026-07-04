@@ -286,8 +286,12 @@ func main() {
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	server.Shutdown(shutdownCtx)
-	internalServer.Shutdown(shutdownCtx)
+	if err := server.Shutdown(shutdownCtx); err != nil {
+		log.Printf("Warning: public server shutdown: %v", err)
+	}
+	if err := internalServer.Shutdown(shutdownCtx); err != nil {
+		log.Printf("Warning: internal server shutdown: %v", err)
+	}
 	if stopKeyWatcher != nil {
 		stopKeyWatcher()
 	}
