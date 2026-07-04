@@ -609,11 +609,7 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 }
 
 func writeGatewayError(w http.ResponseWriter, err error) {
-	if errors.Is(err, ErrNamespaceNotAllowed) {
-		writeError(w, http.StatusForbidden, err.Error())
-		return
-	}
-	writeError(w, http.StatusInternalServerError, err.Error())
+	writeError(w, httpStatusForError(err), err.Error())
 }
 
 func parseLogParams(r *http.Request) (bool, int32) {
