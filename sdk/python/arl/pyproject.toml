@@ -32,6 +32,7 @@ dev = [
     "ruff>=0.8.0",
     "mypy>=1.13.0",
     "pytest>=7.2.1",
+    "pytest-asyncio>=0.23.0",
     "pytest-cov>=2.8.1",
 ]
 
@@ -76,3 +77,6 @@ disallow_untyped_defs = true
 [[tool.mypy.overrides]]
 module = "websockets.*"
 ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"

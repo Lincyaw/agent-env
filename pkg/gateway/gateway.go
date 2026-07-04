@@ -318,6 +318,9 @@ func (g *Gateway) CreateSession(ctx context.Context, req CreateSessionRequest) (
 		recordSpanErr(span, err)
 		return nil, err
 	}
+	if req.Mode == SessionModeDevbox && req.Devbox != nil {
+		claimEnv = injectDevboxEnv(claimEnv, req.Devbox)
+	}
 	var autoCreatedPool string
 	req, autoCreatedPool, err = g.ensureImageBackedSessionPool(ctx, req, ns)
 	if err != nil {
@@ -416,6 +419,9 @@ func (g *Gateway) CreateSession(ctx context.Context, req CreateSessionRequest) (
 		PodName:     allocation.PodName,
 		CreatedAt:   createdAt,
 		Status:      "active",
+	}
+	if req.Mode == SessionModeDevbox {
+		info.ConnectionInfo = buildConnectionInfo(sessionID, allocation.PodIP, req.Devbox)
 	}
 
 	g.store.Set(sessionID, &session{
@@ -2008,6 +2014,76 @@ func (g *Gateway) resolveMaxLifetime(req CreateSessionRequest) time.Duration {
 	return g.gwConfig.MaxLifetime
 }
 
+// injectDevboxEnv appends devbox-specific environment variables (SSH keys,
+// git config) to the claim env var list so they are available inside the
+// sandbox container.
+func injectDevboxEnv(claimEnv []RuntimeEnvVar, cfg *DevboxConfig) []RuntimeEnvVar {
+	if cfg == nil {
+		return claimEnv
+	}
+	if len(cfg.SSHPublicKeys) > 0 {
+		claimEnv = append(claimEnv, RuntimeEnvVar{
+			Name:  "ARL_DEVBOX_SSH_PUBLIC_KEYS",
+			Value: strings.Join(cfg.SSHPublicKeys, "\n"),
+		})
+	}
+	if cfg.GitConfig != nil {
+		if cfg.GitConfig.Name != "" {
+			claimEnv = append(claimEnv, RuntimeEnvVar{
+				Name:  "ARL_DEVBOX_GIT_USER_NAME",
+				Value: cfg.GitConfig.Name,
+			})
+		}
+		if cfg.GitConfig.Email != "" {
+			claimEnv = append(claimEnv, RuntimeEnvVar{
+				Name:  "ARL_DEVBOX_GIT_USER_EMAIL",
+				Value: cfg.GitConfig.Email,
+			})
+		}
+	}
+	return claimEnv
+}
+
+// buildConnectionInfo constructs connection info for a devbox session.
+func buildConnectionInfo(sessionID, podIP string, cfg *DevboxConfig) *ConnectionInfo {
+	info := &ConnectionInfo{
+		Shell: "/v1/sessions/" + sessionID + "/shell",
+	}
+	if cfg == nil {
+		return info
+	}
+	hasSSH := false
+	for _, p := range cfg.Ports {
+		proto := strings.ToLower(p.Protocol)
+		if proto == "" {
+			proto = "tcp"
+		}
+		name := p.Name
+		if name == "" {
+			name = fmt.Sprintf("port-%d", p.Port)
+		}
+		info.Ports = append(info.Ports, PortInfo{
+			Name:          name,
+			ContainerPort: p.Port,
+			Protocol:      proto,
+		})
+		if p.Port == 22 {
+			hasSSH = true
+		}
+	}
+	if len(cfg.SSHPublicKeys) > 0 && !hasSSH {
+		info.Ports = append(info.Ports, PortInfo{
+			Name:          "ssh",
+			ContainerPort: 22,
+			Protocol:      "tcp",
+		})
+	}
+	if len(cfg.SSHPublicKeys) > 0 {
+		info.SSH = &SSHInfo{Host: podIP, Port: 22}
+	}
+	return info
+}
+
 func resolveStepTimeoutSeconds(step StepRequest) int32 {
 	if step.TimeoutSeconds > 0 {
 		return step.TimeoutSeconds
@@ -2395,6 +2471,7 @@ func (g *Gateway) CreateManagedSession(ctx context.Context, req CreateManagedSes
 		PoolName:           poolName,
 		Namespace:          ns,
 		Mode:               req.Mode,
+		Devbox:             req.Devbox,
 		IdleTimeoutSeconds: req.IdleTimeoutSeconds,
 		MaxLifetimeSeconds: req.MaxLifetimeSeconds,
 		ConfigEnv:          req.ConfigEnv,

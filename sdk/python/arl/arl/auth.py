@@ -11,9 +11,10 @@ refresh. ``ApiKeyAuth`` is the static case used for direct ARL access.
 
 from __future__ import annotations
 
+import asyncio
 import threading
 import time
-from collections.abc import Generator
+from collections.abc import AsyncGenerator, Generator
 
 import httpx
 
@@ -77,10 +78,21 @@ class SsoTokenAuth(httpx.Auth):
         # False to disable verification on a trusted network.
         self._verify = verify
         self._lock = threading.Lock()
+        self._async_lock = asyncio.Lock()
         self._token: str | None = None
         self._expires_at = 0.0
 
-    def _fetch_token(self) -> str:
+    def _parse_token_response(self, payload: dict[str, object]) -> str:
+        raw_token = payload.get("access_token")
+        if not isinstance(raw_token, str) or not raw_token:
+            raise ValueError("token endpoint response missing 'access_token'")
+        raw_expires = payload.get("expires_in")
+        expires_in = float(raw_expires) if isinstance(raw_expires, (int, float)) else 3600.0
+        self._token = raw_token
+        self._expires_at = time.monotonic() + expires_in
+        return raw_token
+
+    def _token_request_data(self) -> dict[str, str]:
         data = {
             "grant_type": "client_credentials",
             "client_id": self._client_id,
@@ -88,33 +100,62 @@ class SsoTokenAuth(httpx.Auth):
         }
         if self._scope:
             data["scope"] = self._scope
-        resp = httpx.post(self._token_url, data=data, timeout=self._timeout, verify=self._verify)
+        return data
+
+    def _needs_refresh(self, force: bool = False) -> bool:
+        if force or self._token is None:
+            return True
+        return time.monotonic() >= self._expires_at - self._expiry_margin
+
+    def _fetch_token(self) -> str:
+        resp = httpx.post(
+            self._token_url,
+            data=self._token_request_data(),
+            timeout=self._timeout,
+            verify=self._verify,
+        )
         resp.raise_for_status()
-        payload = resp.json()
-        raw_token = payload.get("access_token")
-        if not isinstance(raw_token, str) or not raw_token:
-            raise ValueError("token endpoint response missing 'access_token'")
-        token: str = raw_token
-        # Default to a conservative 1h lifetime if the server omits expires_in.
-        expires_in = float(payload.get("expires_in", 3600))
-        self._token = token
-        self._expires_at = time.monotonic() + expires_in
-        return token
+        return self._parse_token_response(resp.json())
+
+    async def _async_fetch_token(self) -> str:
+        async with httpx.AsyncClient(verify=self._verify) as client:
+            resp = await client.post(
+                self._token_url,
+                data=self._token_request_data(),
+                timeout=self._timeout,
+            )
+        resp.raise_for_status()
+        return self._parse_token_response(resp.json())
 
     def _valid_token(self, *, force_refresh: bool = False) -> str:
         with self._lock:
-            stale = time.monotonic() >= self._expires_at - self._expiry_margin
-            if force_refresh or self._token is None or stale:
+            if self._needs_refresh(force_refresh):
                 return self._fetch_token()
-            return self._token
+            return self._token  # type: ignore[return-value]
+
+    async def _async_valid_token(self, *, force_refresh: bool = False) -> str:
+        async with self._async_lock:
+            if self._needs_refresh(force_refresh):
+                return await self._async_fetch_token()
+            return self._token  # type: ignore[return-value]
 
     def auth_flow(self, request: httpx.Request) -> Generator[httpx.Request, httpx.Response, None]:
         request.headers["Authorization"] = f"Bearer {self._valid_token()}"
         response = yield request
         if response.status_code == 401:
-            # The cached token may have been revoked or rotated upstream; mint a
-            # fresh one and replay the request exactly once.
             request.headers["Authorization"] = f"Bearer {self._valid_token(force_refresh=True)}"
+            yield request
+
+    async def async_auth_flow(
+        self,
+        request: httpx.Request,
+    ) -> AsyncGenerator[httpx.Request, httpx.Response]:
+        request.headers["Authorization"] = f"Bearer {await self._async_valid_token()}"
+        response = yield request
+        if response.status_code == 401:
+            request.headers["Authorization"] = (
+                f"Bearer {await self._async_valid_token(force_refresh=True)}"
+            )
             yield request
 
 

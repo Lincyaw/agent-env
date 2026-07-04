@@ -48,6 +48,9 @@ func SetupRoutes(mux *http.ServeMux, gw *Gateway, authCfg *AuthConfig) {
 	// Interactive shell — WebSocket (user role; token may come via query param)
 	mux.HandleFunc("/v1/sessions/{id}/shell", user(handleShell(gw, authCfg)))
 
+	// TCP tunnel — WebSocket to pod:port relay (user role)
+	mux.HandleFunc("/v1/sessions/{id}/tunnel/{port}", user(handleTunnel(gw, authCfg)))
+
 	// History, trajectory, and logs (user role)
 	mux.HandleFunc("GET /v1/sessions/{id}/history", user(handleGetHistory(gw)))
 	mux.HandleFunc("GET /v1/sessions/{id}/trajectory", user(handleGetTrajectory(gw)))

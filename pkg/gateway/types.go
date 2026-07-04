@@ -29,6 +29,47 @@ type ManagedSessionInfo struct {
 	Managed      bool   `json:"managed"`
 }
 
+// DevboxConfig holds devbox-specific session configuration.
+type DevboxConfig struct {
+	Ports         []DevboxPort `json:"ports,omitempty"`
+	SSHPublicKeys []string     `json:"sshPublicKeys,omitempty"`
+	GitConfig     *GitConfig   `json:"gitConfig,omitempty"`
+	StorageSize   string       `json:"storageSize,omitempty"`
+}
+
+// DevboxPort describes a port to expose on the devbox container.
+type DevboxPort struct {
+	Port     int32  `json:"port"`
+	Protocol string `json:"protocol,omitempty"`
+	Name     string `json:"name,omitempty"`
+}
+
+// GitConfig holds git identity configuration for devbox sessions.
+type GitConfig struct {
+	Name  string `json:"name,omitempty"`
+	Email string `json:"email,omitempty"`
+}
+
+// ConnectionInfo describes how to connect to a devbox session.
+type ConnectionInfo struct {
+	Shell string     `json:"shell"`
+	SSH   *SSHInfo   `json:"ssh,omitempty"`
+	Ports []PortInfo `json:"ports,omitempty"`
+}
+
+// SSHInfo describes SSH connection details.
+type SSHInfo struct {
+	Host string `json:"host"`
+	Port int32  `json:"port"`
+}
+
+// PortInfo describes an exposed port on a session pod.
+type PortInfo struct {
+	Name          string `json:"name"`
+	ContainerPort int32  `json:"containerPort"`
+	Protocol      string `json:"protocol"`
+}
+
 // --- Request types ---
 
 // CreateSessionRequest is the body for POST /v1/sessions
@@ -37,6 +78,7 @@ type CreateSessionRequest struct {
 	Profile            string                 `json:"profile,omitempty"`
 	Namespace          string                 `json:"namespace,omitempty"`
 	Mode               string                 `json:"mode,omitempty"`
+	Devbox             *DevboxConfig          `json:"devbox,omitempty"`
 	ConfigEnv          json.RawMessage        `json:"configEnv,omitempty"`
 	IdleTimeoutSeconds int                    `json:"idleTimeoutSeconds,omitempty"`
 	MaxLifetimeSeconds int                    `json:"maxLifetimeSeconds,omitempty"`
@@ -76,6 +118,7 @@ type CreateManagedSessionRequest struct {
 	ExperimentID       string                       `json:"experimentId"`
 	Namespace          string                       `json:"namespace,omitempty"`
 	Mode               string                       `json:"mode,omitempty"`
+	Devbox             *DevboxConfig                `json:"devbox,omitempty"`
 	ConfigEnv          json.RawMessage              `json:"configEnv,omitempty"`
 	Resources          *corev1.ResourceRequirements `json:"resources,omitempty"`
 	Tools              json.RawMessage              `json:"tools,omitempty"`
@@ -173,19 +216,20 @@ type ScalePoolRequest struct {
 
 // SessionInfo describes a session
 type SessionInfo struct {
-	ID             string     `json:"id"`
-	SandboxName    string     `json:"sandboxName"`
-	Namespace      string     `json:"namespace"`
-	Image          string     `json:"image,omitempty"`
-	Profile        string     `json:"profile,omitempty"`
-	Mode           string     `json:"mode,omitempty"`
-	PoolRef        string     `json:"-"`
-	PodIP          string     `json:"podIP"`
-	PodName        string     `json:"podName"`
-	CreatedAt      time.Time  `json:"createdAt"`
-	Status         string     `json:"status,omitempty"`
-	DeletedAt      *time.Time `json:"deletedAt,omitempty"`
-	DeletionReason string     `json:"deletionReason,omitempty"`
+	ID             string          `json:"id"`
+	SandboxName    string          `json:"sandboxName"`
+	Namespace      string          `json:"namespace"`
+	Image          string          `json:"image,omitempty"`
+	Profile        string          `json:"profile,omitempty"`
+	Mode           string          `json:"mode,omitempty"`
+	PoolRef        string          `json:"-"`
+	PodIP          string          `json:"podIP"`
+	PodName        string          `json:"podName"`
+	CreatedAt      time.Time       `json:"createdAt"`
+	Status         string          `json:"status,omitempty"`
+	DeletedAt      *time.Time      `json:"deletedAt,omitempty"`
+	DeletionReason string          `json:"deletionReason,omitempty"`
+	ConnectionInfo *ConnectionInfo `json:"connectionInfo,omitempty"`
 }
 
 // ExecuteResponse is the response for POST /v1/sessions/{id}/execute

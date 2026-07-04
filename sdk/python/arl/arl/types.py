@@ -83,6 +83,57 @@ class DeleteExperimentResponse(BaseModel):
     error: str = ""
 
 
+class DevboxPort(BaseModel):
+    """A port to expose on the devbox container."""
+
+    port: Annotated[int, Field(gt=0, le=65535)]
+    protocol: str = ""
+    name: str = ""
+
+
+class GitConfig(BaseModel):
+    """Git identity configuration for devbox sessions."""
+
+    name: str = ""
+    email: str = ""
+
+
+class DevboxConfig(BaseModel):
+    """Devbox-specific session configuration."""
+
+    ports: list[DevboxPort] = []
+    ssh_public_keys: list[str] = Field(default=[], alias="sshPublicKeys")
+    git_config: GitConfig | None = Field(None, alias="gitConfig")
+    storage_size: str = Field("", alias="storageSize")
+
+    model_config = {"populate_by_name": True}
+
+
+class SSHInfo(BaseModel):
+    """SSH connection details."""
+
+    host: str = ""
+    port: Annotated[int, Field(ge=0)] = 22
+
+
+class PortInfo(BaseModel):
+    """An exposed port on a session pod."""
+
+    name: str = ""
+    container_port: Annotated[int, Field(ge=0)] = Field(0, alias="containerPort")
+    protocol: str = "tcp"
+
+    model_config = {"populate_by_name": True}
+
+
+class ConnectionInfo(BaseModel):
+    """How to connect to a devbox session."""
+
+    shell: str = ""
+    ssh: SSHInfo | None = None
+    ports: list[PortInfo] = []
+
+
 class SessionInfo(BaseModel):
     """Information about an active session.
 
@@ -102,6 +153,7 @@ class SessionInfo(BaseModel):
     mode: str = ""
     deleted_at: datetime | None = Field(None, alias="deletedAt")
     deletion_reason: str = Field("", alias="deletionReason")
+    connection_info: ConnectionInfo | None = Field(None, alias="connectionInfo")
 
     model_config = {"populate_by_name": True}
 

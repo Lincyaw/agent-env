@@ -1,19 +1,23 @@
-"""Sandbox session management for ARL via Gateway API."""
+"""Async sandbox session management for ARL via Gateway API.
+
+Mirrors :class:`SandboxSession` and :class:`ManagedSession` with native
+``async``/``await`` so callers in an async event loop can avoid
+``asyncio.to_thread``.
+"""
 
 from __future__ import annotations
 
 import base64
 import json
 import re
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import AsyncIterator, Callable, Iterable
 from pathlib import Path
 from typing import Any, BinaryIO
 
+from arl.async_client import AsyncGatewayClient
 from arl.configenv import ConfigEnvSpec
-from arl.gateway_client import GatewayClient
 from arl.types import (
     ContainerExecuteResponse,
-    DevboxConfig,
     ExecuteResponse,
     LogEntry,
     PrivateContainerSpec,
@@ -30,45 +34,32 @@ from arl.types import (
 _SAFE_TOOL_NAME = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]*$")
 
 
-class SandboxSession:
-    """High-level sandbox session manager via the Gateway API.
-
-    All execution goes through the Gateway HTTP API (no direct K8s API calls).
-    Execute returns results synchronously - no polling needed.
+class AsyncSandboxSession:
+    """Async high-level sandbox session manager via the Gateway API.
 
     Examples:
-        Using context manager (automatic cleanup):
+        Using async context manager (automatic cleanup):
 
-        >>> with SandboxSession(image="python:3.12", profile="code") as session:
-        ...     result = session.execute([
-        ...         {"name": "hello", "type": "command", "command": ["echo", "hello"]}
+        >>> async with AsyncSandboxSession(image="python:3.12", profile="code") as session:
+        ...     result = await session.execute([
+        ...         {"name": "hello", "command": ["echo", "hello"]}
         ...     ])
         ...     print(result.results[0].output.stdout)
 
-        Manual lifecycle management with restore:
+        Manual lifecycle:
 
-        >>> session = SandboxSession(image="python:3.12", profile="code")
+        >>> session = AsyncSandboxSession(image="python:3.12", profile="code")
         >>> try:
-        ...     session.create_sandbox()
-        ...     r1 = session.execute([...])
-        ...     snap_id = r1.results[0].snapshot_id  # auto snapshot after each step
-        ...     r2 = session.execute([...])
-        ...     session.restore(snap_id)  # rollback to step 1 state
+        ...     await session.create_sandbox()
+        ...     r = await session.execute([...])
         ... finally:
-        ...     session.delete_sandbox()
+        ...     await session.delete_sandbox()
+        ...     await session.aclose()
 
-        Export trajectory for RL/SFT:
+        Attach to an existing session:
 
-        >>> with SandboxSession(image="python:3.12", profile="code") as session:
-        ...     session.execute([...])
-        ...     session.execute([...])
-        ...     jsonl = session.export_trajectory()
-
-        Attach to an existing persistent session:
-
-        >>> session = SandboxSession.attach("gw-12345", gateway_url="...")
-        >>> result = session.execute([{"name": "ls", "command": ["ls"]}])
-        >>> session.delete_sandbox()  # explicit cleanup when done
+        >>> session = await AsyncSandboxSession.attach("gw-12345", gateway_url="...")
+        >>> result = await session.execute([{"name": "ls", "command": ["ls"]}])
     """
 
     def __init__(
@@ -76,7 +67,6 @@ class SandboxSession:
         image: str | None = None,
         *,
         mode: str | None = None,
-        devbox: DevboxConfig | dict[str, Any] | None = None,
         profile: str | None = "default",
         gateway_url: str = "",
         timeout: float = 300.0,
@@ -86,50 +76,36 @@ class SandboxSession:
         private_containers: Iterable[PrivateContainerSpec | dict[str, Any]] | None = None,
     ) -> None:
         self.image = image or ""
-        self.profile = profile or ""
         self.mode = mode
-        self.devbox = devbox
+        self.profile = profile or ""
         self.idle_timeout_seconds = idle_timeout_seconds
         self.max_lifetime_seconds = max_lifetime_seconds
         self.private_containers = private_containers
 
-        self._client = GatewayClient(base_url=gateway_url, timeout=timeout, api_key=api_key)
+        self._client = AsyncGatewayClient(
+            base_url=gateway_url,
+            timeout=timeout,
+            api_key=api_key,
+        )
         self._api_key = api_key
         self._session_id: str | None = None
         self._session_info: SessionInfo | None = None
         self._delete_on_exit = True
 
     @classmethod
-    def attach(
+    async def attach(
         cls,
         session_id: str,
         gateway_url: str = "",
         timeout: float = 300.0,
         api_key: str | None = None,
-    ) -> SandboxSession:
-        """Attach to an existing session by session ID.
-
-        Retrieves session info from the Gateway and returns a
-        SandboxSession bound to that session. No new sandbox is
-        created.
-
-        Args:
-            session_id: The session ID to attach to.
-            gateway_url: Gateway base URL.
-            timeout: HTTP request timeout.
-            api_key: API key for authentication.
-
-        Returns:
-            SandboxSession bound to the existing session.
-
-        Raises:
-            GatewayError: If the session does not exist.
-        """
-        client = GatewayClient(base_url=gateway_url, timeout=timeout, api_key=api_key)
+    ) -> AsyncSandboxSession:
+        """Attach to an existing session by session ID."""
+        client = AsyncGatewayClient(base_url=gateway_url, timeout=timeout, api_key=api_key)
         try:
-            info = client.get_session(session_id)
+            info = await client.get_session(session_id)
         finally:
-            client.close()
+            await client.aclose()
 
         instance = cls(
             image=info.image or None,
@@ -151,17 +127,12 @@ class SandboxSession:
     def session_info(self) -> SessionInfo | None:
         return self._session_info
 
-    def create_sandbox(self) -> SessionInfo:
-        """Create a new session (sandbox) via the Gateway.
-
-        Returns:
-            SessionInfo with sandbox details (pod IP, pod name, etc.)
-        """
-        info = self._client.create_session(
+    async def create_sandbox(self) -> SessionInfo:
+        """Create a new session (sandbox) via the Gateway."""
+        info = await self._client.create_session(
             image=self.image or None,
             profile=self.profile or None,
             mode=self.mode,
-            devbox=self.devbox,
             idle_timeout_seconds=self.idle_timeout_seconds,
             max_lifetime_seconds=self.max_lifetime_seconds,
             private_containers=self.private_containers,
@@ -172,27 +143,17 @@ class SandboxSession:
         self.profile = info.profile
         return info
 
-    def execute(
+    async def execute(
         self,
         steps: list[dict[str, Any]],
         trace_id: str | None = None,
         operation_id: str | None = None,
         on_output: Callable[[str, str], None] | None = None,
     ) -> ExecuteResponse:
-        """Execute steps in the sandbox. Returns synchronously.
-
-        Args:
-            steps: List of step dicts, each with 'name' and 'command'.
-            trace_id: Optional trace ID for distributed tracing.
-            on_output: Optional callback invoked with (stdout_chunk, stderr_chunk)
-                for each partial output event during streaming execution.
-
-        Returns:
-            ExecuteResponse with per-step results, snapshot IDs, and durations.
-        """
+        """Execute steps in the sandbox."""
         if self._session_id is None:
             raise RuntimeError("No session created. Call create_sandbox() first.")
-        return self._client.execute(
+        return await self._client.execute(
             self._session_id,
             steps,
             trace_id,
@@ -200,7 +161,16 @@ class SandboxSession:
             on_output=on_output,
         )
 
-    def execute_container(
+    async def get_execute_operation(
+        self,
+        operation_id: str,
+    ) -> Any:
+        """Get the status of a pending execute operation."""
+        if self._session_id is None:
+            raise RuntimeError("No session created. Call create_sandbox() first.")
+        return await self._client.get_execute_operation(self._session_id, operation_id)
+
+    async def execute_container(
         self,
         container: str,
         steps: list[dict[str, Any]],
@@ -208,22 +178,15 @@ class SandboxSession:
         """Execute steps in a configured private container."""
         if self._session_id is None:
             raise RuntimeError("No session created. Call create_sandbox() first.")
-        return self._client.execute_container(self._session_id, container, steps)
+        return await self._client.execute_container(self._session_id, container, steps)
 
-    def restore(self, snapshot_id: str) -> None:
-        """Restore workspace to a previous step's snapshot.
-
-        Each step execution automatically creates a snapshot. Use the
-        snapshot_id from a StepResult to restore to that step's state.
-
-        Args:
-            snapshot_id: Snapshot ID (step index string) from a step result.
-        """
+    async def restore(self, snapshot_id: str) -> None:
+        """Restore workspace to a previous step's snapshot."""
         if self._session_id is None:
             raise RuntimeError("No session created. Call create_sandbox() first.")
-        self._client.restore(self._session_id, snapshot_id)
+        await self._client.restore(self._session_id, snapshot_id)
 
-    def replay_from(
+    async def replay_from(
         self,
         source_session_id: str,
         up_to_step: int | None = None,
@@ -231,44 +194,35 @@ class SandboxSession:
         """Replay another session's history into this session."""
         if self._session_id is None:
             raise RuntimeError("No session created. Call create_sandbox() first.")
-        return self._client.replay_from(
+        return await self._client.replay_from(
             self._session_id,
             source_session_id=source_session_id,
             up_to_step=up_to_step,
         )
 
-    def upload_file(
+    async def upload_file(
         self,
         path: str,
         content: str | bytes | Iterable[bytes] | BinaryIO,
         sha256: str | None = None,
     ) -> UploadFileResponse:
-        """Upload one file into the session workspace.
-
-        Args:
-            path: Relative path within the workspace.
-            content: Text, bytes, a binary file object, or an iterable of byte chunks.
-            sha256: Optional expected SHA-256 checksum in hex.
-
-        Returns:
-            UploadFileResponse with the normalized path and byte count.
-        """
+        """Upload one file into the session workspace."""
         if self._session_id is None:
             raise RuntimeError("No session created. Call create_sandbox() first.")
-        return self._client.upload_file(
+        return await self._client.upload_file(
             self._session_id,
             path=path,
             content=content,
             sha256=sha256,
         )
 
-    def download_file(self, path: str) -> bytes:
+    async def download_file(self, path: str) -> bytes:
         """Download one file from the session workspace into memory."""
         if self._session_id is None:
             raise RuntimeError("No session created. Call create_sandbox() first.")
-        return self._client.download_file(self._session_id, path)
+        return await self._client.download_file(self._session_id, path)
 
-    def upload_path(
+    async def upload_path(
         self,
         local_path: str | Path,
         remote_path: str,
@@ -277,107 +231,85 @@ class SandboxSession:
         """Stream a local file into the session workspace."""
         if self._session_id is None:
             raise RuntimeError("No session created. Call create_sandbox() first.")
-        return self._client.upload_path(
+        return await self._client.upload_path(
             self._session_id,
             local_path=local_path,
             remote_path=remote_path,
             sha256=sha256,
         )
 
-    def download_path(self, remote_path: str, local_path: str | Path) -> None:
+    async def download_path(self, remote_path: str, local_path: str | Path) -> None:
         """Stream a session file to a local path."""
         if self._session_id is None:
             raise RuntimeError("No session created. Call create_sandbox() first.")
-        self._client.download_path(self._session_id, remote_path, local_path)
+        await self._client.download_path(self._session_id, remote_path, local_path)
 
-    def iter_download(self, path: str, chunk_size: int = 1024 * 1024) -> Iterator[bytes]:
+    def iter_download(
+        self,
+        path: str,
+        chunk_size: int = 1024 * 1024,
+    ) -> AsyncIterator[bytes]:
         """Iterate over a session file as byte chunks."""
         if self._session_id is None:
             raise RuntimeError("No session created. Call create_sandbox() first.")
-        return self._client.iter_download_file(self._session_id, path, chunk_size=chunk_size)
+        return self._client.iter_download_file(
+            self._session_id,
+            path,
+            chunk_size=chunk_size,
+        )
 
-    def get_history(self) -> list[StepResult]:
-        """Get complete execution history for this session.
-
-        Returns:
-            List of StepResult with input, output, snapshot IDs, and durations.
-        """
+    async def get_history(self) -> list[StepResult]:
+        """Get complete execution history for this session."""
         if self._session_id is None:
             raise RuntimeError("No session created. Call create_sandbox() first.")
-        return self._client.get_history(self._session_id)
+        return await self._client.get_history(self._session_id)
 
-    def export_trajectory(self) -> str:
-        """Export execution history as JSONL trajectory (for RL/SFT).
-
-        Returns:
-            JSONL string, one entry per step.
-        """
+    async def export_trajectory(self) -> str:
+        """Export execution history as JSONL trajectory (for RL/SFT)."""
         if self._session_id is None:
             raise RuntimeError("No session created. Call create_sandbox() first.")
-        return self._client.get_trajectory(self._session_id)
+        return await self._client.get_trajectory(self._session_id)
 
     def iter_logs(
         self,
         *,
         follow: bool = False,
         tail: int = 100,
-    ) -> Iterator[LogEntry]:
+    ) -> AsyncIterator[LogEntry]:
         """Iterate over session sidecar log entries."""
         if self._session_id is None:
             raise RuntimeError("No session created. Call create_sandbox() first.")
-        return self._client.iter_session_logs(self._session_id, follow=follow, tail=tail)
+        return self._client.iter_session_logs(
+            self._session_id,
+            follow=follow,
+            tail=tail,
+        )
 
-    def get_logs(self, *, tail: int = 100) -> list[LogEntry]:
+    async def get_logs(self, *, tail: int = 100) -> list[LogEntry]:
         """Return recent session sidecar log entries."""
         if self._session_id is None:
             raise RuntimeError("No session created. Call create_sandbox() first.")
-        return self._client.list_session_logs(self._session_id, tail=tail)
+        return await self._client.list_session_logs(self._session_id, tail=tail)
 
-    def list_tools(self) -> ToolsRegistry:
-        """List all available tools in the sandbox.
-
-        Reads /opt/arl/tools/registry.json from the executor container.
-
-        Returns:
-            ToolsRegistry with all tool manifests.
-
-        Raises:
-            RuntimeError: If no session created or registry file not found.
-        """
+    async def list_tools(self) -> ToolsRegistry:
+        """List all available tools in the sandbox."""
         if self._session_id is None:
             raise RuntimeError("No session created. Call create_sandbox() first.")
-        result = self._client.execute(
+        result = await self._client.execute(
             self._session_id,
-            [
-                {"name": "_list_tools", "command": ["cat", "/opt/arl/tools/registry.json"]},
-            ],
+            [{"name": "_list_tools", "command": ["cat", "/opt/arl/tools/registry.json"]}],
         )
         step = result.results[0]
         if step.output.exit_code != 0:
             raise RuntimeError(f"Failed to read tool registry: {step.output.stderr}")
         return ToolsRegistry.model_validate_json(step.output.stdout)
 
-    def call_tool(
+    async def call_tool(
         self,
         tool_name: str,
         params: dict[str, object] | None = None,
     ) -> ToolResult:
-        """Call a tool by name with JSON parameters.
-
-        Pipes JSON params to the tool's entrypoint script via stdin.
-        Uses base64 encoding to safely pass parameters without shell injection.
-
-        Args:
-            tool_name: Name of the tool (must exist in registry).
-            params: Parameters dict (passed as JSON stdin to the tool).
-
-        Returns:
-            ToolResult with parsed JSON output, exit code, and stderr.
-
-        Raises:
-            ValueError: If tool_name contains unsafe characters.
-            RuntimeError: If no session created.
-        """
+        """Call a tool by name with JSON parameters."""
         if self._session_id is None:
             raise RuntimeError("No session created. Call create_sandbox() first.")
         if not _SAFE_TOOL_NAME.match(tool_name):
@@ -386,19 +318,15 @@ class SandboxSession:
         params_json = json.dumps(params or {})
         params_b64 = base64.b64encode(params_json.encode()).decode()
         tool_dir = f"/opt/arl/tools/{tool_name}"
-        # Use base64 to safely pass JSON without shell injection risk.
-        # Read entrypoint from manifest via sed (busybox-compatible).
         cmd = (
             f"ENTRYPOINT=$(cat {tool_dir}/manifest.json"
             ' | sed -n \'s/.*"entrypoint":"\\([^"]*\\)".*/\\1/p\')'
             f" && printf '%s' '{params_b64}' | base64 -d | {tool_dir}/$ENTRYPOINT"
         )
 
-        result = self._client.execute(
+        result = await self._client.execute(
             self._session_id,
-            [
-                {"name": f"_call_{tool_name}", "command": ["sh", "-c", cmd]},
-            ],
+            [{"name": f"_call_{tool_name}", "command": ["sh", "-c", cmd]}],
         )
         step = result.results[0]
         parsed: dict[str, object] = {}
@@ -413,24 +341,24 @@ class SandboxSession:
             stderr=step.output.stderr,
         )
 
-    def delete_sandbox(self) -> None:
+    async def delete_sandbox(self) -> None:
         """Delete the session and its underlying sandbox."""
         if self._session_id is None:
             return
-        self._client.delete_session(self._session_id)
+        await self._client.delete_session(self._session_id)
         self._session_id = None
         self._session_info = None
 
-    def close(self) -> None:
+    async def aclose(self) -> None:
         """Close the underlying HTTP client."""
-        self._client.close()
+        await self._client.aclose()
 
-    def __enter__(self) -> SandboxSession:
+    async def __aenter__(self) -> AsyncSandboxSession:
         if self._session_id is None:
-            self.create_sandbox()
+            await self.create_sandbox()
         return self
 
-    def __exit__(
+    async def __aexit__(
         self,
         exc_type: type[BaseException] | None,
         exc_val: BaseException | None,
@@ -438,42 +366,24 @@ class SandboxSession:
     ) -> None:
         try:
             if self._delete_on_exit:
-                self.delete_sandbox()
+                await self.delete_sandbox()
         finally:
-            self.close()
+            await self.aclose()
 
 
-class ManagedSession(SandboxSession):
-    """Ultra-simple session that handles pools automatically.
-
-    Just specify image + experiment ID. Pool lifecycle is handled server-side.
-    No need to create or manage WarmPools manually.
+class AsyncManagedSession(AsyncSandboxSession):
+    """Async managed session with automatic pool lifecycle.
 
     Examples:
-        Basic usage with context manager:
-
-        >>> with ManagedSession(image="python:3.11-slim", experiment_id="my-exp") as s:
-        ...     result = s.execute([{"name": "hello", "command": ["echo", "hi"]}])
-        ...     print(result.results[0].output.stdout)
-
-        With custom resources:
-
-        >>> from arl import ResourceRequirements
-        >>> with ManagedSession(
-        ...     image="python:3.11-slim",
-        ...     experiment_id="my-exp",
-        ...     resources=ResourceRequirements(
-        ...         requests={"cpu": "500m", "memory": "512Mi"},
-        ...         limits={"cpu": "2", "memory": "2Gi"},
-        ...     ),
+        >>> async with AsyncManagedSession(
+        ...     image="python:3.11-slim", experiment_id="my-exp",
         ... ) as s:
-        ...     result = s.execute([{"name": "test", "command": ["python", "-c", "print(1)"]}])
+        ...     result = await s.execute([{"name": "hello", "command": ["echo", "hi"]}])
 
         Batch cleanup by experiment:
 
-        >>> from arl import GatewayClient
-        >>> client = GatewayClient(base_url="http://localhost:8080")
-        >>> client.delete_experiment("my-exp")
+        >>> async with AsyncGatewayClient(base_url="http://localhost:8080") as client:
+        ...     await client.delete_experiment("my-exp")
     """
 
     def __init__(
@@ -495,8 +405,8 @@ class ManagedSession(SandboxSession):
     ) -> None:
         super().__init__(
             image=image,
-            profile=profile,
             mode=mode,
+            profile=profile,
             gateway_url=gateway_url,
             timeout=timeout,
             api_key=api_key,
@@ -504,7 +414,6 @@ class ManagedSession(SandboxSession):
         )
         self._image = image
         self._profile = profile
-        self._mode = mode
         self._experiment_id = experiment_id
         self._resources = resources
         self._config_env = config_env
@@ -513,20 +422,15 @@ class ManagedSession(SandboxSession):
         self._idle_timeout_seconds = idle_timeout_seconds
         self._max_lifetime_seconds = max_lifetime_seconds
         self._private_containers = private_containers
+        self._mode = mode
 
     @property
     def experiment_id(self) -> str:
         return self._experiment_id
 
-    def create_sandbox(self) -> SessionInfo:
-        """Create a managed session via the Gateway.
-
-        The server automatically handles pool creation and scaling.
-
-        Returns:
-            ManagedSessionInfo with session details.
-        """
-        info = self._client.create_managed_session(
+    async def create_sandbox(self) -> SessionInfo:
+        """Create a managed session via the Gateway."""
+        info = await self._client.create_managed_session(
             image=self._image,
             experiment_id=self._experiment_id,
             profile=self._profile,
@@ -546,39 +450,23 @@ class ManagedSession(SandboxSession):
         return info
 
 
-class DevboxSession(SandboxSession):
-    """Long-lived development sandbox session.
+class AsyncDevboxSession(AsyncSandboxSession):
+    """Async long-lived development sandbox session.
 
     Creates a devbox-mode session with extended lifecycle defaults:
     - 4-hour idle timeout (vs 10 minutes for regular sessions)
     - No maximum lifetime (vs 1 hour for regular sessions)
 
-    All execution, file, and shell APIs work identically to regular sessions.
-
     Examples:
-        >>> with DevboxSession(image="ubuntu:22.04") as devbox:
-        ...     devbox.execute([{"name": "setup", "command": ["apt-get", "update"]}])
-        ...     devbox.upload_file("main.py", "print('hello')")
-        ...     devbox.execute([{"name": "run", "command": ["python", "main.py"]}])
-
-        With SSH access:
-        >>> from arl import DevboxConfig, GitConfig
-        >>> cfg = DevboxConfig(
-        ...     ssh_public_keys=["ssh-ed25519 AAAA... user@host"],
-        ...     git_config=GitConfig(name="Dev", email="dev@example.com"),
-        ... )
-        >>> with DevboxSession(image="ubuntu:22.04", devbox=cfg) as devbox:
-        ...     print(devbox.session_info.connection_info.ssh)
-
-        Attach to an existing devbox:
-        >>> devbox = DevboxSession.attach("gw-12345", gateway_url="...")
+        >>> async with AsyncDevboxSession(image="ubuntu:22.04") as devbox:
+        ...     await devbox.execute([{"name": "setup", "command": ["apt-get", "update"]}])
+        ...     await devbox.upload_file("main.py", "print('hello')")
     """
 
     def __init__(
         self,
         image: str | None = None,
         *,
-        devbox: DevboxConfig | dict[str, Any] | None = None,
         profile: str | None = "default",
         gateway_url: str = "",
         timeout: float = 300.0,
@@ -590,7 +478,6 @@ class DevboxSession(SandboxSession):
         super().__init__(
             image=image,
             mode="devbox",
-            devbox=devbox,
             profile=profile,
             gateway_url=gateway_url,
             timeout=timeout,
