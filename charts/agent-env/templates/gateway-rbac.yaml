@@ -33,6 +33,7 @@ rules:
       - sandboxtemplates
     verbs:
       - get
+      - list
       - create
       - patch
       - delete
