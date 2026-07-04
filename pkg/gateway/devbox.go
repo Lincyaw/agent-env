@@ -75,7 +75,7 @@ func buildConnectionInfo(sessionID, podIP string, cfg *DevboxConfig) *Connection
 	return info
 }
 
-func devboxVolumeClaimTemplates(req CreateSessionRequest) []RuntimeVolumeClaimTemplate {
+func (g *Gateway) devboxVolumeClaimTemplates(req CreateSessionRequest) []RuntimeVolumeClaimTemplate {
 	if req.Mode != SessionModeDevbox || req.Devbox == nil {
 		return nil
 	}
@@ -83,9 +83,11 @@ func devboxVolumeClaimTemplates(req CreateSessionRequest) []RuntimeVolumeClaimTe
 	if storageSize == "" {
 		return nil
 	}
+	storageClass := g.gwConfig.DevboxStorageClassName
 	return []RuntimeVolumeClaimTemplate{{
-		Name:        "workspace",
-		StorageSize: storageSize,
-		AccessMode:  "ReadWriteOnce",
+		Name:             "workspace",
+		StorageSize:      storageSize,
+		AccessMode:       "ReadWriteOnce",
+		StorageClassName: storageClass,
 	}}
 }

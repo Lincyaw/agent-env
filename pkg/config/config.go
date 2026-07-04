@@ -101,6 +101,9 @@ type Config struct {
 	DefaultSandboxLimitCPU      string
 	DefaultSandboxLimitMemory   string
 
+	// Devbox persistent storage default StorageClass.
+	DevboxStorageClassName string
+
 	// Sandbox security policy applied to generated SandboxTemplates.
 	SandboxNetworkPolicyManagement  string
 	SandboxRuntimeClassName         string
@@ -413,6 +416,9 @@ func LoadFromEnv() *Config {
 		if b, err := strconv.ParseBool(v); err == nil {
 			cfg.ImageLocalityEnabled = b
 		}
+	}
+	if v := os.Getenv("DEVBOX_STORAGE_CLASS_NAME"); v != "" {
+		cfg.DevboxStorageClassName = v
 	}
 	if v := os.Getenv("SANDBOX_DEFAULT_REQUEST_CPU"); v != "" {
 		cfg.DefaultSandboxRequestCPU = v

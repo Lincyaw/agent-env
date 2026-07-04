@@ -190,18 +190,22 @@ func sandboxClaimVCTs(vcts []RuntimeVolumeClaimTemplate) []sandboxv1beta1.Persis
 		if vct.AccessMode != "" {
 			accessMode = corev1.PersistentVolumeAccessMode(vct.AccessMode)
 		}
+		pvcSpec := corev1.PersistentVolumeClaimSpec{
+			AccessModes: []corev1.PersistentVolumeAccessMode{accessMode},
+			Resources: corev1.VolumeResourceRequirements{
+				Requests: corev1.ResourceList{
+					corev1.ResourceStorage: resource.MustParse(vct.StorageSize),
+				},
+			},
+		}
+		if vct.StorageClassName != "" {
+			pvcSpec.StorageClassName = &vct.StorageClassName
+		}
 		out = append(out, sandboxv1beta1.PersistentVolumeClaimTemplate{
 			EmbeddedObjectMetadata: sandboxv1beta1.EmbeddedObjectMetadata{
 				Name: vct.Name,
 			},
-			Spec: corev1.PersistentVolumeClaimSpec{
-				AccessModes: []corev1.PersistentVolumeAccessMode{accessMode},
-				Resources: corev1.VolumeResourceRequirements{
-					Requests: corev1.ResourceList{
-						corev1.ResourceStorage: resource.MustParse(vct.StorageSize),
-					},
-				},
-			},
+			Spec: pvcSpec,
 		})
 	}
 	return out

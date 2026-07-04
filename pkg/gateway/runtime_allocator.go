@@ -42,9 +42,10 @@ type RuntimeEnvVar struct {
 
 // RuntimeVolumeClaimTemplate is a per-session PVC request injected into the SandboxClaim.
 type RuntimeVolumeClaimTemplate struct {
-	Name        string
-	StorageSize string
-	AccessMode  string
+	Name             string
+	StorageSize      string
+	AccessMode       string
+	StorageClassName string
 }
 
 // RuntimeLifecycle describes the claim-level lifecycle mirror for a session.

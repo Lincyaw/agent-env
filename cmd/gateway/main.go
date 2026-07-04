@@ -127,6 +127,7 @@ func main() {
 		MaxLifetime:                     cfg.GatewayMaxLifetime,
 		DevboxIdleTimeout:               cfg.DevboxIdleTimeout,
 		DevboxMaxLifetime:               cfg.DevboxMaxLifetime,
+		DevboxStorageClassName:          cfg.DevboxStorageClassName,
 		SweepInterval:                   cfg.GatewaySweepInterval,
 		Namespace:                       cfg.GatewayNamespace,
 		SidecarImage:                    cfg.SidecarImage,

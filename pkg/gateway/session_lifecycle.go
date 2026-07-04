@@ -2,7 +2,6 @@ package gateway
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"log"
 	"strings"
@@ -13,10 +12,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	sandboxv1beta1 "sigs.k8s.io/agent-sandbox/api/v1beta1"
-	extensionsv1beta1 "sigs.k8s.io/agent-sandbox/extensions/api/v1beta1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-
-	"github.com/Lincyaw/agent-env/pkg/labels"
 )
 
 // CreateSession allocates a sandbox runtime from the pool and registers a session.
@@ -123,7 +119,7 @@ func (g *Gateway) CreateSession(ctx context.Context, req CreateSessionRequest) (
 		Mode:                 req.Mode,
 		Lifecycle:            lifecycle,
 		Env:                  claimEnv,
-		VolumeClaimTemplates: devboxVolumeClaimTemplates(req),
+		VolumeClaimTemplates: g.devboxVolumeClaimTemplates(req),
 	})
 	if err != nil {
 		recordSpanErr(span, err)
@@ -206,13 +202,7 @@ func (g *Gateway) GetSession(sessionID string) (*SessionInfo, error) {
 }
 
 func (g *Gateway) GetHistoricalSession(sessionID string) (*session, bool) {
-	historical, ok := g.store.(interface {
-		GetHistorical(string) (*session, bool)
-	})
-	if !ok {
-		return nil, false
-	}
-	return historical.GetHistorical(sessionID)
+	return g.store.GetHistorical(sessionID)
 }
 
 // SuspendSession suspends a devbox session (keeps PVC, terminates pod).
@@ -424,21 +414,3 @@ func (g *Gateway) markSessionDeleted(s *session, reason string) {
 	s.Info.DeletedAt = &now
 	s.mu.Unlock()
 }
-
-// ensureImageBackedSessionPool is declared in pool_policy.go or a related file.
-// parseConfigEnvVars is declared in config_env.go.
-// privateContainerMap is declared in private_containers.go.
-// These are cross-references within the same package, resolved at compile time.
-
-// resolveStepTimeoutSeconds resolves the step timeout, preferring TimeoutSeconds over Timeout.
-func resolveStepTimeoutSeconds(step StepRequest) int32 {
-	if step.TimeoutSeconds > 0 {
-		return step.TimeoutSeconds
-	}
-	if step.Timeout > 0 {
-		return step.Timeout
-	}
-	return 0
-}
-
-const uploadFileStepName = "upload_file"
