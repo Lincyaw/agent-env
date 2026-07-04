@@ -20,16 +20,17 @@ type RuntimeAllocation struct {
 
 // RuntimeAllocateRequest describes one session allocation request.
 type RuntimeAllocateRequest struct {
-	PoolRef      string
-	Namespace    string
-	SessionID    string
-	SandboxName  string
-	OwnerKeyHash string
-	Managed      bool
-	ExperimentID string
-	Mode         string
-	Lifecycle    RuntimeLifecycle
-	Env          []RuntimeEnvVar
+	PoolRef              string
+	Namespace            string
+	SessionID            string
+	SandboxName          string
+	OwnerKeyHash         string
+	Managed              bool
+	ExperimentID         string
+	Mode                 string
+	Lifecycle            RuntimeLifecycle
+	Env                  []RuntimeEnvVar
+	VolumeClaimTemplates []RuntimeVolumeClaimTemplate
 }
 
 // RuntimeEnvVar is a session-scoped environment variable request.
@@ -37,6 +38,13 @@ type RuntimeEnvVar struct {
 	Name          string
 	Value         string
 	ContainerName string
+}
+
+// RuntimeVolumeClaimTemplate is a per-session PVC request injected into the SandboxClaim.
+type RuntimeVolumeClaimTemplate struct {
+	Name        string
+	StorageSize string
+	AccessMode  string
 }
 
 // RuntimeLifecycle describes the claim-level lifecycle mirror for a session.

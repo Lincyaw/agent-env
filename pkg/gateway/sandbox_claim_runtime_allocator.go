@@ -9,7 +9,9 @@ import (
 	"strings"
 	"time"
 
+	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
+	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -112,7 +114,8 @@ func (a *SandboxClaimRuntimeAllocator) Allocate(ctx context.Context, req Runtime
 			AdditionalPodMetadata: sandboxv1beta1.PodMetadata{
 				Annotations: podAnnotations,
 			},
-			Env: sandboxClaimEnv(req.Env),
+			Env:                  sandboxClaimEnv(req.Env),
+			VolumeClaimTemplates: sandboxClaimVCTs(req.VolumeClaimTemplates),
 		},
 	}
 
@@ -172,6 +175,33 @@ func sandboxClaimEnv(env []RuntimeEnvVar) []extensionsv1beta1.EnvVar {
 			Name:          ev.Name,
 			Value:         ev.Value,
 			ContainerName: ev.ContainerName,
+		})
+	}
+	return out
+}
+
+func sandboxClaimVCTs(vcts []RuntimeVolumeClaimTemplate) []sandboxv1beta1.PersistentVolumeClaimTemplate {
+	if len(vcts) == 0 {
+		return nil
+	}
+	out := make([]sandboxv1beta1.PersistentVolumeClaimTemplate, 0, len(vcts))
+	for _, vct := range vcts {
+		accessMode := corev1.ReadWriteOnce
+		if vct.AccessMode != "" {
+			accessMode = corev1.PersistentVolumeAccessMode(vct.AccessMode)
+		}
+		out = append(out, sandboxv1beta1.PersistentVolumeClaimTemplate{
+			EmbeddedObjectMetadata: sandboxv1beta1.EmbeddedObjectMetadata{
+				Name: vct.Name,
+			},
+			Spec: corev1.PersistentVolumeClaimSpec{
+				AccessModes: []corev1.PersistentVolumeAccessMode{accessMode},
+				Resources: corev1.VolumeResourceRequirements{
+					Requests: corev1.ResourceList{
+						corev1.ResourceStorage: resource.MustParse(vct.StorageSize),
+					},
+				},
+			},
 		})
 	}
 	return out

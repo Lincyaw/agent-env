@@ -377,16 +377,17 @@ func (g *Gateway) CreateSession(ctx context.Context, req CreateSessionRequest) (
 
 	allocStart := time.Now()
 	allocation, err := g.runtimeAllocator.Allocate(allocCtx, RuntimeAllocateRequest{
-		PoolRef:      poolRef,
-		Namespace:    ns,
-		SessionID:    sessionID,
-		SandboxName:  sandboxName,
-		OwnerKeyHash: ownerHash,
-		Managed:      req.Managed,
-		ExperimentID: req.ExperimentID,
-		Mode:         req.Mode,
-		Lifecycle:    lifecycle,
-		Env:          claimEnv,
+		PoolRef:              poolRef,
+		Namespace:            ns,
+		SessionID:            sessionID,
+		SandboxName:          sandboxName,
+		OwnerKeyHash:         ownerHash,
+		Managed:              req.Managed,
+		ExperimentID:         req.ExperimentID,
+		Mode:                 req.Mode,
+		Lifecycle:            lifecycle,
+		Env:                  claimEnv,
+		VolumeClaimTemplates: devboxVolumeClaimTemplates(req),
 	})
 	if err != nil {
 		recordSpanErr(span, err)
@@ -1540,9 +1541,10 @@ func (g *Gateway) CreatePool(ctx context.Context, req CreatePoolRequest) error {
 	template := &extensionsv1beta1.SandboxTemplate{
 		ObjectMeta: templateMeta,
 		Spec: extensionsv1beta1.SandboxTemplateSpec{
-			NetworkPolicyManagement: g.sandboxNetworkPolicyManagement(),
-			EnvVarsInjectionPolicy:  extensionsv1beta1.EnvVarsInjectionPolicyOverrides,
-			Service:                 boolPtr(false),
+			NetworkPolicyManagement:    g.sandboxNetworkPolicyManagement(),
+			EnvVarsInjectionPolicy:     extensionsv1beta1.EnvVarsInjectionPolicyOverrides,
+			VolumeClaimTemplatesPolicy: extensionsv1beta1.VolumeClaimTemplatesPolicyAllowed,
+			Service:                    boolPtr(false),
 			PodTemplate: sandboxv1beta1.PodTemplate{
 				ObjectMeta: podMetadata,
 				Spec:       g.sandboxPodSpec(req.Image, workspaceDir, *resources, req.PrivateContainers),
@@ -2082,6 +2084,21 @@ func buildConnectionInfo(sessionID, podIP string, cfg *DevboxConfig) *Connection
 		info.SSH = &SSHInfo{Host: podIP, Port: 22}
 	}
 	return info
+}
+
+func devboxVolumeClaimTemplates(req CreateSessionRequest) []RuntimeVolumeClaimTemplate {
+	if req.Mode != SessionModeDevbox || req.Devbox == nil {
+		return nil
+	}
+	storageSize := strings.TrimSpace(req.Devbox.StorageSize)
+	if storageSize == "" {
+		return nil
+	}
+	return []RuntimeVolumeClaimTemplate{{
+		Name:        "workspace",
+		StorageSize: storageSize,
+		AccessMode:  "ReadWriteOnce",
+	}}
 }
 
 func resolveStepTimeoutSeconds(step StepRequest) int32 {
