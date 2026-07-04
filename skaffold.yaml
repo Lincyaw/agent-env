@@ -4,6 +4,8 @@ metadata:
   name: agent-env
 
 build:
+  local:
+    useBuildkit: true
   artifacts:
     - image: arl-sidecar
       docker:
