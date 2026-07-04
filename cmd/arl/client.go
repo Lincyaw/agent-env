@@ -64,7 +64,7 @@ func (c *Client) do(method, path string, body any, result any) error {
 }
 
 func responseError(resp *http.Response) error {
-	data, _ := io.ReadAll(resp.Body)
+	data, _ := io.ReadAll(io.LimitReader(resp.Body, 64*1024))
 	var errResp ErrorResponse
 	if json.Unmarshal(data, &errResp) == nil && errResp.Error != "" {
 		msg := errResp.Error
