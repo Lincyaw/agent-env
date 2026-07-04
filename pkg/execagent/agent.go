@@ -416,13 +416,25 @@ func (a *Agent) resolveWorkspacePath(relPath string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("resolve workspace: %w", err)
 	}
-	targetPath := filepath.Join(workspaceRoot, clean)
-	targetAbs, err := filepath.Abs(targetPath)
-	if err != nil {
-		return "", fmt.Errorf("resolve target path: %w", err)
+	if resolved, err := filepath.EvalSymlinks(workspaceRoot); err == nil {
+		workspaceRoot = resolved
 	}
 
-	relToRoot, err := filepath.Rel(workspaceRoot, targetAbs)
+	targetPath := filepath.Join(workspaceRoot, clean)
+
+	// Resolve symlinks on the target to prevent escaping the workspace via symlink.
+	// Use the longest existing prefix for paths that don't fully exist yet.
+	resolvedTarget := targetPath
+	if resolved, err := filepath.EvalSymlinks(targetPath); err == nil {
+		resolvedTarget = resolved
+	} else {
+		dir := filepath.Dir(targetPath)
+		if resolvedDir, dirErr := filepath.EvalSymlinks(dir); dirErr == nil {
+			resolvedTarget = filepath.Join(resolvedDir, filepath.Base(targetPath))
+		}
+	}
+
+	relToRoot, err := filepath.Rel(workspaceRoot, resolvedTarget)
 	if err != nil {
 		return "", fmt.Errorf("validate target path: %w", err)
 	}
@@ -430,7 +442,7 @@ func (a *Agent) resolveWorkspacePath(relPath string) (string, error) {
 		return "", errors.New("path must stay within the workspace")
 	}
 
-	return targetAbs, nil
+	return resolvedTarget, nil
 }
 
 func (a *Agent) handleSignal(req Request, encoder *json.Encoder) {

@@ -28,8 +28,6 @@ func resolveStepTimeoutSeconds(step StepRequest) int32 {
 	return 0
 }
 
-// resolveSessionPodIP validates the session's SandboxClaim binding before
-// returning the current pod IP.
 func (g *Gateway) resolveSessionPodIP(ctx context.Context, sessionID string) (*session, string, error) {
 	s, ok := g.store.Get(sessionID)
 	if !ok {
@@ -102,6 +100,49 @@ func (g *Gateway) acquireSessionPodIP(ctx context.Context, sessionID string) (*s
 	return validated, podIP, release, nil
 }
 
+// recordStepResult handles the common post-execution bookkeeping for a completed step:
+// metrics, history recording, and trajectory enqueueing.
+func (g *Gateway) recordStepResult(s *session, sessionID string, result *StepResult, start time.Time) {
+	result.DurationMs = time.Since(start).Milliseconds()
+
+	if g.metrics != nil {
+		stepType := result.Name
+		if stepType == "" {
+			stepType = "unnamed"
+		}
+		g.metrics.RecordGatewayStepDuration(stepType, time.Since(start))
+		outcome := "success"
+		if result.Output.ExitCode != 0 {
+			outcome = "error"
+		}
+		g.metrics.IncrementGatewayStepResult(stepType, outcome)
+	}
+
+	stepRecord := StepRecord{
+		Name:       result.Name,
+		Input:      result.Input,
+		Output:     result.Output,
+		DurationMs: result.DurationMs,
+		Timestamp:  result.Timestamp,
+	}
+	globalIdx := s.History.Add(stepRecord)
+
+	result.Index = globalIdx
+	result.SnapshotID = fmt.Sprintf("%d", globalIdx)
+
+	obsJSON, _ := json.Marshal(result.Output)
+	g.enqueueTrajectory(audit.TrajectoryEntry{
+		SessionID:   sessionID,
+		Step:        globalIdx,
+		Name:        result.Name,
+		Action:      result.Input,
+		Observation: obsJSON,
+		SnapshotID:  result.SnapshotID,
+		DurationMs:  result.DurationMs,
+		Timestamp:   result.Timestamp,
+	}, sessionID, globalIdx)
+}
+
 // ExecuteSteps executes steps directly via sidecar gRPC.
 func (g *Gateway) ExecuteSteps(ctx context.Context, sessionID string, req ExecuteRequest) (*ExecuteResponse, error) {
 	return g.executeStepsWithOperation(ctx, sessionID, req)
@@ -134,10 +175,7 @@ func (g *Gateway) executeStepsNow(ctx context.Context, sessionID string, req Exe
 		start := time.Now()
 		inputJSON, _ := json.Marshal(step)
 
-		var result StepResult
-		result.Name = step.Name
-		result.Input = inputJSON
-		result.Timestamp = start
+		result := StepResult{Name: step.Name, Input: inputJSON, Timestamp: start}
 
 		execReq := &sidecar.ExecRequest{
 			Command:        step.Command,
@@ -159,52 +197,12 @@ func (g *Gateway) executeStepsNow(ctx context.Context, sessionID string, req Exe
 			result.Output.ExitCode = execResp.GetExitCode()
 		}
 
-		result.DurationMs = time.Since(start).Milliseconds()
-
-		if g.metrics != nil {
-			stepType := step.Name
-			if stepType == "" {
-				stepType = "unnamed"
-			}
-			g.metrics.RecordGatewayStepDuration(stepType, time.Since(start))
-			outcome := "success"
-			if result.Output.ExitCode != 0 {
-				outcome = "error"
-			}
-			g.metrics.IncrementGatewayStepResult(stepType, outcome)
-		}
-
-		stepRecord := StepRecord{
-			Name:       result.Name,
-			Input:      result.Input,
-			Output:     result.Output,
-			DurationMs: result.DurationMs,
-			Timestamp:  result.Timestamp,
-		}
-		globalIdx := s.History.Add(stepRecord)
-
-		result.Index = globalIdx
-		result.SnapshotID = fmt.Sprintf("%d", globalIdx)
-
+		g.recordStepResult(s, sessionID, &result, start)
 		resp.Results = append(resp.Results, result)
-
-		obsJSON, _ := json.Marshal(result.Output)
-		g.enqueueTrajectory(audit.TrajectoryEntry{
-			SessionID:   sessionID,
-			Step:        globalIdx,
-			Name:        result.Name,
-			Action:      result.Input,
-			Observation: obsJSON,
-			SnapshotID:  result.SnapshotID,
-			DurationMs:  result.DurationMs,
-			Timestamp:   result.Timestamp,
-		}, sessionID, globalIdx)
 	}
 
 	resp.TotalDurationMs = time.Since(totalStart).Milliseconds()
-
 	g.touchLastTaskTime(sessionID)
-
 	g.store.Sync(sessionID)
 
 	return resp, nil
@@ -246,16 +244,11 @@ func (g *Gateway) ExecuteStepsSSE(w http.ResponseWriter, ctx context.Context, se
 	w.WriteHeader(http.StatusOK)
 	flusher.Flush()
 
-	totalStart := time.Now()
-
 	for _, step := range req.Steps {
 		start := time.Now()
 		inputJSON, _ := json.Marshal(step)
 
-		var result StepResult
-		result.Name = step.Name
-		result.Input = inputJSON
-		result.Timestamp = start
+		result := StepResult{Name: step.Name, Input: inputJSON, Timestamp: start}
 
 		execReq := &sidecar.ExecRequest{
 			Command:        step.Command,
@@ -301,53 +294,13 @@ func (g *Gateway) ExecuteStepsSSE(w http.ResponseWriter, ctx context.Context, se
 			result.Output.Stderr = stderr.String()
 		}
 
-		result.DurationMs = time.Since(start).Milliseconds()
-
-		if g.metrics != nil {
-			stepType := step.Name
-			if stepType == "" {
-				stepType = "unnamed"
-			}
-			g.metrics.RecordGatewayStepDuration(stepType, time.Since(start))
-			outcome := "success"
-			if result.Output.ExitCode != 0 {
-				outcome = "error"
-			}
-			g.metrics.IncrementGatewayStepResult(stepType, outcome)
-		}
-
-		stepRecord := StepRecord{
-			Name:       result.Name,
-			Input:      result.Input,
-			Output:     result.Output,
-			DurationMs: result.DurationMs,
-			Timestamp:  result.Timestamp,
-		}
-		globalIdx := s.History.Add(stepRecord)
-
-		result.Index = globalIdx
-		result.SnapshotID = fmt.Sprintf("%d", globalIdx)
-
-		obsJSON, _ := json.Marshal(result.Output)
-		g.enqueueTrajectory(audit.TrajectoryEntry{
-			SessionID:   sessionID,
-			Step:        globalIdx,
-			Name:        result.Name,
-			Action:      result.Input,
-			Observation: obsJSON,
-			SnapshotID:  result.SnapshotID,
-			DurationMs:  result.DurationMs,
-			Timestamp:   result.Timestamp,
-		}, sessionID, globalIdx)
+		g.recordStepResult(s, sessionID, &result, start)
 
 		resultData, _ := json.Marshal(result)
 		fmt.Fprintf(w, "event: result\ndata: %s\n\n", resultData)
 		flusher.Flush()
 	}
 
-	_ = time.Since(totalStart)
-
 	g.touchLastTaskTime(sessionID)
-
 	g.store.Sync(sessionID)
 }
