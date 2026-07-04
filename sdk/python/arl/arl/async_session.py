@@ -18,6 +18,7 @@ from arl.async_client import AsyncGatewayClient
 from arl.configenv import ConfigEnvSpec
 from arl.types import (
     ContainerExecuteResponse,
+    DevboxConfig,
     ExecuteResponse,
     LogEntry,
     PrivateContainerSpec,
@@ -67,6 +68,7 @@ class AsyncSandboxSession:
         image: str | None = None,
         *,
         mode: str | None = None,
+        devbox: DevboxConfig | dict[str, Any] | None = None,
         profile: str | None = "default",
         gateway_url: str = "",
         timeout: float = 300.0,
@@ -77,6 +79,7 @@ class AsyncSandboxSession:
     ) -> None:
         self.image = image or ""
         self.mode = mode
+        self.devbox = devbox
         self.profile = profile or ""
         self.idle_timeout_seconds = idle_timeout_seconds
         self.max_lifetime_seconds = max_lifetime_seconds
@@ -134,6 +137,7 @@ class AsyncSandboxSession:
             image=self.image or None,
             profile=self.profile or None,
             mode=self.mode,
+            devbox=self.devbox,
             idle_timeout_seconds=self.idle_timeout_seconds,
             max_lifetime_seconds=self.max_lifetime_seconds,
             private_containers=self.private_containers,
@@ -415,10 +419,12 @@ class AsyncManagedSession(AsyncSandboxSession):
         api_key: str | None = None,
         private_containers: Iterable[PrivateContainerSpec | dict[str, Any]] | None = None,
         mode: str | None = None,
+        devbox: DevboxConfig | dict[str, Any] | None = None,
     ) -> None:
         super().__init__(
             image=image,
             mode=mode,
+            devbox=devbox,
             profile=profile,
             gateway_url=gateway_url,
             timeout=timeout,
@@ -448,6 +454,7 @@ class AsyncManagedSession(AsyncSandboxSession):
             experiment_id=self._experiment_id,
             profile=self._profile,
             mode=self._mode,
+            devbox=self.devbox,
             config_env=self._config_env,
             resources=self._resources,
             tools=self._tools,
@@ -480,6 +487,7 @@ class AsyncDevboxSession(AsyncSandboxSession):
         self,
         image: str | None = None,
         *,
+        devbox: DevboxConfig | dict[str, Any] | None = None,
         profile: str | None = "default",
         gateway_url: str = "",
         timeout: float = 300.0,
@@ -491,6 +499,7 @@ class AsyncDevboxSession(AsyncSandboxSession):
         super().__init__(
             image=image,
             mode="devbox",
+            devbox=devbox,
             profile=profile,
             gateway_url=gateway_url,
             timeout=timeout,
