@@ -479,6 +479,84 @@ func (g *Gateway) GetHistoricalSession(sessionID string) (*session, bool) {
 	return historical.GetHistorical(sessionID)
 }
 
+// SuspendSession suspends a devbox session (keeps PVC, terminates pod).
+func (g *Gateway) SuspendSession(ctx context.Context, sessionID string) error {
+	s, ok := g.store.Get(sessionID)
+	if !ok {
+		return fmt.Errorf("session %s not found", sessionID)
+	}
+	s.mu.RLock()
+	mode := s.mode
+	sandboxName := s.Runtime.SandboxName
+	ns := s.Info.Namespace
+	s.mu.RUnlock()
+
+	if mode != SessionModeDevbox {
+		return fmt.Errorf("only devbox sessions can be suspended")
+	}
+	if sandboxName == "" {
+		return fmt.Errorf("session %s has no sandbox binding", sessionID)
+	}
+
+	sandbox := &sandboxv1beta1.Sandbox{}
+	key := types.NamespacedName{Name: sandboxName, Namespace: ns}
+	if err := g.k8sClient.Get(ctx, key, sandbox); err != nil {
+		return fmt.Errorf("get sandbox %s: %w", sandboxName, err)
+	}
+	if sandbox.Spec.OperatingMode == sandboxv1beta1.SandboxOperatingModeSuspended {
+		return nil
+	}
+	patch := client.MergeFrom(sandbox.DeepCopy())
+	sandbox.Spec.OperatingMode = sandboxv1beta1.SandboxOperatingModeSuspended
+	if err := g.k8sClient.Patch(ctx, sandbox, patch); err != nil {
+		return fmt.Errorf("suspend sandbox %s: %w", sandboxName, err)
+	}
+
+	s.mu.Lock()
+	s.Info.Status = "suspended"
+	s.mu.Unlock()
+	return nil
+}
+
+// ResumeSession resumes a suspended devbox session.
+func (g *Gateway) ResumeSession(ctx context.Context, sessionID string) error {
+	s, ok := g.store.Get(sessionID)
+	if !ok {
+		return fmt.Errorf("session %s not found", sessionID)
+	}
+	s.mu.RLock()
+	mode := s.mode
+	sandboxName := s.Runtime.SandboxName
+	ns := s.Info.Namespace
+	s.mu.RUnlock()
+
+	if mode != SessionModeDevbox {
+		return fmt.Errorf("only devbox sessions can be resumed")
+	}
+	if sandboxName == "" {
+		return fmt.Errorf("session %s has no sandbox binding", sessionID)
+	}
+
+	sandbox := &sandboxv1beta1.Sandbox{}
+	key := types.NamespacedName{Name: sandboxName, Namespace: ns}
+	if err := g.k8sClient.Get(ctx, key, sandbox); err != nil {
+		return fmt.Errorf("get sandbox %s: %w", sandboxName, err)
+	}
+	if sandbox.Spec.OperatingMode == sandboxv1beta1.SandboxOperatingModeRunning {
+		return nil
+	}
+	patch := client.MergeFrom(sandbox.DeepCopy())
+	sandbox.Spec.OperatingMode = sandboxv1beta1.SandboxOperatingModeRunning
+	if err := g.k8sClient.Patch(ctx, sandbox, patch); err != nil {
+		return fmt.Errorf("resume sandbox %s: %w", sandboxName, err)
+	}
+
+	s.mu.Lock()
+	s.Info.Status = "active"
+	s.mu.Unlock()
+	return nil
+}
+
 // DeleteSession releases the sandbox runtime and removes the session.
 func (g *Gateway) DeleteSession(ctx context.Context, sessionID string) error {
 	return g.deleteSession(ctx, sessionID, "deleted")

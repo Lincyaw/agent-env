@@ -413,6 +413,18 @@ class SandboxSession:
             stderr=step.output.stderr,
         )
 
+    def suspend(self) -> None:
+        """Suspend the devbox session (keeps storage, terminates pod)."""
+        if self._session_id is None:
+            raise RuntimeError("No session created. Call create_sandbox() first.")
+        self._client.suspend_session(self._session_id)
+
+    def resume(self) -> None:
+        """Resume a suspended devbox session."""
+        if self._session_id is None:
+            raise RuntimeError("No session created. Call create_sandbox() first.")
+        self._client.resume_session(self._session_id)
+
     def delete_sandbox(self) -> None:
         """Delete the session and its underlying sandbox."""
         if self._session_id is None:

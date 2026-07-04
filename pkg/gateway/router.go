@@ -35,6 +35,8 @@ func SetupRoutes(mux *http.ServeMux, gw *Gateway, authCfg *AuthConfig) {
 	mux.HandleFunc("POST /v1/sessions", user(handleCreateSession(gw)))
 	mux.HandleFunc("GET /v1/sessions/{id}", user(handleGetSession(gw)))
 	mux.HandleFunc("DELETE /v1/sessions/{id}", user(handleDeleteSession(gw)))
+	mux.HandleFunc("POST /v1/sessions/{id}/suspend", user(handleSuspendSession(gw)))
+	mux.HandleFunc("POST /v1/sessions/{id}/resume", user(handleResumeSession(gw)))
 
 	// Execution (user role)
 	mux.HandleFunc("POST /v1/sessions/{id}/execute", user(handleExecute(gw)))
@@ -215,6 +217,34 @@ func handleDeleteSession(gw *Gateway) http.HandlerFunc {
 			return
 		}
 		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+func handleSuspendSession(gw *Gateway) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		if checkOwnership(gw, w, r, id) == nil {
+			return
+		}
+		if err := gw.SuspendSession(r.Context(), id); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"status": "suspended"})
+	}
+}
+
+func handleResumeSession(gw *Gateway) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		if checkOwnership(gw, w, r, id) == nil {
+			return
+		}
+		if err := gw.ResumeSession(r.Context(), id); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"status": "active"})
 	}
 }
 

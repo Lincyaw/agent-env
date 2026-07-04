@@ -218,6 +218,14 @@ class GatewayClient:
         resp = self._client.delete(f"/v1/sessions/{session_id}")
         self._handle_error(resp)
 
+    def suspend_session(self, session_id: str) -> None:
+        resp = self._client.post(f"/v1/sessions/{session_id}/suspend")
+        self._handle_error(resp)
+
+    def resume_session(self, session_id: str) -> None:
+        resp = self._client.post(f"/v1/sessions/{session_id}/resume")
+        self._handle_error(resp)
+
     def execute(
         self,
         session_id: str,

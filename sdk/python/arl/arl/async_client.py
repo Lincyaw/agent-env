@@ -142,6 +142,14 @@ class AsyncGatewayClient:
         resp = await self._client.delete(f"/v1/sessions/{session_id}")
         self._handle_error(resp)
 
+    async def suspend_session(self, session_id: str) -> None:
+        resp = await self._client.post(f"/v1/sessions/{session_id}/suspend")
+        self._handle_error(resp)
+
+    async def resume_session(self, session_id: str) -> None:
+        resp = await self._client.post(f"/v1/sessions/{session_id}/resume")
+        self._handle_error(resp)
+
     async def execute(
         self,
         session_id: str,
