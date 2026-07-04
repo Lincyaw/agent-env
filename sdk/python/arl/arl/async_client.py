@@ -29,6 +29,7 @@ from arl.gateway_client import (
 from arl.types import (
     ContainerExecuteResponse,
     DeleteExperimentResponse,
+    DevboxConfig,
     ErrorResponse,
     ExecuteOperationInfo,
     ExecuteResponse,
@@ -105,6 +106,7 @@ class AsyncGatewayClient:
         *,
         profile: str | None = "default",
         mode: str | None = None,
+        devbox: DevboxConfig | dict[str, object] | None = None,
         config_env: ConfigEnvSpec | dict[str, Any] | None = None,
         idle_timeout_seconds: int | None = None,
         max_lifetime_seconds: int | None = None,
@@ -119,6 +121,11 @@ class AsyncGatewayClient:
             body["profile"] = profile
         if mode:
             body["mode"] = mode
+        if devbox is not None:
+            if isinstance(devbox, DevboxConfig):
+                body["devbox"] = devbox.model_dump(by_alias=True, exclude_none=True)
+            else:
+                body["devbox"] = devbox
         config_env_payload = _serialize_config_env(config_env)
         if config_env_payload is not None:
             body["configEnv"] = config_env_payload
@@ -521,6 +528,7 @@ class AsyncGatewayClient:
         experiment_id: str,
         profile: str = "default",
         mode: str | None = None,
+        devbox: DevboxConfig | dict[str, object] | None = None,
         resources: ResourceRequirements | None = None,
         tools: ToolsSpec | None = None,
         workspace_dir: str = "/workspace",
@@ -537,6 +545,11 @@ class AsyncGatewayClient:
         }
         if mode:
             body["mode"] = mode
+        if devbox is not None:
+            if isinstance(devbox, DevboxConfig):
+                body["devbox"] = devbox.model_dump(by_alias=True, exclude_none=True)
+            else:
+                body["devbox"] = devbox
         config_env_payload = _serialize_config_env(config_env)
         if config_env_payload is not None:
             body["configEnv"] = config_env_payload
