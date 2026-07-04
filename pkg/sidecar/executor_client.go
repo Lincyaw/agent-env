@@ -10,9 +10,10 @@ import (
 	"time"
 
 	"github.com/Lincyaw/agent-env/pkg/execagent"
+	"github.com/Lincyaw/agent-env/pkg/interfaces"
 )
 
-const fileTransferChunkSize = 1024 * 1024
+const fileTransferChunkSize = interfaces.FileTransferChunkSize
 
 // ExecutorClient communicates with the executor agent over a Unix socket.
 type ExecutorClient struct {

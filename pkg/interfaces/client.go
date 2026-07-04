@@ -5,6 +5,9 @@ import (
 	"io"
 )
 
+// FileTransferChunkSize is the standard chunk size for streaming file operations.
+const FileTransferChunkSize = 1024 * 1024
+
 // LogEntry represents a single log line from the sidecar.
 type LogEntry struct {
 	Timestamp string

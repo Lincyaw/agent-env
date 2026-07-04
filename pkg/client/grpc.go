@@ -21,7 +21,7 @@ import (
 	"github.com/Lincyaw/agent-env/pkg/sidecar"
 )
 
-const fileChunkSize = 1024 * 1024
+const fileChunkSize = interfaces.FileTransferChunkSize
 
 // GRPCSidecarClient is a gRPC-based implementation of SidecarClient
 type GRPCSidecarClient struct {
