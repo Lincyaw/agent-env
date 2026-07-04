@@ -456,6 +456,7 @@ func (g *Gateway) diagnosePoolHealth(ctx context.Context, poolRef, namespace str
 }
 
 // ListPools returns SandboxWarmPool CRDs in the gateway namespace.
+// Uses batch queries to avoid N+1 API calls.
 func (g *Gateway) ListPools(ctx context.Context, namespace string) ([]PoolInfo, error) {
 	namespace, err := g.resolveNamespace(namespace)
 	if err != nil {
@@ -463,14 +464,47 @@ func (g *Gateway) ListPools(ctx context.Context, namespace string) ([]PoolInfo, 
 	}
 
 	var poolList extensionsv1beta1.SandboxWarmPoolList
-	opts := []client.ListOption{client.InNamespace(namespace)}
-	if err := g.k8sClient.List(ctx, &poolList, opts...); err != nil {
+	if err := g.k8sClient.List(ctx, &poolList, client.InNamespace(namespace)); err != nil {
 		return nil, err
+	}
+
+	templatesByName := make(map[string]*extensionsv1beta1.SandboxTemplate)
+	var templateList extensionsv1beta1.SandboxTemplateList
+	if err := g.k8sClient.List(ctx, &templateList, client.InNamespace(namespace)); err == nil {
+		for i := range templateList.Items {
+			templatesByName[templateList.Items[i].Name] = &templateList.Items[i]
+		}
+	}
+
+	claimCountsByPool := make(map[string]int32)
+	var claims extensionsv1beta1.SandboxClaimList
+	if err := g.k8sClient.List(ctx, &claims, client.InNamespace(namespace)); err == nil {
+		for i := range claims.Items {
+			claim := &claims.Items[i]
+			if claim.DeletionTimestamp == nil && claim.Spec.WarmPoolRef.Name != "" {
+				claimCountsByPool[claim.Spec.WarmPoolRef.Name]++
+			}
+		}
 	}
 
 	pools := make([]PoolInfo, 0, len(poolList.Items))
 	for i := range poolList.Items {
-		pools = append(pools, g.poolInfoFromSandboxWarmPool(ctx, &poolList.Items[i]))
+		pool := &poolList.Items[i]
+		info := PoolInfo{
+			Name:              pool.Name,
+			Namespace:         pool.Namespace,
+			Profile:           firstNonEmpty(profileFromObjectMeta(pool.ObjectMeta), defaultPoolProfile),
+			Replicas:          desiredSandboxWarmPoolReplicas(pool),
+			ReadyReplicas:     pool.Status.ReadyReplicas,
+			State:             firstNonEmpty(pool.Annotations[labels.PoolStateAnnotation], labels.PoolStateRunning),
+			CreatedAt:         pool.CreationTimestamp.Time,
+			AllocatedReplicas: claimCountsByPool[pool.Name],
+		}
+		if template, ok := templatesByName[pool.Spec.TemplateRef.Name]; ok {
+			info.Image = primarySandboxTemplateImage(template)
+			info.Profile = firstNonEmpty(profileFromObjectMeta(pool.ObjectMeta), profileFromObjectMeta(template.ObjectMeta), defaultPoolProfile)
+		}
+		pools = append(pools, info)
 	}
 	return pools, nil
 }

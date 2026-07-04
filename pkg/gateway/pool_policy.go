@@ -458,14 +458,22 @@ func (g *Gateway) snapshotPools(ctx context.Context, namespace string) ([]PoolSn
 		claimCounts[key]++
 	}
 
+	var templateList extensionsv1beta1.SandboxTemplateList
+	templatesByName := make(map[types.NamespacedName]*extensionsv1beta1.SandboxTemplate)
+	if err := g.k8sClient.List(ctx, &templateList, client.InNamespace(namespace)); err == nil {
+		for i := range templateList.Items {
+			t := &templateList.Items[i]
+			templatesByName[types.NamespacedName{Name: t.Name, Namespace: t.Namespace}] = t
+		}
+	}
+
 	snapshots := make([]PoolSnapshot, 0, len(poolList.Items))
 	for i := range poolList.Items {
 		pool := &poolList.Items[i]
-		template := &extensionsv1beta1.SandboxTemplate{}
-		templateKey := types.NamespacedName{Name: pool.Spec.TemplateRef.Name, Namespace: pool.Namespace}
 		image := ""
 		templateProfile := ""
-		if err := g.k8sClient.Get(ctx, templateKey, template); err == nil {
+		templateKey := types.NamespacedName{Name: pool.Spec.TemplateRef.Name, Namespace: pool.Namespace}
+		if template, ok := templatesByName[templateKey]; ok {
 			image = primarySandboxTemplateImage(template)
 			templateProfile = profileFromObjectMeta(template.ObjectMeta)
 		}

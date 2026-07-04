@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/Lincyaw/agent-env/pkg/execagent"
+	"github.com/Lincyaw/agent-env/pkg/interfaces"
 	"github.com/google/uuid"
 )
 
@@ -47,19 +48,11 @@ type ExecLog struct {
 	Done     bool
 }
 
-// FileWriteResult describes a streamed write result.
-type FileWriteResult struct {
-	Path         string
-	BytesWritten int64
-	SHA256       string
-}
+// FileWriteResult is an alias for the canonical definition in pkg/interfaces.
+type FileWriteResult = interfaces.FileWriteResult
 
-// FileReadResult describes a streamed read result.
-type FileReadResult struct {
-	Path      string
-	SizeBytes int64
-	SHA256    string
-}
+// FileReadResult is an alias for the canonical definition in pkg/interfaces.
+type FileReadResult = interfaces.FileReadResult
 
 // GetStdout implements interfaces.ExecResponse
 func (r *ExecLog) GetStdout() string {
