@@ -133,6 +133,23 @@ func (g *Gateway) reapRuntimeClaims(ctx context.Context, now time.Time) error {
 
 func (g *Gateway) reapRuntimeClaim(ctx context.Context, claim *extensionsv1beta1.SandboxClaim, sessionID string, now time.Time) error {
 	s, hasSession := g.store.Get(sessionID)
+	if !hasSession {
+		// A cache miss is not proof the session is gone: cache-backed stores
+		// (RedisStore) only serve local entries from Get. Confirm against the
+		// durable record before treating the claim as orphaned — releasing a
+		// live session's claim destroys its runtime.
+		if targeted, ok := g.store.(targetedRecoverableSessionStore); ok {
+			record, err := targeted.RecoverSession(ctx, sessionID)
+			if err != nil {
+				return fmt.Errorf("verify session %s against durable store: %w", sessionID, err)
+			}
+			if record.found && !record.deleted && record.session != nil {
+				log.Printf("Runtime reaper: re-hydrated session %s from durable store for claim %s/%s; skipping orphan release",
+					sessionID, claim.Namespace, claim.Name)
+				s, hasSession = record.session, true
+			}
+		}
+	}
 	terminalExpired := claimTerminalExpired(claim, now)
 	idleExpired := false
 	if !hasSession {
@@ -151,6 +168,8 @@ func (g *Gateway) reapRuntimeClaim(ctx context.Context, claim *extensionsv1beta1
 		s.mu.RUnlock()
 		if currentAllocation.ClaimName != "" &&
 			(currentAllocation.ClaimName != claim.Name || currentAllocation.Namespace != claim.Namespace) {
+			log.Printf("Runtime reaper: releasing stale claim %s/%s for session %s (current claim is %s/%s)",
+				claim.Namespace, claim.Name, sessionID, currentAllocation.Namespace, currentAllocation.ClaimName)
 			return g.runtimeAllocator.Release(ctx, RuntimeAllocation{
 				Backend:     runtimeBackendSandboxClaim,
 				PoolRef:     claim.Spec.WarmPoolRef.Name,
@@ -174,6 +193,8 @@ func (g *Gateway) reapRuntimeClaim(ctx context.Context, claim *extensionsv1beta1
 		return nil
 	}
 
+	log.Printf("Runtime reaper: releasing orphaned claim %s/%s (session=%s, terminalExpired=%t, idleExpired=%t, unhealthy=%t)",
+		claim.Namespace, claim.Name, sessionID, terminalExpired, idleExpired, unhealthy)
 	return g.runtimeAllocator.Release(ctx, RuntimeAllocation{
 		Backend:     runtimeBackendSandboxClaim,
 		PoolRef:     claim.Spec.WarmPoolRef.Name,

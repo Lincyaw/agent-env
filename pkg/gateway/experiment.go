@@ -247,6 +247,12 @@ func (g *Gateway) stopManagedPoolIfUnused(ctx context.Context, poolName, namespa
 		return false, err
 	}
 
+	// Serialize check-then-stop: concurrent session deletes racing this path
+	// could each observe "no bindings" while another is mid-decision. The pool
+	// and binding state are re-read inside the critical section.
+	g.poolStopMu.Lock()
+	defer g.poolStopMu.Unlock()
+
 	pool := &extensionsv1beta1.SandboxWarmPool{}
 	if err := g.k8sClient.Get(ctx, types.NamespacedName{Name: poolName, Namespace: namespace}, pool); err != nil {
 		if errors.IsNotFound(err) {

@@ -460,11 +460,15 @@ func (g *Gateway) snapshotPools(ctx context.Context, namespace string) ([]PoolSn
 
 	var templateList extensionsv1beta1.SandboxTemplateList
 	templatesByName := make(map[types.NamespacedName]*extensionsv1beta1.SandboxTemplate)
-	if err := g.k8sClient.List(ctx, &templateList, client.InNamespace(namespace)); err == nil {
-		for i := range templateList.Items {
-			t := &templateList.Items[i]
-			templatesByName[types.NamespacedName{Name: t.Name, Namespace: t.Namespace}] = t
-		}
+	if err := g.k8sClient.List(ctx, &templateList, client.InNamespace(namespace)); err != nil {
+		// Without templates every pool snapshot resolves to image "", which
+		// silently rejects all allocations with confusing mismatch errors
+		// (e.g. when RBAC denies the list). Surface the real cause instead.
+		return nil, fmt.Errorf("list sandbox templates for pool snapshots: %w", err)
+	}
+	for i := range templateList.Items {
+		t := &templateList.Items[i]
+		templatesByName[types.NamespacedName{Name: t.Name, Namespace: t.Namespace}] = t
 	}
 
 	snapshots := make([]PoolSnapshot, 0, len(poolList.Items))

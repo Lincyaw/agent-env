@@ -122,6 +122,7 @@ type Gateway struct {
 	autoscaleWg         sync.WaitGroup
 	admissionQueueMu    sync.Mutex
 	admissionQueueDepth map[types.NamespacedName]int32
+	poolStopMu          sync.Mutex
 	trajMu              sync.RWMutex
 	trajCh              chan audit.TrajectoryEntry
 	trajWg              sync.WaitGroup

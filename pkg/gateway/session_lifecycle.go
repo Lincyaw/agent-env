@@ -312,7 +312,11 @@ func (g *Gateway) deleteSession(ctx context.Context, sessionID string, reason st
 	allocation := s.runtimeAllocation()
 	podName := allocation.PodName
 	podIP := allocation.PodIP
+	experimentID := s.experimentID
 	s.mu.Unlock()
+
+	log.Printf("Deleting session %s (reason=%s, experiment=%s, pool=%s, pod=%s)",
+		sessionID, reason, experimentID, allocation.PoolRef, podName)
 
 	if g.runtimeAllocator != nil {
 		if err := g.runtimeAllocator.Release(ctx, allocation); err != nil && !errors.IsNotFound(err) {
@@ -370,6 +374,8 @@ func (g *Gateway) dropSession(sessionID string, s *session) {
 	info := s.Info
 	allocation := s.runtimeAllocation()
 	s.mu.Unlock()
+
+	log.Printf("Dropping session %s: runtime lost (pool=%s, pod=%s)", sessionID, allocation.PoolRef, allocation.PodName)
 
 	if info.PodIP != "" {
 		if g.sidecarClient != nil {
