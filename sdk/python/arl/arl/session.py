@@ -125,21 +125,22 @@ class SandboxSession:
         Raises:
             GatewayError: If the session does not exist.
         """
-        client = GatewayClient(base_url=gateway_url, timeout=timeout, api_key=api_key)
-        try:
-            info = client.get_session(session_id)
-        finally:
-            client.close()
-
         instance = cls(
-            image=info.image or None,
-            profile=info.profile or None,
+            image=None,
+            profile=None,
             gateway_url=gateway_url,
             timeout=timeout,
             api_key=api_key,
         )
+        try:
+            info = instance._client.get_session(session_id)
+        except Exception:
+            instance.close()
+            raise
         instance._session_id = info.id
         instance._session_info = info
+        instance.image = info.image or ""
+        instance.profile = info.profile or ""
         instance._delete_on_exit = False
         return instance
 

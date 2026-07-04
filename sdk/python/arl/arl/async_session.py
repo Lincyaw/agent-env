@@ -101,21 +101,22 @@ class AsyncSandboxSession:
         api_key: str | None = None,
     ) -> AsyncSandboxSession:
         """Attach to an existing session by session ID."""
-        client = AsyncGatewayClient(base_url=gateway_url, timeout=timeout, api_key=api_key)
-        try:
-            info = await client.get_session(session_id)
-        finally:
-            await client.aclose()
-
         instance = cls(
-            image=info.image or None,
-            profile=info.profile or None,
+            image=None,
+            profile=None,
             gateway_url=gateway_url,
             timeout=timeout,
             api_key=api_key,
         )
+        try:
+            info = await instance._client.get_session(session_id)
+        except Exception:
+            await instance.aclose()
+            raise
         instance._session_id = info.id
         instance._session_info = info
+        instance.image = info.image or ""
+        instance.profile = info.profile or ""
         instance._delete_on_exit = False
         return instance
 
