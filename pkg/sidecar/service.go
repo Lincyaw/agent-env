@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"os/exec"
 	"strings"
 	"time"
 
@@ -17,7 +16,6 @@ type ExecRequest struct {
 	Command        []string
 	Env            map[string]string
 	WorkingDir     string
-	Background     bool
 	TimeoutSeconds int32
 }
 
@@ -86,7 +84,6 @@ func (r *ExecLog) IsDone() bool {
 // AgentService implements the sidecar functionality
 type AgentService struct {
 	workspaceDir   string
-	processes      map[int]*exec.Cmd
 	executorClient *ExecutorClient
 	Logs           *LogBuffer
 }
@@ -95,7 +92,6 @@ type AgentService struct {
 func NewAgentService(workspaceDir string) *AgentService {
 	return &AgentService{
 		workspaceDir: workspaceDir,
-		processes:    make(map[int]*exec.Cmd),
 		Logs:         NewLogBuffer(2000),
 	}
 }
@@ -104,7 +100,6 @@ func NewAgentService(workspaceDir string) *AgentService {
 func NewAgentServiceWithExecutor(workspaceDir, executorSocket string) *AgentService {
 	return &AgentService{
 		workspaceDir:   workspaceDir,
-		processes:      make(map[int]*exec.Cmd),
 		executorClient: NewExecutorClient(executorSocket),
 		Logs:           NewLogBuffer(2000),
 	}

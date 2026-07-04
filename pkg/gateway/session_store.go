@@ -24,6 +24,15 @@ type SessionStore interface {
 	// IncrCount atomically increments the session count by delta and returns the new value.
 	IncrCount(delta int64) int64
 
+	// Sync persists session state to durable storage. No-op for in-memory stores.
+	Sync(sessionID string)
+
+	// GetHistorical returns a soft-deleted session for replay/history purposes.
+	GetHistorical(sessionID string) (*session, bool)
+
+	// FindByExperiment returns session IDs associated with an experiment.
+	FindByExperiment(experimentID string) []string
+
 	// Close releases any resources held by the store.
 	Close() error
 }

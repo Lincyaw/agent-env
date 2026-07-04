@@ -15,6 +15,7 @@ type RateLimiter struct {
 	visitors map[string]*visitor
 	limit    rate.Limit
 	burst    int
+	stop     chan struct{}
 }
 
 type visitor struct {
@@ -29,6 +30,7 @@ func NewRateLimiter(rps float64, burst int) *RateLimiter {
 		visitors: make(map[string]*visitor),
 		limit:    rate.Limit(rps),
 		burst:    burst,
+		stop:     make(chan struct{}),
 	}
 	go rl.cleanup()
 	return rl
@@ -50,16 +52,27 @@ func (rl *RateLimiter) getVisitor(ip string) *rate.Limiter {
 }
 
 func (rl *RateLimiter) cleanup() {
+	ticker := time.NewTicker(3 * time.Minute)
+	defer ticker.Stop()
 	for {
-		time.Sleep(3 * time.Minute)
-		rl.mu.Lock()
-		for ip, v := range rl.visitors {
-			if time.Since(v.lastSeen) > 5*time.Minute {
-				delete(rl.visitors, ip)
+		select {
+		case <-rl.stop:
+			return
+		case <-ticker.C:
+			rl.mu.Lock()
+			for ip, v := range rl.visitors {
+				if time.Since(v.lastSeen) > 5*time.Minute {
+					delete(rl.visitors, ip)
+				}
 			}
+			rl.mu.Unlock()
 		}
-		rl.mu.Unlock()
 	}
+}
+
+// Close stops the background cleanup goroutine.
+func (rl *RateLimiter) Close() {
+	close(rl.stop)
 }
 
 // Middleware returns an HTTP middleware that rejects requests exceeding the

@@ -439,6 +439,12 @@ func (s *recoverableMemoryStore) SetCount(count int64) int64 {
 	return count
 }
 
+func (s *recoverableMemoryStore) Sync(_ string) {}
+
+func (s *recoverableMemoryStore) GetHistorical(_ string) (*session, bool) { return nil, false }
+
+func (s *recoverableMemoryStore) FindByExperiment(_ string) []string { return nil }
+
 func (s *recoverableMemoryStore) Close() error {
 	return nil
 }

@@ -96,9 +96,7 @@ func (g *Gateway) touchLastTaskTime(sessionID string) {
 	allocation := s.runtimeAllocation()
 	s.mu.Unlock()
 
-	if rs, ok := g.store.(*RedisStore); ok {
-		rs.Sync(sessionID)
-	}
+	g.store.Sync(sessionID)
 
 	if shouldPatch && g.runtimeAllocator != nil {
 		go func() {

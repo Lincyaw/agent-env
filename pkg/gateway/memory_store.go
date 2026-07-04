@@ -64,6 +64,10 @@ func (ms *MemoryStore) SetCount(count int64) int64 {
 	return count
 }
 
+func (ms *MemoryStore) Sync(_ string) {}
+
+func (ms *MemoryStore) FindByExperiment(_ string) []string { return nil }
+
 func (ms *MemoryStore) Close() error {
 	return nil
 }

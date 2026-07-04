@@ -95,7 +95,6 @@ func (s *GRPCServer) Execute(req *pb.ExecRequest, stream grpc.ServerStreamingSer
 		Command:        req.GetCommand(),
 		Env:            req.GetEnv(),
 		WorkingDir:     req.GetWorkingDir(),
-		Background:     req.GetBackground(),
 		TimeoutSeconds: req.GetTimeoutSeconds(),
 	}
 

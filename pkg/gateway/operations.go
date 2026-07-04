@@ -156,6 +156,17 @@ func (g *Gateway) getOrStartExecuteOperation(sessionID string, req ExecuteReques
 			}
 			g.metrics.IncrementExecuteOperationResult(result)
 		}
+
+		operationID := req.OperationID
+		time.AfterFunc(10*time.Minute, func() {
+			s, ok := g.store.Get(sessionID)
+			if !ok {
+				return
+			}
+			s.mu.Lock()
+			delete(s.operations, operationID)
+			s.mu.Unlock()
+		})
 	}()
 
 	return op, true, nil

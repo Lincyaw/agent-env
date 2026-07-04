@@ -334,12 +334,8 @@ func (g *Gateway) scalePoolForQueuedDemand(ctx context.Context, key types.Namesp
 		return fmt.Errorf("get sandbox warm pool %s/%s for queued demand: %w", key.Namespace, key.Name, err)
 	}
 
-	claimCounts, err := g.activeClaimCountsByPool(ctx)
-	if err != nil {
-		return err
-	}
 	queuedCounts := g.admissionQueueSnapshot()
-	target := g.poolAutoscaleTarget(claimCounts[key], queuedCounts[key])
+	target := g.poolAutoscaleTarget(queuedCounts[key])
 	if target < 1 {
 		target = 1
 	}

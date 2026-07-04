@@ -85,7 +85,7 @@ func (g *Gateway) reconcilePoolAutoscaling(ctx context.Context) error {
 		key := types.NamespacedName{Name: pool.Name, Namespace: pool.Namespace}
 		activeClaims := claimCounts[key]
 		queuedRequests := queuedCounts[key]
-		target := g.poolAutoscaleTarget(activeClaims, queuedRequests)
+		target := g.poolAutoscaleTarget(queuedRequests)
 		current := desiredSandboxWarmPoolReplicas(pool)
 		g.publishPoolMetrics(pool, activeClaims, queuedRequests, current)
 		if target == current {
@@ -143,7 +143,7 @@ func (g *Gateway) activeClaimCountsByPool(ctx context.Context) (map[types.Namesp
 	return counts, nil
 }
 
-func (g *Gateway) poolAutoscaleTarget(activeClaims, queuedRequests int32) int32 {
+func (g *Gateway) poolAutoscaleTarget(queuedRequests int32) int32 {
 	buffer := g.gwConfig.PoolAutoscalerBuffer
 	if buffer < 0 {
 		buffer = 0

@@ -97,10 +97,10 @@ func (b *LogBuffer) Subscribe() chan LogLine {
 	return ch
 }
 
-// Unsubscribe removes a follow channel and closes it.
+// Unsubscribe removes a follow channel. The channel is not closed; the
+// subscriber should detect end-of-stream via context cancellation.
 func (b *LogBuffer) Unsubscribe(ch chan LogLine) {
 	b.mu.Lock()
 	delete(b.subs, ch)
 	b.mu.Unlock()
-	close(ch)
 }
