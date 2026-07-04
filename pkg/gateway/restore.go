@@ -16,11 +16,7 @@ import (
 func (g *Gateway) ReplayFrom(ctx context.Context, targetSessionID string, req ReplayRequest) (*ReplayResponse, error) {
 	sourceSession, ok := g.store.Get(req.SourceSessionID)
 	if !ok {
-		if historical, hasHistory := g.store.(interface {
-			GetHistorical(string) (*session, bool)
-		}); hasHistory {
-			sourceSession, ok = historical.GetHistorical(req.SourceSessionID)
-		}
+		sourceSession, ok = g.store.GetHistorical(req.SourceSessionID)
 		if !ok {
 			return nil, fmt.Errorf("source session %s not found", req.SourceSessionID)
 		}
