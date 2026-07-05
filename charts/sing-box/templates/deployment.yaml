@@ -1,0 +1,185 @@
+{{- if .Values.subscriptionURL }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "sing-box.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "sing-box.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.replicas }}
+  selector:
+    matchLabels:
+      {{- include "sing-box.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "sing-box.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      initContainers:
+      - name: fetch-config
+        image: {{ .Values.initImage.repository }}:{{ .Values.initImage.tag }}
+        command: ["python3", "-c"]
+        args:
+        - |
+          import json, os, urllib.request
+
+          url = os.environ["SUB_URL"]
+          port = int(os.environ["LISTEN_PORT"])
+          level = os.environ["LOG_LEVEL"]
+          routing = json.loads(os.environ.get("ROUTING_CONFIG", "{}"))
+
+          req = urllib.request.Request(url, headers={"User-Agent": "sing-box/1.12"})
+          with urllib.request.urlopen(req) as resp:
+              with open("/data/raw.json", "wb") as out:
+                  out.write(resp.read())
+          with open("/data/raw.json") as f:
+              cfg = json.load(f)
+
+          # --- Strip to mixed inbound only ---
+          cfg["inbounds"] = [ib for ib in cfg.get("inbounds", []) if ib.get("type") == "mixed"]
+          if not cfg["inbounds"]:
+              cfg["inbounds"] = [{"type": "mixed", "tag": "mixed-in"}]
+          for ib in cfg["inbounds"]:
+              ib["listen"] = "::"
+              ib["listen_port"] = port
+
+          cfg.pop("ntp", None)
+
+          # --- Clean DNS (remove FakeIP) ---
+          if "dns" in cfg:
+              cfg["dns"]["servers"] = [
+                  s for s in cfg["dns"].get("servers", [])
+                  if s.get("tag") != "DNS-FAKEIP"
+              ]
+              cfg["dns"].pop("fakeip", None)
+              if "rules" in cfg["dns"]:
+                  cfg["dns"]["rules"] = [
+                      r for r in cfg["dns"]["rules"]
+                      if r.get("server") != "DNS-FAKEIP"
+                  ]
+
+          # --- Detect proxy outbound ---
+          proxy_ob = routing.get("proxyOutbound", "")
+          if not proxy_ob:
+              for ob in cfg.get("outbounds", []):
+                  if ob.get("type") in ("selector", "urltest"):
+                      proxy_ob = ob["tag"]
+                      break
+              if not proxy_ob:
+                  for ob in cfg.get("outbounds", []):
+                      if ob.get("type") not in ("direct", "block", "dns"):
+                          proxy_ob = ob["tag"]
+                          break
+
+          # --- Ensure a direct outbound exists ---
+          direct_tag = "direct"
+          for ob in cfg.get("outbounds", []):
+              if ob.get("type") == "direct":
+                  direct_tag = ob["tag"]
+                  break
+          else:
+              cfg.setdefault("outbounds", []).append({"type": "direct", "tag": "direct"})
+
+          # --- Build route rules (order = priority) ---
+          rules = []
+
+          # 1) Always-direct domains (highest priority)
+          ds = routing.get("directDomainSuffixes", [])
+          if ds:
+              rules.append({"domain_suffix": ds, "outbound": direct_tag})
+
+          # 2) User proxy whitelist
+          v = routing.get("proxyDomainSuffixes", [])
+          if v:
+              rules.append({"domain_suffix": v, "outbound": proxy_ob})
+          v = routing.get("proxyDomains", [])
+          if v:
+              rules.append({"domain": v, "outbound": proxy_ob})
+          v = routing.get("proxyDomainKeywords", [])
+          if v:
+              rules.append({"domain_keyword": v, "outbound": proxy_ob})
+          v = routing.get("proxyIPCIDRs", [])
+          if v:
+              rules.append({"ip_cidr": v, "outbound": proxy_ob})
+
+          # 3) Subscription rules (if kept)
+          if routing.get("keepSubscriptionRules", True) and "route" in cfg:
+              sub_rules = [r for r in cfg["route"].get("rules", [])
+                           if r.get("inbound") != "tun-in"]
+              rules.extend(sub_rules)
+
+          # 4) Extra raw rules
+          rules.extend(routing.get("extraRules", []))
+
+          # --- Apply ---
+          cfg["route"] = cfg.get("route", {})
+          cfg["route"]["rules"] = rules
+          final = routing.get("final", "direct")
+          cfg["route"]["final"] = proxy_ob if final == "proxy" else direct_tag
+
+          cfg["log"] = cfg.get("log", {})
+          cfg["log"]["level"] = level
+          cfg["log"]["disabled"] = False
+
+          with open("/data/config.json", "w") as f:
+              json.dump(cfg, f, indent=2, ensure_ascii=False)
+          print("config: %d outbounds, %d rules, proxy=%s, final=%s, port=%d" % (
+              len(cfg.get("outbounds", [])), len(rules), proxy_ob,
+              cfg["route"]["final"], port))
+        env:
+        - name: SUB_URL
+          valueFrom:
+            secretKeyRef:
+              name: {{ include "sing-box.fullname" . }}
+              key: url
+        - name: LISTEN_PORT
+          value: "{{ .Values.port }}"
+        - name: LOG_LEVEL
+          value: "{{ .Values.logLevel }}"
+        - name: ROUTING_CONFIG
+          value: {{ .Values.routing | toJson | quote }}
+        volumeMounts:
+        - name: data
+          mountPath: /data
+      containers:
+      - name: sing-box
+        image: {{ .Values.image.repository }}:{{ .Values.image.tag }}
+        imagePullPolicy: {{ .Values.image.pullPolicy }}
+        args: ["run", "-c", "/data/config.json"]
+        {{- with .Values.extraEnv }}
+        env:
+          {{- toYaml . | nindent 10 }}
+        {{- end }}
+        ports:
+        - name: mixed
+          containerPort: {{ .Values.port }}
+          protocol: TCP
+        {{- if .Values.clashAPIPort }}
+        - name: clash-api
+          containerPort: {{ .Values.clashAPIPort }}
+          protocol: TCP
+        {{- end }}
+        readinessProbe:
+          tcpSocket:
+            port: mixed
+          initialDelaySeconds: 5
+          periodSeconds: 10
+        livenessProbe:
+          tcpSocket:
+            port: mixed
+          initialDelaySeconds: 15
+          periodSeconds: 30
+        resources:
+          {{- toYaml .Values.resources | nindent 10 }}
+        volumeMounts:
+        - name: data
+          mountPath: /data
+      volumes:
+      - name: data
+        emptyDir: {}
+{{- end }}

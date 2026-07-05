@@ -1,0 +1,87 @@
+# sing-box in-cluster proxy.
+#
+# Fetches a sing-box JSON subscription at startup, strips inbounds down to a
+# single mixed-protocol listener, and serves HTTP/SOCKS5 proxy on port 7890.
+
+image:
+  repository: pair-cn-shanghai.cr.volces.com/opspai/sing-box
+  tag: v1.12.2
+  pullPolicy: IfNotPresent
+
+# Init container image for fetching and adapting the subscription config.
+# Needs python3. Uses Docker Hub mirror for China clusters.
+initImage:
+  repository: pair-cn-shanghai.cr.volces.com/library/python
+  tag: 3-alpine
+
+# sing-box subscription URL that returns a full JSON config (e.g. ?app=sb_112).
+# Required — the chart does nothing useful without it.
+subscriptionURL: ""
+
+# Mixed inbound listen port (HTTP + SOCKS5).
+port: 7890
+
+# Clash API port for external dashboards (0 to disable).
+clashAPIPort: 9090
+
+# Log level: trace, debug, info, warn, error, fatal, panic.
+logLevel: info
+
+replicas: 1
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 256Mi
+  limits:
+    cpu: "2"
+    memory: 1Gi
+
+# ---------------------------------------------------------------------------
+# Routing rules — control which traffic goes through the proxy.
+# By default subscription rules are kept; add your own on top.
+# ---------------------------------------------------------------------------
+routing:
+  # Outbound tag for proxied traffic.
+  # Empty = auto-detect (first selector/urltest outbound from subscription).
+  proxyOutbound: ""
+
+  # What to do with unmatched traffic: "direct" or "proxy".
+  final: "direct"
+
+  # Keep routing rules from the subscription config.
+  # false = clean whitelist-only mode (only your rules below apply).
+  keepSubscriptionRules: false
+
+  # --- Proxy whitelist (domain/IP that should go through proxy) ---
+
+  # Domain suffixes (e.g. "github.com" matches *.github.com and github.com)
+  proxyDomainSuffixes:
+    - github.com
+    - githubusercontent.com
+    - ghcr.io
+    - gitlab.com
+    - googlesource.com
+
+  # Exact domain matches
+  proxyDomains: []
+
+  # Domain keyword matches (substring)
+  proxyDomainKeywords: []
+
+  # Destination IP CIDRs
+  proxyIPCIDRs: []
+
+  # --- Direct list (always bypass proxy, highest priority) ---
+
+  directDomainSuffixes:
+    - cluster.local
+    - svc.local
+
+  # --- Advanced: raw sing-box route rule objects (appended last) ---
+  extraRules: []
+
+# Extra sing-box environment variables. 1.12.x needs no compat flags.
+extraEnv: []
+
+imagePullSecrets: []

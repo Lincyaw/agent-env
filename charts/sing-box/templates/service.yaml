@@ -1,0 +1,24 @@
+{{- if .Values.subscriptionURL }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "sing-box.fullname" . }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "sing-box.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector:
+    {{- include "sing-box.selectorLabels" . | nindent 4 }}
+  ports:
+  - name: mixed
+    port: {{ .Values.port }}
+    targetPort: mixed
+    protocol: TCP
+  {{- if .Values.clashAPIPort }}
+  - name: clash-api
+    port: {{ .Values.clashAPIPort }}
+    targetPort: clash-api
+    protocol: TCP
+  {{- end }}
+{{- end }}
