@@ -2,5 +2,8 @@ dependencies:
 - name: agent-sandbox
   repository: oci://pair-diag-cn-guangzhou.cr.volces.com/pair
   version: 0.1.0
-digest: sha256:21041ade1aefde604c4328825bd86bb3c852c5e6df8987ec03bb1b7898416e80
-generated: "2026-06-29T19:48:08.699457+03:00"
+- name: sing-box
+  repository: file://../sing-box
+  version: 0.1.0
+digest: sha256:74d1f5d2615b7993272e869c43d7449e3d615cacc70e13166181308c675d3e3c
+generated: "2026-07-05T20:47:53.197696921+01:00"

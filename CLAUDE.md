@@ -92,7 +92,7 @@ After modifying components or interfaces:
   ```
   `UNAUTHORIZED: project opspai not found` during cross-repo blob mount can be non-fatal when `crane` retries without mount and later prints a target digest.
 - **Sidecar image**: Keep the sidecar runtime minimal. The sidecar is a static Go server; shell, Python, and tools belong in the executor/user image, not the sidecar image.
-- **Mihomo**: In-cluster proxy at `mihomo.arl.svc:7890`. Sandbox pods get `HTTP_PROXY` injected automatically when `proxy.url` is set.
+- **sing-box**: In-cluster proxy subchart (`charts/sing-box`). Sandbox pods get `HTTP_PROXY` injected automatically when `proxy.url` is set.
 - **replicas=0**: Default. Pre-pulls image only; pods are created on demand when sessions arrive.
 - **Post-deploy checks**: Verify CRDs and controllers first, then gateway health:
   ```bash

@@ -21,3 +21,8 @@ dependencies:
     version: 0.1.0
     repository: oci://pair-diag-cn-guangzhou.cr.volces.com/pair
     condition: agentSandbox.enabled
+  - name: sing-box
+    alias: singBox
+    version: 0.1.0
+    repository: file://../sing-box
+    condition: singBox.enabled
