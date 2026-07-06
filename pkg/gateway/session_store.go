@@ -27,6 +27,9 @@ type SessionStore interface {
 	// Sync persists session state to durable storage. No-op for in-memory stores.
 	Sync(sessionID string)
 
+	// SyncHistory persists replayable session history/action data. No-op for in-memory stores.
+	SyncHistory(sessionID string)
+
 	// GetHistorical returns a soft-deleted session for replay/history purposes.
 	GetHistorical(sessionID string) (*session, bool)
 

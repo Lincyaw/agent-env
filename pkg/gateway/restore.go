@@ -153,7 +153,7 @@ func (g *Gateway) Restore(ctx context.Context, sessionID string, snapshotID stri
 
 	s.History.TruncateTo(targetIdx)
 	g.touchLastTaskTime(sessionID)
-	g.store.Sync(sessionID)
+	g.store.SyncHistory(sessionID)
 
 	go func() {
 		bgCtx, bgCancel := context.WithTimeout(context.Background(), 10*time.Second)

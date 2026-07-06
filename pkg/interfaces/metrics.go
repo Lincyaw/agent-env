@@ -4,6 +4,7 @@ import "time"
 
 // MetricsCollector defines the gateway metrics used by the current runtime.
 type MetricsCollector interface {
+	RecordHTTPRequestDuration(method, route, status string, duration time.Duration)
 	RecordSessionAllocationDuration(poolName string, duration time.Duration)
 	IncrementPodAllocationResult(poolName, result string)
 	RecordSandboxReadyDuration(poolName string, duration time.Duration)
@@ -18,18 +19,17 @@ type MetricsCollector interface {
 	IncrementRestoreResult(result string)
 	SetGatewayGoroutines(count int)
 	SetGatewaySessionsTotal(count int)
-	SetIdleQueueDepth(pool string, count int)
-	SetPendingWaiters(pool string, count int)
-	SetAdmissionQueueDepth(pool string, count int)
-	SetPoolSaturation(pool string, saturation float64)
-	SetPoolDesiredReplicas(pool string, count int)
-	SetPoolReadyReplicas(pool string, count int)
-	SetPoolAllocatedReplicas(pool string, count int)
+	SetRuntimeIdleCapacity(count int)
+	SetRuntimePendingWaiters(count int)
+	ResetPoolAggregateMetrics()
+	SetPoolAggregateMetrics(profile, state string, desired, ready, allocated, queued int, saturation float64)
 }
 
 // NoOpMetricsCollector is a no-op implementation for tests or disabled metrics.
 type NoOpMetricsCollector struct{}
 
+func (n *NoOpMetricsCollector) RecordHTTPRequestDuration(method, route, status string, duration time.Duration) {
+}
 func (n *NoOpMetricsCollector) RecordSessionAllocationDuration(poolName string, duration time.Duration) {
 }
 func (n *NoOpMetricsCollector) IncrementPodAllocationResult(poolName, result string)               {}
@@ -43,15 +43,12 @@ func (n *NoOpMetricsCollector) RecordGatewayStepDuration(stepType string, durati
 func (n *NoOpMetricsCollector) IncrementGatewayStepResult(stepType, result string) {}
 func (n *NoOpMetricsCollector) RecordSidecarCallDuration(method string, duration time.Duration) {
 }
-func (n *NoOpMetricsCollector) RecordRestoreDuration(duration time.Duration)  {}
-func (n *NoOpMetricsCollector) IncrementRestoreResult(result string)          {}
-func (n *NoOpMetricsCollector) SetGatewayGoroutines(count int)                {}
-func (n *NoOpMetricsCollector) SetGatewaySessionsTotal(count int)             {}
-func (n *NoOpMetricsCollector) SetIdleQueueDepth(pool string, count int)      {}
-func (n *NoOpMetricsCollector) SetPendingWaiters(pool string, count int)      {}
-func (n *NoOpMetricsCollector) SetAdmissionQueueDepth(pool string, count int) {}
-func (n *NoOpMetricsCollector) SetPoolSaturation(pool string, saturation float64) {
+func (n *NoOpMetricsCollector) RecordRestoreDuration(duration time.Duration) {}
+func (n *NoOpMetricsCollector) IncrementRestoreResult(result string)         {}
+func (n *NoOpMetricsCollector) SetGatewayGoroutines(count int)               {}
+func (n *NoOpMetricsCollector) SetGatewaySessionsTotal(count int)            {}
+func (n *NoOpMetricsCollector) SetRuntimeIdleCapacity(count int)             {}
+func (n *NoOpMetricsCollector) SetRuntimePendingWaiters(count int)           {}
+func (n *NoOpMetricsCollector) ResetPoolAggregateMetrics()                   {}
+func (n *NoOpMetricsCollector) SetPoolAggregateMetrics(profile, state string, desired, ready, allocated, queued int, saturation float64) {
 }
-func (n *NoOpMetricsCollector) SetPoolDesiredReplicas(pool string, count int)   {}
-func (n *NoOpMetricsCollector) SetPoolReadyReplicas(pool string, count int)     {}
-func (n *NoOpMetricsCollector) SetPoolAllocatedReplicas(pool string, count int) {}

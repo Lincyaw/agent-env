@@ -83,11 +83,9 @@ func (g *Gateway) reconcilePoolAutoscaling(ctx context.Context) error {
 		}
 
 		key := types.NamespacedName{Name: pool.Name, Namespace: pool.Namespace}
-		activeClaims := claimCounts[key]
 		queuedRequests := queuedCounts[key]
 		target := g.poolAutoscaleTarget(queuedRequests)
 		current := desiredSandboxWarmPoolReplicas(pool)
-		g.publishPoolMetrics(pool, activeClaims, queuedRequests, current)
 		if target == current {
 			continue
 		}
@@ -97,8 +95,8 @@ func (g *Gateway) reconcilePoolAutoscaling(ctx context.Context) error {
 		if err := g.k8sClient.Patch(ctx, pool, client.MergeFrom(before)); err != nil {
 			return fmt.Errorf("scale sandbox warm pool %s/%s from %d to %d: %w", pool.Namespace, pool.Name, current, target, err)
 		}
-		g.publishPoolMetrics(pool, activeClaims, queuedRequests, target)
 	}
+	g.publishWarmPoolAggregateMetrics(pools.Items, claimCounts, queuedCounts)
 	return nil
 }
 
@@ -109,10 +107,7 @@ func (g *Gateway) publishCurrentPoolMetrics(ctx context.Context) error {
 	namespace := g.runtimeNamespace()
 	if readModel, ok := g.syncedPoolReadModel(); ok {
 		queuedCounts := g.admissionQueueSnapshot()
-		for _, pool := range readModel.ListPools(PoolListOptions{Namespace: namespace}) {
-			key := types.NamespacedName{Name: pool.Name, Namespace: pool.Namespace}
-			g.publishPoolInfoMetrics(pool, queuedCounts[key])
-		}
+		g.publishPoolAggregateMetrics(readModel.ListPools(PoolListOptions{Namespace: namespace}), queuedCounts)
 		return nil
 	}
 	if g.k8sClient == nil {
@@ -127,11 +122,7 @@ func (g *Gateway) publishCurrentPoolMetrics(ctx context.Context) error {
 		return err
 	}
 	queuedCounts := g.admissionQueueSnapshot()
-	for i := range pools.Items {
-		pool := &pools.Items[i]
-		key := types.NamespacedName{Name: pool.Name, Namespace: pool.Namespace}
-		g.publishPoolMetrics(pool, claimCounts[key], queuedCounts[key], desiredSandboxWarmPoolReplicas(pool))
-	}
+	g.publishWarmPoolAggregateMetrics(pools.Items, claimCounts, queuedCounts)
 	return nil
 }
 
@@ -212,36 +203,79 @@ func poolAutoscalingDisabled(pool *v1beta1.SandboxWarmPool) bool {
 	return value == "false" || value == "disabled" || value == "off"
 }
 
-func (g *Gateway) publishPoolMetrics(pool *v1beta1.SandboxWarmPool, allocated, queued, desired int32) {
-	if g.metrics == nil || pool == nil {
-		return
-	}
-	label := poolMetricLabel(pool.Namespace, pool.Name)
-	g.metrics.SetPoolDesiredReplicas(label, int(desired))
-	g.metrics.SetPoolReadyReplicas(label, int(pool.Status.ReadyReplicas))
-	g.metrics.SetPoolAllocatedReplicas(label, int(allocated))
-	g.metrics.SetAdmissionQueueDepth(label, int(queued))
-	saturation := 0.0
-	if desired > 0 {
-		saturation = float64(allocated) / float64(desired)
-	}
-	g.metrics.SetPoolSaturation(label, saturation)
+type poolMetricAggregate struct {
+	desired   int
+	ready     int
+	allocated int
+	queued    int
 }
 
-func (g *Gateway) publishPoolInfoMetrics(pool PoolInfo, queued int32) {
+func (g *Gateway) publishWarmPoolAggregateMetrics(
+	pools []v1beta1.SandboxWarmPool,
+	claimCounts map[types.NamespacedName]int32,
+	queuedCounts map[types.NamespacedName]int32,
+) {
 	if g.metrics == nil {
 		return
 	}
-	label := poolMetricLabel(pool.Namespace, pool.Name)
-	g.metrics.SetPoolDesiredReplicas(label, int(pool.Replicas))
-	g.metrics.SetPoolReadyReplicas(label, int(pool.ReadyReplicas))
-	g.metrics.SetPoolAllocatedReplicas(label, int(pool.AllocatedReplicas))
-	g.metrics.SetAdmissionQueueDepth(label, int(queued))
-	saturation := 0.0
-	if pool.Replicas > 0 {
-		saturation = float64(pool.AllocatedReplicas) / float64(pool.Replicas)
+	infos := make([]PoolInfo, 0, len(pools))
+	for i := range pools {
+		pool := &pools[i]
+		key := types.NamespacedName{Name: pool.Name, Namespace: pool.Namespace}
+		infos = append(infos, PoolInfo{
+			Name:              pool.Name,
+			Namespace:         pool.Namespace,
+			Profile:           firstNonEmpty(profileFromObjectMeta(pool.ObjectMeta), defaultPoolProfile),
+			Replicas:          desiredSandboxWarmPoolReplicas(pool),
+			ReadyReplicas:     pool.Status.ReadyReplicas,
+			AllocatedReplicas: claimCounts[key],
+			State:             firstNonEmpty(pool.Annotations[labels.PoolStateAnnotation], labels.PoolStateRunning),
+		})
 	}
-	g.metrics.SetPoolSaturation(label, saturation)
+	g.publishPoolAggregateMetrics(infos, queuedCounts)
+}
+
+func (g *Gateway) publishPoolAggregateMetrics(pools []PoolInfo, queuedCounts map[types.NamespacedName]int32) {
+	if g.metrics == nil {
+		return
+	}
+	g.metrics.ResetPoolAggregateMetrics()
+	aggregates := make(map[string]*poolMetricAggregate)
+	for _, pool := range pools {
+		profile := firstNonEmpty(pool.Profile, defaultPoolProfile)
+		state := strings.ToLower(firstNonEmpty(pool.State, labels.PoolStateRunning))
+		key := profile + "\x00" + state
+		aggregate := aggregates[key]
+		if aggregate == nil {
+			aggregate = &poolMetricAggregate{}
+			aggregates[key] = aggregate
+		}
+		aggregate.desired += int(pool.Replicas)
+		aggregate.ready += int(pool.ReadyReplicas)
+		aggregate.allocated += int(pool.AllocatedReplicas)
+		aggregate.queued += int(queuedCounts[types.NamespacedName{Name: pool.Name, Namespace: pool.Namespace}])
+	}
+	for key, aggregate := range aggregates {
+		parts := strings.SplitN(key, "\x00", 2)
+		profile := parts[0]
+		state := labels.PoolStateRunning
+		if len(parts) == 2 {
+			state = parts[1]
+		}
+		saturation := 0.0
+		if aggregate.desired > 0 {
+			saturation = float64(aggregate.allocated) / float64(aggregate.desired)
+		}
+		g.metrics.SetPoolAggregateMetrics(
+			profile,
+			state,
+			aggregate.desired,
+			aggregate.ready,
+			aggregate.allocated,
+			aggregate.queued,
+			saturation,
+		)
+	}
 }
 
 func poolMetricLabel(namespace, name string) string {

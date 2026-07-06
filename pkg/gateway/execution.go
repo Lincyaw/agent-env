@@ -118,19 +118,22 @@ func (g *Gateway) recordStepResult(s *session, sessionID string, result *StepRes
 		g.metrics.IncrementGatewayStepResult(stepType, outcome)
 	}
 
+	storedOutput, outputBytes, outputTruncated := g.retainedStepOutput(result.Output)
 	stepRecord := StepRecord{
-		Name:       result.Name,
-		Input:      result.Input,
-		Output:     result.Output,
-		DurationMs: result.DurationMs,
-		Timestamp:  result.Timestamp,
+		Name:            result.Name,
+		Input:           result.Input,
+		Output:          storedOutput,
+		OutputBytes:     outputBytes,
+		OutputTruncated: outputTruncated,
+		DurationMs:      result.DurationMs,
+		Timestamp:       result.Timestamp,
 	}
 	globalIdx := s.History.Add(stepRecord)
 
 	result.Index = globalIdx
 	result.SnapshotID = fmt.Sprintf("%d", globalIdx)
 
-	obsJSON, _ := json.Marshal(result.Output)
+	obsJSON, _ := json.Marshal(storedOutput)
 	g.enqueueTrajectory(audit.TrajectoryEntry{
 		SessionID:   sessionID,
 		Step:        globalIdx,
@@ -203,7 +206,7 @@ func (g *Gateway) executeStepsNow(ctx context.Context, sessionID string, req Exe
 
 	resp.TotalDurationMs = time.Since(totalStart).Milliseconds()
 	g.touchLastTaskTime(sessionID)
-	g.store.Sync(sessionID)
+	g.store.SyncHistory(sessionID)
 
 	return resp, nil
 }
@@ -302,5 +305,5 @@ func (g *Gateway) ExecuteStepsSSE(w http.ResponseWriter, ctx context.Context, se
 	}
 
 	g.touchLastTaskTime(sessionID)
-	g.store.Sync(sessionID)
+	g.store.SyncHistory(sessionID)
 }

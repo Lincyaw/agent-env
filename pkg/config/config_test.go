@@ -102,6 +102,13 @@ func TestConfigValidate(t *testing.T) {
 			wantErr: "gateway sweep interval must be positive",
 		},
 		{
+			name: "invalid observation preview bytes",
+			mutate: func(cfg *Config) {
+				cfg.ObservationPreviewBytes = -1
+			},
+			wantErr: "observation preview bytes",
+		},
+		{
 			name: "invalid internal port conflict",
 			mutate: func(cfg *Config) {
 				cfg.InternalPort = cfg.GatewayPort
@@ -270,6 +277,12 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.SandboxAllowPrivilegeEscalation {
 		t.Error("SandboxAllowPrivilegeEscalation = true, want false")
 	}
+	if cfg.FullObservationEnabled {
+		t.Error("FullObservationEnabled = true, want false")
+	}
+	if cfg.ObservationPreviewBytes != 4096 {
+		t.Errorf("ObservationPreviewBytes = %d, want 4096", cfg.ObservationPreviewBytes)
+	}
 }
 
 func TestLoadFromEnvImagePullPolicy(t *testing.T) {
@@ -322,6 +335,8 @@ func TestLoadFromEnvGatewaySettings(t *testing.T) {
 	t.Setenv("SANDBOX_SECCOMP_PROFILE_TYPE", "Localhost")
 	t.Setenv("SANDBOX_SECCOMP_LOCALHOST_PROFILE", "profiles/agent-env.json")
 	t.Setenv("SANDBOX_ALLOW_PRIVILEGE_ESCALATION", "true")
+	t.Setenv("FULL_OBSERVATION_ENABLED", "true")
+	t.Setenv("OBSERVATION_PREVIEW_BYTES", "1024")
 
 	cfg := LoadFromEnv()
 	if cfg.AuthEnabled {
@@ -407,5 +422,11 @@ func TestLoadFromEnvGatewaySettings(t *testing.T) {
 	}
 	if !cfg.SandboxAllowPrivilegeEscalation {
 		t.Fatal("SandboxAllowPrivilegeEscalation = false, want true")
+	}
+	if !cfg.FullObservationEnabled {
+		t.Fatal("FullObservationEnabled = false, want true")
+	}
+	if cfg.ObservationPreviewBytes != 1024 {
+		t.Fatalf("ObservationPreviewBytes = %d, want 1024", cfg.ObservationPreviewBytes)
 	}
 }

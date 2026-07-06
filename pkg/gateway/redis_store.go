@@ -13,34 +13,52 @@ import (
 )
 
 const (
-	redisSessionPrefix    = "arl:session:"
-	redisExperimentPrefix = "arl:experiment:"
-	redisProfilePrefix    = "arl:profile:"
-	redisStatusPrefix     = "arl:status:"
-	redisCountKey         = "arl:session_count"
+	redisSessionPrefix        = "arl:session:"
+	redisSessionActionsPrefix = "arl:session_actions:"
+	redisExperimentPrefix     = "arl:experiment:"
+	redisProfilePrefix        = "arl:profile:"
+	redisStatusPrefix         = "arl:status:"
+	redisCountKey             = "arl:session_count"
 )
 
 // redisSessionData is the JSON-serializable representation of a session
 // stored in Redis. Fields that cannot be serialized (sync.RWMutex, StepHistory)
 // are managed separately or reconstructed on load.
 type redisSessionData struct {
-	Info                SessionInfo             `json:"info"`
-	Runtime             RuntimeAllocation       `json:"runtime,omitempty"`
-	Managed             bool                    `json:"managed"`
-	ExperimentID        string                  `json:"experimentId"`
-	Mode                string                  `json:"mode,omitempty"`
-	OwnerKeyHash        string                  `json:"ownerKeyHash,omitempty"`
-	Deleted             bool                    `json:"deleted,omitempty"`
-	DeletedAt           *time.Time              `json:"deletedAt,omitempty"`
-	DeletionReason      string                  `json:"deletionReason,omitempty"`
-	LastTaskTime        time.Time               `json:"lastTaskTime"`
-	LastAnnotationPatch time.Time               `json:"lastAnnotationPatch"`
-	IdleTimeout         time.Duration           `json:"idleTimeout"`
-	CreatedAt           time.Time               `json:"createdAt"`
-	PrivateContainers   []PrivateContainerSpec  `json:"privateContainers,omitempty"`
-	HistoryRecords      []StepRecord            `json:"historyRecords"`
-	HistoryReplayInputs map[int]json.RawMessage `json:"historyReplayInputs,omitempty"`
-	HistoryNextIndex    int                     `json:"historyNextIndex"`
+	Info                SessionInfo            `json:"info"`
+	Runtime             RuntimeAllocation      `json:"runtime,omitempty"`
+	Managed             bool                   `json:"managed"`
+	ExperimentID        string                 `json:"experimentId"`
+	Mode                string                 `json:"mode,omitempty"`
+	OwnerKeyHash        string                 `json:"ownerKeyHash,omitempty"`
+	Deleted             bool                   `json:"deleted,omitempty"`
+	DeletedAt           *time.Time             `json:"deletedAt,omitempty"`
+	DeletionReason      string                 `json:"deletionReason,omitempty"`
+	LastTaskTime        time.Time              `json:"lastTaskTime"`
+	LastAnnotationPatch time.Time              `json:"lastAnnotationPatch"`
+	IdleTimeout         time.Duration          `json:"idleTimeout"`
+	CreatedAt           time.Time              `json:"createdAt"`
+	PrivateContainers   []PrivateContainerSpec `json:"privateContainers,omitempty"`
+
+	// Legacy monolithic session keys may still contain history. Recovery reads
+	// only replayable action fields and intentionally ignores legacy output.
+	HistoryRecords   []redisLegacyStepRecord `json:"historyRecords,omitempty"`
+	HistoryNextIndex int                     `json:"historyNextIndex,omitempty"`
+}
+
+type redisSessionActionsData struct {
+	Records      []StepRecord            `json:"records"`
+	ReplayInputs map[int]json.RawMessage `json:"replayInputs,omitempty"`
+	NextIndex    int                     `json:"nextIndex"`
+}
+
+type redisLegacyStepRecord struct {
+	Index      int             `json:"index"`
+	Name       string          `json:"name"`
+	Input      json.RawMessage `json:"input"`
+	SnapshotID string          `json:"snapshot_id"`
+	DurationMs int64           `json:"duration_ms"`
+	Timestamp  time.Time       `json:"timestamp"`
 }
 
 func sessionToRedisData(s *session) redisSessionData {
@@ -69,34 +87,36 @@ func sessionToRedisData(s *session) redisSessionData {
 		}
 	}
 
-	if s.History != nil {
-		data.HistoryRecords = s.History.GetAll()
-		data.HistoryReplayInputs = make(map[int]json.RawMessage)
-		for _, record := range data.HistoryRecords {
-			if len(record.ReplayInput) > 0 {
-				data.HistoryReplayInputs[record.Index] = append(json.RawMessage(nil), record.ReplayInput...)
-			}
-		}
-		if len(data.HistoryReplayInputs) == 0 {
-			data.HistoryReplayInputs = nil
-		}
-		s.History.mu.RLock()
-		data.HistoryNextIndex = s.History.nextIndex
-		s.History.mu.RUnlock()
-	}
-
 	return data
 }
 
-func redisDataToSession(data redisSessionData) *session {
-	h := NewStepHistory()
-	h.records = data.HistoryRecords
-	for i := range h.records {
-		if replayInput, ok := data.HistoryReplayInputs[h.records[i].Index]; ok {
-			h.records[i].ReplayInput = append(json.RawMessage(nil), replayInput...)
+func sessionActionsToRedisData(s *session) redisSessionActionsData {
+	if s.History == nil {
+		return redisSessionActionsData{}
+	}
+	data := redisSessionActionsData{
+		Records:      s.History.GetAll(),
+		ReplayInputs: make(map[int]json.RawMessage),
+	}
+	for _, record := range data.Records {
+		if len(record.ReplayInput) > 0 {
+			data.ReplayInputs[record.Index] = append(json.RawMessage(nil), record.ReplayInput...)
 		}
 	}
-	h.nextIndex = data.HistoryNextIndex
+	if len(data.ReplayInputs) == 0 {
+		data.ReplayInputs = nil
+	}
+	s.History.mu.RLock()
+	data.NextIndex = s.History.nextIndex
+	s.History.mu.RUnlock()
+	return data
+}
+
+func redisDataToSession(data redisSessionData, actions redisSessionActionsData) *session {
+	h := redisActionsToHistory(actions)
+	if h == nil {
+		h = redisLegacyHistoryToHistory(data.HistoryRecords, data.HistoryNextIndex)
+	}
 
 	return &session{
 		Info:                data.Info,
@@ -116,6 +136,42 @@ func redisDataToSession(data redisSessionData) *session {
 		operations:          make(map[string]*executeOperation),
 		privateContainers:   privateContainerMap(data.PrivateContainers),
 	}
+}
+
+func redisActionsToHistory(data redisSessionActionsData) *StepHistory {
+	if len(data.Records) == 0 && data.NextIndex == 0 {
+		return nil
+	}
+	h := NewStepHistory()
+	h.records = data.Records
+	for i := range h.records {
+		if replayInput, ok := data.ReplayInputs[h.records[i].Index]; ok {
+			h.records[i].ReplayInput = append(json.RawMessage(nil), replayInput...)
+		}
+	}
+	h.nextIndex = data.NextIndex
+	return h
+}
+
+func redisLegacyHistoryToHistory(records []redisLegacyStepRecord, nextIndex int) *StepHistory {
+	h := NewStepHistory()
+	h.records = make([]StepRecord, 0, len(records))
+	for _, record := range records {
+		step := StepRecord{
+			Index:      record.Index,
+			Name:       record.Name,
+			Input:      record.Input,
+			SnapshotID: record.SnapshotID,
+			DurationMs: record.DurationMs,
+			Timestamp:  record.Timestamp,
+		}
+		h.records = append(h.records, step)
+	}
+	h.nextIndex = nextIndex
+	if h.nextIndex == 0 && len(h.records) > 0 {
+		h.nextIndex = h.records[len(h.records)-1].Index + 1
+	}
+	return h
 }
 
 // RedisStore is a SessionStore backed by Redis.
@@ -167,6 +223,10 @@ func (rs *RedisStore) redisKey(sessionID string) string {
 	return redisSessionPrefix + sessionID
 }
 
+func (rs *RedisStore) redisActionsKey(sessionID string) string {
+	return redisSessionActionsPrefix + sessionID
+}
+
 func (rs *RedisStore) Get(sessionID string) (*session, bool) {
 	if val, ok := rs.cache.Load(sessionID); ok {
 		return val.(*session), true
@@ -177,6 +237,7 @@ func (rs *RedisStore) Get(sessionID string) (*session, bool) {
 func (rs *RedisStore) Set(sessionID string, s *session) {
 	rs.cache.Store(sessionID, s)
 	rs.persistToRedis(sessionID, s)
+	rs.persistActionsToRedis(sessionID, s)
 }
 
 func (rs *RedisStore) Delete(sessionID string) {
@@ -204,6 +265,7 @@ func (rs *RedisStore) Delete(sessionID string) {
 		data.DeletionReason = "deleted"
 	}
 	rs.persistDataToRedis(sessionID, *data)
+	rs.expireActionsKey(sessionID)
 }
 
 func (rs *RedisStore) Range(fn func(sessionID string, s *session) bool) {
@@ -269,6 +331,14 @@ func (rs *RedisStore) Sync(sessionID string) {
 	rs.persistToRedis(sessionID, val.(*session))
 }
 
+func (rs *RedisStore) SyncHistory(sessionID string) {
+	val, ok := rs.cache.Load(sessionID)
+	if !ok {
+		return
+	}
+	rs.persistActionsToRedis(sessionID, val.(*session))
+}
+
 // GetHistorical retrieves a session record for replay even if it has been
 // tombstoned by Delete. Active request paths must use Get instead.
 func (rs *RedisStore) GetHistorical(sessionID string) (*session, bool) {
@@ -276,7 +346,8 @@ func (rs *RedisStore) GetHistorical(sessionID string) (*session, bool) {
 	if !ok {
 		return nil, false
 	}
-	return redisDataToSession(data), true
+	actions := rs.loadRedisActions(sessionID)
+	return redisDataToSession(data, actions), true
 }
 
 func (rs *RedisStore) loadRedisData(sessionID string) (redisSessionData, bool) {
@@ -311,6 +382,34 @@ func (rs *RedisStore) loadRedisDataContextResult(ctx context.Context, sessionID 
 	return data, true, nil
 }
 
+func (rs *RedisStore) loadRedisActions(sessionID string) redisSessionActionsData {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	data, err := rs.loadRedisActionsContext(ctx, sessionID)
+	if err != nil {
+		log.Printf("Warning: failed to load session actions %s from Redis: %v", sessionID, err)
+		return redisSessionActionsData{}
+	}
+	return data
+}
+
+func (rs *RedisStore) loadRedisActionsContext(ctx context.Context, sessionID string) (redisSessionActionsData, error) {
+	raw, err := rs.client.Get(ctx, rs.redisActionsKey(sessionID)).Bytes()
+	if err != nil {
+		if err == redis.Nil {
+			return redisSessionActionsData{}, nil
+		}
+		return redisSessionActionsData{}, err
+	}
+
+	var data redisSessionActionsData
+	if err := json.Unmarshal(raw, &data); err != nil {
+		return redisSessionActionsData{}, err
+	}
+	return data, nil
+}
+
 func (rs *RedisStore) RecoverSession(ctx context.Context, sessionID string) (sessionRecoveryRecord, error) {
 	data, found, err := rs.loadRedisDataContextResult(ctx, sessionID)
 	if err != nil {
@@ -325,7 +424,11 @@ func (rs *RedisStore) RecoverSession(ctx context.Context, sessionID string) (ses
 		return sessionRecoveryRecord{found: true, deleted: true}, nil
 	}
 
-	s := redisDataToSession(data)
+	actions, err := rs.loadRedisActionsContext(ctx, sessionID)
+	if err != nil {
+		return sessionRecoveryRecord{}, err
+	}
+	s := redisDataToSession(data, actions)
 	rs.cache.Store(sessionID, s)
 	return sessionRecoveryRecord{session: s, found: true}, nil
 }
@@ -348,7 +451,11 @@ func (rs *RedisStore) RecoverActiveSessions(ctx context.Context) (map[string]*se
 				rs.cache.Delete(sessionID)
 				continue
 			}
-			s := redisDataToSession(data)
+			actions, err := rs.loadRedisActionsContext(ctx, sessionID)
+			if err != nil {
+				return recovered, fmt.Errorf("load redis session actions %s: %w", sessionID, err)
+			}
+			s := redisDataToSession(data, actions)
 			rs.cache.Store(sessionID, s)
 			recovered[sessionID] = s
 		}
@@ -362,6 +469,27 @@ func (rs *RedisStore) RecoverActiveSessions(ctx context.Context) (map[string]*se
 
 func (rs *RedisStore) persistToRedis(sessionID string, s *session) {
 	rs.persistDataToRedis(sessionID, sessionToRedisData(s))
+}
+
+func (rs *RedisStore) persistActionsToRedis(sessionID string, s *session) {
+	raw, err := json.Marshal(sessionActionsToRedisData(s))
+	if err != nil {
+		log.Printf("Warning: failed to marshal session actions %s for Redis: %v", sessionID, err)
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	if err := rs.client.Set(ctx, rs.redisActionsKey(sessionID), raw, rs.ttl).Err(); err != nil {
+		log.Printf("Warning: failed to persist session actions %s to Redis: %v", sessionID, err)
+	}
+}
+
+func (rs *RedisStore) expireActionsKey(sessionID string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	rs.client.Expire(ctx, rs.redisActionsKey(sessionID), rs.ttl)
 }
 
 func (rs *RedisStore) persistDataToRedis(sessionID string, data redisSessionData) {

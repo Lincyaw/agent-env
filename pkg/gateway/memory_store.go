@@ -80,6 +80,8 @@ func (ms *MemoryStore) SetCount(count int64) int64 {
 
 func (ms *MemoryStore) Sync(_ string) {}
 
+func (ms *MemoryStore) SyncHistory(_ string) {}
+
 func (ms *MemoryStore) FindByExperiment(experimentID string) []string {
 	return ms.idsFromIndex(ms.experiments, experimentID)
 }

@@ -31,22 +31,25 @@ func SetupRoutes(mux *http.ServeMux, gw *Gateway, authCfg *AuthConfig) {
 			return requireAuth(authCfg, RoleAdmin, h)
 		}
 	}
+	route := func(pattern string, h http.HandlerFunc) {
+		mux.HandleFunc(pattern, instrumentGatewayRoute(gw, pattern, h))
+	}
 
 	// Session management (user role)
-	mux.HandleFunc("POST /v1/sessions", user(handleCreateSession(gw)))
-	mux.HandleFunc("GET /v1/sessions/{id}", user(handleGetSession(gw)))
-	mux.HandleFunc("DELETE /v1/sessions/{id}", user(handleDeleteSession(gw)))
-	mux.HandleFunc("POST /v1/sessions/{id}/suspend", user(handleSuspendSession(gw)))
-	mux.HandleFunc("POST /v1/sessions/{id}/resume", user(handleResumeSession(gw)))
+	route("POST /v1/sessions", user(handleCreateSession(gw)))
+	route("GET /v1/sessions/{id}", user(handleGetSession(gw)))
+	route("DELETE /v1/sessions/{id}", user(handleDeleteSession(gw)))
+	route("POST /v1/sessions/{id}/suspend", user(handleSuspendSession(gw)))
+	route("POST /v1/sessions/{id}/resume", user(handleResumeSession(gw)))
 
 	// Execution (user role)
-	mux.HandleFunc("POST /v1/sessions/{id}/execute", user(handleExecute(gw)))
-	mux.HandleFunc("POST /v1/sessions/{id}/containers/{container}/execute", user(handleExecuteContainer(gw)))
-	mux.HandleFunc("GET /v1/sessions/{id}/operations/{operationID}", user(handleGetExecuteOperation(gw)))
-	mux.HandleFunc("PUT /v1/sessions/{id}/files/{path...}", user(handleUploadFile(gw)))
-	mux.HandleFunc("GET /v1/sessions/{id}/files/{path...}", user(handleDownloadFile(gw)))
-	mux.HandleFunc("POST /v1/sessions/{id}/restore", user(handleRestore(gw)))
-	mux.HandleFunc("POST /v1/sessions/{id}/replay", user(handleReplay(gw)))
+	route("POST /v1/sessions/{id}/execute", user(handleExecute(gw)))
+	route("POST /v1/sessions/{id}/containers/{container}/execute", user(handleExecuteContainer(gw)))
+	route("GET /v1/sessions/{id}/operations/{operationID}", user(handleGetExecuteOperation(gw)))
+	route("PUT /v1/sessions/{id}/files/{path...}", user(handleUploadFile(gw)))
+	route("GET /v1/sessions/{id}/files/{path...}", user(handleDownloadFile(gw)))
+	route("POST /v1/sessions/{id}/restore", user(handleRestore(gw)))
+	route("POST /v1/sessions/{id}/replay", user(handleReplay(gw)))
 
 	// Interactive shell — WebSocket (user role; token may come via query param)
 	mux.HandleFunc("/v1/sessions/{id}/shell", user(handleShell(gw, authCfg)))
@@ -55,35 +58,81 @@ func SetupRoutes(mux *http.ServeMux, gw *Gateway, authCfg *AuthConfig) {
 	mux.HandleFunc("/v1/sessions/{id}/tunnel/{port}", user(handleTunnel(gw, authCfg)))
 
 	// History, trajectory, and logs (user role)
-	mux.HandleFunc("GET /v1/sessions/{id}/history", user(handleGetHistory(gw)))
-	mux.HandleFunc("GET /v1/sessions/{id}/trajectory", user(handleGetTrajectory(gw)))
-	mux.HandleFunc("GET /v1/sessions/{id}/logs", user(handleSessionLogs(gw)))
+	route("GET /v1/sessions/{id}/history", user(handleGetHistory(gw)))
+	route("GET /v1/sessions/{id}/trajectory", user(handleGetTrajectory(gw)))
+	route("GET /v1/sessions/{id}/logs", user(handleSessionLogs(gw)))
 
 	// List endpoints (admin role)
-	mux.HandleFunc("GET /v1/sessions", admin(handleListSessions(gw)))
-	mux.HandleFunc("GET /v1/summary", admin(handleSummary(gw)))
-	mux.HandleFunc("GET /v1/pools", admin(handleListPools(gw)))
-	mux.HandleFunc("GET /v1/managed/experiments", admin(handleListExperiments(gw)))
+	route("GET /v1/sessions", admin(handleListSessions(gw)))
+	route("GET /v1/summary", admin(handleSummary(gw)))
+	route("GET /v1/pools", admin(handleListPools(gw)))
+	route("GET /v1/managed/experiments", admin(handleListExperiments(gw)))
 
 	// Pool management (admin role)
-	mux.HandleFunc("POST /v1/pools", admin(handleCreatePool(gw)))
-	mux.HandleFunc("GET /v1/pools/{name}", admin(handleGetPool(gw)))
-	mux.HandleFunc("PATCH /v1/pools/{name}", admin(handleScalePool(gw)))
-	mux.HandleFunc("DELETE /v1/pools/{name}", admin(handleDeletePool(gw)))
-	mux.HandleFunc("POST /v1/pools/{name}/destroy", admin(handleDestroyPool(gw)))
-	mux.HandleFunc("POST /v1/pools/{name}/prefetch", admin(handlePrefetchPool(gw)))
-	mux.HandleFunc("GET /v1/pools/{name}/logs", admin(handlePoolLogs(gw)))
+	route("POST /v1/pools", admin(handleCreatePool(gw)))
+	route("GET /v1/pools/{name}", admin(handleGetPool(gw)))
+	route("PATCH /v1/pools/{name}", admin(handleScalePool(gw)))
+	route("DELETE /v1/pools/{name}", admin(handleDeletePool(gw)))
+	route("POST /v1/pools/{name}/destroy", admin(handleDestroyPool(gw)))
+	route("POST /v1/pools/{name}/prefetch", admin(handlePrefetchPool(gw)))
+	route("GET /v1/pools/{name}/logs", admin(handlePoolLogs(gw)))
 
 	// Managed sessions (admin role — creates infrastructure)
-	mux.HandleFunc("POST /v1/managed/sessions", admin(handleCreateManagedSession(gw)))
-	mux.HandleFunc("GET /v1/managed/experiments/{id}/sessions", user(handleListExperimentSessions(gw)))
-	mux.HandleFunc("DELETE /v1/managed/experiments/{id}", admin(handleDeleteExperiment(gw)))
+	route("POST /v1/managed/sessions", admin(handleCreateManagedSession(gw)))
+	route("GET /v1/managed/experiments/{id}/sessions", user(handleListExperimentSessions(gw)))
+	route("DELETE /v1/managed/experiments/{id}", admin(handleDeleteExperiment(gw)))
 
 	// Health probe (unauthenticated — needed by K8s liveness/readiness probes)
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
+	route("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("ok"))
 	})
+}
+
+type metricResponseWriter struct {
+	http.ResponseWriter
+	status      int
+	wroteHeader bool
+}
+
+func (w *metricResponseWriter) WriteHeader(status int) {
+	if w.wroteHeader {
+		return
+	}
+	w.status = status
+	w.wroteHeader = true
+	w.ResponseWriter.WriteHeader(status)
+}
+
+func (w *metricResponseWriter) Write(b []byte) (int, error) {
+	if !w.wroteHeader {
+		w.WriteHeader(http.StatusOK)
+	}
+	return w.ResponseWriter.Write(b)
+}
+
+func (w *metricResponseWriter) Flush() {
+	if !w.wroteHeader {
+		w.WriteHeader(http.StatusOK)
+	}
+	if flusher, ok := w.ResponseWriter.(http.Flusher); ok {
+		flusher.Flush()
+	}
+}
+
+func instrumentGatewayRoute(gw *Gateway, route string, h http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if gw == nil || gw.metrics == nil {
+			h(w, r)
+			return
+		}
+		recorder := &metricResponseWriter{ResponseWriter: w, status: http.StatusOK}
+		start := time.Now()
+		defer func() {
+			gw.metrics.RecordHTTPRequestDuration(r.Method, route, strconv.Itoa(recorder.status), time.Since(start))
+		}()
+		h(recorder, r)
+	}
 }
 
 // SetupInternalRoutes registers debug, metrics, and webhook routes on a

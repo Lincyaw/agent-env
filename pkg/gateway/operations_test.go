@@ -79,6 +79,72 @@ func TestExecuteStepsOperationIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestExecuteStepsStoresObservationPreviewByDefault(t *testing.T) {
+	store := NewMemoryStore()
+	sessionID := "gw-preview"
+	store.Set(sessionID, &session{
+		Info: SessionInfo{
+			ID:        sessionID,
+			Namespace: "default",
+			PoolRef:   "code",
+			PodIP:     "10.0.0.1",
+			PodName:   "pod-1",
+			Status:    "active",
+		},
+		Runtime: RuntimeAllocation{
+			Backend:   runtimeBackendSandboxClaim,
+			PoolRef:   "code",
+			Namespace: "default",
+			ClaimName: "claim-1",
+			PodIP:     "10.0.0.1",
+			PodName:   "pod-1",
+		},
+		History:      NewStepHistory(),
+		lastTaskTime: time.Now(),
+		createdAt:    time.Now(),
+		operations:   make(map[string]*executeOperation),
+	})
+	store.IncrCount(1)
+
+	sidecarClient := &mockclient.MockSidecarClient{
+		ExecuteFunc: func(ctx context.Context, podIP string, req interfaces.ExecRequest) (interfaces.ExecResponse, error) {
+			return &sidecar.ExecLog{Stdout: "abcdef", Stderr: "UVWXYZ", ExitCode: 0, Done: true}, nil
+		},
+	}
+	gw := New(nil, &operationRuntimeAllocator{}, sidecarClient, nil, nil, GatewayConfig{ObservationPreviewBytes: 4}, store)
+
+	resp, err := gw.ExecuteSteps(context.Background(), sessionID, ExecuteRequest{
+		Steps: []StepRequest{{
+			Name:    "echo",
+			Command: []string{"echo", "ok"},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("ExecuteSteps returned error: %v", err)
+	}
+	if got := resp.Results[0].Output.Stdout; got != "abcdef" {
+		t.Fatalf("response stdout = %q, want full stdout", got)
+	}
+
+	s, ok := store.Get(sessionID)
+	if !ok {
+		t.Fatal("session missing after execute")
+	}
+	records := s.History.GetAll()
+	if len(records) != 1 {
+		t.Fatalf("history records = %d, want 1", len(records))
+	}
+	if !records[0].OutputTruncated {
+		t.Fatal("history output was not marked truncated")
+	}
+	if records[0].OutputBytes != len("abcdef")+len("UVWXYZ") {
+		t.Fatalf("OutputBytes = %d, want 12", records[0].OutputBytes)
+	}
+	if got := len(records[0].Output.Stdout) + len(records[0].Output.Stderr); got != 4 {
+		t.Fatalf("stored output bytes = %d, want preview length 4", got)
+	}
+}
+
 type operationRuntimeAllocator struct{}
 
 func (a *operationRuntimeAllocator) Start(ctx context.Context) error { return nil }

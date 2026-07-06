@@ -74,6 +74,8 @@ type recordingMetricsCollector struct {
 	imagePullDurations map[string]time.Duration
 }
 
+func (m *recordingMetricsCollector) RecordHTTPRequestDuration(method, route, status string, duration time.Duration) {
+}
 func (m *recordingMetricsCollector) RecordSessionAllocationDuration(poolName string, duration time.Duration) {
 }
 func (m *recordingMetricsCollector) IncrementPodAllocationResult(poolName, result string) {}
@@ -93,15 +95,12 @@ func (m *recordingMetricsCollector) RecordGatewayStepDuration(stepType string, d
 func (m *recordingMetricsCollector) IncrementGatewayStepResult(stepType, result string) {}
 func (m *recordingMetricsCollector) RecordSidecarCallDuration(method string, duration time.Duration) {
 }
-func (m *recordingMetricsCollector) RecordRestoreDuration(duration time.Duration)  {}
-func (m *recordingMetricsCollector) IncrementRestoreResult(result string)          {}
-func (m *recordingMetricsCollector) SetGatewayGoroutines(count int)                {}
-func (m *recordingMetricsCollector) SetGatewaySessionsTotal(count int)             {}
-func (m *recordingMetricsCollector) SetIdleQueueDepth(pool string, count int)      {}
-func (m *recordingMetricsCollector) SetPendingWaiters(pool string, count int)      {}
-func (m *recordingMetricsCollector) SetAdmissionQueueDepth(pool string, count int) {}
-func (m *recordingMetricsCollector) SetPoolSaturation(pool string, saturation float64) {
+func (m *recordingMetricsCollector) RecordRestoreDuration(duration time.Duration) {}
+func (m *recordingMetricsCollector) IncrementRestoreResult(result string)         {}
+func (m *recordingMetricsCollector) SetGatewayGoroutines(count int)               {}
+func (m *recordingMetricsCollector) SetGatewaySessionsTotal(count int)            {}
+func (m *recordingMetricsCollector) SetRuntimeIdleCapacity(count int)             {}
+func (m *recordingMetricsCollector) SetRuntimePendingWaiters(count int)           {}
+func (m *recordingMetricsCollector) ResetPoolAggregateMetrics()                   {}
+func (m *recordingMetricsCollector) SetPoolAggregateMetrics(profile, state string, desired, ready, allocated, queued int, saturation float64) {
 }
-func (m *recordingMetricsCollector) SetPoolDesiredReplicas(pool string, count int)   {}
-func (m *recordingMetricsCollector) SetPoolReadyReplicas(pool string, count int)     {}
-func (m *recordingMetricsCollector) SetPoolAllocatedReplicas(pool string, count int) {}

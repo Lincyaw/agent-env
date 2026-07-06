@@ -30,6 +30,11 @@ type Config struct {
 	TrajectoryEnabled bool
 	TrajectoryDebug   bool
 
+	// Observation retention controls whether stdout/stderr observations are
+	// retained in full in session history and trajectory storage.
+	FullObservationEnabled  bool
+	ObservationPreviewBytes int
+
 	// gRPC authentication token (shared between gateway and sidecar)
 	GRPCAuthToken      string
 	GRPCAuthSecretName string
@@ -117,26 +122,27 @@ type Config struct {
 // DefaultConfig returns the default configuration
 func DefaultConfig() *Config {
 	return &Config{
-		SidecarImage:       "arl-sidecar:latest",
-		SidecarHTTPPort:    8080,
-		SidecarGRPCPort:    9090,
-		WorkspaceDir:       "/workspace",
-		HTTPClientTimeout:  5 * time.Minute,
-		ClickHouseEnabled:  false,
-		ClickHouseAddr:     "localhost:9000",
-		ClickHouseDatabase: "arl",
-		ClickHouseUsername: "default",
-		ClickHousePassword: "",
-		GRPCAuthToken:      "",
-		GRPCAuthSecretName: "agent-env-grpc-token",
-		TrajectoryEnabled:  false,
-		TrajectoryDebug:    false,
-		ExecutorAgentImage: "arl-executor-agent:latest",
-		ImagePullPolicy:    "Always",
-		GatewayPort:        8080,
-		GatewayNamespace:   "default",
-		K8sClientQPS:       10000,
-		K8sClientBurst:     20000,
+		SidecarImage:            "arl-sidecar:latest",
+		SidecarHTTPPort:         8080,
+		SidecarGRPCPort:         9090,
+		WorkspaceDir:            "/workspace",
+		HTTPClientTimeout:       5 * time.Minute,
+		ClickHouseEnabled:       false,
+		ClickHouseAddr:          "localhost:9000",
+		ClickHouseDatabase:      "arl",
+		ClickHouseUsername:      "default",
+		ClickHousePassword:      "",
+		GRPCAuthToken:           "",
+		GRPCAuthSecretName:      "agent-env-grpc-token",
+		TrajectoryEnabled:       false,
+		TrajectoryDebug:         false,
+		ObservationPreviewBytes: 4096,
+		ExecutorAgentImage:      "arl-executor-agent:latest",
+		ImagePullPolicy:         "Always",
+		GatewayPort:             8080,
+		GatewayNamespace:        "default",
+		K8sClientQPS:            10000,
+		K8sClientBurst:          20000,
 
 		GatewayIdleTimeout:   600 * time.Second,
 		GatewaySweepInterval: 30 * time.Second,
@@ -239,6 +245,16 @@ func LoadFromEnv() *Config {
 
 	if debug := os.Getenv("TRAJECTORY_DEBUG"); debug == "true" {
 		cfg.TrajectoryDebug = true
+	}
+	if v := os.Getenv("FULL_OBSERVATION_ENABLED"); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			cfg.FullObservationEnabled = b
+		}
+	}
+	if v := os.Getenv("OBSERVATION_PREVIEW_BYTES"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.ObservationPreviewBytes = n
+		}
 	}
 
 	if v := os.Getenv("GRPC_AUTH_TOKEN"); v != "" {
@@ -526,6 +542,10 @@ func (c *Config) Validate() error {
 
 	if c.GatewaySweepInterval <= 0 {
 		return fmt.Errorf("gateway sweep interval must be positive: %v", c.GatewaySweepInterval)
+	}
+
+	if c.ObservationPreviewBytes < 0 {
+		return fmt.Errorf("observation preview bytes cannot be negative: %d", c.ObservationPreviewBytes)
 	}
 
 	if c.DevboxIdleTimeout < 0 {

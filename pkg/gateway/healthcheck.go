@@ -119,13 +119,16 @@ func (hc *HealthChecker) collect() {
 
 	// 3. Runtime allocator stats
 	allocStats := hc.gw.allocatorDiagnosticStats()
-	for pool, stats := range allocStats {
-		if hc.metrics != nil {
-			hc.metrics.SetIdleQueueDepth(pool, stats.IdleCount)
-			hc.metrics.SetPendingWaiters(pool, stats.WaiterCount)
-		}
-	}
 	if hc.metrics != nil {
+		idleCapacity := 0
+		pendingWaiters := 0
+		for _, stats := range allocStats {
+			idleCapacity += stats.IdleCount
+			pendingWaiters += stats.WaiterCount
+		}
+		hc.metrics.SetRuntimeIdleCapacity(idleCapacity)
+		hc.metrics.SetRuntimePendingWaiters(pendingWaiters)
+
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		if err := hc.gw.publishCurrentPoolMetrics(ctx); err != nil {
 			log.Printf("Warning: failed to publish pool metrics: %v", err)
