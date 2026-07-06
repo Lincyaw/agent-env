@@ -194,3 +194,27 @@ func (g *Gateway) deletePrefetchPod(ctx context.Context, name, namespace string)
 	}
 	return nil
 }
+
+// CleanupStalePrefetchPods deletes any leftover prefetch pods from a
+// previous gateway instance. Call once at startup.
+func (g *Gateway) CleanupStalePrefetchPods(ctx context.Context, namespace string) {
+	var pods corev1.PodList
+	if err := g.k8sClient.List(ctx, &pods,
+		client.InNamespace(namespace),
+		client.HasLabels{prefetchLabelKey},
+	); err != nil {
+		log.Printf("prefetch: failed to list stale pods: %v", err)
+		return
+	}
+	for i := range pods.Items {
+		pod := &pods.Items[i]
+		if err := g.k8sClient.Delete(ctx, pod, &client.DeleteOptions{
+			GracePeriodSeconds: int64Ptr(0),
+		}); err != nil && !errors.IsNotFound(err) {
+			log.Printf("prefetch: failed to cleanup stale pod %s/%s: %v", namespace, pod.Name, err)
+		}
+	}
+	if len(pods.Items) > 0 {
+		log.Printf("prefetch: cleaned up %d stale prefetch pods", len(pods.Items))
+	}
+}

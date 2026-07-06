@@ -171,6 +171,9 @@ func main() {
 		log.Printf("Recovered %d active session(s) from durable store", recovered)
 	}
 
+	// Cleanup stale prefetch pods from a previous gateway instance.
+	gw.CleanupStalePrefetchPods(ctx, cfg.GatewayNamespace)
+
 	// Start session sweep (idle timeout reaper)
 	gw.StartSessionSweep()
 	gw.StartPoolAutoscaler()
