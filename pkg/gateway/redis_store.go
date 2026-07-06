@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"runtime/debug"
 	"strings"
 	"sync"
 	"time"
@@ -172,6 +173,10 @@ func redisLegacyHistoryToHistory(records []redisLegacyStepRecord, nextIndex int)
 		h.nextIndex = h.records[len(h.records)-1].Index + 1
 	}
 	return h
+}
+
+func redisSessionNeedsLegacyCompaction(data redisSessionData) bool {
+	return len(data.HistoryRecords) > 0 || data.HistoryNextIndex > 0
 }
 
 // RedisStore is a SessionStore backed by Redis.
@@ -347,7 +352,9 @@ func (rs *RedisStore) GetHistorical(sessionID string) (*session, bool) {
 		return nil, false
 	}
 	actions := rs.loadRedisActions(sessionID)
-	return redisDataToSession(data, actions), true
+	s := redisDataToSession(data, actions)
+	rs.compactLegacySession(sessionID, data, s)
+	return s, true
 }
 
 func (rs *RedisStore) loadRedisData(sessionID string) (redisSessionData, bool) {
@@ -430,6 +437,7 @@ func (rs *RedisStore) RecoverSession(ctx context.Context, sessionID string) (ses
 	}
 	s := redisDataToSession(data, actions)
 	rs.cache.Store(sessionID, s)
+	rs.compactLegacySession(sessionID, data, s)
 	return sessionRecoveryRecord{session: s, found: true}, nil
 }
 
@@ -457,6 +465,7 @@ func (rs *RedisStore) RecoverActiveSessions(ctx context.Context) (map[string]*se
 			}
 			s := redisDataToSession(data, actions)
 			rs.cache.Store(sessionID, s)
+			rs.compactLegacySession(sessionID, data, s)
 			recovered[sessionID] = s
 		}
 		cursor = nextCursor
@@ -465,6 +474,16 @@ func (rs *RedisStore) RecoverActiveSessions(ctx context.Context) (map[string]*se
 		}
 	}
 	return recovered, nil
+}
+
+func (rs *RedisStore) compactLegacySession(sessionID string, data redisSessionData, s *session) {
+	if s == nil || !redisSessionNeedsLegacyCompaction(data) {
+		return
+	}
+	rs.persistActionsToRedis(sessionID, s)
+	rs.persistToRedis(sessionID, s)
+	log.Printf("Compacted legacy Redis session %s into metadata/action keys (%d history records)", sessionID, len(data.HistoryRecords))
+	debug.FreeOSMemory()
 }
 
 func (rs *RedisStore) persistToRedis(sessionID string, s *session) {
