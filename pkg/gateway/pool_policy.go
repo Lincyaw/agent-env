@@ -292,15 +292,21 @@ func (g *Gateway) waitForWarmCapacity(ctx context.Context, intent ResourceIntent
 	defer cancel()
 	ticker := time.NewTicker(poll)
 	defer ticker.Stop()
+	waitErr := func(err error) error {
+		if err == context.DeadlineExceeded {
+			return fmt.Errorf("%w: queued for %s waiting for warm capacity", ErrPoolAtCapacity, timeout)
+		}
+		return err
+	}
 
 	for {
 		select {
 		case <-waitCtx.Done():
-			if waitCtx.Err() == context.DeadlineExceeded {
-				return selection, decision, fmt.Errorf("%w: queued for %s waiting for warm capacity", ErrPoolAtCapacity, timeout)
-			}
-			return selection, decision, waitCtx.Err()
+			return selection, decision, waitErr(waitCtx.Err())
 		case <-ticker.C:
+			if err := waitCtx.Err(); err != nil {
+				return selection, decision, waitErr(err)
+			}
 			nextSelection, nextDecision, nextErr := g.tryPlanSessionAllocation(waitCtx, intent)
 			if nextErr == nil {
 				return nextSelection, nextDecision, nil

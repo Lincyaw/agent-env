@@ -208,6 +208,9 @@ func TestPlanSessionAllocationQueuesThenRejectsWhenWarmCapacityDoesNotFree(t *te
 	if !errors.Is(err, ErrPoolAtCapacity) {
 		t.Fatalf("planSessionAllocation error = %v, want ErrPoolAtCapacity", err)
 	}
+	if !strings.Contains(err.Error(), "queued for") || !strings.Contains(err.Error(), "waiting for warm capacity") {
+		t.Fatalf("planSessionAllocation error = %v, want explicit queue timeout", err)
+	}
 }
 
 func TestCreateSessionUsesProfilePolicySelection(t *testing.T) {
