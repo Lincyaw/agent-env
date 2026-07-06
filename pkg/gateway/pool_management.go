@@ -92,7 +92,12 @@ func (g *Gateway) CreatePool(ctx context.Context, req CreatePoolRequest) error {
 		templateAnnotations[labels.ManagedPoolAnnotation] = "true"
 		poolAnnotations[labels.ManagedPoolAnnotation] = "true"
 	}
-	poolAnnotations[labels.PoolStateAnnotation] = labels.PoolStateRunning
+	if replicas > 0 {
+		poolAnnotations[labels.PoolStateAnnotation] = labels.PoolStateRunning
+	} else {
+		poolAnnotations[labels.PoolStateAnnotation] = labels.PoolStateStopped
+		poolAnnotations[scheduling.PoolAutoscaleAnnotation] = "false"
+	}
 	imageLocalityEnabled := g.gwConfig.ImageLocalityEnabled || hasJSONPayload(req.ImageLocality)
 	if imageLocalityEnabled {
 		templateAnnotations[scheduling.ImageLocalityAnnotation] = scheduling.ImageLocalityEnabledValue
