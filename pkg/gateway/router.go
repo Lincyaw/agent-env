@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/pprof"
 	"path"
 	"strconv"
 	"strings"
@@ -142,6 +143,12 @@ func SetupInternalRoutes(mux *http.ServeMux, hc *HealthChecker) {
 		mux.HandleFunc("GET /debug/health", hc.HandleDebugHealth())
 		mux.HandleFunc("POST /internal/alertmanager-webhook", hc.HandleAlertManagerWebhook())
 	}
+
+	mux.HandleFunc("GET /debug/pprof/", pprof.Index)
+	mux.HandleFunc("GET /debug/pprof/cmdline", pprof.Cmdline)
+	mux.HandleFunc("GET /debug/pprof/profile", pprof.Profile)
+	mux.HandleFunc("GET /debug/pprof/symbol", pprof.Symbol)
+	mux.HandleFunc("GET /debug/pprof/trace", pprof.Trace)
 
 	mux.Handle("GET /metrics", promhttp.HandlerFor(ctrlmetrics.Registry, promhttp.HandlerOpts{}))
 
