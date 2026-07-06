@@ -17,10 +17,14 @@ import (
 )
 
 const (
-	prefetchTimeout    = 10 * time.Minute
-	prefetchPollPeriod = 5 * time.Second
-	prefetchLabelKey   = "agent-env.io/prefetch-pool"
+	prefetchTimeout        = 10 * time.Minute
+	prefetchPollPeriod     = 5 * time.Second
+	prefetchLabelKey       = "agent-env.io/prefetch-pool"
+	prefetchMaxConcurrency = 20
 )
+
+// prefetchSem limits how many prefetch pods run simultaneously.
+var prefetchSem = make(chan struct{}, prefetchMaxConcurrency)
 
 func prefetchPodName(poolName string) string {
 	return dnsLabelWithSuffix(poolName, "-prefetch")
@@ -68,6 +72,9 @@ func (g *Gateway) poolPrimaryImage(ctx context.Context, poolName, namespace stri
 // runImagePrefetch creates a single ephemeral pod to pull the image onto
 // one cluster node. The image-locality scheduler handles spreading from there.
 func (g *Gateway) runImagePrefetch(poolName, namespace, image string) {
+	prefetchSem <- struct{}{}
+	defer func() { <-prefetchSem }()
+
 	log.Printf("prefetch: started for pool %s/%s image %s", namespace, poolName, image)
 
 	ctx, cancel := context.WithTimeout(context.Background(), prefetchTimeout)
