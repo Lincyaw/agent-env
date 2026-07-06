@@ -20,25 +20,22 @@ var statusCmd = &cobra.Command{
 			}
 		}
 
-		sessions, sessErr := c.ListSessions()
-		pools, poolErr := c.ListPools()
-		exps, expErr := c.ListExperiments()
+		summary, summaryErr := c.Summary()
 
 		if flagOutput == "json" {
 			result := map[string]any{
-				"healthy":  healthy,
-				"gateway":  flagGatewayURL,
-				"sessions": len(sessions),
-				"pools":    len(pools),
+				"healthy": healthy,
+				"gateway": flagGatewayURL,
 			}
-			if exps != nil {
-				result["experiments"] = len(exps)
-			}
-			if sessErr != nil {
-				result["sessionError"] = sessErr.Error()
-			}
-			if poolErr != nil {
-				result["poolError"] = poolErr.Error()
+			if summaryErr != nil {
+				result["summaryError"] = summaryErr.Error()
+			} else {
+				result["sessions"] = summary.Sessions
+				result["managedSessions"] = summary.ManagedSessions
+				result["pools"] = summary.Pools
+				result["readyReplicas"] = summary.ReadyReplicas
+				result["allocatedReplicas"] = summary.AllocatedReplicas
+				result["experiments"] = summary.Experiments
 			}
 			printJSON(result)
 			return nil
@@ -48,34 +45,12 @@ var statusCmd = &cobra.Command{
 			fmt.Printf("Gateway:       OK (%s)\n", flagGatewayURL)
 		}
 
-		if sessErr != nil {
-			fmt.Printf("Sessions:      error (%v)\n", sessErr)
+		if summaryErr != nil {
+			fmt.Printf("Summary:       error (%v)\n", summaryErr)
 		} else {
-			managed := 0
-			for _, s := range sessions {
-				if s.Managed {
-					managed++
-				}
-			}
-			fmt.Printf("Sessions:      %d total (%d managed)\n", len(sessions), managed)
-		}
-
-		if poolErr != nil {
-			fmt.Printf("Pools:         error (%v)\n", poolErr)
-		} else {
-			totalReady := int32(0)
-			totalAlloc := int32(0)
-			for _, p := range pools {
-				totalReady += p.ReadyReplicas
-				totalAlloc += p.AllocatedReplicas
-			}
-			fmt.Printf("Pools:         %d (ready=%d, allocated=%d)\n", len(pools), totalReady, totalAlloc)
-		}
-
-		if expErr != nil {
-			fmt.Printf("Experiments:   error (%v)\n", expErr)
-		} else {
-			fmt.Printf("Experiments:   %d\n", len(exps))
+			fmt.Printf("Sessions:      %d total (%d managed)\n", summary.Sessions, summary.ManagedSessions)
+			fmt.Printf("Pools:         %d (ready=%d, allocated=%d)\n", summary.Pools, summary.ReadyReplicas, summary.AllocatedReplicas)
+			fmt.Printf("Experiments:   %d\n", summary.Experiments)
 		}
 
 		return nil

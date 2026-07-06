@@ -15,6 +15,8 @@ import (
 const (
 	redisSessionPrefix    = "arl:session:"
 	redisExperimentPrefix = "arl:experiment:"
+	redisProfilePrefix    = "arl:profile:"
+	redisStatusPrefix     = "arl:status:"
 	redisCountKey         = "arl:session_count"
 )
 
@@ -381,16 +383,42 @@ func (rs *RedisStore) persistDataToRedis(sessionID string, data redisSessionData
 		rs.client.SAdd(ctx, expKey, sessionID)
 		rs.client.Expire(ctx, expKey, rs.ttl)
 	}
+	if data.Info.Profile != "" {
+		profileKey := redisProfilePrefix + data.Info.Profile
+		rs.client.SAdd(ctx, profileKey, sessionID)
+		rs.client.Expire(ctx, profileKey, rs.ttl)
+	}
+	status := data.Info.Status
+	if status == "" && !data.Deleted {
+		status = "active"
+	}
+	if status != "" {
+		statusKey := redisStatusPrefix + status
+		rs.client.SAdd(ctx, statusKey, sessionID)
+		rs.client.Expire(ctx, statusKey, rs.ttl)
+	}
 }
 
 // FindByExperiment returns session IDs associated with an experiment,
 // including sessions that have been soft-deleted from cache but still
 // exist in Redis (within the TTL window).
 func (rs *RedisStore) FindByExperiment(experimentID string) []string {
+	return rs.findBySet(redisExperimentPrefix + experimentID)
+}
+
+func (rs *RedisStore) FindByProfile(profile string) []string {
+	return rs.findBySet(redisProfilePrefix + profile)
+}
+
+func (rs *RedisStore) FindByStatus(status string) []string {
+	return rs.findBySet(redisStatusPrefix + status)
+}
+
+func (rs *RedisStore) findBySet(key string) []string {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	ids, err := rs.client.SMembers(ctx, redisExperimentPrefix+experimentID).Result()
+	ids, err := rs.client.SMembers(ctx, key).Result()
 	if err != nil {
 		return nil
 	}

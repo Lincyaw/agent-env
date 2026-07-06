@@ -42,6 +42,7 @@ def test_gateway_public_routes_have_python_sdk_entrypoints() -> None:
         (GatewayClient, "list_session_logs"),
         (GatewayClient, "list_sessions"),
         (GatewayClient, "list_pools"),
+        (GatewayClient, "summary"),
         (GatewayClient, "list_experiments"),
         (GatewayClient, "create_pool"),
         (GatewayClient, "get_pool"),
@@ -138,6 +139,54 @@ def test_list_endpoints_parse_models() -> None:
         experiments = client.list_experiments()
         assert experiments[0].experiment_id == "exp-1"
         assert experiments[0].session_count == 2
+
+
+def test_list_endpoints_pass_query_options() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "GET" and request.url.path == "/v1/sessions":
+            assert request.url.params["profile"] == "cpu"
+            assert request.url.params["experiment"] == "exp-1"
+            assert request.url.params["status"] == "active"
+            assert request.url.params["limit"] == "25"
+            assert request.url.params["cursor"] == "gw-1"
+            return httpx.Response(200, json=[])
+        if request.method == "GET" and request.url.path == "/v1/pools":
+            assert request.url.params["includeStopped"] == "true"
+            return httpx.Response(200, json=[])
+        return httpx.Response(404, json={"error": "unexpected request"})
+
+    with _client_with_handler(handler) as client:
+        assert client.list_sessions(
+            profile="cpu",
+            experiment_id="exp-1",
+            status="active",
+            limit=25,
+            cursor="gw-1",
+        ) == []
+        assert client.list_pools(include_stopped=True) == []
+
+
+def test_summary_parses_compact_status() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "GET"
+        assert request.url.path == "/v1/summary"
+        return httpx.Response(
+            200,
+            json={
+                "sessions": 3,
+                "managedSessions": 2,
+                "pools": 1,
+                "readyReplicas": 4,
+                "allocatedReplicas": 2,
+                "experiments": 1,
+            },
+        )
+
+    with _client_with_handler(handler) as client:
+        summary = client.summary()
+        assert summary.sessions == 3
+        assert summary.managed_sessions == 2
+        assert summary.ready_replicas == 4
 
 
 def test_log_stream_endpoints_parse_ndjson() -> None:

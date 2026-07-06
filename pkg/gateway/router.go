@@ -3,8 +3,8 @@ package gateway
 import (
 	"encoding/json"
 	"errors"
-	"io"
 	"fmt"
+	"io"
 	"net/http"
 	"path"
 	"strconv"
@@ -61,6 +61,7 @@ func SetupRoutes(mux *http.ServeMux, gw *Gateway, authCfg *AuthConfig) {
 
 	// List endpoints (admin role)
 	mux.HandleFunc("GET /v1/sessions", admin(handleListSessions(gw)))
+	mux.HandleFunc("GET /v1/summary", admin(handleSummary(gw)))
 	mux.HandleFunc("GET /v1/pools", admin(handleListPools(gw)))
 	mux.HandleFunc("GET /v1/managed/experiments", admin(handleListExperiments(gw)))
 
@@ -728,22 +729,61 @@ func handlePoolLogs(gw *Gateway) http.HandlerFunc {
 }
 
 func handleListSessions(gw *Gateway) http.HandlerFunc {
-	return func(w http.ResponseWriter, _ *http.Request) {
-		sessions := gw.ListSessions()
-		writeJSON(w, http.StatusOK, sessions)
+	return func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		limit := 0
+		if rawLimit := strings.TrimSpace(q.Get("limit")); rawLimit != "" {
+			parsed, err := strconv.Atoi(rawLimit)
+			if err != nil || parsed < 0 {
+				writeGatewayError(w, fmt.Errorf("limit must be a non-negative integer"))
+				return
+			}
+			limit = parsed
+		}
+		page := gw.ListSessionsPage(SessionListOptions{
+			Profile:      q.Get("profile"),
+			ExperimentID: q.Get("experiment"),
+			Status:       q.Get("status"),
+			Limit:        limit,
+			Cursor:       q.Get("cursor"),
+		})
+		if page.NextCursor != "" {
+			w.Header().Set("X-Next-Cursor", page.NextCursor)
+		}
+		writeJSON(w, http.StatusOK, page.Items)
+	}
+}
+
+func handleSummary(gw *Gateway) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		summary, err := gw.Summary(r.Context())
+		if err != nil {
+			writeGatewayError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusOK, summary)
 	}
 }
 
 func handleListPools(gw *Gateway) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		ns := r.URL.Query().Get("namespace")
-		pools, err := gw.ListPools(r.Context(), ns)
+		q := r.URL.Query()
+		includeStopped := parseBoolQuery(q.Get("includeStopped")) || parseBoolQuery(q.Get("all"))
+		pools, err := gw.ListPoolsWithOptions(r.Context(), PoolListOptions{
+			Namespace:      q.Get("namespace"),
+			IncludeStopped: includeStopped,
+		})
 		if err != nil {
 			writeGatewayError(w, err)
 			return
 		}
 		writeJSON(w, http.StatusOK, pools)
 	}
+}
+
+func parseBoolQuery(value string) bool {
+	value = strings.ToLower(strings.TrimSpace(value))
+	return value == "1" || value == "true" || value == "yes" || value == "on"
 }
 
 func handleListExperiments(gw *Gateway) http.HandlerFunc {

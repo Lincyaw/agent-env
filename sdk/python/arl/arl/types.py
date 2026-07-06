@@ -273,6 +273,19 @@ class ExperimentSummary(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+class GatewaySummary(BaseModel):
+    """Compact gateway status counters."""
+
+    sessions: Annotated[int, Field(ge=0)] = 0
+    managed_sessions: Annotated[int, Field(ge=0)] = Field(0, alias="managedSessions")
+    pools: Annotated[int, Field(ge=0)] = 0
+    ready_replicas: Annotated[int, Field(ge=0)] = Field(0, alias="readyReplicas")
+    allocated_replicas: Annotated[int, Field(ge=0)] = Field(0, alias="allocatedReplicas")
+    experiments: Annotated[int, Field(ge=0)] = 0
+
+    model_config = {"populate_by_name": True}
+
+
 class LogEntry(BaseModel):
     """A single NDJSON log entry from a session sidecar."""
 
@@ -482,15 +495,15 @@ class ResourceRequirements(BaseModel):
                             f"CPU millicores must be between 1 and 1000000, got {millicores}"
                         )
 
-            elif resource_name == "memory":
-                # Memory should have a suffix (Mi, Gi, M, G, etc.)
-                if not re.search(r"[KMGTPE]i?$", quantity):
-                    # Allow plain numbers but warn they might be interpreted as bytes
-                    if not quantity.isdigit():
-                        raise ValueError(
-                            f"Memory quantity '{quantity}' should include a unit suffix "
-                            f"(e.g., 'Mi', 'Gi', 'M', 'G')"
-                        )
+            elif (
+                resource_name == "memory"
+                and not re.search(r"[KMGTPE]i?$", quantity)
+                and not quantity.isdigit()
+            ):
+                raise ValueError(
+                    f"Memory quantity '{quantity}' should include a unit suffix "
+                    f"(e.g., 'Mi', 'Gi', 'M', 'G')"
+                )
 
         return v
 

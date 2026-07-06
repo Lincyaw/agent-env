@@ -84,6 +84,7 @@ class TestAsyncGatewayClient:
             "list_session_logs",
             "list_sessions",
             "list_pools",
+            "summary",
             "list_experiments",
             "create_pool",
             "get_pool",
@@ -143,6 +144,52 @@ class TestAsyncGatewayClient:
 
             experiments = await client.list_experiments()
             assert experiments[0].experiment_id == "exp-1"
+
+    async def test_list_endpoints_pass_query_options(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.method == "GET" and request.url.path == "/v1/sessions":
+                assert request.url.params["profile"] == "cpu"
+                assert request.url.params["experiment"] == "exp-1"
+                assert request.url.params["status"] == "active"
+                assert request.url.params["limit"] == "25"
+                assert request.url.params["cursor"] == "gw-1"
+                return httpx.Response(200, json=[])
+            if request.method == "GET" and request.url.path == "/v1/pools":
+                assert request.url.params["includeStopped"] == "true"
+                return httpx.Response(200, json=[])
+            return httpx.Response(404, json={"error": "unexpected request"})
+
+        async with _async_client_with_handler(handler) as client:
+            assert await client.list_sessions(
+                profile="cpu",
+                experiment_id="exp-1",
+                status="active",
+                limit=25,
+                cursor="gw-1",
+            ) == []
+            assert await client.list_pools(include_stopped=True) == []
+
+    async def test_summary_parses_compact_status(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            assert request.method == "GET"
+            assert request.url.path == "/v1/summary"
+            return httpx.Response(
+                200,
+                json={
+                    "sessions": 3,
+                    "managedSessions": 2,
+                    "pools": 1,
+                    "readyReplicas": 4,
+                    "allocatedReplicas": 2,
+                    "experiments": 1,
+                },
+            )
+
+        async with _async_client_with_handler(handler) as client:
+            summary = await client.summary()
+            assert summary.sessions == 3
+            assert summary.managed_sessions == 2
+            assert summary.ready_replicas == 4
 
     async def test_execute_uses_operation_id(self) -> None:
         def handler(request: httpx.Request) -> httpx.Response:

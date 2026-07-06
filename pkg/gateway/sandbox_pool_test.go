@@ -1170,7 +1170,7 @@ func (r releaseFailingRuntimeAllocator) DiagnosticStats() map[string]AllocatorPo
 	return nil
 }
 
-func newGatewayTestScheme(t *testing.T) *runtime.Scheme {
+func newGatewayTestScheme(t testing.TB) *runtime.Scheme {
 	t.Helper()
 
 	scheme := runtime.NewScheme()

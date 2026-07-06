@@ -22,7 +22,7 @@ const (
 	defaultPolicyTenant = "default"
 	defaultPoolProfile  = "default"
 
-	poolProfileAnnotation = "arl.infra.io/profile"
+	poolProfileAnnotation = labels.PoolProfileAnnotation
 )
 
 // RequestScope identifies the policy boundary for a session request. Tenant is
@@ -234,18 +234,6 @@ func (g *Gateway) ensureImageBackedSessionPool(ctx context.Context, req CreateSe
 		return req, "", nil
 	}
 
-	snapshots, err := g.snapshotPools(ctx, namespace)
-	if err != nil {
-		return req, "", err
-	}
-	if len(req.PrivateContainers) == 0 {
-		for _, pool := range snapshots {
-			if pool.Namespace == namespace && pool.Profile == req.Profile && pool.Image == req.Image {
-				return req, "", nil
-			}
-		}
-	}
-
 	poolName, err := managedPoolName(req.Image, namespace, req.Profile, req.PrivateContainers)
 	if err != nil {
 		return req, "", err
@@ -352,14 +340,14 @@ func (g *Gateway) scalePoolForQueuedDemand(ctx context.Context, key types.Namesp
 	}
 
 	before := pool.DeepCopy()
-	if pool.Annotations == nil {
-		pool.Annotations = make(map[string]string)
-	}
 	pool.Spec.Replicas = int32Ptr(target)
-	pool.Annotations[labels.PoolStateAnnotation] = labels.PoolStateRunning
+	applyPoolStateMetadata(&pool.ObjectMeta, labels.PoolStateRunning)
 	delete(pool.Annotations, scheduling.PoolAutoscaleAnnotation)
 	if err := g.k8sClient.Patch(ctx, pool, client.MergeFrom(before)); err != nil {
 		return fmt.Errorf("scale sandbox warm pool %s/%s for queued demand: %w", key.Namespace, key.Name, err)
+	}
+	if g.poolIndex != nil {
+		g.poolIndex.upsertPool(pool)
 	}
 	return nil
 }
@@ -404,8 +392,7 @@ func (g *Gateway) admissionQueueSnapshot() map[types.NamespacedName]int32 {
 }
 
 func (g *Gateway) tryPlanSessionAllocation(ctx context.Context, intent ResourceIntent) (PoolSelection, AdmissionDecision, error) {
-	scope := intent.Scope.normalized()
-	snapshots, err := g.snapshotPools(ctx, scope.Namespace)
+	snapshots, err := g.snapshotPoolsForIntent(ctx, intent)
 	if err != nil {
 		return PoolSelection{}, AdmissionDecision{}, err
 	}
@@ -434,6 +421,44 @@ func (g *Gateway) tryPlanSessionAllocation(ctx context.Context, intent ResourceI
 	return selection, decision, nil
 }
 
+func (g *Gateway) snapshotPoolsForIntent(ctx context.Context, intent ResourceIntent) ([]PoolSnapshot, error) {
+	scope := intent.Scope.normalized()
+	if readModel, ok := g.syncedPoolReadModel(); ok {
+		if intent.PinnedPoolName != "" {
+			if snapshot, found := readModel.SnapshotPool(scope.Namespace, intent.PinnedPoolName); found {
+				return []PoolSnapshot{snapshot}, nil
+			}
+		} else {
+			return readModel.SnapshotPoolsForIntent(intent), nil
+		}
+	}
+	if intent.PinnedPoolName != "" {
+		return g.snapshotPinnedPool(ctx, scope.Namespace, intent.PinnedPoolName)
+	}
+	return g.snapshotPools(ctx, scope.Namespace)
+}
+
+func (g *Gateway) snapshotPinnedPool(ctx context.Context, namespace, poolName string) ([]PoolSnapshot, error) {
+	if namespace == "" {
+		namespace = "default"
+	}
+	pool := &extensionsv1beta1.SandboxWarmPool{}
+	if err := g.k8sClient.Get(ctx, types.NamespacedName{Name: poolName, Namespace: namespace}, pool); err != nil {
+		return nil, fmt.Errorf("get sandbox warm pool %s/%s: %w", namespace, poolName, err)
+	}
+
+	template := &extensionsv1beta1.SandboxTemplate{}
+	if err := g.k8sClient.Get(ctx, types.NamespacedName{Name: pool.Spec.TemplateRef.Name, Namespace: namespace}, template); err != nil {
+		return nil, fmt.Errorf("get sandbox template %s/%s for pool snapshot: %w", namespace, pool.Spec.TemplateRef.Name, err)
+	}
+
+	allocated, err := g.claimCountForPool(ctx, namespace, pool.Name)
+	if err != nil {
+		return nil, err
+	}
+	return []PoolSnapshot{poolSnapshotFromObjects(pool, template, allocated)}, nil
+}
+
 func (g *Gateway) snapshotPools(ctx context.Context, namespace string) ([]PoolSnapshot, error) {
 	if namespace == "" {
 		namespace = "default"
@@ -444,18 +469,9 @@ func (g *Gateway) snapshotPools(ctx context.Context, namespace string) ([]PoolSn
 		return nil, fmt.Errorf("list sandbox warm pools: %w", err)
 	}
 
-	claimCounts := make(map[types.NamespacedName]int32)
-	var claims extensionsv1beta1.SandboxClaimList
-	if err := g.k8sClient.List(ctx, &claims, client.InNamespace(namespace)); err != nil {
-		return nil, fmt.Errorf("list sandbox claims: %w", err)
-	}
-	for i := range claims.Items {
-		claim := &claims.Items[i]
-		if claim.DeletionTimestamp != nil || claim.Spec.WarmPoolRef.Name == "" {
-			continue
-		}
-		key := types.NamespacedName{Name: claim.Spec.WarmPoolRef.Name, Namespace: claim.Namespace}
-		claimCounts[key]++
+	claimCounts, err := g.claimCountsByPool(ctx, namespace)
+	if err != nil {
+		return nil, err
 	}
 
 	var templateList extensionsv1beta1.SandboxTemplateList
@@ -474,34 +490,79 @@ func (g *Gateway) snapshotPools(ctx context.Context, namespace string) ([]PoolSn
 	snapshots := make([]PoolSnapshot, 0, len(poolList.Items))
 	for i := range poolList.Items {
 		pool := &poolList.Items[i]
-		image := ""
-		templateProfile := ""
 		templateKey := types.NamespacedName{Name: pool.Spec.TemplateRef.Name, Namespace: pool.Namespace}
-		if template, ok := templatesByName[templateKey]; ok {
-			image = primarySandboxTemplateImage(template)
-			templateProfile = profileFromObjectMeta(template.ObjectMeta)
-		}
-
+		template := templatesByName[templateKey]
 		key := types.NamespacedName{Name: pool.Name, Namespace: pool.Namespace}
-		profile := firstNonEmpty(profileFromObjectMeta(pool.ObjectMeta), templateProfile, defaultPoolProfile)
-		snapshots = append(snapshots, PoolSnapshot{
-			Name:              pool.Name,
-			Namespace:         pool.Namespace,
-			Profile:           profile,
-			Image:             image,
-			DesiredReplicas:   desiredSandboxWarmPoolReplicas(pool),
-			ReadyReplicas:     pool.Status.ReadyReplicas,
-			AllocatedReplicas: claimCounts[key],
-		})
+		snapshots = append(snapshots, poolSnapshotFromObjects(pool, template, claimCounts[key]))
 	}
 	return snapshots, nil
 }
 
-func profileFromObjectMeta(meta metav1.ObjectMeta) string {
-	if meta.Annotations == nil {
-		return ""
+func (g *Gateway) claimCountsByPool(ctx context.Context, namespace string) (map[types.NamespacedName]int32, error) {
+	claimCounts := make(map[types.NamespacedName]int32)
+	var claims extensionsv1beta1.SandboxClaimList
+	if err := g.k8sClient.List(ctx, &claims, client.InNamespace(namespace)); err != nil {
+		return nil, fmt.Errorf("list sandbox claims: %w", err)
 	}
-	return strings.TrimSpace(meta.Annotations[poolProfileAnnotation])
+	for i := range claims.Items {
+		claim := &claims.Items[i]
+		if claim.DeletionTimestamp != nil || claim.Spec.WarmPoolRef.Name == "" {
+			continue
+		}
+		key := types.NamespacedName{Name: claim.Spec.WarmPoolRef.Name, Namespace: claim.Namespace}
+		claimCounts[key]++
+	}
+	return claimCounts, nil
+}
+
+func (g *Gateway) claimCountForPool(ctx context.Context, namespace, poolName string) (int32, error) {
+	var claims extensionsv1beta1.SandboxClaimList
+	if err := g.k8sClient.List(ctx, &claims,
+		client.InNamespace(namespace),
+		client.MatchingLabels{labels.PoolLabelKey: poolName},
+	); err != nil {
+		return 0, fmt.Errorf("list sandbox claims for pool %s/%s: %w", namespace, poolName, err)
+	}
+	var count int32
+	for i := range claims.Items {
+		claim := &claims.Items[i]
+		if claim.DeletionTimestamp != nil || claim.Spec.WarmPoolRef.Name != poolName {
+			continue
+		}
+		count++
+	}
+	return count, nil
+}
+
+func poolSnapshotFromObjects(pool *extensionsv1beta1.SandboxWarmPool, template *extensionsv1beta1.SandboxTemplate, allocated int32) PoolSnapshot {
+	image := ""
+	templateProfile := ""
+	if template != nil {
+		image = primarySandboxTemplateImage(template)
+		templateProfile = profileFromObjectMeta(template.ObjectMeta)
+	}
+	profile := firstNonEmpty(profileFromObjectMeta(pool.ObjectMeta), templateProfile, defaultPoolProfile)
+	return PoolSnapshot{
+		Name:              pool.Name,
+		Namespace:         pool.Namespace,
+		Profile:           profile,
+		Image:             image,
+		DesiredReplicas:   desiredSandboxWarmPoolReplicas(pool),
+		ReadyReplicas:     pool.Status.ReadyReplicas,
+		AllocatedReplicas: allocated,
+	}
+}
+
+func profileFromObjectMeta(meta metav1.ObjectMeta) string {
+	if meta.Annotations != nil {
+		if profile := strings.TrimSpace(meta.Annotations[poolProfileAnnotation]); profile != "" {
+			return profile
+		}
+	}
+	if meta.Labels != nil {
+		return strings.TrimSpace(meta.Labels[labels.PoolProfileLabelKey])
+	}
+	return ""
 }
 
 func firstNonEmpty(values ...string) string {

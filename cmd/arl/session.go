@@ -23,14 +23,23 @@ var sessionListCmd = &cobra.Command{
 	RunE: func(cmd *cobra.Command, args []string) error {
 		filterProfile, _ := cmd.Flags().GetString("profile")
 		filterExp, _ := cmd.Flags().GetString("experiment")
+		filterStatus, _ := cmd.Flags().GetString("status")
+		limit, _ := cmd.Flags().GetInt("limit")
+		cursor, _ := cmd.Flags().GetString("cursor")
 
 		c := newClient()
-		sessions, err := c.ListSessions()
+		sessions, err := c.ListSessions(SessionListOptions{
+			Profile:      filterProfile,
+			ExperimentID: filterExp,
+			Status:       filterStatus,
+			Limit:        limit,
+			Cursor:       cursor,
+		})
 		if err != nil {
 			return err
 		}
 
-		filtered := filterSessions(sessions, filterProfile, filterExp)
+		filtered := filterSessions(sessions, filterProfile, filterExp, filterStatus)
 
 		if flagOutput == "json" {
 			printJSON(filtered)
@@ -68,13 +77,16 @@ var sessionListCmd = &cobra.Command{
 	},
 }
 
-func filterSessions(sessions []SessionListItem, profile, experimentID string) []SessionListItem {
+func filterSessions(sessions []SessionListItem, profile, experimentID, status string) []SessionListItem {
 	filtered := make([]SessionListItem, 0, len(sessions))
 	for _, s := range sessions {
 		if profile != "" && s.Profile != profile {
 			continue
 		}
 		if experimentID != "" && s.ExperimentID != experimentID {
+			continue
+		}
+		if status != "" && s.Status != status {
 			continue
 		}
 		filtered = append(filtered, s)
@@ -550,6 +562,9 @@ func uploadLocalFileError(localPath, remotePath string, err error) error {
 func init() {
 	sessionListCmd.Flags().String("profile", "", "Filter by profile")
 	sessionListCmd.Flags().String("experiment", "", "Filter by experiment ID")
+	sessionListCmd.Flags().String("status", "", "Filter by status")
+	sessionListCmd.Flags().Int("limit", 0, "Maximum sessions to return")
+	sessionListCmd.Flags().String("cursor", "", "Return sessions after this session ID")
 
 	sessionCreateCmd.Flags().String("image", "", "Container image")
 	sessionCreateCmd.Flags().String("profile", "default", "Resource profile")

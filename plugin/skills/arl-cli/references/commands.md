@@ -44,6 +44,8 @@ trajectory export, or bulk deletion.
 ```bash
 arl pool list
 arl pool list --format wide
+# Include stopped historical pools; default list is active-only.
+arl pool list --all
 arl pool get <name>
 arl pool create <name> --image python:3.12 --profile <profile> --replicas 2
 arl pool create <name> --image python:3.12 --workspace-dir /workspace
@@ -82,6 +84,7 @@ arl session create --image python:3.12 --profile cpu \
 arl session list
 arl session list --profile <profile>
 arl session list --experiment <experiment-id>
+arl session list --status active --limit 100 --cursor <session-id>
 arl session list --format wide
 arl session get <id>
 arl session delete <id>
@@ -158,6 +161,9 @@ arl metrics --filter pool
 arl metrics --raw
 arl config
 ```
+
+`arl status` uses the compact `/v1/summary` endpoint instead of downloading
+full session, pool, and experiment lists.
 
 The gateway exposes metrics on the internal port. If `arl metrics` fails
 against the public gateway URL, port-forward the metrics service and point

@@ -124,6 +124,27 @@ func TestConfigValidate(t *testing.T) {
 			wantErr: "pool autoscaler max replicas",
 		},
 		{
+			name: "invalid managed pool GC interval",
+			mutate: func(cfg *Config) {
+				cfg.ManagedPoolGCInterval = 0
+			},
+			wantErr: "managed pool GC interval",
+		},
+		{
+			name: "invalid managed pool GC min idle age",
+			mutate: func(cfg *Config) {
+				cfg.ManagedPoolGCMinIdleAge = -time.Second
+			},
+			wantErr: "managed pool GC min idle age",
+		},
+		{
+			name: "invalid managed pool GC max stopped",
+			mutate: func(cfg *Config) {
+				cfg.ManagedPoolGCMaxStopped = -1
+			},
+			wantErr: "managed pool GC max stopped",
+		},
+		{
 			name: "invalid sandbox network policy management",
 			mutate: func(cfg *Config) {
 				cfg.SandboxNetworkPolicyManagement = "sometimes"
@@ -216,6 +237,18 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.PoolAutoscalerBuffer != 1 {
 		t.Errorf("PoolAutoscalerBuffer = %d, want 1", cfg.PoolAutoscalerBuffer)
 	}
+	if !cfg.ManagedPoolGCEnabled {
+		t.Error("ManagedPoolGCEnabled = false, want true")
+	}
+	if cfg.ManagedPoolGCInterval != 10*time.Minute {
+		t.Errorf("ManagedPoolGCInterval = %v, want 10m", cfg.ManagedPoolGCInterval)
+	}
+	if cfg.ManagedPoolGCMinIdleAge != 30*time.Minute {
+		t.Errorf("ManagedPoolGCMinIdleAge = %v, want 30m", cfg.ManagedPoolGCMinIdleAge)
+	}
+	if cfg.ManagedPoolGCMaxStopped != 128 {
+		t.Errorf("ManagedPoolGCMaxStopped = %d, want 128", cfg.ManagedPoolGCMaxStopped)
+	}
 	if cfg.DefaultSandboxRequestCPU != "500m" {
 		t.Errorf("DefaultSandboxRequestCPU = %q, want 500m", cfg.DefaultSandboxRequestCPU)
 	}
@@ -274,6 +307,10 @@ func TestLoadFromEnvGatewaySettings(t *testing.T) {
 	t.Setenv("POOL_AUTOSCALER_BUFFER", "4")
 	t.Setenv("POOL_AUTOSCALER_MIN_REPLICAS", "2")
 	t.Setenv("POOL_AUTOSCALER_MAX_REPLICAS", "20")
+	t.Setenv("MANAGED_POOL_GC_ENABLED", "true")
+	t.Setenv("MANAGED_POOL_GC_INTERVAL", "7m")
+	t.Setenv("MANAGED_POOL_GC_MIN_IDLE_AGE", "45m")
+	t.Setenv("MANAGED_POOL_GC_MAX_STOPPED", "64")
 	t.Setenv("SCHEDULER_NAME", "agent-env-image-locality")
 	t.Setenv("IMAGE_LOCALITY_ENABLED", "true")
 	t.Setenv("SANDBOX_DEFAULT_REQUEST_CPU", "250m")
@@ -325,6 +362,18 @@ func TestLoadFromEnvGatewaySettings(t *testing.T) {
 	}
 	if cfg.PoolAutoscalerMaxReplicas != 20 {
 		t.Fatalf("PoolAutoscalerMaxReplicas = %d, want 20", cfg.PoolAutoscalerMaxReplicas)
+	}
+	if !cfg.ManagedPoolGCEnabled {
+		t.Fatal("ManagedPoolGCEnabled = false, want true")
+	}
+	if cfg.ManagedPoolGCInterval != 7*time.Minute {
+		t.Fatalf("ManagedPoolGCInterval = %v, want 7m", cfg.ManagedPoolGCInterval)
+	}
+	if cfg.ManagedPoolGCMinIdleAge != 45*time.Minute {
+		t.Fatalf("ManagedPoolGCMinIdleAge = %v, want 45m", cfg.ManagedPoolGCMinIdleAge)
+	}
+	if cfg.ManagedPoolGCMaxStopped != 64 {
+		t.Fatalf("ManagedPoolGCMaxStopped = %d, want 64", cfg.ManagedPoolGCMaxStopped)
 	}
 	if cfg.SchedulerName != "agent-env-image-locality" {
 		t.Fatalf("SchedulerName = %q, want agent-env-image-locality", cfg.SchedulerName)

@@ -11,6 +11,7 @@ import base64
 import json
 import re
 from collections.abc import AsyncIterator, Callable, Iterable
+from contextlib import suppress
 from pathlib import Path
 from typing import Any, BinaryIO
 
@@ -332,10 +333,8 @@ class AsyncSandboxSession:
         )
         step = result.results[0]
         parsed: dict[str, object] = {}
-        try:
+        with suppress(json.JSONDecodeError, ValueError):
             parsed = json.loads(step.output.stdout)
-        except (json.JSONDecodeError, ValueError):
-            pass
         return ToolResult(
             raw_output=step.output.stdout,
             parsed=parsed,

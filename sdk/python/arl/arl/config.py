@@ -15,6 +15,7 @@ Resolution order (matches Go CLI):
 from __future__ import annotations
 
 import os
+from contextlib import suppress
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -54,7 +55,7 @@ def load_config() -> ArlConfig:
     if not path.is_file():
         return ArlConfig()
     try:
-        import yaml  # type: ignore[import-untyped]
+        import yaml
 
         raw: dict[str, Any] = yaml.safe_load(path.read_text()) or {}
     except Exception:
@@ -111,10 +112,8 @@ def resolve_from_config(
 
     resolved_key = api_key or os.environ.get("ARL_API_KEY", "")
     if not resolved_key and ctx.api_key_file:
-        try:
+        with suppress(Exception):
             resolved_key = Path(ctx.api_key_file).read_text().strip()
-        except Exception:
-            pass
     if not resolved_key:
         resolved_key = ctx.api_key
 

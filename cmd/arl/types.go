@@ -14,6 +14,7 @@ type SessionInfo struct {
 	PodIP       string    `json:"podIP"`
 	PodName     string    `json:"podName"`
 	CreatedAt   time.Time `json:"createdAt"`
+	Status      string    `json:"status,omitempty"`
 }
 
 type SessionListItem struct {
@@ -152,6 +153,27 @@ type ReplayResponse struct {
 
 type ScalePoolRequest struct {
 	Replicas int32 `json:"replicas"`
+}
+
+type PoolListOptions struct {
+	IncludeStopped bool
+}
+
+type SessionListOptions struct {
+	Profile      string
+	ExperimentID string
+	Status       string
+	Limit        int
+	Cursor       string
+}
+
+type GatewaySummary struct {
+	Sessions          int64 `json:"sessions"`
+	ManagedSessions   int   `json:"managedSessions"`
+	Pools             int   `json:"pools"`
+	ReadyReplicas     int32 `json:"readyReplicas"`
+	AllocatedReplicas int32 `json:"allocatedReplicas"`
+	Experiments       int   `json:"experiments"`
 }
 
 type CreatePoolRequest struct {

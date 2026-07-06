@@ -43,12 +43,24 @@ const (
 	// ManagedPoolAnnotation marks gateway-created image-backed pools that may
 	// be stopped automatically once no session or claim references them.
 	ManagedPoolAnnotation = "arl.infra.io/managed-pool"
+	ManagedPoolLabelKey   = ManagedPoolAnnotation
 
 	// PoolStateAnnotation records the ARL lifecycle state for a pool.
 	PoolStateAnnotation = "arl.infra.io/pool-state"
+	PoolStateLabelKey   = PoolStateAnnotation
 	PoolStateRunning    = "running"
 	PoolStateDraining   = "draining"
 	PoolStateStopped    = "stopped"
+
+	// PoolLastUsedAnnotation records when a managed pool last transitioned to
+	// an idle stopped state. Managed pool GC uses it for LRU cleanup.
+	PoolLastUsedAnnotation = "arl.infra.io/pool-last-used"
+
+	// PoolProfileAnnotation records the pool scheduling profile on pool and
+	// template metadata. The matching label is used for server-side filtering
+	// when the value is Kubernetes-label-safe.
+	PoolProfileAnnotation = "arl.infra.io/profile"
+	PoolProfileLabelKey   = PoolProfileAnnotation
 
 	// ModeAnnotation records the session mode (e.g. "devbox") for recovery.
 	ModeAnnotation = "arl.infra.io/mode"

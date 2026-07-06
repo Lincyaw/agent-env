@@ -145,6 +145,10 @@ func main() {
 		PoolAutoscalerBuffer:            cfg.PoolAutoscalerBuffer,
 		PoolAutoscalerMinReplicas:       cfg.PoolAutoscalerMinReplicas,
 		PoolAutoscalerMaxReplicas:       cfg.PoolAutoscalerMaxReplicas,
+		ManagedPoolGCEnabled:            cfg.ManagedPoolGCEnabled,
+		ManagedPoolGCInterval:           cfg.ManagedPoolGCInterval,
+		ManagedPoolGCMinIdleAge:         cfg.ManagedPoolGCMinIdleAge,
+		ManagedPoolGCMaxStopped:         cfg.ManagedPoolGCMaxStopped,
 		SchedulerName:                   cfg.SchedulerName,
 		ImageLocalityEnabled:            cfg.ImageLocalityEnabled,
 		DefaultSandboxRequestCPU:        cfg.DefaultSandboxRequestCPU,
@@ -158,6 +162,15 @@ func main() {
 		SandboxAllowPrivilegeEscalation: cfg.SandboxAllowPrivilegeEscalation,
 		K8sRESTConfig:                   k8sConfig,
 	}, sessionStore)
+
+	if reconciled, err := gw.ReconcilePoolMetadataLabels(ctx); err != nil {
+		log.Printf("Warning: pool metadata label reconciliation failed: %v", err)
+	} else if reconciled > 0 {
+		log.Printf("Reconciled metadata labels on %d pool(s)", reconciled)
+	}
+	if err := gw.StartPoolIndex(ctx, scheme); err != nil {
+		log.Fatalf("Failed to start pool index: %v", err)
+	}
 
 	// Start runtime allocator cache and event handlers.
 	allocCtx, allocCancel := context.WithCancel(context.Background())
@@ -176,6 +189,7 @@ func main() {
 	// Start session sweep (idle timeout reaper)
 	gw.StartSessionSweep()
 	gw.StartPoolAutoscaler()
+	gw.StartManagedPoolGC()
 	if trajectoryConfig != nil {
 		startTrajectoryConnector(ctx, gw, *trajectoryConfig)
 	}
@@ -296,6 +310,7 @@ func main() {
 		stopKeyWatcher()
 	}
 	healthChecker.Stop()
+	gw.StopManagedPoolGC()
 	gw.StopPoolAutoscaler()
 	gw.StopSessionSweep()
 	allocCancel() // Stop runtime allocator cache

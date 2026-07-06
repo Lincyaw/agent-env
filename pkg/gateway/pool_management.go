@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/errors"
@@ -81,38 +82,31 @@ func (g *Gateway) CreatePool(ctx context.Context, req CreatePoolRequest) error {
 		Name:      req.Name,
 		Namespace: ns,
 	}
-	templateAnnotations := map[string]string{}
-	poolAnnotations := map[string]string{}
 	podAnnotations := map[string]string{}
 	if profile := strings.TrimSpace(req.Profile); profile != "" {
-		templateAnnotations[poolProfileAnnotation] = profile
-		poolAnnotations[poolProfileAnnotation] = profile
+		applyPoolProfileMetadata(&templateMeta, profile)
+		applyPoolProfileMetadata(&poolMeta, profile)
 	}
 	if req.Managed {
-		templateAnnotations[labels.ManagedPoolAnnotation] = "true"
-		poolAnnotations[labels.ManagedPoolAnnotation] = "true"
+		applyManagedPoolMetadata(&templateMeta, true)
+		applyManagedPoolMetadata(&poolMeta, true)
 	}
 	if replicas > 0 {
-		poolAnnotations[labels.PoolStateAnnotation] = labels.PoolStateRunning
+		applyPoolStateMetadata(&poolMeta, labels.PoolStateRunning)
 	} else {
-		poolAnnotations[labels.PoolStateAnnotation] = labels.PoolStateStopped
-		poolAnnotations[scheduling.PoolAutoscaleAnnotation] = "false"
+		applyPoolStateMetadata(&poolMeta, labels.PoolStateStopped)
+		applyPoolLastUsedMetadata(&poolMeta, time.Now())
+		ensureObjectAnnotations(&poolMeta)[scheduling.PoolAutoscaleAnnotation] = "false"
 	}
 	imageLocalityEnabled := g.gwConfig.ImageLocalityEnabled || hasJSONPayload(req.ImageLocality)
 	if imageLocalityEnabled {
-		templateAnnotations[scheduling.ImageLocalityAnnotation] = scheduling.ImageLocalityEnabledValue
-		poolAnnotations[scheduling.ImageLocalityAnnotation] = scheduling.ImageLocalityEnabledValue
+		ensureObjectAnnotations(&templateMeta)[scheduling.ImageLocalityAnnotation] = scheduling.ImageLocalityEnabledValue
+		ensureObjectAnnotations(&poolMeta)[scheduling.ImageLocalityAnnotation] = scheduling.ImageLocalityEnabledValue
 		podAnnotations[scheduling.ImageLocalityAnnotation] = scheduling.ImageLocalityEnabledValue
 	}
 	if req.Image != "" && (imageLocalityEnabled || strings.TrimSpace(g.gwConfig.SchedulerName) != "") {
-		templateAnnotations[scheduling.ExecutorImageAnnotation] = req.Image
+		ensureObjectAnnotations(&templateMeta)[scheduling.ExecutorImageAnnotation] = req.Image
 		podAnnotations[scheduling.ExecutorImageAnnotation] = req.Image
-	}
-	if len(templateAnnotations) > 0 {
-		templateMeta.Annotations = templateAnnotations
-	}
-	if len(poolAnnotations) > 0 {
-		poolMeta.Annotations = poolAnnotations
 	}
 	podMetadata := sandboxv1beta1.PodMetadata{}
 	if len(podAnnotations) > 0 {
@@ -157,6 +151,10 @@ func (g *Gateway) CreatePool(ctx context.Context, req CreatePoolRequest) error {
 			}
 		}
 		return fmt.Errorf("create sandbox warm pool: %w", err)
+	}
+	if g.poolIndex != nil {
+		g.poolIndex.upsertTemplate(template)
+		g.poolIndex.upsertPool(pool)
 	}
 
 	if replicas == 0 && req.Image != "" {
@@ -266,19 +264,20 @@ func (g *Gateway) ScalePool(ctx context.Context, name string, req ScalePoolReque
 		return nil, fmt.Errorf("updating resources requires updating the SandboxTemplate and is not supported by ScalePool")
 	}
 	pool.Spec.Replicas = int32Ptr(req.Replicas)
-	if pool.Annotations == nil {
-		pool.Annotations = make(map[string]string)
-	}
 	if req.Replicas > 0 {
-		pool.Annotations[labels.PoolStateAnnotation] = labels.PoolStateRunning
+		applyPoolStateMetadata(&pool.ObjectMeta, labels.PoolStateRunning)
 		delete(pool.Annotations, scheduling.PoolAutoscaleAnnotation)
 	} else {
-		pool.Annotations[labels.PoolStateAnnotation] = labels.PoolStateStopped
-		pool.Annotations[scheduling.PoolAutoscaleAnnotation] = "false"
+		applyPoolStateMetadata(&pool.ObjectMeta, labels.PoolStateStopped)
+		applyPoolLastUsedMetadata(&pool.ObjectMeta, time.Now())
+		ensureObjectAnnotations(&pool.ObjectMeta)[scheduling.PoolAutoscaleAnnotation] = "false"
 	}
 
 	if err := g.k8sClient.Update(ctx, pool); err != nil {
 		return nil, fmt.Errorf("update pool: %w", err)
+	}
+	if g.poolIndex != nil {
+		g.poolIndex.upsertPool(pool)
 	}
 
 	return g.GetPool(ctx, name, ns)
@@ -326,6 +325,9 @@ func (g *Gateway) DestroyPool(ctx context.Context, name, namespace string) error
 	if err := g.k8sClient.Delete(ctx, pool); err != nil && !errors.IsNotFound(err) {
 		return fmt.Errorf("delete sandbox warm pool %s/%s: %w", namespace, name, err)
 	}
+	if g.poolIndex != nil {
+		g.poolIndex.deletePool(pool)
+	}
 	if templateName == "" {
 		return nil
 	}
@@ -369,16 +371,19 @@ func (g *Gateway) patchPoolLifecycle(ctx context.Context, name, namespace string
 		return fmt.Errorf("get pool %s/%s: %w", namespace, name, err)
 	}
 	before := pool.DeepCopy()
-	if pool.Annotations == nil {
-		pool.Annotations = make(map[string]string)
-	}
 	pool.Spec.Replicas = int32Ptr(replicas)
-	pool.Annotations[labels.PoolStateAnnotation] = state
+	applyPoolStateMetadata(&pool.ObjectMeta, state)
+	if state == labels.PoolStateStopped {
+		applyPoolLastUsedMetadata(&pool.ObjectMeta, time.Now())
+	}
 	if disableAutoscale {
-		pool.Annotations[scheduling.PoolAutoscaleAnnotation] = "false"
+		ensureObjectAnnotations(&pool.ObjectMeta)[scheduling.PoolAutoscaleAnnotation] = "false"
 	}
 	if err := g.k8sClient.Patch(ctx, pool, client.MergeFrom(before)); err != nil {
 		return fmt.Errorf("patch pool %s/%s lifecycle: %w", namespace, name, err)
+	}
+	if g.poolIndex != nil {
+		g.poolIndex.upsertPool(pool)
 	}
 	return nil
 }
@@ -398,6 +403,9 @@ func (g *Gateway) deletePoolTemplateIfOwned(ctx context.Context, templateName, p
 	}
 	if err := g.k8sClient.Delete(ctx, template); err != nil && !errors.IsNotFound(err) {
 		return fmt.Errorf("delete sandbox template %s/%s: %w", namespace, templateName, err)
+	}
+	if g.poolIndex != nil {
+		g.poolIndex.deleteTemplate(template)
 	}
 	return nil
 }
@@ -465,25 +473,27 @@ func (g *Gateway) diagnosePoolHealth(ctx context.Context, poolRef, namespace str
 		poolRef, desiredSandboxWarmPoolReplicas(pool), pool.Status.Replicas, pool.Status.ReadyReplicas, pool.Spec.TemplateRef.Name)
 }
 
-// ListPools returns SandboxWarmPool CRDs in the gateway namespace.
-// Uses batch queries to avoid N+1 API calls.
+// ListPools returns active SandboxWarmPool CRDs in the gateway namespace.
 func (g *Gateway) ListPools(ctx context.Context, namespace string) ([]PoolInfo, error) {
-	namespace, err := g.resolveNamespace(namespace)
+	return g.ListPoolsWithOptions(ctx, PoolListOptions{Namespace: namespace})
+}
+
+// ListPoolsWithOptions returns SandboxWarmPool CRDs matching the requested
+// shape. By default it omits stopped, unallocated pools so common list/status
+// paths do not have to load every historical template.
+func (g *Gateway) ListPoolsWithOptions(ctx context.Context, opts PoolListOptions) ([]PoolInfo, error) {
+	namespace, err := g.resolveNamespace(opts.Namespace)
 	if err != nil {
 		return nil, err
+	}
+	opts.Namespace = namespace
+	if readModel, ok := g.syncedPoolReadModel(); ok {
+		return readModel.ListPools(opts), nil
 	}
 
 	var poolList extensionsv1beta1.SandboxWarmPoolList
 	if err := g.k8sClient.List(ctx, &poolList, client.InNamespace(namespace)); err != nil {
 		return nil, err
-	}
-
-	templatesByName := make(map[string]*extensionsv1beta1.SandboxTemplate)
-	var templateList extensionsv1beta1.SandboxTemplateList
-	if err := g.k8sClient.List(ctx, &templateList, client.InNamespace(namespace)); err == nil {
-		for i := range templateList.Items {
-			templatesByName[templateList.Items[i].Name] = &templateList.Items[i]
-		}
 	}
 
 	claimCountsByPool := make(map[string]int32)
@@ -497,9 +507,42 @@ func (g *Gateway) ListPools(ctx context.Context, namespace string) ([]PoolInfo, 
 		}
 	}
 
-	pools := make([]PoolInfo, 0, len(poolList.Items))
+	filteredPools := make([]*extensionsv1beta1.SandboxWarmPool, 0, len(poolList.Items))
 	for i := range poolList.Items {
 		pool := &poolList.Items[i]
+		allocated := claimCountsByPool[pool.Name]
+		if !opts.IncludeStopped && poolListItemStopped(pool, allocated) {
+			continue
+		}
+		filteredPools = append(filteredPools, pool)
+	}
+
+	templatesByName := make(map[string]*extensionsv1beta1.SandboxTemplate)
+	if opts.IncludeStopped {
+		var templateList extensionsv1beta1.SandboxTemplateList
+		if err := g.k8sClient.List(ctx, &templateList, client.InNamespace(namespace)); err == nil {
+			for i := range templateList.Items {
+				templatesByName[templateList.Items[i].Name] = &templateList.Items[i]
+			}
+		}
+	} else {
+		for _, pool := range filteredPools {
+			templateName := pool.Spec.TemplateRef.Name
+			if templateName == "" {
+				continue
+			}
+			if _, ok := templatesByName[templateName]; ok {
+				continue
+			}
+			template := &extensionsv1beta1.SandboxTemplate{}
+			if err := g.k8sClient.Get(ctx, types.NamespacedName{Name: templateName, Namespace: namespace}, template); err == nil {
+				templatesByName[templateName] = template
+			}
+		}
+	}
+
+	pools := make([]PoolInfo, 0, len(filteredPools))
+	for _, pool := range filteredPools {
 		info := PoolInfo{
 			Name:              pool.Name,
 			Namespace:         pool.Namespace,
@@ -519,6 +562,17 @@ func (g *Gateway) ListPools(ctx context.Context, namespace string) ([]PoolInfo, 
 	return pools, nil
 }
 
+func poolListItemStopped(pool *extensionsv1beta1.SandboxWarmPool, allocated int32) bool {
+	if pool == nil || allocated > 0 {
+		return false
+	}
+	state := strings.ToLower(strings.TrimSpace(pool.Annotations[labels.PoolStateAnnotation]))
+	if state == labels.PoolStateStopped {
+		return true
+	}
+	return desiredSandboxWarmPoolReplicas(pool) == 0 && pool.Status.ReadyReplicas == 0
+}
+
 func (g *Gateway) poolInfoFromSandboxWarmPool(ctx context.Context, pool *extensionsv1beta1.SandboxWarmPool) PoolInfo {
 	info := PoolInfo{
 		Name:          pool.Name,
@@ -534,13 +588,14 @@ func (g *Gateway) poolInfoFromSandboxWarmPool(ctx context.Context, pool *extensi
 		info.Image = primarySandboxTemplateImage(template)
 		info.Profile = firstNonEmpty(profileFromObjectMeta(pool.ObjectMeta), profileFromObjectMeta(template.ObjectMeta), defaultPoolProfile)
 	}
-	var claims extensionsv1beta1.SandboxClaimList
-	if err := g.k8sClient.List(ctx, &claims, client.InNamespace(pool.Namespace)); err == nil {
-		for i := range claims.Items {
-			if claims.Items[i].Spec.WarmPoolRef.Name == pool.Name && claims.Items[i].DeletionTimestamp == nil {
-				info.AllocatedReplicas++
-			}
+	if readModel, ok := g.syncedPoolReadModel(); ok {
+		if snapshot, found := readModel.SnapshotPool(pool.Namespace, pool.Name); found {
+			info.AllocatedReplicas = snapshot.AllocatedReplicas
+			return info
 		}
+	}
+	if allocated, err := g.claimCountForPool(ctx, pool.Namespace, pool.Name); err == nil {
+		info.AllocatedReplicas = allocated
 	}
 	return info
 }

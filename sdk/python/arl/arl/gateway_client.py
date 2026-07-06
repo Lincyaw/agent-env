@@ -24,6 +24,7 @@ from arl.types import (
     ExecuteOperationInfo,
     ExecuteResponse,
     ExperimentSummary,
+    GatewaySummary,
     LogEntry,
     ManagedSessionInfo,
     PoolCondition,
@@ -461,8 +462,27 @@ class GatewayClient:
         self._handle_error(resp)
         return resp.text
 
-    def list_sessions(self) -> list[SessionListItem]:
-        resp = self._client.get("/v1/sessions")
+    def list_sessions(
+        self,
+        *,
+        profile: str | None = None,
+        experiment_id: str | None = None,
+        status: str | None = None,
+        limit: int | None = None,
+        cursor: str | None = None,
+    ) -> list[SessionListItem]:
+        params: dict[str, str | int] = {}
+        if profile:
+            params["profile"] = profile
+        if experiment_id:
+            params["experiment"] = experiment_id
+        if status:
+            params["status"] = status
+        if limit is not None:
+            params["limit"] = limit
+        if cursor:
+            params["cursor"] = cursor
+        resp = self._client.get("/v1/sessions", params=params)
         self._handle_error(resp)
         data = resp.json()
         if isinstance(data, list):
@@ -532,13 +552,19 @@ class GatewayClient:
         resp = self._client.post("/v1/pools", json=body)
         self._handle_error(resp)
 
-    def list_pools(self) -> list[PoolInfo]:
-        resp = self._client.get("/v1/pools")
+    def list_pools(self, *, include_stopped: bool = False) -> list[PoolInfo]:
+        params = {"includeStopped": "true"} if include_stopped else None
+        resp = self._client.get("/v1/pools", params=params)
         self._handle_error(resp)
         data = resp.json()
         if isinstance(data, list):
             return [PoolInfo.model_validate(item) for item in data]
         return []
+
+    def summary(self) -> GatewaySummary:
+        resp = self._client.get("/v1/summary")
+        self._handle_error(resp)
+        return GatewaySummary.model_validate(resp.json())
 
     def get_pool(self, name: str) -> PoolInfo:
         resp = self._client.get(f"/v1/pools/{name}")

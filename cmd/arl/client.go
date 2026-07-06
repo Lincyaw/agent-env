@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"path"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -100,9 +101,31 @@ func (c *Client) rawGet(path string) ([]byte, int, error) {
 
 // --- Session API ---
 
-func (c *Client) ListSessions() ([]SessionListItem, error) {
+func (c *Client) ListSessions(options ...SessionListOptions) ([]SessionListItem, error) {
+	endpoint := "/v1/sessions"
+	if len(options) > 0 {
+		q := url.Values{}
+		if options[0].Profile != "" {
+			q.Set("profile", options[0].Profile)
+		}
+		if options[0].ExperimentID != "" {
+			q.Set("experiment", options[0].ExperimentID)
+		}
+		if options[0].Status != "" {
+			q.Set("status", options[0].Status)
+		}
+		if options[0].Limit > 0 {
+			q.Set("limit", strconv.Itoa(options[0].Limit))
+		}
+		if options[0].Cursor != "" {
+			q.Set("cursor", options[0].Cursor)
+		}
+		if encoded := q.Encode(); encoded != "" {
+			endpoint += "?" + encoded
+		}
+	}
 	var sessions []SessionListItem
-	err := c.do("GET", "/v1/sessions", nil, &sessions)
+	err := c.do("GET", endpoint, nil, &sessions)
 	if sessions == nil {
 		sessions = []SessionListItem{}
 	}
@@ -247,13 +270,25 @@ func (c *Client) GetTrajectory(sessionID string) ([]byte, error) {
 
 // --- Pool API ---
 
-func (c *Client) ListPools() ([]PoolInfo, error) {
+func (c *Client) ListPools(options ...PoolListOptions) ([]PoolInfo, error) {
+	endpoint := "/v1/pools"
+	if len(options) > 0 && options[0].IncludeStopped {
+		endpoint += "?includeStopped=true"
+	}
 	var pools []PoolInfo
-	err := c.do("GET", "/v1/pools", nil, &pools)
+	err := c.do("GET", endpoint, nil, &pools)
 	if pools == nil {
 		pools = []PoolInfo{}
 	}
 	return pools, err
+}
+
+func (c *Client) Summary() (*GatewaySummary, error) {
+	var summary GatewaySummary
+	if err := c.do("GET", "/v1/summary", nil, &summary); err != nil {
+		return nil, err
+	}
+	return &summary, nil
 }
 
 func (c *Client) GetPool(name string) (*PoolInfo, error) {

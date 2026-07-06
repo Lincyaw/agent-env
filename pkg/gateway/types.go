@@ -295,6 +295,12 @@ type PoolInfo struct {
 	Conditions        []PoolCondition `json:"conditions,omitempty"`
 }
 
+// PoolListOptions controls the cost and shape of pool list responses.
+type PoolListOptions struct {
+	Namespace      string
+	IncludeStopped bool
+}
+
 // PoolCondition is a simplified condition for API consumers
 type PoolCondition struct {
 	Type    string `json:"type"`
@@ -310,6 +316,23 @@ type SessionListItem struct {
 	ExperimentID string `json:"experimentId,omitempty"`
 }
 
+// SessionListOptions filters session list responses at the gateway.
+type SessionListOptions struct {
+	Profile      string
+	ExperimentID string
+	Status       string
+	Limit        int
+	Cursor       string
+}
+
+// SessionListPage carries the current page and an optional cursor for the next
+// page. The HTTP API keeps returning a JSON array for compatibility and exposes
+// NextCursor through the X-Next-Cursor header.
+type SessionListPage struct {
+	Items      []SessionListItem
+	NextCursor string
+}
+
 // ExperimentSummary describes an experiment with aggregate info.
 type ExperimentSummary struct {
 	ExperimentID string `json:"experimentId"`
@@ -317,6 +340,18 @@ type ExperimentSummary struct {
 	Image        string `json:"image,omitempty"`
 	Profile      string `json:"profile,omitempty"`
 	Namespace    string `json:"namespace,omitempty"`
+}
+
+// GatewaySummary is a compact status response for health dashboards and CLI
+// status. It avoids returning full session or pool lists when callers only need
+// aggregate counts.
+type GatewaySummary struct {
+	Sessions          int64 `json:"sessions"`
+	ManagedSessions   int   `json:"managedSessions"`
+	Pools             int   `json:"pools"`
+	ReadyReplicas     int32 `json:"readyReplicas"`
+	AllocatedReplicas int32 `json:"allocatedReplicas"`
+	Experiments       int   `json:"experiments"`
 }
 
 // ErrorResponse is a generic error response

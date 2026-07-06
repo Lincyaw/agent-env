@@ -14,6 +14,9 @@ import (
 	extensionsv1beta1 "sigs.k8s.io/agent-sandbox/extensions/api/v1beta1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
+	"sigs.k8s.io/controller-runtime/pkg/client/interceptor"
+
+	"github.com/Lincyaw/agent-env/pkg/labels"
 )
 
 func TestDefaultPoolSelectorUsesPinnedPool(t *testing.T) {
@@ -117,6 +120,71 @@ func TestSnapshotPoolsIncludesProfileImageAndClaims(t *testing.T) {
 	}
 }
 
+func TestPinnedPoolSnapshotAvoidsTemplateList(t *testing.T) {
+	scheme := newGatewayTestScheme(t)
+	pool := testSandboxWarmPool("code", "default", "code-template", 1, 1, "code")
+	template := testSandboxTemplate("code-template", "default", "python:3.12", "code")
+	claim := &extensionsv1beta1.SandboxClaim{
+		ObjectMeta: metav1.ObjectMeta{Name: "claim-1", Namespace: "default"},
+		Spec: extensionsv1beta1.SandboxClaimSpec{
+			WarmPoolRef: extensionsv1beta1.SandboxWarmPoolRef{Name: "code"},
+		},
+	}
+	baseClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(pool, template, claim).Build()
+	k8sClient := interceptor.NewClient(baseClient, interceptor.Funcs{
+		List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+			if _, ok := list.(*extensionsv1beta1.SandboxTemplateList); ok {
+				return errors.New("unexpected full template list")
+			}
+			return c.List(ctx, list, opts...)
+		},
+	})
+	gw := &Gateway{k8sClient: k8sClient}
+
+	selection, decision, err := gw.tryPlanSessionAllocation(context.Background(), ResourceIntent{
+		Scope:          RequestScope{Namespace: "default"},
+		Profile:        "code",
+		Image:          "python:3.12",
+		PinnedPoolName: "code",
+	})
+	if err != nil {
+		t.Fatalf("tryPlanSessionAllocation returned error: %v", err)
+	}
+	if selection.PoolName != "code" {
+		t.Fatalf("PoolName = %q, want code", selection.PoolName)
+	}
+	if !decision.Admitted {
+		t.Fatalf("decision = %#v, want admitted", decision)
+	}
+}
+
+func TestListPoolsOmitsStoppedPoolsByDefault(t *testing.T) {
+	scheme := newGatewayTestScheme(t)
+	active := testSandboxWarmPool("active", "default", "active-template", 1, 1, "code")
+	stopped := testSandboxWarmPool("stopped", "default", "stopped-template", 0, 0, "code")
+	stopped.Annotations[labels.PoolStateAnnotation] = labels.PoolStateStopped
+	activeTemplate := testSandboxTemplate("active-template", "default", "python:3.12", "code")
+	stoppedTemplate := testSandboxTemplate("stopped-template", "default", "python:3.12", "code")
+	k8sClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(active, stopped, activeTemplate, stoppedTemplate).Build()
+	gw := &Gateway{k8sClient: k8sClient}
+
+	pools, err := gw.ListPools(context.Background(), "default")
+	if err != nil {
+		t.Fatalf("ListPools returned error: %v", err)
+	}
+	if len(pools) != 1 || pools[0].Name != "active" {
+		t.Fatalf("ListPools = %#v, want only active pool", pools)
+	}
+
+	allPools, err := gw.ListPoolsWithOptions(context.Background(), PoolListOptions{Namespace: "default", IncludeStopped: true})
+	if err != nil {
+		t.Fatalf("ListPoolsWithOptions returned error: %v", err)
+	}
+	if len(allPools) != 2 {
+		t.Fatalf("all pools length = %d, want 2", len(allPools))
+	}
+}
+
 func TestPlanSessionAllocationQueuesThenRejectsWhenWarmCapacityDoesNotFree(t *testing.T) {
 	scheme := newGatewayTestScheme(t)
 	pool := testSandboxWarmPool("code", "default", "code-template", 1, 0, "code")
@@ -206,6 +274,42 @@ func TestEnsureImageBackedSessionPoolCreatesProfiledPool(t *testing.T) {
 	}
 	if pool.Annotations[poolProfileAnnotation] != "code" {
 		t.Fatalf("pool profile annotation = %q, want code", pool.Annotations[poolProfileAnnotation])
+	}
+}
+
+func TestEnsureImageBackedSessionPoolAvoidsFullPoolSnapshot(t *testing.T) {
+	scheme := newGatewayTestScheme(t)
+	poolName, err := managedPoolName("python:3.12", "default", "code", nil)
+	if err != nil {
+		t.Fatalf("managedPoolName returned error: %v", err)
+	}
+	pool := testSandboxWarmPool(poolName, "default", sandboxTemplateName(poolName), 1, 1, "code")
+	baseClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(pool).Build()
+	k8sClient := interceptor.NewClient(baseClient, interceptor.Funcs{
+		List: func(ctx context.Context, c client.WithWatch, list client.ObjectList, opts ...client.ListOption) error {
+			switch list.(type) {
+			case *extensionsv1beta1.SandboxWarmPoolList, *extensionsv1beta1.SandboxTemplateList:
+				return errors.New("unexpected full pool snapshot list")
+			default:
+				return c.List(ctx, list, opts...)
+			}
+		},
+	})
+	gw := New(k8sClient, &recordingRuntimeAllocator{}, nil, nil, nil, GatewayConfig{}, NewMemoryStore())
+
+	req, createdPool, err := gw.ensureImageBackedSessionPool(context.Background(), CreateSessionRequest{
+		Namespace: "default",
+		Image:     "python:3.12",
+		Profile:   "code",
+	}, "default")
+	if err != nil {
+		t.Fatalf("ensureImageBackedSessionPool returned error: %v", err)
+	}
+	if req.PoolName != poolName {
+		t.Fatalf("PoolName = %q, want %q", req.PoolName, poolName)
+	}
+	if createdPool != "" {
+		t.Fatalf("createdPool = %q, want empty for existing pool", createdPool)
 	}
 }
 

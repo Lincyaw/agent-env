@@ -121,6 +121,13 @@ gateway:
     buffer: 1
     minReplicas: 0
     maxReplicas: 100
+  # Low-frequency LRU cleanup for stopped managed pools. This deletes only the
+  # SandboxWarmPool CR and its owned SandboxTemplate; it does not delete images.
+  managedPoolGC:
+    enabled: true
+    interval: "10m"
+    minIdleAge: "30m"
+    maxStopped: 128
   # Scheduler and image-locality hints applied to generated sandbox templates.
   scheduler:
     # Empty means: use imageLocalityScheduler.schedulerName when

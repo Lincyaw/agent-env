@@ -41,6 +41,10 @@ type GatewayConfig struct {
 	PoolAutoscalerBuffer            int32
 	PoolAutoscalerMinReplicas       int32
 	PoolAutoscalerMaxReplicas       int32
+	ManagedPoolGCEnabled            bool
+	ManagedPoolGCInterval           time.Duration
+	ManagedPoolGCMinIdleAge         time.Duration
+	ManagedPoolGCMaxStopped         int
 	SchedulerName                   string
 	ImageLocalityEnabled            bool
 	DefaultSandboxRequestCPU        string
@@ -102,27 +106,33 @@ func (s *session) runtimeAllocation() RuntimeAllocation {
 
 // Gateway manages sessions and forwards execution to sidecars.
 type Gateway struct {
-	k8sClient           client.Client
-	k8sRESTConfig       *rest.Config
-	runtimeAllocator    RuntimeAllocator
-	poolSelector        PoolSelector
-	admissionController AdmissionController
-	sidecarClient       interfaces.SidecarClient
-	metrics             interfaces.MetricsCollector
-	trajectoryWriter    *audit.TrajectoryWriter
-	store               SessionStore
-	gwConfig            GatewayConfig
-	sweepStopCh         chan struct{}
-	sweepWg             sync.WaitGroup
-	autoscaleStopCh     chan struct{}
-	autoscaleStopOnce   sync.Once
-	autoscaleWg         sync.WaitGroup
-	admissionQueueMu    sync.Mutex
-	admissionQueueDepth map[types.NamespacedName]int32
-	poolStopMu          sync.Mutex
-	trajMu              sync.RWMutex
-	trajCh              chan audit.TrajectoryEntry
-	trajWg              sync.WaitGroup
+	k8sClient             client.Client
+	k8sRESTConfig         *rest.Config
+	runtimeAllocator      RuntimeAllocator
+	poolSelector          PoolSelector
+	admissionController   AdmissionController
+	sidecarClient         interfaces.SidecarClient
+	metrics               interfaces.MetricsCollector
+	trajectoryWriter      *audit.TrajectoryWriter
+	store                 SessionStore
+	gwConfig              GatewayConfig
+	sweepStopCh           chan struct{}
+	sweepWg               sync.WaitGroup
+	autoscaleStopCh       chan struct{}
+	autoscaleStopOnce     sync.Once
+	autoscaleWg           sync.WaitGroup
+	managedPoolGCStopCh   chan struct{}
+	managedPoolGCStopOnce sync.Once
+	managedPoolGCWg       sync.WaitGroup
+	admissionQueueMu      sync.Mutex
+	admissionQueueDepth   map[types.NamespacedName]int32
+	poolStopMu            sync.Mutex
+	poolIndexMu           sync.Mutex
+	poolIndex             *poolIndex
+	poolReadModel         PoolReadModel
+	trajMu                sync.RWMutex
+	trajCh                chan audit.TrajectoryEntry
+	trajWg                sync.WaitGroup
 }
 
 // New creates a new gateway. metrics and trajectoryWriter may be nil.
@@ -144,8 +154,11 @@ func New(k8sClient client.Client, runtimeAllocator RuntimeAllocator, sidecarClie
 		gwConfig:            gwConfig,
 		sweepStopCh:         make(chan struct{}),
 		autoscaleStopCh:     make(chan struct{}),
+		managedPoolGCStopCh: make(chan struct{}),
 		admissionQueueDepth: make(map[types.NamespacedName]int32),
+		poolIndex:           newPoolIndex(),
 	}
+	gw.poolReadModel = gw.poolIndex
 	return gw
 }
 

@@ -93,6 +93,14 @@ spec:
               value: "{{ .Values.gateway.autoscaler.minReplicas }}"
             - name: POOL_AUTOSCALER_MAX_REPLICAS
               value: "{{ .Values.gateway.autoscaler.maxReplicas }}"
+            - name: MANAGED_POOL_GC_ENABLED
+              value: "{{ .Values.gateway.managedPoolGC.enabled }}"
+            - name: MANAGED_POOL_GC_INTERVAL
+              value: "{{ .Values.gateway.managedPoolGC.interval }}"
+            - name: MANAGED_POOL_GC_MIN_IDLE_AGE
+              value: "{{ .Values.gateway.managedPoolGC.minIdleAge }}"
+            - name: MANAGED_POOL_GC_MAX_STOPPED
+              value: "{{ .Values.gateway.managedPoolGC.maxStopped }}"
             {{- if $schedulerName }}
             - name: SCHEDULER_NAME
               value: "{{ $schedulerName }}"

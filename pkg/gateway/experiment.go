@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"sort"
 	"strings"
 
 	"go.opentelemetry.io/otel"
@@ -118,6 +119,38 @@ func (g *Gateway) CreateManagedSession(ctx context.Context, req CreateManagedSes
 func (g *Gateway) ListExperimentSessions(experimentID string) []ManagedSessionInfo {
 	results := make([]ManagedSessionInfo, 0)
 	seen := make(map[string]bool)
+
+	for _, id := range g.store.FindByExperiment(experimentID) {
+		if s, ok := g.store.Get(id); ok {
+			s.mu.RLock()
+			if s.managed && s.experimentID == experimentID {
+				results = append(results, ManagedSessionInfo{
+					SessionInfo:  s.Info,
+					ExperimentID: s.experimentID,
+					Managed:      true,
+				})
+				seen[id] = true
+			}
+			s.mu.RUnlock()
+			continue
+		}
+		if s, ok := g.store.GetHistorical(id); ok {
+			s.mu.RLock()
+			if s.managed && s.experimentID == experimentID {
+				results = append(results, ManagedSessionInfo{
+					SessionInfo:  s.Info,
+					ExperimentID: s.experimentID,
+					Managed:      true,
+				})
+				seen[id] = true
+			}
+			s.mu.RUnlock()
+		}
+	}
+	if len(seen) > 0 {
+		return results
+	}
+
 	g.store.Range(func(id string, s *session) bool {
 		s.mu.RLock()
 		if s.managed && s.experimentID == experimentID {
@@ -150,21 +183,202 @@ func (g *Gateway) ListExperimentSessions(experimentID string) []ManagedSessionIn
 	return results
 }
 
-// ListSessions returns all active sessions.
-func (g *Gateway) ListSessions() []SessionListItem {
+type indexedSessionStore interface {
+	FindByExperiment(experimentID string) []string
+	FindByProfile(profile string) []string
+	FindByStatus(status string) []string
+}
+
+// ListSessions returns matching active sessions.
+func (g *Gateway) ListSessions(options ...SessionListOptions) []SessionListItem {
+	return g.ListSessionsPage(options...).Items
+}
+
+// ListSessionsPage returns a stable, optionally bounded page of active
+// sessions. It uses store indexes when a selective filter is present.
+func (g *Gateway) ListSessionsPage(options ...SessionListOptions) SessionListPage {
+	var opts SessionListOptions
+	if len(options) > 0 {
+		opts = options[0]
+	}
+	if ids, ok := g.sessionCandidateIDs(opts); ok {
+		return g.listSessionsFromCandidateIDs(ids, opts)
+	}
+
 	var items []SessionListItem
 	g.store.Range(func(_ string, s *session) bool {
-		s.mu.RLock()
-		item := SessionListItem{
-			SessionInfo:  s.Info,
-			Managed:      s.managed,
-			ExperimentID: s.experimentID,
+		if item, ok := sessionListItem(s, opts); ok {
+			items = append(items, item)
 		}
-		s.mu.RUnlock()
-		items = append(items, item)
 		return true
 	})
-	return items
+	sort.SliceStable(items, func(i, j int) bool {
+		if items[i].CreatedAt.Equal(items[j].CreatedAt) {
+			return items[i].ID < items[j].ID
+		}
+		return items[i].CreatedAt.Before(items[j].CreatedAt)
+	})
+	return pageSessionItems(items, opts)
+}
+
+func (g *Gateway) listSessionsFromCandidateIDs(ids []string, opts SessionListOptions) SessionListPage {
+	sort.Strings(ids)
+	cursor := strings.TrimSpace(opts.Cursor)
+	limit := opts.Limit
+	if limit < 0 {
+		limit = 0
+	}
+
+	started := cursor == ""
+	items := make([]SessionListItem, 0, minPositive(limit, len(ids)))
+	nextCursor := ""
+	lastID := ""
+	for _, id := range ids {
+		if id == lastID {
+			continue
+		}
+		lastID = id
+		if !started {
+			if id == cursor {
+				started = true
+			}
+			continue
+		}
+		s, found := g.store.Get(id)
+		if !found {
+			continue
+		}
+		if item, ok := sessionListItem(s, opts); ok {
+			items = append(items, item)
+		}
+		if limit > 0 && len(items) >= limit {
+			nextCursor = id
+			break
+		}
+	}
+	return SessionListPage{Items: items, NextCursor: nextCursor}
+}
+
+func minPositive(limit, total int) int {
+	if limit > 0 && limit < total {
+		return limit
+	}
+	return total
+}
+
+func (g *Gateway) sessionCandidateIDs(opts SessionListOptions) ([]string, bool) {
+	indexed, ok := g.store.(indexedSessionStore)
+	if !ok {
+		return nil, false
+	}
+	if experimentID := strings.TrimSpace(opts.ExperimentID); experimentID != "" {
+		return indexed.FindByExperiment(experimentID), true
+	}
+	if profile := strings.TrimSpace(opts.Profile); profile != "" {
+		return indexed.FindByProfile(profile), true
+	}
+	if status := strings.TrimSpace(opts.Status); status != "" {
+		return indexed.FindByStatus(status), true
+	}
+	return nil, false
+}
+
+func sessionListItem(s *session, opts SessionListOptions) (SessionListItem, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if !sessionMatchesListOptionsLocked(s, opts) {
+		return SessionListItem{}, false
+	}
+	return SessionListItem{
+		SessionInfo:  s.Info,
+		Managed:      s.managed,
+		ExperimentID: s.experimentID,
+	}, true
+}
+
+func sessionMatchesListOptions(s *session, opts SessionListOptions) bool {
+	if s == nil {
+		return false
+	}
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return sessionMatchesListOptionsLocked(s, opts)
+}
+
+func sessionMatchesListOptionsLocked(s *session, opts SessionListOptions) bool {
+	profile := strings.TrimSpace(opts.Profile)
+	if profile != "" && s.Info.Profile != profile {
+		return false
+	}
+	experimentID := strings.TrimSpace(opts.ExperimentID)
+	if experimentID != "" && s.experimentID != experimentID {
+		return false
+	}
+	status := strings.TrimSpace(opts.Status)
+	if status != "" {
+		sessionStatus := s.Info.Status
+		if sessionStatus == "" {
+			sessionStatus = "active"
+		}
+		if sessionStatus != status {
+			return false
+		}
+	}
+	return true
+}
+
+func pageSessionItems(items []SessionListItem, opts SessionListOptions) SessionListPage {
+	cursor := strings.TrimSpace(opts.Cursor)
+	limit := opts.Limit
+	if limit < 0 {
+		limit = 0
+	}
+
+	started := cursor == ""
+	result := make([]SessionListItem, 0, len(items))
+	for _, item := range items {
+		if !started {
+			if item.ID == cursor {
+				started = true
+			}
+			continue
+		}
+		if limit > 0 && len(result) >= limit {
+			return SessionListPage{Items: result, NextCursor: result[len(result)-1].ID}
+		}
+		result = append(result, item)
+	}
+	return SessionListPage{Items: result}
+}
+
+func (g *Gateway) Summary(ctx context.Context) (GatewaySummary, error) {
+	summary := GatewaySummary{
+		Sessions: g.store.Count(),
+	}
+	experiments := make(map[string]struct{})
+	g.store.Range(func(_ string, s *session) bool {
+		s.mu.RLock()
+		if s.managed {
+			summary.ManagedSessions++
+		}
+		if s.experimentID != "" {
+			experiments[s.experimentID] = struct{}{}
+		}
+		s.mu.RUnlock()
+		return true
+	})
+	summary.Experiments = len(experiments)
+
+	pools, err := g.ListPoolsWithOptions(ctx, PoolListOptions{Namespace: g.runtimeNamespace()})
+	if err != nil {
+		return summary, err
+	}
+	summary.Pools = len(pools)
+	for _, pool := range pools {
+		summary.ReadyReplicas += pool.ReadyReplicas
+		summary.AllocatedReplicas += pool.AllocatedReplicas
+	}
+	return summary, nil
 }
 
 // ListExperiments returns aggregate experiment summaries.

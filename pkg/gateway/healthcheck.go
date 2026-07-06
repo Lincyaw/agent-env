@@ -118,13 +118,11 @@ func (hc *HealthChecker) collect() {
 	}
 
 	// 3. Runtime allocator stats
-	if hc.gw.runtimeAllocator != nil {
-		allocStats := hc.gw.runtimeAllocator.DiagnosticStats()
-		for pool, stats := range allocStats {
-			if hc.metrics != nil {
-				hc.metrics.SetIdleQueueDepth(pool, stats.IdleCount)
-				hc.metrics.SetPendingWaiters(pool, stats.WaiterCount)
-			}
+	allocStats := hc.gw.allocatorDiagnosticStats()
+	for pool, stats := range allocStats {
+		if hc.metrics != nil {
+			hc.metrics.SetIdleQueueDepth(pool, stats.IdleCount)
+			hc.metrics.SetPendingWaiters(pool, stats.WaiterCount)
 		}
 	}
 	if hc.metrics != nil {
@@ -222,10 +220,7 @@ func (hc *HealthChecker) BuildReport() HealthReport {
 		return true
 	})
 
-	var allocStats map[string]AllocatorPoolStats
-	if hc.gw.runtimeAllocator != nil {
-		allocStats = hc.gw.runtimeAllocator.DiagnosticStats()
-	}
+	allocStats := hc.gw.allocatorDiagnosticStats()
 
 	checks := hc.runChecks(sessionCount)
 

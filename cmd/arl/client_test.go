@@ -77,6 +77,54 @@ func TestClientPoolDeleteAndDestroyUseDistinctEndpoints(t *testing.T) {
 	}
 }
 
+func TestClientListMethodsPassQueryFilters(t *testing.T) {
+	var seen []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = append(seen, r.URL.RequestURI())
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte("[]"))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "")
+	if _, err := client.ListSessions(SessionListOptions{Profile: "cpu", ExperimentID: "exp-1", Status: "active", Limit: 25, Cursor: "gw-1"}); err != nil {
+		t.Fatalf("ListSessions returned error: %v", err)
+	}
+	if _, err := client.ListPools(PoolListOptions{IncludeStopped: true}); err != nil {
+		t.Fatalf("ListPools returned error: %v", err)
+	}
+
+	want := []string{
+		"/v1/sessions?cursor=gw-1&experiment=exp-1&limit=25&profile=cpu&status=active",
+		"/v1/pools?includeStopped=true",
+	}
+	if strings.Join(seen, ",") != strings.Join(want, ",") {
+		t.Fatalf("seen requests = %#v, want %#v", seen, want)
+	}
+}
+
+func TestClientSummaryUsesCompactEndpoint(t *testing.T) {
+	var seen string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		seen = r.Method + " " + r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"sessions":3,"managedSessions":2,"pools":1,"readyReplicas":4,"allocatedReplicas":2,"experiments":1}`))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "")
+	summary, err := client.Summary()
+	if err != nil {
+		t.Fatalf("Summary returned error: %v", err)
+	}
+	if seen != "GET /v1/summary" {
+		t.Fatalf("request = %q, want GET /v1/summary", seen)
+	}
+	if summary.Sessions != 3 || summary.Pools != 1 || summary.Experiments != 1 {
+		t.Fatalf("summary = %#v", summary)
+	}
+}
+
 func TestClientCreateSessionDoesNotExposeCapacityBypassPolicy(t *testing.T) {
 	var bodies []map[string]any
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -128,7 +176,7 @@ func TestUploadLocalFileErrorHintsReversedArguments(t *testing.T) {
 }
 
 func TestFilterSessionsReturnsEmptySlice(t *testing.T) {
-	filtered := filterSessions(nil, "missing-profile", "")
+	filtered := filterSessions(nil, "missing-profile", "", "")
 	if filtered == nil {
 		t.Fatal("filterSessions returned nil, want empty non-nil slice")
 	}

@@ -18,8 +18,9 @@ var poolListCmd = &cobra.Command{
 	Use:   "list",
 	Short: "List all WarmPools",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		includeStopped, _ := cmd.Flags().GetBool("all")
 		c := newClient()
-		pools, err := c.ListPools()
+		pools, err := c.ListPools(PoolListOptions{IncludeStopped: includeStopped})
 		if err != nil {
 			return err
 		}
@@ -375,6 +376,8 @@ var poolLogsCmd = &cobra.Command{
 }
 
 func init() {
+	poolListCmd.Flags().Bool("all", false, "Include stopped historical pools")
+
 	poolCreateCmd.Flags().String("image", "", "Container image (required)")
 	poolCreateCmd.Flags().String("profile", "", "Pool selection profile (default: pool name)")
 	poolCreateCmd.Flags().Int32("replicas", 2, "Number of warm replicas")

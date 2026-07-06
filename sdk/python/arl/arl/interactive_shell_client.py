@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 from collections.abc import Callable
+from contextlib import suppress
 
 from arl.types import ShellMessage
 
@@ -131,10 +132,8 @@ class InteractiveShellClient:
     def close(self) -> None:
         """Close the shell connection."""
         if self._ws is not None:
-            try:
+            with suppress(Exception):
                 self._ws.close()  # type: ignore[attr-defined]
-            except Exception:
-                pass
             self._ws = None
 
     def is_open(self) -> bool:

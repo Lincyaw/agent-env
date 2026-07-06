@@ -88,6 +88,10 @@ type Config struct {
 	PoolAutoscalerBuffer       int32
 	PoolAutoscalerMinReplicas  int32
 	PoolAutoscalerMaxReplicas  int32
+	ManagedPoolGCEnabled       bool
+	ManagedPoolGCInterval      time.Duration
+	ManagedPoolGCMinIdleAge    time.Duration
+	ManagedPoolGCMaxStopped    int
 
 	// Scheduler integration.
 	SchedulerName        string
@@ -159,6 +163,10 @@ func DefaultConfig() *Config {
 		PoolAutoscalerBuffer:            1,
 		PoolAutoscalerMinReplicas:       0,
 		PoolAutoscalerMaxReplicas:       0,
+		ManagedPoolGCEnabled:            true,
+		ManagedPoolGCInterval:           10 * time.Minute,
+		ManagedPoolGCMinIdleAge:         30 * time.Minute,
+		ManagedPoolGCMaxStopped:         128,
 		SchedulerName:                   "",
 		ImageLocalityEnabled:            false,
 		DefaultSandboxRequestCPU:        "500m",
@@ -393,6 +401,26 @@ func LoadFromEnv() *Config {
 			cfg.PoolAutoscalerMaxReplicas = int32(n)
 		}
 	}
+	if v := os.Getenv("MANAGED_POOL_GC_ENABLED"); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			cfg.ManagedPoolGCEnabled = b
+		}
+	}
+	if v := os.Getenv("MANAGED_POOL_GC_INTERVAL"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			cfg.ManagedPoolGCInterval = d
+		}
+	}
+	if v := os.Getenv("MANAGED_POOL_GC_MIN_IDLE_AGE"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			cfg.ManagedPoolGCMinIdleAge = d
+		}
+	}
+	if v := os.Getenv("MANAGED_POOL_GC_MAX_STOPPED"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			cfg.ManagedPoolGCMaxStopped = n
+		}
+	}
 	if v := os.Getenv("SCHEDULER_NAME"); v != "" {
 		cfg.SchedulerName = v
 	}
@@ -542,6 +570,15 @@ func (c *Config) Validate() error {
 	}
 	if c.PoolAutoscalerMaxReplicas > 0 && c.PoolAutoscalerMaxReplicas < c.PoolAutoscalerMinReplicas {
 		return fmt.Errorf("pool autoscaler max replicas (%d) must be >= min replicas (%d)", c.PoolAutoscalerMaxReplicas, c.PoolAutoscalerMinReplicas)
+	}
+	if c.ManagedPoolGCInterval <= 0 {
+		return fmt.Errorf("managed pool GC interval must be positive: %v", c.ManagedPoolGCInterval)
+	}
+	if c.ManagedPoolGCMinIdleAge < 0 {
+		return fmt.Errorf("managed pool GC min idle age cannot be negative: %v", c.ManagedPoolGCMinIdleAge)
+	}
+	if c.ManagedPoolGCMaxStopped < 0 {
+		return fmt.Errorf("managed pool GC max stopped cannot be negative: %d", c.ManagedPoolGCMaxStopped)
 	}
 	for _, item := range []struct {
 		name  string
