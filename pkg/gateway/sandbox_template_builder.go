@@ -60,6 +60,10 @@ func int32Ptr(v int32) *int32 {
 	return &v
 }
 
+func int64Ptr(v int64) *int64 {
+	return &v
+}
+
 func desiredSandboxWarmPoolReplicas(pool *extensionsv1beta1.SandboxWarmPool) int32 {
 	if pool.Spec.Replicas == nil {
 		return 1

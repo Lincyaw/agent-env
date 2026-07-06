@@ -200,7 +200,6 @@ type CreatePoolRequest struct {
 	WorkspaceDir      string                       `json:"workspaceDir,omitempty"`
 	ImageLocality     json.RawMessage              `json:"imageLocality,omitempty"`
 	PrivateContainers []PrivateContainerSpec       `json:"privateContainers,omitempty"`
-	Prefetch          bool                         `json:"prefetch,omitempty"`
 	Managed           bool                         `json:"-"`
 }
 

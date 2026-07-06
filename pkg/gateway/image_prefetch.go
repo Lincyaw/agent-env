@@ -26,6 +26,11 @@ const (
 // prefetchSem limits how many prefetch pods run simultaneously.
 var prefetchSem = make(chan struct{}, prefetchMaxConcurrency)
 
+var (
+	prefetchCPU    = resource.MustParse("10m")
+	prefetchMemory = resource.MustParse("16Mi")
+)
+
 func prefetchPodName(poolName string) string {
 	return dnsLabelWithSuffix(poolName, "-prefetch")
 }
@@ -125,12 +130,12 @@ func buildPrefetchPod(name, namespace, poolName, image string) *corev1.Pod {
 					Command:         []string{"true"},
 					Resources: corev1.ResourceRequirements{
 						Requests: corev1.ResourceList{
-							corev1.ResourceCPU:    resource.MustParse("10m"),
-							corev1.ResourceMemory: resource.MustParse("16Mi"),
+							corev1.ResourceCPU:    prefetchCPU,
+							corev1.ResourceMemory: prefetchMemory,
 						},
 						Limits: corev1.ResourceList{
-							corev1.ResourceCPU:    resource.MustParse("10m"),
-							corev1.ResourceMemory: resource.MustParse("16Mi"),
+							corev1.ResourceCPU:    prefetchCPU,
+							corev1.ResourceMemory: prefetchMemory,
 						},
 					},
 				},
@@ -139,10 +144,6 @@ func buildPrefetchPod(name, namespace, poolName, image string) *corev1.Pod {
 			AutomountServiceAccountToken:  boolPtr(false),
 		},
 	}
-}
-
-func int64Ptr(v int64) *int64 {
-	return &v
 }
 
 func (g *Gateway) waitForPrefetchPod(ctx context.Context, podName, namespace string) error {
@@ -207,11 +208,8 @@ func (g *Gateway) CleanupStalePrefetchPods(ctx context.Context, namespace string
 		return
 	}
 	for i := range pods.Items {
-		pod := &pods.Items[i]
-		if err := g.k8sClient.Delete(ctx, pod, &client.DeleteOptions{
-			GracePeriodSeconds: int64Ptr(0),
-		}); err != nil && !errors.IsNotFound(err) {
-			log.Printf("prefetch: failed to cleanup stale pod %s/%s: %v", namespace, pod.Name, err)
+		if err := g.deletePrefetchPod(ctx, pods.Items[i].Name, namespace); err != nil {
+			log.Printf("prefetch: failed to cleanup stale pod %s/%s: %v", namespace, pods.Items[i].Name, err)
 		}
 	}
 	if len(pods.Items) > 0 {

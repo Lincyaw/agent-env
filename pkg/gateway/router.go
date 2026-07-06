@@ -3,6 +3,7 @@ package gateway
 import (
 	"encoding/json"
 	"errors"
+	"io"
 	"fmt"
 	"net/http"
 	"path"
@@ -604,9 +605,9 @@ func handlePrefetchPool(gw *Gateway) http.HandlerFunc {
 		name := r.PathValue("name")
 
 		var req PrefetchPoolRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			// Allow empty body — namespace defaults to gateway namespace.
-			req = PrefetchPoolRequest{}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil && err != io.EOF {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
 		}
 
 		if err := gw.PrefetchImage(r.Context(), name, req.Namespace); err != nil {
