@@ -4,11 +4,7 @@ import "strings"
 
 const defaultObservationPreviewBytes = 4096
 
-func (g *Gateway) retainedStepOutput(output StepOutput) (StepOutput, int, bool) {
-	total := len(output.Stdout) + len(output.Stderr)
-	if g.gwConfig.FullObservationEnabled {
-		return output, total, false
-	}
+func (g *Gateway) observationPreviewLimit() int {
 	limit := g.gwConfig.ObservationPreviewBytes
 	if limit < 0 {
 		limit = 0
@@ -16,6 +12,15 @@ func (g *Gateway) retainedStepOutput(output StepOutput) (StepOutput, int, bool) 
 	if limit == 0 {
 		limit = defaultObservationPreviewBytes
 	}
+	return limit
+}
+
+func (g *Gateway) retainedStepOutput(output StepOutput) (StepOutput, int, bool) {
+	total := len(output.Stdout) + len(output.Stderr)
+	if g.gwConfig.FullObservationEnabled {
+		return output, total, false
+	}
+	limit := g.observationPreviewLimit()
 	if total <= limit {
 		return output, total, false
 	}

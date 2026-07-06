@@ -41,9 +41,9 @@ func TestExecuteStepsOperationIsIdempotent(t *testing.T) {
 
 	var executeCalls atomic.Int32
 	sidecarClient := &mockclient.MockSidecarClient{
-		ExecuteFunc: func(ctx context.Context, podIP string, req interfaces.ExecRequest) (interfaces.ExecResponse, error) {
+		ExecuteStreamFunc: func(ctx context.Context, podIP string, req interfaces.ExecRequest) (<-chan interfaces.ExecResponse, error) {
 			executeCalls.Add(1)
-			return &sidecar.ExecLog{Stdout: "ok\n", ExitCode: 0, Done: true}, nil
+			return singleExecStream("ok\n", "", 0), nil
 		},
 	}
 	gw := New(nil, &operationRuntimeAllocator{}, sidecarClient, nil, nil, GatewayConfig{}, store)
@@ -107,8 +107,8 @@ func TestExecuteStepsOperationCachesObservationPreview(t *testing.T) {
 	store.IncrCount(1)
 
 	sidecarClient := &mockclient.MockSidecarClient{
-		ExecuteFunc: func(ctx context.Context, podIP string, req interfaces.ExecRequest) (interfaces.ExecResponse, error) {
-			return &sidecar.ExecLog{Stdout: "abcdef", Stderr: "UVWXYZ", ExitCode: 0, Done: true}, nil
+		ExecuteStreamFunc: func(ctx context.Context, podIP string, req interfaces.ExecRequest) (<-chan interfaces.ExecResponse, error) {
+			return singleExecStream("abcdef", "UVWXYZ", 0), nil
 		},
 	}
 	gw := New(nil, &operationRuntimeAllocator{}, sidecarClient, nil, nil, GatewayConfig{ObservationPreviewBytes: 4}, store)
@@ -137,6 +137,13 @@ func TestExecuteStepsOperationCachesObservationPreview(t *testing.T) {
 	if got := len(info.Result.Results[0].Output.Stdout) + len(info.Result.Results[0].Output.Stderr); got != 4 {
 		t.Fatalf("cached operation output bytes = %d, want preview length 4", got)
 	}
+}
+
+func singleExecStream(stdout, stderr string, exitCode int32) <-chan interfaces.ExecResponse {
+	ch := make(chan interfaces.ExecResponse, 1)
+	ch <- &sidecar.ExecLog{Stdout: stdout, Stderr: stderr, ExitCode: exitCode, Done: true}
+	close(ch)
+	return ch
 }
 
 func TestExecuteStepsStoresObservationPreviewByDefault(t *testing.T) {
