@@ -153,6 +153,11 @@ func (g *Gateway) CreatePool(ctx context.Context, req CreatePoolRequest) error {
 		}
 		return fmt.Errorf("create sandbox warm pool: %w", err)
 	}
+
+	if req.Prefetch && req.Image != "" {
+		go g.runImagePrefetch(req.Name, ns, req.Image)
+	}
+
 	return nil
 }
 

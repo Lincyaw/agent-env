@@ -69,6 +69,7 @@ func SetupRoutes(mux *http.ServeMux, gw *Gateway, authCfg *AuthConfig) {
 	mux.HandleFunc("PATCH /v1/pools/{name}", admin(handleScalePool(gw)))
 	mux.HandleFunc("DELETE /v1/pools/{name}", admin(handleDeletePool(gw)))
 	mux.HandleFunc("POST /v1/pools/{name}/destroy", admin(handleDestroyPool(gw)))
+	mux.HandleFunc("POST /v1/pools/{name}/prefetch", admin(handlePrefetchPool(gw)))
 	mux.HandleFunc("GET /v1/pools/{name}/logs", admin(handlePoolLogs(gw)))
 
 	// Managed sessions (admin role — creates infrastructure)
@@ -595,6 +596,28 @@ func handleDestroyPool(gw *Gateway) http.HandlerFunc {
 		}
 
 		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+func handlePrefetchPool(gw *Gateway) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		name := r.PathValue("name")
+
+		var req PrefetchPoolRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			// Allow empty body — namespace defaults to gateway namespace.
+			req = PrefetchPoolRequest{}
+		}
+
+		if err := gw.PrefetchImage(r.Context(), name, req.Namespace); err != nil {
+			writeGatewayError(w, err)
+			return
+		}
+
+		writeJSON(w, http.StatusAccepted, map[string]string{
+			"name":   name,
+			"status": "prefetch_started",
+		})
 	}
 }
 

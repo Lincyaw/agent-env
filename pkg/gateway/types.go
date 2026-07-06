@@ -200,7 +200,13 @@ type CreatePoolRequest struct {
 	WorkspaceDir      string                       `json:"workspaceDir,omitempty"`
 	ImageLocality     json.RawMessage              `json:"imageLocality,omitempty"`
 	PrivateContainers []PrivateContainerSpec       `json:"privateContainers,omitempty"`
+	Prefetch          bool                         `json:"prefetch,omitempty"`
 	Managed           bool                         `json:"-"`
+}
+
+// PrefetchPoolRequest is the body for POST /v1/pools/{name}/prefetch
+type PrefetchPoolRequest struct {
+	Namespace string `json:"namespace,omitempty"`
 }
 
 // ScalePoolRequest is the body for PATCH /v1/pools/{name}
