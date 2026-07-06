@@ -79,6 +79,66 @@ func TestExecuteStepsOperationIsIdempotent(t *testing.T) {
 	}
 }
 
+func TestExecuteStepsOperationCachesObservationPreview(t *testing.T) {
+	store := NewMemoryStore()
+	sessionID := "gw-op-preview"
+	store.Set(sessionID, &session{
+		Info: SessionInfo{
+			ID:        sessionID,
+			Namespace: "default",
+			PoolRef:   "code",
+			PodIP:     "10.0.0.1",
+			PodName:   "pod-1",
+			Status:    "active",
+		},
+		Runtime: RuntimeAllocation{
+			Backend:   runtimeBackendSandboxClaim,
+			PoolRef:   "code",
+			Namespace: "default",
+			ClaimName: "claim-1",
+			PodIP:     "10.0.0.1",
+			PodName:   "pod-1",
+		},
+		History:      NewStepHistory(),
+		lastTaskTime: time.Now(),
+		createdAt:    time.Now(),
+		operations:   make(map[string]*executeOperation),
+	})
+	store.IncrCount(1)
+
+	sidecarClient := &mockclient.MockSidecarClient{
+		ExecuteFunc: func(ctx context.Context, podIP string, req interfaces.ExecRequest) (interfaces.ExecResponse, error) {
+			return &sidecar.ExecLog{Stdout: "abcdef", Stderr: "UVWXYZ", ExitCode: 0, Done: true}, nil
+		},
+	}
+	gw := New(nil, &operationRuntimeAllocator{}, sidecarClient, nil, nil, GatewayConfig{ObservationPreviewBytes: 4}, store)
+
+	resp, err := gw.ExecuteSteps(context.Background(), sessionID, ExecuteRequest{
+		OperationID: "op-preview",
+		Steps: []StepRequest{{
+			Name:    "echo",
+			Command: []string{"echo", "ok"},
+		}},
+	})
+	if err != nil {
+		t.Fatalf("ExecuteSteps returned error: %v", err)
+	}
+	if got := len(resp.Results[0].Output.Stdout) + len(resp.Results[0].Output.Stderr); got != 4 {
+		t.Fatalf("operation response output bytes = %d, want preview length 4", got)
+	}
+
+	info, err := gw.ExecuteOperationStatus(sessionID, "op-preview")
+	if err != nil {
+		t.Fatalf("ExecuteOperationStatus returned error: %v", err)
+	}
+	if info.Result == nil || len(info.Result.Results) != 1 {
+		t.Fatalf("operation info result = %#v, want one result", info.Result)
+	}
+	if got := len(info.Result.Results[0].Output.Stdout) + len(info.Result.Results[0].Output.Stderr); got != 4 {
+		t.Fatalf("cached operation output bytes = %d, want preview length 4", got)
+	}
+}
+
 func TestExecuteStepsStoresObservationPreviewByDefault(t *testing.T) {
 	store := NewMemoryStore()
 	sessionID := "gw-preview"

@@ -1,5 +1,7 @@
 package gateway
 
+import "strings"
+
 const defaultObservationPreviewBytes = 4096
 
 func (g *Gateway) retainedStepOutput(output StepOutput) (StepOutput, int, bool) {
@@ -48,5 +50,5 @@ func truncateStringBytes(value string, limit int) string {
 	if len(value) <= limit {
 		return value
 	}
-	return value[:limit]
+	return strings.Clone(value[:limit])
 }
