@@ -55,13 +55,11 @@ type Config struct {
 
 	// Gateway session lifecycle configuration
 	GatewayIdleTimeout   time.Duration
-	GatewayMaxLifetime   time.Duration
 	GatewaySweepInterval time.Duration
 	GatewayWriteTimeout  time.Duration
 
 	// Devbox session lifecycle defaults (longer-lived development environments)
 	DevboxIdleTimeout time.Duration
-	DevboxMaxLifetime time.Duration
 
 	// Redis session store configuration
 	RedisEnabled  bool
@@ -137,12 +135,10 @@ func DefaultConfig() *Config {
 		K8sClientBurst:     20000,
 
 		GatewayIdleTimeout:   600 * time.Second,
-		GatewayMaxLifetime:   3600 * time.Second,
 		GatewaySweepInterval: 30 * time.Second,
 		GatewayWriteTimeout:  0,
 
 		DevboxIdleTimeout: 4 * time.Hour,
-		DevboxMaxLifetime: 0,
 
 		RedisEnabled:  false,
 		RedisAddr:     "localhost:6379",
@@ -283,12 +279,6 @@ func LoadFromEnv() *Config {
 		}
 	}
 
-	if v := os.Getenv("GATEWAY_MAX_LIFETIME"); v != "" {
-		if d, err := time.ParseDuration(v); err == nil {
-			cfg.GatewayMaxLifetime = d
-		}
-	}
-
 	if v := os.Getenv("GATEWAY_SWEEP_INTERVAL"); v != "" {
 		if d, err := time.ParseDuration(v); err == nil {
 			cfg.GatewaySweepInterval = d
@@ -304,12 +294,6 @@ func LoadFromEnv() *Config {
 	if v := os.Getenv("DEVBOX_IDLE_TIMEOUT"); v != "" {
 		if d, err := time.ParseDuration(v); err == nil {
 			cfg.DevboxIdleTimeout = d
-		}
-	}
-
-	if v := os.Getenv("DEVBOX_MAX_LIFETIME"); v != "" {
-		if d, err := time.ParseDuration(v); err == nil {
-			cfg.DevboxMaxLifetime = d
 		}
 	}
 
@@ -508,10 +492,6 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("gateway idle timeout cannot be negative: %v", c.GatewayIdleTimeout)
 	}
 
-	if c.GatewayMaxLifetime < 0 {
-		return fmt.Errorf("gateway max lifetime cannot be negative: %v", c.GatewayMaxLifetime)
-	}
-
 	if c.GatewayWriteTimeout < 0 {
 		return fmt.Errorf("gateway write timeout cannot be negative: %v", c.GatewayWriteTimeout)
 	}
@@ -523,10 +503,6 @@ func (c *Config) Validate() error {
 	if c.DevboxIdleTimeout < 0 {
 		return fmt.Errorf("devbox idle timeout cannot be negative: %v", c.DevboxIdleTimeout)
 	}
-	if c.DevboxMaxLifetime < 0 {
-		return fmt.Errorf("devbox max lifetime cannot be negative: %v", c.DevboxMaxLifetime)
-	}
-
 	// Auth key validation is deferred to cmd/gateway/main.go which checks
 	// both AUTH_API_KEYS and AUTH_KEY_FILE before starting.
 

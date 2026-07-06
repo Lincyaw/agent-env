@@ -24,7 +24,6 @@ var expCreateCmd = &cobra.Command{
 		count, _ := cmd.Flags().GetInt("sessions")
 		workspaceDir, _ := cmd.Flags().GetString("workspace-dir")
 		idleTimeout, _ := cmd.Flags().GetInt("idle-timeout")
-		maxLifetime, _ := cmd.Flags().GetInt("max-lifetime")
 		privateContainers, err := privateContainersFromFlags(cmd)
 		if err != nil {
 			return err
@@ -47,7 +46,6 @@ var expCreateCmd = &cobra.Command{
 				ExperimentID:       args[0],
 				WorkspaceDir:       workspaceDir,
 				IdleTimeoutSeconds: idleTimeout,
-				MaxLifetimeSeconds: maxLifetime,
 				PrivateContainers:  privateContainers,
 			})
 			if err != nil {
@@ -203,7 +201,6 @@ func init() {
 	expCreateCmd.Flags().Int("sessions", 1, "Number of sessions to create")
 	expCreateCmd.Flags().String("workspace-dir", "", "Workspace directory inside each sandbox")
 	expCreateCmd.Flags().Int("idle-timeout", 0, "Idle timeout in seconds (0 uses gateway default)")
-	expCreateCmd.Flags().Int("max-lifetime", 0, "Maximum lifetime in seconds (0 uses gateway default)")
 	addPrivateContainerFlags(expCreateCmd)
 
 	expDeleteCmd.Flags().Bool("force", false, "Skip confirmation")

@@ -81,7 +81,6 @@ type CreateSessionRequest struct {
 	Devbox             *DevboxConfig          `json:"devbox,omitempty"`
 	ConfigEnv          json.RawMessage        `json:"configEnv,omitempty"`
 	IdleTimeoutSeconds int                    `json:"idleTimeoutSeconds,omitempty"`
-	MaxLifetimeSeconds int                    `json:"maxLifetimeSeconds,omitempty"`
 	PrivateContainers  []PrivateContainerSpec `json:"privateContainers,omitempty"`
 	PoolName           string                 `json:"-"` // internal pinned SandboxWarmPool, not part of the public API
 	ExtraLabels        map[string]string      `json:"-"` // internal use only, not exposed via JSON
@@ -124,7 +123,6 @@ type CreateManagedSessionRequest struct {
 	Tools              json.RawMessage              `json:"tools,omitempty"`
 	WorkspaceDir       string                       `json:"workspaceDir,omitempty"`
 	IdleTimeoutSeconds int                          `json:"idleTimeoutSeconds,omitempty"`
-	MaxLifetimeSeconds int                          `json:"maxLifetimeSeconds,omitempty"`
 	PrivateContainers  []PrivateContainerSpec       `json:"privateContainers,omitempty"`
 }
 

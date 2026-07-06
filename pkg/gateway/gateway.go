@@ -20,9 +20,7 @@ import (
 // GatewayConfig holds Gateway-level configuration.
 type GatewayConfig struct {
 	IdleTimeout                     time.Duration
-	MaxLifetime                     time.Duration
 	DevboxIdleTimeout               time.Duration
-	DevboxMaxLifetime               time.Duration
 	DevboxStorageClassName          string
 	SweepInterval                   time.Duration
 	Namespace                       string
@@ -73,7 +71,6 @@ type session struct {
 	lastTaskTime        time.Time
 	lastAnnotationPatch time.Time
 	idleTimeout         time.Duration
-	maxLifetime         time.Duration
 	createdAt           time.Time
 	activeExecs         int32
 	operations          map[string]*executeOperation
@@ -187,16 +184,6 @@ func (g *Gateway) resolveIdleTimeout(req CreateSessionRequest) time.Duration {
 		return g.gwConfig.DevboxIdleTimeout
 	}
 	return g.gwConfig.IdleTimeout
-}
-
-func (g *Gateway) resolveMaxLifetime(req CreateSessionRequest) time.Duration {
-	if req.MaxLifetimeSeconds > 0 {
-		return time.Duration(req.MaxLifetimeSeconds) * time.Second
-	}
-	if req.Mode == SessionModeDevbox {
-		return g.gwConfig.DevboxMaxLifetime
-	}
-	return g.gwConfig.MaxLifetime
 }
 
 func randomSuffix(n int) string {

@@ -34,7 +34,6 @@ type redisSessionData struct {
 	LastTaskTime        time.Time               `json:"lastTaskTime"`
 	LastAnnotationPatch time.Time               `json:"lastAnnotationPatch"`
 	IdleTimeout         time.Duration           `json:"idleTimeout"`
-	MaxLifetime         time.Duration           `json:"maxLifetime"`
 	CreatedAt           time.Time               `json:"createdAt"`
 	PrivateContainers   []PrivateContainerSpec  `json:"privateContainers,omitempty"`
 	HistoryRecords      []StepRecord            `json:"historyRecords"`
@@ -59,7 +58,6 @@ func sessionToRedisData(s *session) redisSessionData {
 		LastTaskTime:        s.lastTaskTime,
 		LastAnnotationPatch: s.lastAnnotationPatch,
 		IdleTimeout:         s.idleTimeout,
-		MaxLifetime:         s.maxLifetime,
 		CreatedAt:           s.createdAt,
 	}
 	if len(s.privateContainers) > 0 {
@@ -112,7 +110,6 @@ func redisDataToSession(data redisSessionData) *session {
 		lastTaskTime:        data.LastTaskTime,
 		lastAnnotationPatch: data.LastAnnotationPatch,
 		idleTimeout:         data.IdleTimeout,
-		maxLifetime:         data.MaxLifetime,
 		createdAt:           data.CreatedAt,
 		operations:          make(map[string]*executeOperation),
 		privateContainers:   privateContainerMap(data.PrivateContainers),

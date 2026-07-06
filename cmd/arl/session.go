@@ -89,7 +89,6 @@ var sessionCreateCmd = &cobra.Command{
 		image, _ := cmd.Flags().GetString("image")
 		profile, _ := cmd.Flags().GetString("profile")
 		idleTimeout, _ := cmd.Flags().GetInt("idle-timeout")
-		maxLifetime, _ := cmd.Flags().GetInt("max-lifetime")
 		privateContainers, err := privateContainersFromFlags(cmd)
 		if err != nil {
 			return err
@@ -104,7 +103,6 @@ var sessionCreateCmd = &cobra.Command{
 			Image:              image,
 			Profile:            profile,
 			IdleTimeoutSeconds: idleTimeout,
-			MaxLifetimeSeconds: maxLifetime,
 			PrivateContainers:  privateContainers,
 		})
 		if err != nil {
@@ -556,7 +554,6 @@ func init() {
 	sessionCreateCmd.Flags().String("image", "", "Container image")
 	sessionCreateCmd.Flags().String("profile", "default", "Resource profile")
 	sessionCreateCmd.Flags().Int("idle-timeout", 0, "Idle timeout in seconds (0 uses gateway default)")
-	sessionCreateCmd.Flags().Int("max-lifetime", 0, "Maximum lifetime in seconds (0 uses gateway default)")
 	addPrivateContainerFlags(sessionCreateCmd)
 
 	sessionHistoryCmd.Flags().BoolP("verbose", "v", false, "Show step output")

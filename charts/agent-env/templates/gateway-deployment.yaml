@@ -73,8 +73,6 @@ spec:
               value: "{{ .Values.image.injectedPullPolicy | default "Always" }}"
             - name: GATEWAY_IDLE_TIMEOUT
               value: "{{ .Values.gateway.idleTimeout }}"
-            - name: GATEWAY_MAX_LIFETIME
-              value: "{{ .Values.gateway.maxLifetime }}"
             - name: GATEWAY_SWEEP_INTERVAL
               value: "{{ .Values.gateway.sweepInterval }}"
             - name: HTTP_CLIENT_TIMEOUT

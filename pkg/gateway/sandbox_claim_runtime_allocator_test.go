@@ -121,7 +121,6 @@ func TestSandboxClaimRuntimeAllocatorAllocate(t *testing.T) {
 			CreatedAt:      time.Now(),
 			LastActivityAt: time.Now(),
 			IdleTimeout:    10 * time.Minute,
-			MaxLifetime:    time.Hour,
 			FinishedTTL:    5 * time.Minute,
 		},
 	})

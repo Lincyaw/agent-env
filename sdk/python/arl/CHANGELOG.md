@@ -59,8 +59,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [0.14.1] - 2026-06-29
 
 ### Added
-- Managed session timeout passthrough (`idle_timeout_seconds` and
-  `max_lifetime_seconds`)
+- Managed session timeout passthrough (`idle_timeout_seconds`)
 - File upload/download helpers on `SandboxSession` and `GatewayClient`
 - Cross-session replay through `GatewayClient.replay_from`
 - Keep-alive attach flow through `SandboxSession.attach`

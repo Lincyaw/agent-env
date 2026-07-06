@@ -26,7 +26,6 @@ type CreateSessionRequest struct {
 	Image              string                 `json:"image,omitempty"`
 	Profile            string                 `json:"profile,omitempty"`
 	IdleTimeoutSeconds int                    `json:"idleTimeoutSeconds,omitempty"`
-	MaxLifetimeSeconds int                    `json:"maxLifetimeSeconds,omitempty"`
 	PrivateContainers  []PrivateContainerSpec `json:"privateContainers,omitempty"`
 }
 
@@ -170,7 +169,6 @@ type CreateManagedSessionRequest struct {
 	ExperimentID       string                 `json:"experimentId"`
 	WorkspaceDir       string                 `json:"workspaceDir,omitempty"`
 	IdleTimeoutSeconds int                    `json:"idleTimeoutSeconds,omitempty"`
-	MaxLifetimeSeconds int                    `json:"maxLifetimeSeconds,omitempty"`
 	PrivateContainers  []PrivateContainerSpec `json:"privateContainers,omitempty"`
 }
 

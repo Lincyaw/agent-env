@@ -269,8 +269,7 @@ finally:
     attached.close()
 ```
 
-Use `idle_timeout_seconds` or `max_lifetime_seconds` when you need explicit
-server-side lifetime limits.
+Use `idle_timeout_seconds` when you need an explicit server-side idle limit.
 
 ## Execute and Timeout Recovery
 

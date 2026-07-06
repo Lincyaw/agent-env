@@ -422,9 +422,6 @@ func annotateLifecycle(annotations map[string]string, lifecycle RuntimeLifecycle
 	if lifecycle.IdleTimeout > 0 {
 		annotations[labels.IdleTimeoutAnnotation] = durationSecondsString(lifecycle.IdleTimeout)
 	}
-	if lifecycle.MaxLifetime > 0 {
-		annotations[labels.MaxLifetimeAnnotation] = durationSecondsString(lifecycle.MaxLifetime)
-	}
 	if lifecycle.FinishedTTL > 0 {
 		annotations[labels.FinishedTTLAnnotation] = durationSecondsString(lifecycle.FinishedTTL)
 	}
@@ -454,26 +451,15 @@ func sandboxClaimLifecycle(now time.Time, lifecycle RuntimeLifecycle) *extension
 }
 
 func runtimeShutdownTime(now time.Time, lifecycle RuntimeLifecycle) *time.Time {
-	var deadline *time.Time
-	createdAt := lifecycle.CreatedAt
-	if createdAt.IsZero() {
-		createdAt = now
-	}
 	lastActivityAt := lifecycle.LastActivityAt
 	if lastActivityAt.IsZero() {
 		lastActivityAt = now
 	}
 	if lifecycle.IdleTimeout > 0 {
 		t := lastActivityAt.Add(lifecycle.IdleTimeout)
-		deadline = &t
+		return &t
 	}
-	if lifecycle.MaxLifetime > 0 {
-		t := createdAt.Add(lifecycle.MaxLifetime)
-		if deadline == nil || t.Before(*deadline) {
-			deadline = &t
-		}
-	}
-	return deadline
+	return nil
 }
 
 func durationSecondsString(d time.Duration) string {

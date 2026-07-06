@@ -15,12 +15,11 @@ const (
 	runtimePatchMinInterval   = 5 * time.Second
 )
 
-func (g *Gateway) runtimeLifecycle(createdAt, lastActivityAt time.Time, idleTimeout, maxLifetime time.Duration) RuntimeLifecycle {
+func (g *Gateway) runtimeLifecycle(createdAt, lastActivityAt time.Time, idleTimeout time.Duration) RuntimeLifecycle {
 	return RuntimeLifecycle{
 		CreatedAt:      createdAt,
 		LastActivityAt: lastActivityAt,
 		IdleTimeout:    idleTimeout,
-		MaxLifetime:    maxLifetime,
 		FinishedTTL:    defaultRuntimeFinishedTTL,
 	}
 }
@@ -33,7 +32,7 @@ func (g *Gateway) sessionRuntimeLifecycleLocked(s *session, at time.Time) Runtim
 	if createdAt.IsZero() {
 		createdAt = at
 	}
-	return g.runtimeLifecycle(createdAt, at, s.idleTimeout, s.maxLifetime)
+	return g.runtimeLifecycle(createdAt, at, s.idleTimeout)
 }
 
 func runtimePatchInterval(idleTimeout time.Duration) time.Duration {

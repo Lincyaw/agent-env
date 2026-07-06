@@ -88,7 +88,6 @@ func (g *Gateway) CreateManagedSession(ctx context.Context, req CreateManagedSes
 		Mode:               req.Mode,
 		Devbox:             req.Devbox,
 		IdleTimeoutSeconds: req.IdleTimeoutSeconds,
-		MaxLifetimeSeconds: req.MaxLifetimeSeconds,
 		ConfigEnv:          req.ConfigEnv,
 		Managed:            true,
 		ExperimentID:       req.ExperimentID,

@@ -81,7 +81,6 @@ class SandboxSession:
         gateway_url: str = "",
         timeout: float = 300.0,
         idle_timeout_seconds: int | None = None,
-        max_lifetime_seconds: int | None = None,
         api_key: str | None = None,
         private_containers: Iterable[PrivateContainerSpec | dict[str, Any]] | None = None,
     ) -> None:
@@ -90,7 +89,6 @@ class SandboxSession:
         self.mode = mode
         self.devbox = devbox
         self.idle_timeout_seconds = idle_timeout_seconds
-        self.max_lifetime_seconds = max_lifetime_seconds
         self.private_containers = private_containers
 
         self._client = GatewayClient(base_url=gateway_url, timeout=timeout, api_key=api_key)
@@ -164,7 +162,6 @@ class SandboxSession:
             mode=self.mode,
             devbox=self.devbox,
             idle_timeout_seconds=self.idle_timeout_seconds,
-            max_lifetime_seconds=self.max_lifetime_seconds,
             private_containers=self.private_containers,
         )
         self._session_id = info.id
@@ -499,7 +496,6 @@ class ManagedSession(SandboxSession):
         tools: ToolsSpec | None = None,
         workspace_dir: str = "/workspace",
         idle_timeout_seconds: int | None = None,
-        max_lifetime_seconds: int | None = None,
         config_env: ConfigEnvSpec | dict[str, Any] | None = None,
         profile: str = "default",
         api_key: str | None = None,
@@ -524,7 +520,6 @@ class ManagedSession(SandboxSession):
         self._tools = tools
         self._workspace_dir = workspace_dir
         self._idle_timeout_seconds = idle_timeout_seconds
-        self._max_lifetime_seconds = max_lifetime_seconds
         self._private_containers = private_containers
 
     @property
@@ -549,7 +544,6 @@ class ManagedSession(SandboxSession):
             tools=self._tools,
             workspace_dir=self._workspace_dir,
             idle_timeout_seconds=self._idle_timeout_seconds,
-            max_lifetime_seconds=self._max_lifetime_seconds,
             private_containers=self._private_containers,
         )
         self._session_id = info.id
@@ -564,7 +558,6 @@ class DevboxSession(SandboxSession):
 
     Creates a devbox-mode session with extended lifecycle defaults:
     - 4-hour idle timeout (vs 10 minutes for regular sessions)
-    - No maximum lifetime (vs 1 hour for regular sessions)
 
     All execution, file, and shell APIs work identically to regular sessions.
 
@@ -596,7 +589,6 @@ class DevboxSession(SandboxSession):
         gateway_url: str = "",
         timeout: float = 300.0,
         idle_timeout_seconds: int | None = None,
-        max_lifetime_seconds: int | None = None,
         api_key: str | None = None,
         private_containers: Iterable[PrivateContainerSpec | dict[str, Any]] | None = None,
     ) -> None:
@@ -608,7 +600,6 @@ class DevboxSession(SandboxSession):
             gateway_url=gateway_url,
             timeout=timeout,
             idle_timeout_seconds=idle_timeout_seconds,
-            max_lifetime_seconds=max_lifetime_seconds,
             api_key=api_key,
             private_containers=private_containers,
         )

@@ -55,7 +55,6 @@ type RuntimeLifecycle struct {
 	CreatedAt      time.Time
 	LastActivityAt time.Time
 	IdleTimeout    time.Duration
-	MaxLifetime    time.Duration
 	FinishedTTL    time.Duration
 }
 

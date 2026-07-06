@@ -36,9 +36,6 @@ const (
 	// remains the hot-path source for frequent activity updates.
 	IdleTimeoutAnnotation = "arl.infra.io/idle-timeout-seconds"
 
-	// MaxLifetimeAnnotation records the per-session maximum lifetime in seconds.
-	MaxLifetimeAnnotation = "arl.infra.io/max-lifetime-seconds"
-
 	// FinishedTTLAnnotation records how long terminal runtimes should be kept
 	// before they are eligible for deletion.
 	FinishedTTLAnnotation = "arl.infra.io/finished-ttl-seconds"

@@ -205,10 +205,8 @@ func (g *Gateway) newRecoveredSessionFromClaim(ctx context.Context, sessionID st
 	managed := strings.EqualFold(claim.Annotations[labels.ManagedAnnotation], "true")
 	recoveredMode := claim.Annotations[labels.ModeAnnotation]
 	idleTimeout := g.gwConfig.IdleTimeout
-	maxLifetime := g.gwConfig.MaxLifetime
 	if recoveredMode == SessionModeDevbox {
 		idleTimeout = g.gwConfig.DevboxIdleTimeout
-		maxLifetime = g.gwConfig.DevboxMaxLifetime
 	}
 	info.Mode = recoveredMode
 	return &session{
@@ -222,7 +220,6 @@ func (g *Gateway) newRecoveredSessionFromClaim(ctx context.Context, sessionID st
 		lastTaskTime: lastTask,
 		createdAt:    info.CreatedAt,
 		idleTimeout:  idleTimeout,
-		maxLifetime:  maxLifetime,
 		operations:   make(map[string]*executeOperation),
 	}
 }
@@ -264,9 +261,6 @@ func (g *Gateway) applyRecoveredRuntime(ctx context.Context, s *session, session
 	}
 	if s.idleTimeout == 0 {
 		s.idleTimeout = g.gwConfig.IdleTimeout
-	}
-	if s.maxLifetime == 0 {
-		s.maxLifetime = g.gwConfig.MaxLifetime
 	}
 }
 

@@ -94,8 +94,7 @@ func (g *Gateway) CreateSession(ctx context.Context, req CreateSessionRequest) (
 	ownerHash, _ := KeyHashFromContext(ctx)
 	createdAt := time.Now()
 	idleTimeout := g.resolveIdleTimeout(req)
-	maxLifetime := g.resolveMaxLifetime(req)
-	lifecycle := g.runtimeLifecycle(createdAt, createdAt, idleTimeout, maxLifetime)
+	lifecycle := g.runtimeLifecycle(createdAt, createdAt, idleTimeout)
 	span.SetAttributes(
 		attribute.String("session.id", sessionID),
 		attribute.String("pool.selected", poolRef),
@@ -169,7 +168,6 @@ func (g *Gateway) CreateSession(ctx context.Context, req CreateSessionRequest) (
 		lastAnnotationPatch: createdAt,
 		createdAt:           createdAt,
 		idleTimeout:         idleTimeout,
-		maxLifetime:         maxLifetime,
 		operations:          make(map[string]*executeOperation),
 		privateContainers:   privateContainerMap(req.PrivateContainers),
 	})

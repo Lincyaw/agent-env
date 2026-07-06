@@ -71,20 +71,8 @@ func (g *Gateway) sweepSessions() {
 
 		s.mu.RLock()
 		lastTask := s.lastTaskTime
-		created := s.createdAt
 		idleTimeout := s.idleTimeout
-		maxLifetime := s.maxLifetime
 		s.mu.RUnlock()
-
-		if maxLifetime > 0 && now.Sub(created) > maxLifetime {
-			log.Printf("Session %s exceeded max lifetime (%v), deleting", sessionID, maxLifetime)
-			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-			if err := g.deleteSession(ctx, sessionID, "max_lifetime"); err != nil {
-				log.Printf("Warning: failed to delete expired session %s: %v", sessionID, err)
-			}
-			cancel()
-			return true
-		}
 
 		if idleTimeout > 0 && now.Sub(lastTask) > idleTimeout {
 			log.Printf("Session %s idle for %v (timeout=%v), deleting", sessionID, now.Sub(lastTask), idleTimeout)

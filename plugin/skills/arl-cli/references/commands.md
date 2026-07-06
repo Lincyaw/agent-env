@@ -29,7 +29,7 @@
 ```bash
 arl exp create <experiment-id> --image python:3.12 --sessions 1
 arl exp create <experiment-id> --image python:3.12 --profile gpu --sessions 4 \
-  --workspace-dir /workspace --idle-timeout 1800 --max-lifetime 7200
+  --workspace-dir /workspace --idle-timeout 1800
 arl exp list
 arl exp sessions <experiment-id>
 arl exp stats <experiment-id>
@@ -77,7 +77,7 @@ image-backed pools use one replica unless the caller provides another value.
 arl session create --image python:3.12
 arl session create --profile default
 arl session create --image python:3.12 --profile cpu \
-  --idle-timeout 1800 --max-lifetime 7200
+  --idle-timeout 1800
 
 arl session list
 arl session list --profile <profile>

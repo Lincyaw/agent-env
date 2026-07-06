@@ -124,9 +124,7 @@ func main() {
 
 	gw := gateway.New(k8sClient, runtimeAllocator, sidecarClient, metricsCollector, nil, gateway.GatewayConfig{
 		IdleTimeout:                     cfg.GatewayIdleTimeout,
-		MaxLifetime:                     cfg.GatewayMaxLifetime,
 		DevboxIdleTimeout:               cfg.DevboxIdleTimeout,
-		DevboxMaxLifetime:               cfg.DevboxMaxLifetime,
 		DevboxStorageClassName:          cfg.DevboxStorageClassName,
 		SweepInterval:                   cfg.GatewaySweepInterval,
 		Namespace:                       cfg.GatewayNamespace,
@@ -173,7 +171,7 @@ func main() {
 		log.Printf("Recovered %d active session(s) from durable store", recovered)
 	}
 
-	// Start session sweep (idle timeout / max lifetime reaper)
+	// Start session sweep (idle timeout reaper)
 	gw.StartSessionSweep()
 	gw.StartPoolAutoscaler()
 	if trajectoryConfig != nil {
