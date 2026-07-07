@@ -104,10 +104,11 @@ func (g *Gateway) CreateSession(ctx context.Context, req CreateSessionRequest) (
 	selection, admission, err := g.planSessionAllocation(allocationCtx, intent)
 	if err != nil {
 		recordSpanErr(span, err)
+		wrapped := fmt.Errorf("plan session allocation: %w", err)
 		if doomReason := handlePoolAfterCreateFailure(err, firstNonEmpty(autoCreatedPool, selection.PoolName)); doomReason != "" {
-			return nil, fmt.Errorf("plan session allocation: %w (pool pods stuck: %s)", err, doomReason)
+			return nil, &doomedPoolError{reason: doomReason, err: wrapped}
 		}
-		return nil, fmt.Errorf("plan session allocation: %w", err)
+		return nil, wrapped
 	}
 	poolRef := selection.PoolName
 	ns = selection.Namespace
@@ -160,7 +161,7 @@ func (g *Gateway) CreateSession(ctx context.Context, req CreateSessionRequest) (
 		diag := g.diagnosePoolHealth(ctx, poolRef, ns)
 		log.Printf("Runtime allocation failed for session %s (experiment=%s): %v (%s)", sessionID, req.ExperimentID, err, diag)
 		if doomReason := handlePoolAfterCreateFailure(err, poolRef); doomReason != "" {
-			return nil, fmt.Errorf("allocate runtime from pool %s: %w (pool pods stuck: %s; %s)", poolRef, err, doomReason, diag)
+			return nil, &doomedPoolError{reason: doomReason, err: fmt.Errorf("allocate runtime from pool %s: %w (%s)", poolRef, err, diag)}
 		}
 		return nil, fmt.Errorf("allocate runtime from pool %s: %w (%s)", poolRef, err, diag)
 	}

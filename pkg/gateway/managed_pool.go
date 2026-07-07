@@ -13,6 +13,19 @@ import (
 // ErrPoolAtCapacity is returned when admission control cannot place a session.
 var ErrPoolAtCapacity = errors.New("pool at maximum capacity")
 
+// doomedPoolError marks a create failure whose pool pods are provably stuck;
+// it carries the reason so outer layers neither re-diagnose nor re-wrap.
+type doomedPoolError struct {
+	reason string
+	err    error
+}
+
+func (e *doomedPoolError) Error() string {
+	return fmt.Sprintf("%v (pool pods stuck: %s)", e.err, e.reason)
+}
+
+func (e *doomedPoolError) Unwrap() error { return e.err }
+
 // provisioningWaitFailure reports whether a session create failed only
 // because the caller stopped waiting for warm capacity (admission timeout,
 // client-set allocation deadline, or client disconnect). Demand is still

@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	stderrors "errors"
 	"fmt"
 	"log"
 	"sort"
@@ -97,7 +98,14 @@ func (g *Gateway) CreateManagedSession(ctx context.Context, req CreateManagedSes
 		PrivateContainers:        req.PrivateContainers,
 	})
 	if err != nil {
-		keep, doomReason := g.keepPoolWarmingAfterFailure(err, poolName, ns)
+		// CreateSession already ran doomed detection; reuse its verdict.
+		var doomed *doomedPoolError
+		keep, doomReason := false, ""
+		if stderrors.As(err, &doomed) {
+			doomReason = doomed.reason
+		} else {
+			keep, doomReason = g.keepPoolWarmingAfterFailure(err, poolName, ns)
+		}
 		switch {
 		case keep:
 			log.Printf("Keeping managed pool %s/%s warming after session create wait failure (retry expected)", ns, poolName)
@@ -111,9 +119,6 @@ func (g *Gateway) CreateManagedSession(ctx context.Context, req CreateManagedSes
 			} else if stopped {
 				log.Printf("Stopped unused managed pool %s/%s after managed session create failure", ns, poolName)
 			}
-		}
-		if doomReason != "" {
-			return nil, fmt.Errorf("create session: %w (pool pods stuck: %s)", err, doomReason)
 		}
 		return nil, fmt.Errorf("create session: %w", err)
 	}
