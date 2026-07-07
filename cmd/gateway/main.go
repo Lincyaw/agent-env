@@ -253,7 +253,7 @@ func main() {
 	publicMux := http.NewServeMux()
 	gateway.SetupRoutes(publicMux, gw, authCfg)
 
-	publicHandler := rateLimiter.Middleware(publicMux)
+	publicHandler := rateLimiter.Middleware(gateway.GzipMiddleware(publicMux))
 
 	server := &http.Server{
 		Addr: fmt.Sprintf(":%d", port),
