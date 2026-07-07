@@ -130,6 +130,7 @@ func (g *Gateway) CreateSession(ctx context.Context, req CreateSessionRequest) (
 			g.metrics.IncrementPodAllocationResult(poolRef, result)
 		}
 		diag := g.diagnosePoolHealth(ctx, poolRef, ns)
+		log.Printf("Runtime allocation failed for session %s (experiment=%s): %v (%s)", sessionID, req.ExperimentID, err, diag)
 		cleanupAutoCreatedPool()
 		return nil, fmt.Errorf("allocate runtime from pool %s: %w (%s)", poolRef, err, diag)
 	}

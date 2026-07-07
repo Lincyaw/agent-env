@@ -116,7 +116,8 @@ func (g *Gateway) Restore(ctx context.Context, sessionID string, snapshotID stri
 		Lifecycle:   lifecycle,
 	})
 	if err != nil {
-		return fmt.Errorf("allocate new runtime for restore: %w", err)
+		diag := g.diagnosePoolHealth(ctx, oldAllocation.PoolRef, oldAllocation.Namespace)
+		return fmt.Errorf("allocate new runtime for restore: %w (%s)", err, diag)
 	}
 
 	for _, record := range records {

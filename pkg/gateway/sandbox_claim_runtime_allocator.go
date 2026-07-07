@@ -159,10 +159,52 @@ func (a *SandboxClaimRuntimeAllocator) Allocate(ctx context.Context, req Runtime
 
 		select {
 		case <-ctx.Done():
-			return cleanupCreatedClaim(fmt.Errorf("wait for sandbox claim %s/%s ready: %w", req.Namespace, claimName, ctx.Err()))
+			err := fmt.Errorf("wait for sandbox claim %s/%s ready: %w", req.Namespace, claimName, ctx.Err())
+			// Diagnose before cleanup: releasing the claim tears down its
+			// sandbox pod, losing the container states that explain the wait.
+			if reason := a.describePendingClaim(latest, req.PoolRef); reason != "" {
+				err = fmt.Errorf("%w (%s)", err, reason)
+			}
+			return cleanupCreatedClaim(err)
 		case <-ticker.C:
 		}
 	}
+}
+
+// describePendingClaim explains why a claim has not become ready: container
+// states of the bound sandbox pod when the claim is bound, otherwise the
+// pool's warm sandbox pods. The parent wait context is already done here, so
+// lookups run on a fresh short-lived context.
+func (a *SandboxClaimRuntimeAllocator) describePendingClaim(claim *extensionsv1beta1.SandboxClaim, poolRef string) string {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	sandboxName := claim.Status.SandboxStatus.Name
+	if sandboxName == "" {
+		return diagnoseWarmPoolPodIssues(ctx, a.k8sClient, poolRef, claim.Namespace)
+	}
+
+	podName := sandboxName
+	sandbox := &sandboxv1beta1.Sandbox{}
+	if err := a.k8sClient.Get(ctx, types.NamespacedName{Name: sandboxName, Namespace: claim.Namespace}, sandbox); err == nil {
+		if name := sandbox.Annotations[sandboxv1beta1.SandboxPodNameAnnotation]; name != "" {
+			podName = name
+		}
+	}
+
+	// The gateway role can list pods but not get them.
+	var pods corev1.PodList
+	if err := a.k8sClient.List(ctx, &pods,
+		client.InNamespace(claim.Namespace),
+		client.MatchingFields{"metadata.name": podName},
+	); err != nil || len(pods.Items) == 0 {
+		return fmt.Sprintf("sandbox %s pod %s not found", sandboxName, podName)
+	}
+	pod := &pods.Items[0]
+	if issues := describePodContainerIssues(pod); issues != "" {
+		return fmt.Sprintf("pod %s (%s): %s", pod.Name, pod.Status.Phase, issues)
+	}
+	return fmt.Sprintf("pod %s phase %s, no failing containers", pod.Name, pod.Status.Phase)
 }
 
 func sandboxClaimEnv(env []RuntimeEnvVar) []extensionsv1beta1.EnvVar {

@@ -13,6 +13,7 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
 	sandboxv1beta1 "sigs.k8s.io/agent-sandbox/api/v1beta1"
+	sandboxcontrollers "sigs.k8s.io/agent-sandbox/controllers"
 	extensionsv1beta1 "sigs.k8s.io/agent-sandbox/extensions/api/v1beta1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -469,8 +470,76 @@ func (g *Gateway) diagnosePoolHealth(ctx context.Context, poolRef, namespace str
 		return fmt.Sprintf("unable to check pool health: %v", err)
 	}
 
-	return fmt.Sprintf("pool=%s desired=%d replicas=%d ready=%d template=%s",
+	summary := fmt.Sprintf("pool=%s desired=%d replicas=%d ready=%d template=%s",
 		poolRef, desiredSandboxWarmPoolReplicas(pool), pool.Status.Replicas, pool.Status.ReadyReplicas, pool.Spec.TemplateRef.Name)
+	if issues := g.diagnosePoolPodIssues(ctx, poolRef, namespace); issues != "" {
+		summary += "; " + issues
+	}
+	return summary
+}
+
+const (
+	maxDiagnosedPods         = 3
+	maxDiagnosticMessageSize = 240
+)
+
+// diagnosePoolPodIssues reports non-ready containers in the pool's warm
+// sandbox pods so allocation failures surface the underlying cause (image
+// pull errors, crash loops) instead of only replica counts.
+func (g *Gateway) diagnosePoolPodIssues(ctx context.Context, poolRef, namespace string) string {
+	return diagnoseWarmPoolPodIssues(ctx, g.k8sClient, poolRef, namespace)
+}
+
+func diagnoseWarmPoolPodIssues(ctx context.Context, c client.Client, poolRef, namespace string) string {
+	var pods corev1.PodList
+	if err := c.List(ctx, &pods,
+		client.InNamespace(namespace),
+		client.MatchingLabels{sandboxv1beta1.SandboxWarmPoolLabel: sandboxcontrollers.NameHash(poolRef)},
+	); err != nil {
+		return ""
+	}
+
+	issues := make([]string, 0, maxDiagnosedPods)
+	for i := range pods.Items {
+		if len(issues) == maxDiagnosedPods {
+			issues = append(issues, "...")
+			break
+		}
+		pod := &pods.Items[i]
+		if pod.DeletionTimestamp != nil {
+			continue
+		}
+		if containers := describePodContainerIssues(pod); containers != "" {
+			issues = append(issues, fmt.Sprintf("pod %s (%s): %s", pod.Name, pod.Status.Phase, containers))
+		}
+	}
+	return strings.Join(issues, "; ")
+}
+
+func describePodContainerIssues(pod *corev1.Pod) string {
+	var parts []string
+	describe := func(cs corev1.ContainerStatus) {
+		switch {
+		case cs.State.Waiting != nil && cs.State.Waiting.Reason != "":
+			detail := cs.Name + " " + cs.State.Waiting.Reason
+			if msg := cs.State.Waiting.Message; msg != "" {
+				if len(msg) > maxDiagnosticMessageSize {
+					msg = msg[:maxDiagnosticMessageSize] + "..."
+				}
+				detail += ": " + msg
+			}
+			parts = append(parts, detail)
+		case cs.State.Terminated != nil && cs.State.Terminated.ExitCode != 0:
+			parts = append(parts, fmt.Sprintf("%s exited %d (%s)", cs.Name, cs.State.Terminated.ExitCode, cs.State.Terminated.Reason))
+		}
+	}
+	for _, cs := range pod.Status.InitContainerStatuses {
+		describe(cs)
+	}
+	for _, cs := range pod.Status.ContainerStatuses {
+		describe(cs)
+	}
+	return strings.Join(parts, ", ")
 }
 
 // ListPools returns active SandboxWarmPool CRDs in the gateway namespace.
