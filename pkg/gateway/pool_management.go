@@ -516,6 +516,65 @@ func diagnoseWarmPoolPodIssues(ctx context.Context, c client.Client, poolRef, na
 	return strings.Join(issues, "; ")
 }
 
+// keepPoolWarmingAfterFailure decides whether a failed session create should
+// leave its pool warming. Wait-style failures keep the pool so the client's
+// retry lands on the accumulated progress (e.g. an in-flight image pull) —
+// unless the pool's pods are provably stuck, in which case the returned
+// reason explains why the pool is being torn down.
+func (g *Gateway) keepPoolWarmingAfterFailure(err error, poolRef, namespace string) (bool, string) {
+	if !provisioningWaitFailure(err) {
+		return false, ""
+	}
+	if poolRef == "" || g.k8sClient == nil {
+		return true, ""
+	}
+	// The request context is typically already expired here.
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if reason := poolProvisioningDoomed(ctx, g.k8sClient, poolRef, namespace); reason != "" {
+		return false, reason
+	}
+	return true, ""
+}
+
+// poolProvisioningDoomed reports a non-empty reason when the pool's warm pods
+// are stuck in a state that cannot resolve on its own (missing image, crash
+// loop). Transient pull backoffs are deliberately not treated as doomed.
+func poolProvisioningDoomed(ctx context.Context, c client.Client, poolRef, namespace string) string {
+	var pods corev1.PodList
+	if err := c.List(ctx, &pods,
+		client.InNamespace(namespace),
+		client.MatchingLabels{sandboxv1beta1.SandboxWarmPoolLabel: sandboxcontrollers.NameHash(poolRef)},
+	); err != nil {
+		return ""
+	}
+	for i := range pods.Items {
+		pod := &pods.Items[i]
+		if pod.DeletionTimestamp != nil {
+			continue
+		}
+		statuses := make([]corev1.ContainerStatus, 0, len(pod.Status.InitContainerStatuses)+len(pod.Status.ContainerStatuses))
+		statuses = append(statuses, pod.Status.InitContainerStatuses...)
+		statuses = append(statuses, pod.Status.ContainerStatuses...)
+		for _, cs := range statuses {
+			waiting := cs.State.Waiting
+			if waiting == nil {
+				continue
+			}
+			switch waiting.Reason {
+			case "CrashLoopBackOff":
+				return fmt.Sprintf("pod %s container %s in CrashLoopBackOff", pod.Name, cs.Name)
+			case "ErrImagePull", "ImagePullBackOff", "InvalidImageName":
+				msg := strings.ToLower(waiting.Message)
+				if strings.Contains(msg, "not found") || strings.Contains(msg, "manifest unknown") || waiting.Reason == "InvalidImageName" {
+					return fmt.Sprintf("pod %s container %s: image cannot be pulled (%s)", pod.Name, cs.Name, waiting.Reason)
+				}
+			}
+		}
+	}
+	return ""
+}
+
 func describePodContainerIssues(pod *corev1.Pod) string {
 	var parts []string
 	describe := func(cs corev1.ContainerStatus) {

@@ -373,7 +373,7 @@ func TestCreatePoolDoesNotCreateTemplateWhenWarmPoolAlreadyExists(t *testing.T) 
 	}
 }
 
-func TestCreateManagedSessionStopsNewPoolOnSessionCreateFailure(t *testing.T) {
+func TestCreateManagedSessionKeepsPoolWarmingOnWaitTimeout(t *testing.T) {
 	scheme := newGatewayTestScheme(t)
 	k8sClient := fake.NewClientBuilder().WithScheme(scheme).Build()
 	gw := New(k8sClient, failingRuntimeAllocator{}, nil, nil, nil, GatewayConfig{
@@ -396,9 +396,17 @@ func TestCreateManagedSessionStopsNewPoolOnSessionCreateFailure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("managedPoolName returned error: %v", err)
 	}
-	assertPoolStopped(t, k8sClient, poolName, "default")
+	// A wait-for-warm-capacity timeout means demand is real and a retry is
+	// imminent: the pool must keep warming instead of being torn down.
+	pool := &extensionsv1beta1.SandboxWarmPool{}
+	if err := k8sClient.Get(context.Background(), types.NamespacedName{Name: poolName, Namespace: "default"}, pool); err != nil {
+		t.Fatalf("expected pool %s to survive wait-timeout failure: %v", poolName, err)
+	}
+	if got := desiredSandboxWarmPoolReplicas(pool); got == 0 {
+		t.Fatalf("pool %s was scaled to 0 after wait-timeout failure, want it kept warming", poolName)
+	}
 	if err := k8sClient.Get(context.Background(), types.NamespacedName{Name: sandboxTemplateName(poolName), Namespace: "default"}, &extensionsv1beta1.SandboxTemplate{}); err != nil {
-		t.Fatalf("managed template was deleted after create failure cleanup: %v", err)
+		t.Fatalf("managed template was deleted after create failure: %v", err)
 	}
 }
 

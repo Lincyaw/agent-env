@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -11,6 +12,17 @@ import (
 
 // ErrPoolAtCapacity is returned when admission control cannot place a session.
 var ErrPoolAtCapacity = errors.New("pool at maximum capacity")
+
+// provisioningWaitFailure reports whether a session create failed only
+// because the caller stopped waiting for warm capacity (admission timeout,
+// client-set allocation deadline, or client disconnect). Demand is still
+// real in these cases — the client is expected to retry — so the pool must
+// keep warming instead of being torn down.
+func provisioningWaitFailure(err error) bool {
+	return errors.Is(err, ErrPoolAtCapacity) ||
+		errors.Is(err, context.DeadlineExceeded) ||
+		errors.Is(err, context.Canceled)
+}
 
 func managedPoolName(
 	image string,

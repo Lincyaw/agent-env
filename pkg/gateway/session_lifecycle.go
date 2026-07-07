@@ -85,11 +85,28 @@ func (g *Gateway) CreateSession(ctx context.Context, req CreateSessionRequest) (
 		}
 	}
 
+	// Wait-style failures (admission timeout, client deadline/disconnect) keep
+	// the pool warming: the client will retry and needs the accumulated pull
+	// progress. Teardown only happens for genuine failures or doomed pods.
+	handlePoolAfterCreateFailure := func(err error, poolRef string) string {
+		keep, doomReason := g.keepPoolWarmingAfterFailure(err, poolRef, ns)
+		if keep {
+			if poolRef != "" {
+				log.Printf("Keeping pool %s/%s warming after session create wait failure (retry expected)", ns, poolRef)
+			}
+			return ""
+		}
+		cleanupAutoCreatedPool()
+		return doomReason
+	}
+
 	intent := g.resourceIntentFromCreateSession(allocationCtx, req, ns)
 	selection, admission, err := g.planSessionAllocation(allocationCtx, intent)
 	if err != nil {
-		cleanupAutoCreatedPool()
 		recordSpanErr(span, err)
+		if doomReason := handlePoolAfterCreateFailure(err, firstNonEmpty(autoCreatedPool, selection.PoolName)); doomReason != "" {
+			return nil, fmt.Errorf("plan session allocation: %w (pool pods stuck: %s)", err, doomReason)
+		}
 		return nil, fmt.Errorf("plan session allocation: %w", err)
 	}
 	poolRef := selection.PoolName
@@ -142,7 +159,9 @@ func (g *Gateway) CreateSession(ctx context.Context, req CreateSessionRequest) (
 		}
 		diag := g.diagnosePoolHealth(ctx, poolRef, ns)
 		log.Printf("Runtime allocation failed for session %s (experiment=%s): %v (%s)", sessionID, req.ExperimentID, err, diag)
-		cleanupAutoCreatedPool()
+		if doomReason := handlePoolAfterCreateFailure(err, poolRef); doomReason != "" {
+			return nil, fmt.Errorf("allocate runtime from pool %s: %w (pool pods stuck: %s; %s)", poolRef, err, doomReason, diag)
+		}
 		return nil, fmt.Errorf("allocate runtime from pool %s: %w (%s)", poolRef, err, diag)
 	}
 	span.SetAttributes(

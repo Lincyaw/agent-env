@@ -84,6 +84,8 @@ func (g *Gateway) reconcileManagedPoolGC(ctx context.Context) (int, error) {
 		return 0, err
 	}
 
+	g.stopIdleRunningManagedPools(ctx, namespace, references)
+
 	var pools extensionsv1beta1.SandboxWarmPoolList
 	if err := g.k8sClient.List(ctx, &pools,
 		client.InNamespace(namespace),
@@ -145,6 +147,48 @@ func (g *Gateway) reconcileManagedPoolGC(ctx context.Context) (int, error) {
 		}
 	}
 	return deleted, nil
+}
+
+// stopIdleRunningManagedPools is the safety net for pools left warming after
+// wait-style create failures: a running managed pool with no bindings, no
+// queued admission waiters, and no activity for MinIdleAge is marked stopped
+// so it flows into the stopped-pool LRU above.
+func (g *Gateway) stopIdleRunningManagedPools(ctx context.Context, namespace string, references map[types.NamespacedName]struct{}) {
+	minIdle := g.gwConfig.ManagedPoolGCMinIdleAge
+	if minIdle <= 0 {
+		return
+	}
+	var pools extensionsv1beta1.SandboxWarmPoolList
+	if err := g.k8sClient.List(ctx, &pools,
+		client.InNamespace(namespace),
+		client.MatchingLabels{labels.ManagedPoolLabelKey: "true"},
+	); err != nil {
+		log.Printf("managed pool GC: list managed pools for idle check failed: %v", err)
+		return
+	}
+	queued := g.admissionQueueSnapshot()
+	now := time.Now()
+	for i := range pools.Items {
+		pool := &pools.Items[i]
+		if pool.DeletionTimestamp != nil || !isManagedPool(pool) || poolLifecycleStopped(pool) {
+			continue
+		}
+		key := types.NamespacedName{Name: pool.Name, Namespace: pool.Namespace}
+		if _, inUse := references[key]; inUse {
+			continue
+		}
+		if queued[key] > 0 {
+			continue
+		}
+		if now.Sub(managedPoolLastUsedAt(pool, now)) < minIdle {
+			continue
+		}
+		if stopped, err := g.stopManagedPoolIfUnused(ctx, pool.Name, pool.Namespace); err != nil {
+			log.Printf("managed pool GC: stop idle running pool %s/%s failed: %v", pool.Namespace, pool.Name, err)
+		} else if stopped {
+			log.Printf("managed pool GC stopped idle running pool %s/%s (idle > %s)", pool.Namespace, pool.Name, minIdle)
+		}
+	}
 }
 
 func (g *Gateway) managedPoolReferences(ctx context.Context, namespace string) (map[types.NamespacedName]struct{}, error) {

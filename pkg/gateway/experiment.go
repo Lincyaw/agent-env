@@ -97,14 +97,23 @@ func (g *Gateway) CreateManagedSession(ctx context.Context, req CreateManagedSes
 		PrivateContainers:        req.PrivateContainers,
 	})
 	if err != nil {
-		if createdPool {
+		keep, doomReason := g.keepPoolWarmingAfterFailure(err, poolName, ns)
+		switch {
+		case keep:
+			log.Printf("Keeping managed pool %s/%s warming after session create wait failure (retry expected)", ns, poolName)
+		case createdPool || doomReason != "":
 			cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			defer cancel()
 			if stopped, cleanupErr := g.stopManagedPoolIfUnused(cleanupCtx, poolName, ns); cleanupErr != nil {
 				log.Printf("Warning: failed to cleanup unused managed pool %s/%s after managed session create failure: %v", ns, poolName, cleanupErr)
+			} else if stopped && doomReason != "" {
+				log.Printf("Stopped doomed managed pool %s/%s after session create failure: %s", ns, poolName, doomReason)
 			} else if stopped {
 				log.Printf("Stopped unused managed pool %s/%s after managed session create failure", ns, poolName)
 			}
+		}
+		if doomReason != "" {
+			return nil, fmt.Errorf("create session: %w (pool pods stuck: %s)", err, doomReason)
 		}
 		return nil, fmt.Errorf("create session: %w", err)
 	}

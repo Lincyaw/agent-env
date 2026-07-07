@@ -352,6 +352,9 @@ func (g *Gateway) scalePoolForQueuedDemand(ctx context.Context, key types.Namesp
 	before := pool.DeepCopy()
 	pool.Spec.Replicas = int32Ptr(target)
 	applyPoolStateMetadata(&pool.ObjectMeta, labels.PoolStateRunning)
+	// Queued demand counts as pool activity: it shields the warming pool from
+	// the idle-pool GC while clients are actively waiting or retrying.
+	applyPoolLastUsedMetadata(&pool.ObjectMeta, time.Now())
 	delete(pool.Annotations, scheduling.PoolAutoscaleAnnotation)
 	if err := g.k8sClient.Patch(ctx, pool, client.MergeFrom(before)); err != nil {
 		return fmt.Errorf("scale sandbox warm pool %s/%s for queued demand: %w", key.Namespace, key.Name, err)
