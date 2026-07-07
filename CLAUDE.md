@@ -79,18 +79,8 @@ After modifying components or interfaces:
 - **agent-sandbox extensions**: Keep `agentSandbox.controller.extensions=true`; the gateway uses the extension CRDs (`SandboxClaim`, `SandboxWarmPool`, `SandboxTemplate`).
 - **Registry path**: The runtime image set is `arl-gateway`, `arl-sidecar`, `arl-executor-agent`, `arl-image-locality-scheduler`, plus `agent-sandbox-controller` when bundling sandbox.
 - **Image tags**: Use one immutable tag for all images in a deployment. Avoid reusing a tag after a failed push; create a fresh tag to avoid registry-side partial state.
-- **Docker Hub handoff**: If direct local push to the Guangzhou registry stalls, push to Docker Hub first, then registry-to-registry sync with `crane copy`.
-- **Crane sync**:
-  ```bash
-  TAG=<tag>
-  SRC=docker.io/opspai
-  DST=pair-diag-cn-guangzhou.cr.volces.com/pair
-  for img in agent-sandbox-controller arl-gateway arl-sidecar arl-executor-agent arl-image-locality-scheduler; do
-    crane copy "${SRC}/${img}:${TAG}" "${DST}/${img}:${TAG}"
-    crane digest "${DST}/${img}:${TAG}"
-  done
-  ```
-  `UNAUTHORIZED: project opspai not found` during cross-repo blob mount can be non-fatal when `crane` retries without mount and later prints a target digest.
+- **Registry mirror**: `pair-cn-guangzhou.cr.volces.com` (and `pair-cn-shanghai.cr.volces.com`) are Docker Hub pull-through mirrors — replace the `docker.io` prefix and the image syncs automatically (`docker.io/opspai/arl-gateway:v0.19.9` → `pair-cn-guangzhou.cr.volces.com/opspai/arl-gateway:v0.19.9`). No manual `crane copy` for Docker Hub images. `pair-diag-cn-guangzhou.cr.volces.com/pair` is a separate private registry (ad-hoc skaffold builds) and still needs explicit pushes.
+- **Release flow**: Pushing a `v*` git tag triggers the Publish Images workflow, which builds all four runtime images to `docker.io/opspai`. In-cluster manifests then reference them through the mirror prefix.
 - **Sidecar image**: Keep the sidecar runtime minimal. The sidecar is a static Go server; shell, Python, and tools belong in the executor/user image, not the sidecar image.
 - **sing-box**: In-cluster proxy subchart (`charts/sing-box`). Sandbox pods get `HTTP_PROXY` injected automatically when `proxy.url` is set.
 - **replicas=0**: Default. Pre-pulls image only; pods are created on demand when sessions arrive.
