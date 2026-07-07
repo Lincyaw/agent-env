@@ -201,12 +201,47 @@ func TestPlanSessionAllocationQueuesThenRejectsWhenWarmCapacityDoesNotFree(t *te
 		AdmissionQueuePollInterval: time.Millisecond,
 	}, NewMemoryStore())
 
-	_, _, err := gw.planSessionAllocation(context.Background(), ResourceIntent{
-		Scope:   RequestScope{Namespace: "default"},
-		Profile: "code",
+	ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond)
+	defer cancel()
+	_, _, err := gw.planSessionAllocation(ctx, ResourceIntent{
+		Scope:             RequestScope{Namespace: "default"},
+		Profile:           "code",
+		AllocationTimeout: time.Millisecond,
 	})
 	if !errors.Is(err, ErrPoolAtCapacity) {
 		t.Fatalf("planSessionAllocation error = %v, want ErrPoolAtCapacity", err)
+	}
+	if !strings.Contains(err.Error(), "queued for") || !strings.Contains(err.Error(), "waiting for warm capacity") {
+		t.Fatalf("planSessionAllocation error = %v, want explicit queue timeout", err)
+	}
+}
+
+func TestCreateSessionAllocationTimeoutZeroOverridesGatewayDefault(t *testing.T) {
+	scheme := newGatewayTestScheme(t)
+	pool := testSandboxWarmPool("code", "default", "code-template", 1, 1, "code")
+	template := testSandboxTemplate("code-template", "default", "python:3.12", "code")
+	k8sClient := fake.NewClientBuilder().WithScheme(scheme).WithObjects(pool, template).Build()
+	allocator := &recordingRuntimeAllocator{
+		allocation: RuntimeAllocation{
+			Backend:   runtimeBackendSandboxClaim,
+			PodName:   "pod-1",
+			PodIP:     "10.0.0.1",
+			ClaimName: "claim-1",
+		},
+	}
+	gw := New(k8sClient, allocator, nil, nil, nil, GatewayConfig{
+		AdmissionQueueTimeout: time.Minute,
+	}, NewMemoryStore())
+	timeout := 0
+
+	if _, err := gw.CreateSession(context.Background(), CreateSessionRequest{
+		Profile:                  "code",
+		AllocationTimeoutSeconds: &timeout,
+	}); err != nil {
+		t.Fatalf("CreateSession returned error: %v", err)
+	}
+	if allocator.lastDeadlineSet {
+		t.Fatalf("allocator context had deadline %v, want no deadline", allocator.lastDeadline)
 	}
 }
 
@@ -420,8 +455,10 @@ func testSandboxTemplate(name, namespace, image, profile string) *extensionsv1be
 }
 
 type recordingRuntimeAllocator struct {
-	allocation  RuntimeAllocation
-	lastRequest RuntimeAllocateRequest
+	allocation      RuntimeAllocation
+	lastRequest     RuntimeAllocateRequest
+	lastDeadline    time.Time
+	lastDeadlineSet bool
 }
 
 func (a *recordingRuntimeAllocator) Start(ctx context.Context) error { return nil }
@@ -430,6 +467,7 @@ func (a *recordingRuntimeAllocator) Stop() {}
 
 func (a *recordingRuntimeAllocator) Allocate(ctx context.Context, req RuntimeAllocateRequest) (*RuntimeAllocation, error) {
 	a.lastRequest = req
+	a.lastDeadline, a.lastDeadlineSet = ctx.Deadline()
 	allocation := a.allocation
 	allocation.PoolRef = req.PoolRef
 	allocation.Namespace = req.Namespace

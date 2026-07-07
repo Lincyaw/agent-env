@@ -179,6 +179,7 @@ class GatewayClient:
         devbox: DevboxConfig | dict[str, object] | None = None,
         config_env: ConfigEnvSpec | dict[str, Any] | None = None,
         idle_timeout_seconds: int | None = None,
+        allocation_timeout_seconds: int | None = None,
         private_containers: Iterable[PrivateContainerSpec | dict[str, Any]] | None = None,
     ) -> SessionInfo:
         if not image and not profile:
@@ -200,6 +201,8 @@ class GatewayClient:
             body["configEnv"] = config_env_payload
         if idle_timeout_seconds is not None:
             body["idleTimeoutSeconds"] = idle_timeout_seconds
+        if allocation_timeout_seconds is not None:
+            body["allocationTimeoutSeconds"] = allocation_timeout_seconds
         private_container_payload = _serialize_private_containers(private_containers)
         if private_container_payload is not None:
             body["privateContainers"] = private_container_payload
@@ -641,6 +644,7 @@ class GatewayClient:
         tools: ToolsSpec | None = None,
         workspace_dir: str = "/workspace",
         idle_timeout_seconds: int | None = None,
+        allocation_timeout_seconds: int | None = None,
         config_env: ConfigEnvSpec | dict[str, Any] | None = None,
         private_containers: Iterable[PrivateContainerSpec | dict[str, Any]] | None = None,
     ) -> ManagedSessionInfo:
@@ -683,6 +687,8 @@ class GatewayClient:
             body["tools"] = tools.model_dump(by_alias=True, exclude_none=True)
         if idle_timeout_seconds is not None:
             body["idleTimeoutSeconds"] = idle_timeout_seconds
+        if allocation_timeout_seconds is not None:
+            body["allocationTimeoutSeconds"] = allocation_timeout_seconds
         private_container_payload = _serialize_private_containers(private_containers)
         if private_container_payload is not None:
             body["privateContainers"] = private_container_payload

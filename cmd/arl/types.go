@@ -24,10 +24,11 @@ type SessionListItem struct {
 }
 
 type CreateSessionRequest struct {
-	Image              string                 `json:"image,omitempty"`
-	Profile            string                 `json:"profile,omitempty"`
-	IdleTimeoutSeconds int                    `json:"idleTimeoutSeconds,omitempty"`
-	PrivateContainers  []PrivateContainerSpec `json:"privateContainers,omitempty"`
+	Image                    string                 `json:"image,omitempty"`
+	Profile                  string                 `json:"profile,omitempty"`
+	IdleTimeoutSeconds       int                    `json:"idleTimeoutSeconds,omitempty"`
+	AllocationTimeoutSeconds *int                   `json:"allocationTimeoutSeconds,omitempty"`
+	PrivateContainers        []PrivateContainerSpec `json:"privateContainers,omitempty"`
 }
 
 type ManagedSessionInfo struct {
@@ -186,12 +187,13 @@ type CreatePoolRequest struct {
 }
 
 type CreateManagedSessionRequest struct {
-	Image              string                 `json:"image"`
-	Profile            string                 `json:"profile,omitempty"`
-	ExperimentID       string                 `json:"experimentId"`
-	WorkspaceDir       string                 `json:"workspaceDir,omitempty"`
-	IdleTimeoutSeconds int                    `json:"idleTimeoutSeconds,omitempty"`
-	PrivateContainers  []PrivateContainerSpec `json:"privateContainers,omitempty"`
+	Image                    string                 `json:"image"`
+	Profile                  string                 `json:"profile,omitempty"`
+	ExperimentID             string                 `json:"experimentId"`
+	WorkspaceDir             string                 `json:"workspaceDir,omitempty"`
+	IdleTimeoutSeconds       int                    `json:"idleTimeoutSeconds,omitempty"`
+	AllocationTimeoutSeconds *int                   `json:"allocationTimeoutSeconds,omitempty"`
+	PrivateContainers        []PrivateContainerSpec `json:"privateContainers,omitempty"`
 }
 
 type PrivateContainerSpec struct {

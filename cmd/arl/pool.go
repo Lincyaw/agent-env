@@ -275,6 +275,11 @@ var poolExecCmd = &cobra.Command{
 		if len(cmdArgs) == 0 {
 			return usageError("no command specified; use: arl pool exec <pool> -- <cmd>")
 		}
+		waitTimeout, _ := cmd.Flags().GetDuration("wait-timeout")
+		allocationTimeout, err := allocationTimeoutSecondsFromDuration(waitTimeout)
+		if err != nil {
+			return err
+		}
 
 		c := newClient()
 		pool, err := c.GetPool(poolName)
@@ -287,8 +292,9 @@ var poolExecCmd = &cobra.Command{
 		}
 
 		sessInfo, err := c.CreateSession(CreateSessionRequest{
-			Image:   pool.Image,
-			Profile: profile,
+			Image:                    pool.Image,
+			Profile:                  profile,
+			AllocationTimeoutSeconds: allocationTimeout,
 		})
 		if err != nil {
 			return fmt.Errorf("create temporary session: %w", err)
@@ -395,6 +401,7 @@ func init() {
 
 	poolWaitCmd.Flags().Duration("timeout", 10*time.Minute, "Maximum time to wait")
 	poolWaitCmd.Flags().Int32("min-ready", -1, "Minimum ready sandboxes to wait for (-1 means desired replicas)")
+	poolExecCmd.Flags().Duration("wait-timeout", 0, "Maximum time to wait for temporary session allocation (0 waits until ready or cancellation)")
 
 	poolDeleteCmd.Flags().Bool("force", false, "Skip confirmation")
 	poolDestroyCmd.Flags().Bool("force", false, "Skip confirmation")
