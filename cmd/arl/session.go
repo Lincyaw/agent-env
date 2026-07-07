@@ -101,6 +101,11 @@ var sessionCreateCmd = &cobra.Command{
 		image, _ := cmd.Flags().GetString("image")
 		profile, _ := cmd.Flags().GetString("profile")
 		idleTimeout, _ := cmd.Flags().GetInt("idle-timeout")
+		waitTimeout, _ := cmd.Flags().GetDuration("wait-timeout")
+		allocationTimeout, err := allocationTimeoutSecondsFromDuration(waitTimeout)
+		if err != nil {
+			return err
+		}
 		privateContainers, err := privateContainersFromFlags(cmd)
 		if err != nil {
 			return err
@@ -112,10 +117,11 @@ var sessionCreateCmd = &cobra.Command{
 
 		c := newClient()
 		s, err := c.CreateSession(CreateSessionRequest{
-			Image:              image,
-			Profile:            profile,
-			IdleTimeoutSeconds: idleTimeout,
-			PrivateContainers:  privateContainers,
+			Image:                    image,
+			Profile:                  profile,
+			IdleTimeoutSeconds:       idleTimeout,
+			AllocationTimeoutSeconds: allocationTimeout,
+			PrivateContainers:        privateContainers,
 		})
 		if err != nil {
 			return err
@@ -569,6 +575,7 @@ func init() {
 	sessionCreateCmd.Flags().String("image", "", "Container image")
 	sessionCreateCmd.Flags().String("profile", "default", "Resource profile")
 	sessionCreateCmd.Flags().Int("idle-timeout", 0, "Idle timeout in seconds (0 uses gateway default)")
+	sessionCreateCmd.Flags().Duration("wait-timeout", 0, "Maximum time to wait for session allocation (0 waits until ready or cancellation)")
 	addPrivateContainerFlags(sessionCreateCmd)
 
 	sessionHistoryCmd.Flags().BoolP("verbose", "v", false, "Show step output")

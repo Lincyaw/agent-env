@@ -74,18 +74,19 @@ type PortInfo struct {
 
 // CreateSessionRequest is the body for POST /v1/sessions
 type CreateSessionRequest struct {
-	Image              string                 `json:"image,omitempty"`
-	Profile            string                 `json:"profile,omitempty"`
-	Namespace          string                 `json:"namespace,omitempty"`
-	Mode               string                 `json:"mode,omitempty"`
-	Devbox             *DevboxConfig          `json:"devbox,omitempty"`
-	ConfigEnv          json.RawMessage        `json:"configEnv,omitempty"`
-	IdleTimeoutSeconds int                    `json:"idleTimeoutSeconds,omitempty"`
-	PrivateContainers  []PrivateContainerSpec `json:"privateContainers,omitempty"`
-	PoolName           string                 `json:"-"` // internal pinned SandboxWarmPool, not part of the public API
-	ExtraLabels        map[string]string      `json:"-"` // internal use only, not exposed via JSON
-	Managed            bool                   `json:"-"`
-	ExperimentID       string                 `json:"-"`
+	Image                    string                 `json:"image,omitempty"`
+	Profile                  string                 `json:"profile,omitempty"`
+	Namespace                string                 `json:"namespace,omitempty"`
+	Mode                     string                 `json:"mode,omitempty"`
+	Devbox                   *DevboxConfig          `json:"devbox,omitempty"`
+	ConfigEnv                json.RawMessage        `json:"configEnv,omitempty"`
+	IdleTimeoutSeconds       int                    `json:"idleTimeoutSeconds,omitempty"`
+	AllocationTimeoutSeconds *int                   `json:"allocationTimeoutSeconds,omitempty"`
+	PrivateContainers        []PrivateContainerSpec `json:"privateContainers,omitempty"`
+	PoolName                 string                 `json:"-"` // internal pinned SandboxWarmPool, not part of the public API
+	ExtraLabels              map[string]string      `json:"-"` // internal use only, not exposed via JSON
+	Managed                  bool                   `json:"-"`
+	ExperimentID             string                 `json:"-"`
 }
 
 func hasJSONPayload(raw json.RawMessage) bool {
@@ -112,18 +113,19 @@ func decodeConfigEnv(configEnv json.RawMessage) (json.RawMessage, error) {
 
 // CreateManagedSessionRequest is the body for POST /v1/managed/sessions
 type CreateManagedSessionRequest struct {
-	Image              string                       `json:"image"`
-	Profile            string                       `json:"profile,omitempty"`
-	ExperimentID       string                       `json:"experimentId"`
-	Namespace          string                       `json:"namespace,omitempty"`
-	Mode               string                       `json:"mode,omitempty"`
-	Devbox             *DevboxConfig                `json:"devbox,omitempty"`
-	ConfigEnv          json.RawMessage              `json:"configEnv,omitempty"`
-	Resources          *corev1.ResourceRequirements `json:"resources,omitempty"`
-	Tools              json.RawMessage              `json:"tools,omitempty"`
-	WorkspaceDir       string                       `json:"workspaceDir,omitempty"`
-	IdleTimeoutSeconds int                          `json:"idleTimeoutSeconds,omitempty"`
-	PrivateContainers  []PrivateContainerSpec       `json:"privateContainers,omitempty"`
+	Image                    string                       `json:"image"`
+	Profile                  string                       `json:"profile,omitempty"`
+	ExperimentID             string                       `json:"experimentId"`
+	Namespace                string                       `json:"namespace,omitempty"`
+	Mode                     string                       `json:"mode,omitempty"`
+	Devbox                   *DevboxConfig                `json:"devbox,omitempty"`
+	ConfigEnv                json.RawMessage              `json:"configEnv,omitempty"`
+	Resources                *corev1.ResourceRequirements `json:"resources,omitempty"`
+	Tools                    json.RawMessage              `json:"tools,omitempty"`
+	WorkspaceDir             string                       `json:"workspaceDir,omitempty"`
+	IdleTimeoutSeconds       int                          `json:"idleTimeoutSeconds,omitempty"`
+	AllocationTimeoutSeconds *int                         `json:"allocationTimeoutSeconds,omitempty"`
+	PrivateContainers        []PrivateContainerSpec       `json:"privateContainers,omitempty"`
 }
 
 // ExecuteRequest is the body for POST /v1/sessions/{id}/execute

@@ -30,6 +30,7 @@
 arl exp create <experiment-id> --image python:3.12 --sessions 1
 arl exp create <experiment-id> --image python:3.12 --profile gpu --sessions 4 \
   --workspace-dir /workspace --idle-timeout 1800
+arl exp create <experiment-id> --image python:3.12 --wait-timeout 10m
 arl exp list
 arl exp sessions <experiment-id>
 arl exp stats <experiment-id>
@@ -80,6 +81,7 @@ arl session create --image python:3.12
 arl session create --profile default
 arl session create --image python:3.12 --profile cpu \
   --idle-timeout 1800
+arl session create --image python:3.12 --wait-timeout 10m
 
 arl session list
 arl session list --profile <profile>
@@ -126,6 +128,11 @@ recorded steps from a source session into an existing target session; use
 `exec-container` runs a command in a private sidecar container rather than the
 main sandbox. Accepts `--workdir`, `--timeout` (seconds), and `--env KEY=VALUE`
 (repeatable).
+
+`session create`, `exp create`, and `pool exec` accept `--wait-timeout`. The
+default `0` waits until allocation is ready or the caller cancels; a value like
+`10m` caps each session allocation wait and cleans up request-created resources
+on timeout.
 
 There is no current `arl session list --pool` flag. Filter by `--profile` or
 `--experiment`, or use `--format json` with `jq`.

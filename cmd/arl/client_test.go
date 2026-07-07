@@ -7,6 +7,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestClientListMethodsReturnEmptySlices(t *testing.T) {
@@ -149,6 +150,69 @@ func TestClientCreateSessionDoesNotExposeCapacityBypassPolicy(t *testing.T) {
 
 	if _, ok := bodies[0]["allowColdStart"]; ok {
 		t.Fatalf("create session body included allowColdStart: %#v", bodies[0])
+	}
+}
+
+func TestClientCreateRequestsPassAllocationTimeout(t *testing.T) {
+	var bodies []map[string]any
+	var paths []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		paths = append(paths, r.URL.Path)
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		bodies = append(bodies, body)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		if r.URL.Path == "/v1/managed/sessions" {
+			_, _ = w.Write([]byte(`{"id":"gw-2","sandboxName":"gw-2","namespace":"default","podIP":"10.0.0.2","podName":"pod-2","experimentId":"exp","managed":true,"createdAt":"2026-01-01T00:00:00Z"}`))
+			return
+		}
+		_, _ = w.Write([]byte(`{"id":"gw-1","sandboxName":"gw-1","namespace":"default","podIP":"10.0.0.1","podName":"pod-1","createdAt":"2026-01-01T00:00:00Z"}`))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "")
+	noLimit := 0
+	tenMinutes := 600
+	if _, err := client.CreateSession(CreateSessionRequest{Image: "python:3.12", AllocationTimeoutSeconds: &noLimit}); err != nil {
+		t.Fatalf("CreateSession returned error: %v", err)
+	}
+	if _, err := client.CreateManagedSession(CreateManagedSessionRequest{Image: "python:3.12", ExperimentID: "exp", AllocationTimeoutSeconds: &tenMinutes}); err != nil {
+		t.Fatalf("CreateManagedSession returned error: %v", err)
+	}
+
+	if strings.Join(paths, ",") != "/v1/sessions,/v1/managed/sessions" {
+		t.Fatalf("paths = %#v", paths)
+	}
+	if got := bodies[0]["allocationTimeoutSeconds"]; got != float64(0) {
+		t.Fatalf("session allocationTimeoutSeconds = %#v, want 0", got)
+	}
+	if got := bodies[1]["allocationTimeoutSeconds"]; got != float64(600) {
+		t.Fatalf("managed allocationTimeoutSeconds = %#v, want 600", got)
+	}
+}
+
+func TestAllocationTimeoutSecondsFromDuration(t *testing.T) {
+	got, err := allocationTimeoutSecondsFromDuration(1500 * time.Millisecond)
+	if err != nil {
+		t.Fatalf("allocationTimeoutSecondsFromDuration returned error: %v", err)
+	}
+	if got == nil || *got != 2 {
+		t.Fatalf("allocation timeout seconds = %#v, want 2", got)
+	}
+
+	got, err = allocationTimeoutSecondsFromDuration(0)
+	if err != nil {
+		t.Fatalf("allocationTimeoutSecondsFromDuration(0) returned error: %v", err)
+	}
+	if got == nil || *got != 0 {
+		t.Fatalf("allocation timeout seconds = %#v, want 0", got)
+	}
+
+	if _, err := allocationTimeoutSecondsFromDuration(-time.Second); err == nil {
+		t.Fatal("allocationTimeoutSecondsFromDuration(-1s) returned nil error")
 	}
 }
 

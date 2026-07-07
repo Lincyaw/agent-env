@@ -110,8 +110,9 @@ gateway:
   # Admission control for session allocation.
   admission:
     # Max time a request may wait for ready capacity while the gateway scales
-    # the selected WarmPool up.
-    queueTimeout: "180s"
+    # the selected WarmPool up. 0s waits until the caller disconnects or the
+    # request-level allocationTimeoutSeconds is reached.
+    queueTimeout: "0s"
     queuePollInterval: "500ms"
   # Warm pool autoscaling policy. When enabled, the gateway adjusts
   # SandboxWarmPool.spec.replicas from active sessions and admission queue depth.

@@ -37,6 +37,18 @@ func (g *Gateway) CreateSession(ctx context.Context, req CreateSessionRequest) (
 		recordSpanErr(span, err)
 		return nil, err
 	}
+	allocationTimeout, err := g.allocationTimeout(req)
+	if err != nil {
+		recordSpanErr(span, err)
+		return nil, err
+	}
+	allocationCtx := ctx
+	allocationCancel := func() {}
+	if allocationTimeout > 0 {
+		allocationCtx, allocationCancel = context.WithTimeout(ctx, allocationTimeout)
+	}
+	defer allocationCancel()
+
 	if err := validatePrivateContainers(req.PrivateContainers); err != nil {
 		recordSpanErr(span, err)
 		return nil, err
@@ -55,7 +67,7 @@ func (g *Gateway) CreateSession(ctx context.Context, req CreateSessionRequest) (
 		claimEnv = injectDevboxEnv(claimEnv, req.Devbox)
 	}
 	var autoCreatedPool string
-	req, autoCreatedPool, err = g.ensureImageBackedSessionPool(ctx, req, ns)
+	req, autoCreatedPool, err = g.ensureImageBackedSessionPool(allocationCtx, req, ns)
 	if err != nil {
 		recordSpanErr(span, err)
 		return nil, fmt.Errorf("ensure session pool: %w", err)
@@ -64,15 +76,17 @@ func (g *Gateway) CreateSession(ctx context.Context, req CreateSessionRequest) (
 		if autoCreatedPool == "" {
 			return
 		}
-		if stopped, cleanupErr := g.stopManagedPoolIfUnused(ctx, autoCreatedPool, ns); cleanupErr != nil {
+		cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		defer cancel()
+		if stopped, cleanupErr := g.stopManagedPoolIfUnused(cleanupCtx, autoCreatedPool, ns); cleanupErr != nil {
 			log.Printf("Warning: failed to cleanup unused managed pool %s/%s after session create failure: %v", ns, autoCreatedPool, cleanupErr)
 		} else if stopped {
 			log.Printf("Stopped unused managed pool %s/%s after session create failure", ns, autoCreatedPool)
 		}
 	}
 
-	intent := g.resourceIntentFromCreateSession(ctx, req, ns)
-	selection, admission, err := g.planSessionAllocation(ctx, intent)
+	intent := g.resourceIntentFromCreateSession(allocationCtx, req, ns)
+	selection, admission, err := g.planSessionAllocation(allocationCtx, intent)
 	if err != nil {
 		cleanupAutoCreatedPool()
 		recordSpanErr(span, err)
@@ -82,7 +96,7 @@ func (g *Gateway) CreateSession(ctx context.Context, req CreateSessionRequest) (
 	ns = selection.Namespace
 
 	if len(claimEnv) > 0 {
-		if err := g.ensureClaimEnvInjectionPolicy(ctx, poolRef, ns); err != nil {
+		if err := g.ensureClaimEnvInjectionPolicy(allocationCtx, poolRef, ns); err != nil {
 			cleanupAutoCreatedPool()
 			recordSpanErr(span, err)
 			return nil, err
@@ -103,11 +117,8 @@ func (g *Gateway) CreateSession(ctx context.Context, req CreateSessionRequest) (
 		attribute.Int("admission.warm_available", int(admission.WarmAvailable)),
 	)
 
-	allocCtx, allocCancel := context.WithTimeout(ctx, 5*time.Minute)
-	defer allocCancel()
-
 	allocStart := time.Now()
-	allocation, err := g.runtimeAllocator.Allocate(allocCtx, RuntimeAllocateRequest{
+	allocation, err := g.runtimeAllocator.Allocate(allocationCtx, RuntimeAllocateRequest{
 		PoolRef:              poolRef,
 		Namespace:            ns,
 		SessionID:            sessionID,
@@ -124,7 +135,7 @@ func (g *Gateway) CreateSession(ctx context.Context, req CreateSessionRequest) (
 		recordSpanErr(span, err)
 		if g.metrics != nil {
 			result := "error"
-			if allocCtx.Err() == context.DeadlineExceeded {
+			if allocationCtx.Err() == context.DeadlineExceeded {
 				result = "timeout"
 			}
 			g.metrics.IncrementPodAllocationResult(poolRef, result)
@@ -182,6 +193,27 @@ func (g *Gateway) CreateSession(ctx context.Context, req CreateSessionRequest) (
 	}
 
 	return &info, nil
+}
+
+func (g *Gateway) allocationTimeout(req CreateSessionRequest) (time.Duration, error) {
+	if req.AllocationTimeoutSeconds != nil {
+		if *req.AllocationTimeoutSeconds < 0 {
+			return 0, fmt.Errorf("allocationTimeoutSeconds cannot be negative")
+		}
+		return time.Duration(*req.AllocationTimeoutSeconds) * time.Second, nil
+	}
+	if g.gwConfig.AdmissionQueueTimeout > 0 {
+		return g.gwConfig.AdmissionQueueTimeout, nil
+	}
+	return 0, nil
+}
+
+func (g *Gateway) resolvedAllocationTimeout(req CreateSessionRequest) time.Duration {
+	timeout, err := g.allocationTimeout(req)
+	if err != nil {
+		return 0
+	}
+	return timeout
 }
 
 // GetSession returns session info.

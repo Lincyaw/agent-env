@@ -6,6 +6,7 @@ import (
 	"log"
 	"sort"
 	"strings"
+	"time"
 
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
@@ -82,21 +83,24 @@ func (g *Gateway) CreateManagedSession(ctx context.Context, req CreateManagedSes
 	span.SetAttributes(attribute.String("pool.name", poolName))
 
 	info, err := g.CreateSession(ctx, CreateSessionRequest{
-		Image:              image,
-		Profile:            profile,
-		PoolName:           poolName,
-		Namespace:          ns,
-		Mode:               req.Mode,
-		Devbox:             req.Devbox,
-		IdleTimeoutSeconds: req.IdleTimeoutSeconds,
-		ConfigEnv:          req.ConfigEnv,
-		Managed:            true,
-		ExperimentID:       req.ExperimentID,
-		PrivateContainers:  req.PrivateContainers,
+		Image:                    image,
+		Profile:                  profile,
+		PoolName:                 poolName,
+		Namespace:                ns,
+		Mode:                     req.Mode,
+		Devbox:                   req.Devbox,
+		IdleTimeoutSeconds:       req.IdleTimeoutSeconds,
+		AllocationTimeoutSeconds: req.AllocationTimeoutSeconds,
+		ConfigEnv:                req.ConfigEnv,
+		Managed:                  true,
+		ExperimentID:             req.ExperimentID,
+		PrivateContainers:        req.PrivateContainers,
 	})
 	if err != nil {
 		if createdPool {
-			if stopped, cleanupErr := g.stopManagedPoolIfUnused(ctx, poolName, ns); cleanupErr != nil {
+			cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			if stopped, cleanupErr := g.stopManagedPoolIfUnused(cleanupCtx, poolName, ns); cleanupErr != nil {
 				log.Printf("Warning: failed to cleanup unused managed pool %s/%s after managed session create failure: %v", ns, poolName, cleanupErr)
 			} else if stopped {
 				log.Printf("Stopped unused managed pool %s/%s after managed session create failure", ns, poolName)

@@ -46,13 +46,14 @@ func (s RequestScope) normalized() RequestScope {
 
 // ResourceIntent is the normalized "what do I need?" input to pool policy.
 type ResourceIntent struct {
-	Scope          RequestScope
-	Profile        string
-	Image          string
-	PinnedPoolName string
-	Managed        bool
-	ExperimentID   string
-	ClaimEnv       bool
+	Scope             RequestScope
+	Profile           string
+	Image             string
+	PinnedPoolName    string
+	Managed           bool
+	ExperimentID      string
+	ClaimEnv          bool
+	AllocationTimeout time.Duration
 }
 
 // PoolSnapshot is the selector/admission view of a SandboxWarmPool.
@@ -212,12 +213,13 @@ func (g *Gateway) resourceIntentFromCreateSession(ctx context.Context, req Creat
 			Principal: principal,
 			Tenant:    defaultPolicyTenant,
 		},
-		Profile:        normalizeProfile(req.Profile),
-		Image:          normalizedOptionalImage(req.Image),
-		PinnedPoolName: req.PoolName,
-		Managed:        req.Managed,
-		ExperimentID:   req.ExperimentID,
-		ClaimEnv:       hasJSONPayload(req.ConfigEnv),
+		Profile:           normalizeProfile(req.Profile),
+		Image:             normalizedOptionalImage(req.Image),
+		PinnedPoolName:    req.PoolName,
+		Managed:           req.Managed,
+		ExperimentID:      req.ExperimentID,
+		ClaimEnv:          hasJSONPayload(req.ConfigEnv),
+		AllocationTimeout: g.resolvedAllocationTimeout(req),
 	}
 }
 
@@ -257,6 +259,14 @@ func (g *Gateway) ensureImageBackedSessionPool(ctx context.Context, req CreateSe
 }
 
 func (g *Gateway) planSessionAllocation(ctx context.Context, intent ResourceIntent) (PoolSelection, AdmissionDecision, error) {
+	if intent.AllocationTimeout > 0 {
+		if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+			var cancel context.CancelFunc
+			ctx, cancel = context.WithTimeout(ctx, intent.AllocationTimeout)
+			defer cancel()
+		}
+	}
+
 	selection, decision, err := g.tryPlanSessionAllocation(ctx, intent)
 	if err == nil || ctx.Err() != nil {
 		return selection, decision, err
@@ -280,34 +290,28 @@ func (g *Gateway) waitForWarmCapacity(ctx context.Context, intent ResourceIntent
 		return selection, decision, err
 	}
 
-	timeout := g.gwConfig.AdmissionQueueTimeout
-	if timeout <= 0 {
-		timeout = 5 * time.Minute
-	}
 	poll := g.gwConfig.AdmissionQueuePollInterval
 	if poll <= 0 {
 		poll = 500 * time.Millisecond
 	}
-	waitCtx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
 	ticker := time.NewTicker(poll)
 	defer ticker.Stop()
 	waitErr := func(err error) error {
-		if err == context.DeadlineExceeded {
-			return fmt.Errorf("%w: queued for %s waiting for warm capacity", ErrPoolAtCapacity, timeout)
+		if err == context.DeadlineExceeded && intent.AllocationTimeout > 0 {
+			return fmt.Errorf("%w: queued for %s waiting for warm capacity", ErrPoolAtCapacity, intent.AllocationTimeout)
 		}
 		return err
 	}
 
 	for {
 		select {
-		case <-waitCtx.Done():
-			return selection, decision, waitErr(waitCtx.Err())
+		case <-ctx.Done():
+			return selection, decision, waitErr(ctx.Err())
 		case <-ticker.C:
-			if err := waitCtx.Err(); err != nil {
+			if err := ctx.Err(); err != nil {
 				return selection, decision, waitErr(err)
 			}
-			nextSelection, nextDecision, nextErr := g.tryPlanSessionAllocation(waitCtx, intent)
+			nextSelection, nextDecision, nextErr := g.tryPlanSessionAllocation(ctx, intent)
 			if nextErr == nil {
 				return nextSelection, nextDecision, nil
 			}
@@ -315,7 +319,7 @@ func (g *Gateway) waitForWarmCapacity(ctx context.Context, intent ResourceIntent
 			if !errors.Is(nextErr, ErrPoolAtCapacity) {
 				return nextSelection, nextDecision, nextErr
 			}
-			if err := g.scalePoolForQueuedDemand(waitCtx, queueKey); err != nil {
+			if err := g.scalePoolForQueuedDemand(ctx, queueKey); err != nil {
 				return nextSelection, nextDecision, err
 			}
 		}

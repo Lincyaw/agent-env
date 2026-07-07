@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -12,6 +13,8 @@ import (
 	"strings"
 	"time"
 )
+
+const defaultClientRequestTimeout = 5 * time.Minute
 
 type Client struct {
 	base   string
@@ -28,6 +31,10 @@ func NewClient(baseURL, apiKey string) *Client {
 }
 
 func (c *Client) do(method, path string, body any, result any) error {
+	return c.doWithTimeout(method, path, body, result, defaultClientRequestTimeout)
+}
+
+func (c *Client) doWithTimeout(method, path string, body any, result any, timeout time.Duration) error {
 	var bodyReader io.Reader
 	if body != nil {
 		data, err := json.Marshal(body)
@@ -37,7 +44,14 @@ func (c *Client) do(method, path string, body any, result any) error {
 		bodyReader = bytes.NewReader(data)
 	}
 
-	req, err := http.NewRequest(method, c.base+path, bodyReader)
+	ctx := context.Background()
+	cancel := func() {}
+	if timeout > 0 {
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+	}
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, method, c.base+path, bodyReader)
 	if err != nil {
 		return err
 	}
@@ -48,7 +62,11 @@ func (c *Client) do(method, path string, body any, result any) error {
 		req.Header.Set("Authorization", "Bearer "+c.apiKey)
 	}
 
-	resp, err := c.http.Do(req)
+	httpClient := c.http
+	if timeout == 0 || timeout > c.http.Timeout {
+		httpClient = &http.Client{Timeout: timeout}
+	}
+	resp, err := httpClient.Do(req)
 	if err != nil {
 		return fmt.Errorf("request failed: %w", err)
 	}
@@ -134,7 +152,7 @@ func (c *Client) ListSessions(options ...SessionListOptions) ([]SessionListItem,
 
 func (c *Client) CreateSession(req CreateSessionRequest) (*SessionInfo, error) {
 	var s SessionInfo
-	return &s, c.do("POST", "/v1/sessions", req, &s)
+	return &s, c.doWithTimeout("POST", "/v1/sessions", req, &s, clientTimeoutForAllocation(req.AllocationTimeoutSeconds))
 }
 
 func (c *Client) GetSession(id string) (*SessionInfo, error) {
@@ -335,7 +353,7 @@ func (c *Client) ListExperimentSessions(experimentID string) ([]ManagedSessionIn
 
 func (c *Client) CreateManagedSession(req CreateManagedSessionRequest) (*ManagedSessionInfo, error) {
 	var info ManagedSessionInfo
-	return &info, c.do("POST", "/v1/managed/sessions", req, &info)
+	return &info, c.doWithTimeout("POST", "/v1/managed/sessions", req, &info, clientTimeoutForAllocation(req.AllocationTimeoutSeconds))
 }
 
 func (c *Client) DeleteExperiment(experimentID string) (map[string]any, error) {
