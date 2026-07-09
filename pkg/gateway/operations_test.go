@@ -41,9 +41,9 @@ func TestExecuteStepsOperationIsIdempotent(t *testing.T) {
 
 	var executeCalls atomic.Int32
 	sidecarClient := &mockclient.MockSidecarClient{
-		ExecuteStreamFunc: func(ctx context.Context, podIP string, req interfaces.ExecRequest) (<-chan interfaces.ExecResponse, error) {
+		ExecuteFunc: func(ctx context.Context, podIP string, req interfaces.ExecRequest) (interfaces.ExecResponse, error) {
 			executeCalls.Add(1)
-			return singleExecStream("ok\n", "", 0), nil
+			return &sidecar.ExecLog{Stdout: "ok\n", Stderr: "", ExitCode: 0, Done: true}, nil
 		},
 	}
 	gw := New(nil, &operationRuntimeAllocator{}, sidecarClient, nil, nil, GatewayConfig{}, store)
@@ -79,9 +79,9 @@ func TestExecuteStepsOperationIsIdempotent(t *testing.T) {
 	}
 }
 
-func TestExecuteStepsOperationCachesObservationPreview(t *testing.T) {
+func TestExecuteStepsOperationReturnsFullOutput(t *testing.T) {
 	store := NewMemoryStore()
-	sessionID := "gw-op-preview"
+	sessionID := "gw-op-full"
 	store.Set(sessionID, &session{
 		Info: SessionInfo{
 			ID:        sessionID,
@@ -107,14 +107,14 @@ func TestExecuteStepsOperationCachesObservationPreview(t *testing.T) {
 	store.IncrCount(1)
 
 	sidecarClient := &mockclient.MockSidecarClient{
-		ExecuteStreamFunc: func(ctx context.Context, podIP string, req interfaces.ExecRequest) (<-chan interfaces.ExecResponse, error) {
-			return singleExecStream("abcdef", "UVWXYZ", 0), nil
+		ExecuteFunc: func(ctx context.Context, podIP string, req interfaces.ExecRequest) (interfaces.ExecResponse, error) {
+			return &sidecar.ExecLog{Stdout: "abcdef", Stderr: "UVWXYZ", ExitCode: 0, Done: true}, nil
 		},
 	}
 	gw := New(nil, &operationRuntimeAllocator{}, sidecarClient, nil, nil, GatewayConfig{ObservationPreviewBytes: 4}, store)
 
 	resp, err := gw.ExecuteSteps(context.Background(), sessionID, ExecuteRequest{
-		OperationID: "op-preview",
+		OperationID: "op-full",
 		Steps: []StepRequest{{
 			Name:    "echo",
 			Command: []string{"echo", "ok"},
@@ -123,27 +123,38 @@ func TestExecuteStepsOperationCachesObservationPreview(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ExecuteSteps returned error: %v", err)
 	}
-	if got := len(resp.Results[0].Output.Stdout) + len(resp.Results[0].Output.Stderr); got != 4 {
-		t.Fatalf("operation response output bytes = %d, want preview length 4", got)
+	if got := resp.Results[0].Output.Stdout; got != "abcdef" {
+		t.Fatalf("operation response stdout = %q, want full output", got)
+	}
+	if got := resp.Results[0].Output.Stderr; got != "UVWXYZ" {
+		t.Fatalf("operation response stderr = %q, want full output", got)
 	}
 
-	info, err := gw.ExecuteOperationStatus(sessionID, "op-preview")
+	info, err := gw.ExecuteOperationStatus(sessionID, "op-full")
 	if err != nil {
 		t.Fatalf("ExecuteOperationStatus returned error: %v", err)
 	}
 	if info.Result == nil || len(info.Result.Results) != 1 {
 		t.Fatalf("operation info result = %#v, want one result", info.Result)
 	}
-	if got := len(info.Result.Results[0].Output.Stdout) + len(info.Result.Results[0].Output.Stderr); got != 4 {
-		t.Fatalf("cached operation output bytes = %d, want preview length 4", got)
+	if got := info.Result.Results[0].Output.Stdout; got != "abcdef" {
+		t.Fatalf("polled operation stdout = %q, want full output", got)
 	}
-}
 
-func singleExecStream(stdout, stderr string, exitCode int32) <-chan interfaces.ExecResponse {
-	ch := make(chan interfaces.ExecResponse, 1)
-	ch <- &sidecar.ExecLog{Stdout: stdout, Stderr: stderr, ExitCode: exitCode, Done: true}
-	close(ch)
-	return ch
+	s, ok := store.Get(sessionID)
+	if !ok {
+		t.Fatal("session missing after execute")
+	}
+	records := s.History.GetAll()
+	if len(records) != 1 {
+		t.Fatalf("history records = %d, want 1", len(records))
+	}
+	if !records[0].OutputTruncated {
+		t.Fatal("history output was not marked truncated")
+	}
+	if got := len(records[0].Output.Stdout) + len(records[0].Output.Stderr); got != 4 {
+		t.Fatalf("stored history output bytes = %d, want preview length 4", got)
+	}
 }
 
 func TestExecuteStepsStoresObservationPreviewByDefault(t *testing.T) {

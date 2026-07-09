@@ -175,8 +175,6 @@ func (g *Gateway) executeStepsNow(ctx context.Context, sessionID string, req Exe
 		SessionID:   sessionID,
 		OperationID: req.OperationID,
 	}
-	retainOnly := req.OperationID != "" && !g.gwConfig.FullObservationEnabled
-
 	totalStart := time.Now()
 
 	for _, step := range req.Steps {
@@ -192,34 +190,19 @@ func (g *Gateway) executeStepsNow(ctx context.Context, sessionID string, req Exe
 			TimeoutSeconds: resolveStepTimeoutSeconds(step),
 		}
 		grpcStart := time.Now()
-		if retainOnly {
-			output, outputBytes, outputTruncated, err := g.executeStepRetained(ctx, podIP, execReq)
-			if g.metrics != nil {
-				g.metrics.RecordSidecarCallDuration("ExecuteStream", time.Since(grpcStart))
-			}
-			if err != nil {
-				output.Stderr = err.Error()
-				output.ExitCode = 1
-				outputBytes = len(output.Stderr)
-				outputTruncated = false
-			}
-			result.Output = output
-			g.recordRetainedStepResult(s, sessionID, &result, start, output, outputBytes, outputTruncated)
-		} else {
-			execResp, err := g.sidecarClient.Execute(ctx, podIP, execReq)
-			if g.metrics != nil {
-				g.metrics.RecordSidecarCallDuration("Execute", time.Since(grpcStart))
-			}
-			if err != nil {
-				result.Output.Stderr = err.Error()
-				result.Output.ExitCode = 1
-			} else {
-				result.Output.Stdout = execResp.GetStdout()
-				result.Output.Stderr = execResp.GetStderr()
-				result.Output.ExitCode = execResp.GetExitCode()
-			}
-			g.recordStepResult(s, sessionID, &result, start)
+		execResp, err := g.sidecarClient.Execute(ctx, podIP, execReq)
+		if g.metrics != nil {
+			g.metrics.RecordSidecarCallDuration("Execute", time.Since(grpcStart))
 		}
+		if err != nil {
+			result.Output.Stderr = err.Error()
+			result.Output.ExitCode = 1
+		} else {
+			result.Output.Stdout = execResp.GetStdout()
+			result.Output.Stderr = execResp.GetStderr()
+			result.Output.ExitCode = execResp.GetExitCode()
+		}
+		g.recordStepResult(s, sessionID, &result, start)
 		resp.Results = append(resp.Results, result)
 	}
 
@@ -228,56 +211,6 @@ func (g *Gateway) executeStepsNow(ctx context.Context, sessionID string, req Exe
 	g.store.SyncHistory(sessionID)
 
 	return resp, nil
-}
-
-func (g *Gateway) executeStepRetained(ctx context.Context, podIP string, execReq *sidecar.ExecRequest) (StepOutput, int, bool, error) {
-	streamCh, err := g.sidecarClient.ExecuteStream(ctx, podIP, execReq)
-	if err != nil {
-		return StepOutput{}, 0, false, err
-	}
-	limit := g.observationPreviewLimit()
-	stdoutLimit := limit / 2
-	stderrLimit := limit - stdoutLimit
-	var stdout, stderr strings.Builder
-	totalStdout := 0
-	totalStderr := 0
-	var exitCode int32
-
-	for chunk := range streamCh {
-		stdoutChunk := chunk.GetStdout()
-		if stdoutChunk != "" {
-			totalStdout += len(stdoutChunk)
-			writeLimitedString(&stdout, stdoutChunk, stdoutLimit)
-		}
-		stderrChunk := chunk.GetStderr()
-		if stderrChunk != "" {
-			totalStderr += len(stderrChunk)
-			writeLimitedString(&stderr, stderrChunk, stderrLimit)
-		}
-		if chunk.IsDone() {
-			exitCode = chunk.GetExitCode()
-		}
-	}
-
-	output := StepOutput{
-		Stdout:   stdout.String(),
-		Stderr:   stderr.String(),
-		ExitCode: exitCode,
-	}
-	total := totalStdout + totalStderr
-	retained := len(output.Stdout) + len(output.Stderr)
-	return output, total, total > retained, nil
-}
-
-func writeLimitedString(dst *strings.Builder, value string, limit int) {
-	remaining := limit - dst.Len()
-	if remaining <= 0 {
-		return
-	}
-	if len(value) > remaining {
-		value = value[:remaining]
-	}
-	dst.WriteString(value)
 }
 
 type sseOutputEvent struct {

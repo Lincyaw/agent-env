@@ -146,7 +146,7 @@ func (g *Gateway) getOrStartExecuteOperation(sessionID string, req ExecuteReques
 		if resp != nil {
 			resp.OperationID = req.OperationID
 		}
-		op.resp = g.cachedExecuteResponse(resp)
+		op.resp = resp
 		op.err = err
 		op.finishedAt = &finished
 		if g.metrics != nil {
@@ -172,23 +172,3 @@ func (g *Gateway) getOrStartExecuteOperation(sessionID string, req ExecuteReques
 	return op, true, nil
 }
 
-func (g *Gateway) cachedExecuteResponse(resp *ExecuteResponse) *ExecuteResponse {
-	if resp == nil {
-		return nil
-	}
-	cached := &ExecuteResponse{
-		SessionID:       resp.SessionID,
-		TotalDurationMs: resp.TotalDurationMs,
-		OperationID:     resp.OperationID,
-	}
-	if len(resp.Results) == 0 {
-		return cached
-	}
-	cached.Results = make([]StepResult, len(resp.Results))
-	for i := range resp.Results {
-		result := resp.Results[i]
-		result.Output, _, _ = g.retainedStepOutput(result.Output)
-		cached.Results[i] = result
-	}
-	return cached
-}
