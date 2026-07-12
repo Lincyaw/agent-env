@@ -194,9 +194,25 @@ fn handle_messages(
     tunnels: &Arc<Mutex<HashMap<String, TunnelState>>>,
     subscriptions: &Arc<Mutex<HashMap<String, SubscriptionState>>>,
 ) -> io::Result<()> {
-    let de = serde_json::Deserializer::from_reader(reader);
-    for value in de.into_iter::<V2Request>() {
-        let req = match value {
+    let mut lines = reader.lines();
+    while let Some(line_result) = lines.next() {
+        let line = match line_result {
+            Ok(l) => l,
+            Err(e) => {
+                if e.kind() == io::ErrorKind::UnexpectedEof {
+                    return Ok(());
+                }
+                let _ = send_json(
+                    &writer,
+                    &V2Response::err(String::new(), "READ_ERROR", format!("{e}")),
+                );
+                return Ok(());
+            }
+        };
+        if line.trim().is_empty() {
+            continue;
+        }
+        let req: V2Request = match serde_json::from_str(&line) {
             Ok(r) => r,
             Err(e) => {
                 if e.is_eof() {
@@ -230,14 +246,7 @@ fn handle_messages(
             }
             V2Request::WriteFile { id, params } => {
                 log::info!("[v2:write_file] id={id} path={}", params.path);
-                let _ = send_json(
-                    &writer,
-                    &V2Response::err(
-                        id,
-                        "NOT_IMPLEMENTED",
-                        "use spawned write_file flow".into(),
-                    ),
-                );
+                handle_write_file(&id, params, workspace, &writer, &mut lines);
             }
             V2Request::FileChunk { id, .. } | V2Request::FileDone { id } => {
                 let _ = send_json(
@@ -918,6 +927,123 @@ fn handle_read_file(
             .unwrap(),
         ),
     );
+}
+
+// ---------------------------------------------------------------------------
+// write_file
+// ---------------------------------------------------------------------------
+
+fn handle_write_file(
+    id: &str,
+    params: WriteFileParams,
+    workspace: &str,
+    writer: &SharedWriter,
+    lines: &mut impl Iterator<Item = io::Result<String>>,
+) {
+    let target = match resolve_workspace_path(std::path::Path::new(workspace), &params.path) {
+        Ok(p) => p,
+        Err(e) => {
+            let _ = send_json(writer, &V2Response::err(id.into(), "PATH_ERROR", e));
+            return;
+        }
+    };
+
+    let parent = match target.parent() {
+        Some(p) => p.to_path_buf(),
+        None => {
+            let _ = send_json(writer, &V2Response::err(id.into(), "PATH_ERROR", "invalid target".into()));
+            return;
+        }
+    };
+
+    if let Err(e) = fs::create_dir_all(&parent) {
+        let _ = send_json(writer, &V2Response::err(id.into(), "WRITE_FAILED", format!("mkdir: {e}")));
+        return;
+    }
+
+    let base_name = target.file_name().unwrap_or_default().to_string_lossy();
+    let tmp_path = parent.join(format!(".{base_name}.{}.tmp", std::process::id()));
+
+    let tmp_file = match fs::File::create(&tmp_path) {
+        Ok(f) => f,
+        Err(e) => {
+            let _ = send_json(writer, &V2Response::err(id.into(), "WRITE_FAILED", format!("create temp: {e}")));
+            return;
+        }
+    };
+
+    let mut tmp_writer = io::BufWriter::new(tmp_file);
+    let mut hasher = Sha256::new();
+    let mut written: i64 = 0;
+
+    let result = (|| -> Result<(), String> {
+        for line_result in lines {
+            let line = line_result.map_err(|e| format!("read: {e}"))?;
+            if line.trim().is_empty() {
+                continue;
+            }
+            let chunk: V2Request = serde_json::from_str(&line)
+                .map_err(|e| format!("parse chunk: {e}"))?;
+
+            match chunk {
+                V2Request::FileChunk { id: chunk_id, params: chunk_params } => {
+                    if !chunk_id.is_empty() && chunk_id != id {
+                        return Err("file chunk id mismatch".into());
+                    }
+                    let bytes = base64::engine::general_purpose::STANDARD
+                        .decode(&chunk_params.content)
+                        .map_err(|e| format!("base64 decode: {e}"))?;
+                    if bytes.is_empty() {
+                        continue;
+                    }
+                    use io::Write;
+                    tmp_writer.write_all(&bytes).map_err(|e| format!("write: {e}"))?;
+                    hasher.update(&bytes);
+                    written += bytes.len() as i64;
+                }
+                V2Request::FileDone { .. } => {
+                    use io::Write;
+                    tmp_writer.flush().map_err(|e| format!("flush: {e}"))?;
+                    drop(tmp_writer);
+
+                    let actual_sha = hex::encode(hasher.finalize());
+
+                    if let Some(ref expected) = params.sha256 {
+                        if !expected.eq_ignore_ascii_case(&actual_sha) {
+                            return Err(format!("sha256 mismatch: expected {expected} got {actual_sha}"));
+                        }
+                    }
+
+                    use std::os::unix::fs::PermissionsExt;
+                    fs::set_permissions(&tmp_path, fs::Permissions::from_mode(0o644))
+                        .map_err(|e| format!("chmod: {e}"))?;
+                    fs::rename(&tmp_path, &target)
+                        .map_err(|e| format!("rename: {e}"))?;
+
+                    let _ = send_json(
+                        writer,
+                        &V2Response::result(
+                            id.into(),
+                            serde_json::to_value(WriteFileResult {
+                                bytes_written: written,
+                                sha256: actual_sha,
+                            }).unwrap(),
+                        ),
+                    );
+                    return Ok(());
+                }
+                _ => {
+                    return Err(format!("unexpected message during file upload"));
+                }
+            }
+        }
+        Err("unexpected EOF during file upload".into())
+    })();
+
+    if let Err(e) = result {
+        let _ = fs::remove_file(&tmp_path);
+        let _ = send_json(writer, &V2Response::err(id.into(), "WRITE_FAILED", e));
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -2099,5 +2225,126 @@ mod tests {
         }
 
         assert!(!got_fs_event, "should not receive fs_change after unsubscribe");
+    }
+
+    #[test]
+    fn test_write_file() {
+        let ws = tempfile::tempdir().unwrap();
+        let (sock, _tx) = start_test_agent(ws.path().to_str().unwrap());
+
+        let stream = UnixStream::connect(&sock).unwrap();
+        let mut writer = stream.try_clone().unwrap();
+        let mut reader = BufReader::new(stream);
+
+        let content = b"hello write_file v2!";
+        let content_b64 = base64::engine::general_purpose::STANDARD.encode(content);
+        let expected_sha = hex::encode(sha2::Sha256::digest(content));
+
+        send_request(
+            &mut writer,
+            &format!(r#"{{"id":"wf1","method":"write_file","params":{{"path":"test_output.txt","sha256":"{expected_sha}"}}}}"#),
+        );
+        send_request(
+            &mut writer,
+            &format!(r#"{{"id":"wf1","method":"file_chunk","params":{{"content":"{content_b64}"}}}}"#),
+        );
+        send_request(&mut writer, r#"{"id":"wf1","method":"file_done"}"#);
+
+        let line = read_line(&mut reader);
+        let v: serde_json::Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(v["id"], "wf1");
+        assert_eq!(v["result"]["bytes_written"], content.len() as i64);
+        assert_eq!(v["result"]["sha256"], expected_sha);
+
+        let written = std::fs::read(ws.path().join("test_output.txt")).unwrap();
+        assert_eq!(written, content);
+    }
+
+    #[test]
+    fn test_write_file_sha_mismatch() {
+        let ws = tempfile::tempdir().unwrap();
+        let (sock, _tx) = start_test_agent(ws.path().to_str().unwrap());
+
+        let stream = UnixStream::connect(&sock).unwrap();
+        let mut writer = stream.try_clone().unwrap();
+        let mut reader = BufReader::new(stream);
+
+        let content_b64 = base64::engine::general_purpose::STANDARD.encode(b"data");
+
+        send_request(
+            &mut writer,
+            r#"{"id":"wf2","method":"write_file","params":{"path":"bad.txt","sha256":"0000000000000000000000000000000000000000000000000000000000000000"}}"#,
+        );
+        send_request(
+            &mut writer,
+            &format!(r#"{{"id":"wf2","method":"file_chunk","params":{{"content":"{content_b64}"}}}}"#),
+        );
+        send_request(&mut writer, r#"{"id":"wf2","method":"file_done"}"#);
+
+        let line = read_line(&mut reader);
+        let v: serde_json::Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(v["id"], "wf2");
+        assert!(v["error"]["message"].as_str().unwrap().contains("sha256 mismatch"));
+        assert!(!ws.path().join("bad.txt").exists());
+    }
+
+    #[test]
+    fn test_write_read_roundtrip_large() {
+        let ws = tempfile::tempdir().unwrap();
+        let (sock, _tx) = start_test_agent(ws.path().to_str().unwrap());
+
+        let stream = UnixStream::connect(&sock).unwrap();
+        let mut writer = stream.try_clone().unwrap();
+        let mut reader = BufReader::new(stream);
+
+        // 2MB payload in 4 chunks
+        let chunk_data = vec![0x42u8; 512 * 1024];
+        let chunk_b64 = base64::engine::general_purpose::STANDARD.encode(&chunk_data);
+
+        let mut full_hasher = sha2::Sha256::new();
+        for _ in 0..4 {
+            full_hasher.update(&chunk_data);
+        }
+        let expected_sha = hex::encode(full_hasher.finalize());
+
+        send_request(
+            &mut writer,
+            r#"{"id":"wf3","method":"write_file","params":{"path":"large.bin"}}"#,
+        );
+        for _ in 0..4 {
+            send_request(
+                &mut writer,
+                &format!(r#"{{"id":"wf3","method":"file_chunk","params":{{"content":"{chunk_b64}"}}}}"#),
+            );
+        }
+        send_request(&mut writer, r#"{"id":"wf3","method":"file_done"}"#);
+
+        let line = read_line(&mut reader);
+        let v: serde_json::Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(v["id"], "wf3");
+        assert_eq!(v["result"]["bytes_written"], 2 * 1024 * 1024);
+        assert_eq!(v["result"]["sha256"], expected_sha);
+
+        // Read it back and verify
+        send_request(
+            &mut writer,
+            r#"{"id":"rf3","method":"read_file","params":{"path":"large.bin"}}"#,
+        );
+
+        let mut chunks = Vec::new();
+        loop {
+            let line = read_line(&mut reader);
+            if line.trim().is_empty() { continue; }
+            let v: serde_json::Value = serde_json::from_str(&line).unwrap();
+            if v.get("chunk").is_some() {
+                let b64 = v["chunk"]["content"].as_str().unwrap();
+                chunks.extend(base64::engine::general_purpose::STANDARD.decode(b64).unwrap());
+            } else if v.get("result").is_some() {
+                assert_eq!(v["result"]["size_bytes"], 2 * 1024 * 1024);
+                assert_eq!(v["result"]["sha256"], expected_sha);
+                break;
+            }
+        }
+        assert_eq!(chunks.len(), 2 * 1024 * 1024);
     }
 }
