@@ -337,16 +337,23 @@ func (g *Gateway) grpcAuthSecretName() string {
 }
 
 func (g *Gateway) sidecarEnv() []corev1.EnvVar {
-	return []corev1.EnvVar{{
-		Name: "GRPC_AUTH_TOKEN",
-		ValueFrom: &corev1.EnvVarSource{
-			SecretKeyRef: &corev1.SecretKeySelector{
-				LocalObjectReference: corev1.LocalObjectReference{Name: g.grpcAuthSecretName()},
-				Key:                  "token",
-				Optional:             boolPtr(false),
+	protocol := g.gwConfig.ExecutorProtocol
+	if protocol == "" {
+		protocol = "v1"
+	}
+	return []corev1.EnvVar{
+		{
+			Name: "GRPC_AUTH_TOKEN",
+			ValueFrom: &corev1.EnvVarSource{
+				SecretKeyRef: &corev1.SecretKeySelector{
+					LocalObjectReference: corev1.LocalObjectReference{Name: g.grpcAuthSecretName()},
+					Key:                  "token",
+					Optional:             boolPtr(false),
+				},
 			},
 		},
-	}}
+		{Name: "EXECUTOR_PROTOCOL", Value: protocol},
+	}
 }
 
 func (g *Gateway) executorEnv() []corev1.EnvVar {
