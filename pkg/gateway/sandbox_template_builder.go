@@ -148,6 +148,7 @@ func (g *Gateway) sandboxPodSpec(
 				Image:           image,
 				ImagePullPolicy: corev1.PullIfNotPresent,
 				Command:         []string{"/bin/sh", "-c", executorCommand},
+				Env:             g.executorEnv(),
 				Resources:       g.ensureEphemeralStorage(resources),
 				VolumeMounts: []corev1.VolumeMount{
 					{Name: "workspace", MountPath: workspaceDir},
@@ -346,6 +347,16 @@ func (g *Gateway) sidecarEnv() []corev1.EnvVar {
 			},
 		},
 	}}
+}
+
+func (g *Gateway) executorEnv() []corev1.EnvVar {
+	protocol := g.gwConfig.ExecutorProtocol
+	if protocol == "" {
+		protocol = "v1"
+	}
+	return []corev1.EnvVar{
+		{Name: "EXECUTOR_PROTOCOL", Value: protocol},
+	}
 }
 
 func (g *Gateway) injectProxyEnv(pod *corev1.PodSpec) {

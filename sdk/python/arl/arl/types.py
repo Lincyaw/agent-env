@@ -154,6 +154,7 @@ class SessionInfo(BaseModel):
     deleted_at: datetime | None = Field(None, alias="deletedAt")
     deletion_reason: str = Field("", alias="deletionReason")
     connection_info: ConnectionInfo | None = Field(None, alias="connectionInfo")
+    iroh_addr: str = Field("", alias="irohAddr")
 
     model_config = {"populate_by_name": True}
 

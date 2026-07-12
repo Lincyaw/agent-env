@@ -43,6 +43,9 @@ func SetupRoutes(mux *http.ServeMux, gw *Gateway, authCfg *AuthConfig) {
 	route("POST /v1/sessions/{id}/suspend", user(handleSuspendSession(gw)))
 	route("POST /v1/sessions/{id}/resume", user(handleResumeSession(gw)))
 
+	// Iroh direct-connect address (user role)
+	route("GET /v1/sessions/{id}/iroh-addr", user(handleGetIrohAddr(gw)))
+
 	// Execution (user role)
 	route("POST /v1/sessions/{id}/execute", user(handleExecute(gw)))
 	route("POST /v1/sessions/{id}/containers/{container}/execute", user(handleExecuteContainer(gw)))
@@ -307,6 +310,21 @@ func handleResumeSession(gw *Gateway) http.HandlerFunc {
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]string{"status": "active"})
+	}
+}
+
+func handleGetIrohAddr(gw *Gateway) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		if checkOwnership(gw, w, r, id) == nil {
+			return
+		}
+		addr, err := gw.GetIrohAddr(r.Context(), id)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]string{"addr": addr})
 	}
 }
 

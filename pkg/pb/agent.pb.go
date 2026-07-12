@@ -1082,6 +1082,88 @@ func (*WriteStdinResponse) Descriptor() ([]byte, []int) {
 	return file_proto_agent_proto_rawDescGZIP(), []int{16}
 }
 
+// GetIrohAddrRequest is empty; no parameters needed.
+type GetIrohAddrRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetIrohAddrRequest) Reset() {
+	*x = GetIrohAddrRequest{}
+	mi := &file_proto_agent_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetIrohAddrRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetIrohAddrRequest) ProtoMessage() {}
+
+func (x *GetIrohAddrRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_agent_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetIrohAddrRequest.ProtoReflect.Descriptor instead.
+func (*GetIrohAddrRequest) Descriptor() ([]byte, []int) {
+	return file_proto_agent_proto_rawDescGZIP(), []int{17}
+}
+
+// GetIrohAddrResponse carries the JSON-serialized iroh NodeAddr.
+type GetIrohAddrResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	AddrJson      string                 `protobuf:"bytes,1,opt,name=addr_json,json=addrJson,proto3" json:"addr_json,omitempty"` // JSON-serialized iroh NodeAddr, empty if not available
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetIrohAddrResponse) Reset() {
+	*x = GetIrohAddrResponse{}
+	mi := &file_proto_agent_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetIrohAddrResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetIrohAddrResponse) ProtoMessage() {}
+
+func (x *GetIrohAddrResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_agent_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetIrohAddrResponse.ProtoReflect.Descriptor instead.
+func (*GetIrohAddrResponse) Descriptor() ([]byte, []int) {
+	return file_proto_agent_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *GetIrohAddrResponse) GetAddrJson() string {
+	if x != nil {
+		return x.AddrJson
+	}
+	return ""
+}
+
 var File_proto_agent_proto protoreflect.FileDescriptor
 
 const file_proto_agent_proto_rawDesc = "" +
@@ -1163,7 +1245,10 @@ const file_proto_agent_proto_rawDesc = "" +
 	"\x11WriteStdinRequest\x12\x16\n" +
 	"\x06handle\x18\x01 \x01(\tR\x06handle\x12\x12\n" +
 	"\x04data\x18\x02 \x01(\fR\x04data\"\x14\n" +
-	"\x12WriteStdinResponse2\xb9\x04\n" +
+	"\x12WriteStdinResponse\"\x14\n" +
+	"\x12GetIrohAddrRequest\"2\n" +
+	"\x13GetIrohAddrResponse\x12\x1b\n" +
+	"\taddr_json\x18\x01 \x01(\tR\baddrJson2\x8b\x05\n" +
 	"\fAgentService\x12;\n" +
 	"\aExecute\x12\x18.arl.sidecar.ExecRequest\x1a\x14.arl.sidecar.ExecLog0\x01\x12J\n" +
 	"\tWriteFile\x12\x1b.arl.sidecar.WriteFileChunk\x1a\x1e.arl.sidecar.WriteFileResponse(\x01\x12B\n" +
@@ -1174,7 +1259,8 @@ const file_proto_agent_proto_rawDesc = "" +
 	"WriteStdin\x12\x1e.arl.sidecar.WriteStdinRequest\x1a\x1f.arl.sidecar.WriteStdinResponse\x12I\n" +
 	"\x10InteractiveShell\x12\x17.arl.sidecar.ShellInput\x1a\x18.arl.sidecar.ShellOutput(\x010\x01\x12?\n" +
 	"\n" +
-	"StreamLogs\x12\x18.arl.sidecar.LogsRequest\x1a\x15.arl.sidecar.LogEntry0\x01B%Z#github.com/Lincyaw/agent-env/pkg/pbb\x06proto3"
+	"StreamLogs\x12\x18.arl.sidecar.LogsRequest\x1a\x15.arl.sidecar.LogEntry0\x01\x12P\n" +
+	"\vGetIrohAddr\x12\x1f.arl.sidecar.GetIrohAddrRequest\x1a .arl.sidecar.GetIrohAddrResponseB%Z#github.com/Lincyaw/agent-env/pkg/pbb\x06proto3"
 
 var (
 	file_proto_agent_proto_rawDescOnce sync.Once
@@ -1188,29 +1274,31 @@ func file_proto_agent_proto_rawDescGZIP() []byte {
 	return file_proto_agent_proto_rawDescData
 }
 
-var file_proto_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 18)
+var file_proto_agent_proto_msgTypes = make([]protoimpl.MessageInfo, 20)
 var file_proto_agent_proto_goTypes = []any{
-	(*ExecRequest)(nil),        // 0: arl.sidecar.ExecRequest
-	(*ExecLog)(nil),            // 1: arl.sidecar.ExecLog
-	(*WriteFileChunk)(nil),     // 2: arl.sidecar.WriteFileChunk
-	(*WriteFileResponse)(nil),  // 3: arl.sidecar.WriteFileResponse
-	(*ReadFileRequest)(nil),    // 4: arl.sidecar.ReadFileRequest
-	(*FileChunk)(nil),          // 5: arl.sidecar.FileChunk
-	(*ShellInput)(nil),         // 6: arl.sidecar.ShellInput
-	(*ShellOutput)(nil),        // 7: arl.sidecar.ShellOutput
-	(*LogsRequest)(nil),        // 8: arl.sidecar.LogsRequest
-	(*LogEntry)(nil),           // 9: arl.sidecar.LogEntry
-	(*StatRequest)(nil),        // 10: arl.sidecar.StatRequest
-	(*StatResponse)(nil),       // 11: arl.sidecar.StatResponse
-	(*ListDirRequest)(nil),     // 12: arl.sidecar.ListDirRequest
-	(*ListDirResponse)(nil),    // 13: arl.sidecar.ListDirResponse
-	(*DirEntryProto)(nil),      // 14: arl.sidecar.DirEntryProto
-	(*WriteStdinRequest)(nil),  // 15: arl.sidecar.WriteStdinRequest
-	(*WriteStdinResponse)(nil), // 16: arl.sidecar.WriteStdinResponse
-	nil,                        // 17: arl.sidecar.ExecRequest.EnvEntry
+	(*ExecRequest)(nil),         // 0: arl.sidecar.ExecRequest
+	(*ExecLog)(nil),             // 1: arl.sidecar.ExecLog
+	(*WriteFileChunk)(nil),      // 2: arl.sidecar.WriteFileChunk
+	(*WriteFileResponse)(nil),   // 3: arl.sidecar.WriteFileResponse
+	(*ReadFileRequest)(nil),     // 4: arl.sidecar.ReadFileRequest
+	(*FileChunk)(nil),           // 5: arl.sidecar.FileChunk
+	(*ShellInput)(nil),          // 6: arl.sidecar.ShellInput
+	(*ShellOutput)(nil),         // 7: arl.sidecar.ShellOutput
+	(*LogsRequest)(nil),         // 8: arl.sidecar.LogsRequest
+	(*LogEntry)(nil),            // 9: arl.sidecar.LogEntry
+	(*StatRequest)(nil),         // 10: arl.sidecar.StatRequest
+	(*StatResponse)(nil),        // 11: arl.sidecar.StatResponse
+	(*ListDirRequest)(nil),      // 12: arl.sidecar.ListDirRequest
+	(*ListDirResponse)(nil),     // 13: arl.sidecar.ListDirResponse
+	(*DirEntryProto)(nil),       // 14: arl.sidecar.DirEntryProto
+	(*WriteStdinRequest)(nil),   // 15: arl.sidecar.WriteStdinRequest
+	(*WriteStdinResponse)(nil),  // 16: arl.sidecar.WriteStdinResponse
+	(*GetIrohAddrRequest)(nil),  // 17: arl.sidecar.GetIrohAddrRequest
+	(*GetIrohAddrResponse)(nil), // 18: arl.sidecar.GetIrohAddrResponse
+	nil,                         // 19: arl.sidecar.ExecRequest.EnvEntry
 }
 var file_proto_agent_proto_depIdxs = []int32{
-	17, // 0: arl.sidecar.ExecRequest.env:type_name -> arl.sidecar.ExecRequest.EnvEntry
+	19, // 0: arl.sidecar.ExecRequest.env:type_name -> arl.sidecar.ExecRequest.EnvEntry
 	14, // 1: arl.sidecar.ListDirResponse.entries:type_name -> arl.sidecar.DirEntryProto
 	0,  // 2: arl.sidecar.AgentService.Execute:input_type -> arl.sidecar.ExecRequest
 	2,  // 3: arl.sidecar.AgentService.WriteFile:input_type -> arl.sidecar.WriteFileChunk
@@ -1220,16 +1308,18 @@ var file_proto_agent_proto_depIdxs = []int32{
 	15, // 7: arl.sidecar.AgentService.WriteStdin:input_type -> arl.sidecar.WriteStdinRequest
 	6,  // 8: arl.sidecar.AgentService.InteractiveShell:input_type -> arl.sidecar.ShellInput
 	8,  // 9: arl.sidecar.AgentService.StreamLogs:input_type -> arl.sidecar.LogsRequest
-	1,  // 10: arl.sidecar.AgentService.Execute:output_type -> arl.sidecar.ExecLog
-	3,  // 11: arl.sidecar.AgentService.WriteFile:output_type -> arl.sidecar.WriteFileResponse
-	5,  // 12: arl.sidecar.AgentService.ReadFile:output_type -> arl.sidecar.FileChunk
-	11, // 13: arl.sidecar.AgentService.Stat:output_type -> arl.sidecar.StatResponse
-	13, // 14: arl.sidecar.AgentService.ListDir:output_type -> arl.sidecar.ListDirResponse
-	16, // 15: arl.sidecar.AgentService.WriteStdin:output_type -> arl.sidecar.WriteStdinResponse
-	7,  // 16: arl.sidecar.AgentService.InteractiveShell:output_type -> arl.sidecar.ShellOutput
-	9,  // 17: arl.sidecar.AgentService.StreamLogs:output_type -> arl.sidecar.LogEntry
-	10, // [10:18] is the sub-list for method output_type
-	2,  // [2:10] is the sub-list for method input_type
+	17, // 10: arl.sidecar.AgentService.GetIrohAddr:input_type -> arl.sidecar.GetIrohAddrRequest
+	1,  // 11: arl.sidecar.AgentService.Execute:output_type -> arl.sidecar.ExecLog
+	3,  // 12: arl.sidecar.AgentService.WriteFile:output_type -> arl.sidecar.WriteFileResponse
+	5,  // 13: arl.sidecar.AgentService.ReadFile:output_type -> arl.sidecar.FileChunk
+	11, // 14: arl.sidecar.AgentService.Stat:output_type -> arl.sidecar.StatResponse
+	13, // 15: arl.sidecar.AgentService.ListDir:output_type -> arl.sidecar.ListDirResponse
+	16, // 16: arl.sidecar.AgentService.WriteStdin:output_type -> arl.sidecar.WriteStdinResponse
+	7,  // 17: arl.sidecar.AgentService.InteractiveShell:output_type -> arl.sidecar.ShellOutput
+	9,  // 18: arl.sidecar.AgentService.StreamLogs:output_type -> arl.sidecar.LogEntry
+	18, // 19: arl.sidecar.AgentService.GetIrohAddr:output_type -> arl.sidecar.GetIrohAddrResponse
+	11, // [11:20] is the sub-list for method output_type
+	2,  // [2:11] is the sub-list for method input_type
 	2,  // [2:2] is the sub-list for extension type_name
 	2,  // [2:2] is the sub-list for extension extendee
 	0,  // [0:2] is the sub-list for field type_name
@@ -1250,7 +1340,7 @@ func file_proto_agent_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_agent_proto_rawDesc), len(file_proto_agent_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   18,
+			NumMessages:   20,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

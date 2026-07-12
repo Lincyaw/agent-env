@@ -433,6 +433,16 @@ class SandboxSession:
             stderr=step.output.stderr,
         )
 
+    def get_iroh_addr(self) -> str:
+        """Fetch the iroh direct-connect endpoint address for this session.
+
+        Returns an empty string if the executor is not running with v2
+        protocol or the address is not yet available.
+        """
+        if self._session_id is None:
+            raise RuntimeError("No session created. Call create_sandbox() first.")
+        return self._client.get_iroh_addr(self._session_id)
+
     def suspend(self) -> None:
         """Suspend the devbox session (keeps storage, terminates pod)."""
         if self._session_id is None:

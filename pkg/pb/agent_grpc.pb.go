@@ -27,6 +27,7 @@ const (
 	AgentService_WriteStdin_FullMethodName       = "/arl.sidecar.AgentService/WriteStdin"
 	AgentService_InteractiveShell_FullMethodName = "/arl.sidecar.AgentService/InteractiveShell"
 	AgentService_StreamLogs_FullMethodName       = "/arl.sidecar.AgentService/StreamLogs"
+	AgentService_GetIrohAddr_FullMethodName      = "/arl.sidecar.AgentService/GetIrohAddr"
 )
 
 // AgentServiceClient is the client API for AgentService service.
@@ -51,6 +52,9 @@ type AgentServiceClient interface {
 	InteractiveShell(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[ShellInput, ShellOutput], error)
 	// StreamLogs streams log entries from the sidecar ring buffer.
 	StreamLogs(ctx context.Context, in *LogsRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[LogEntry], error)
+	// GetIrohAddr returns the iroh direct-connect endpoint address written by
+	// the executor agent when EXECUTOR_PROTOCOL=v2.
+	GetIrohAddr(ctx context.Context, in *GetIrohAddrRequest, opts ...grpc.CallOption) (*GetIrohAddrResponse, error)
 }
 
 type agentServiceClient struct {
@@ -174,6 +178,16 @@ func (c *agentServiceClient) StreamLogs(ctx context.Context, in *LogsRequest, op
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type AgentService_StreamLogsClient = grpc.ServerStreamingClient[LogEntry]
 
+func (c *agentServiceClient) GetIrohAddr(ctx context.Context, in *GetIrohAddrRequest, opts ...grpc.CallOption) (*GetIrohAddrResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetIrohAddrResponse)
+	err := c.cc.Invoke(ctx, AgentService_GetIrohAddr_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // AgentServiceServer is the server API for AgentService service.
 // All implementations must embed UnimplementedAgentServiceServer
 // for forward compatibility.
@@ -196,6 +210,9 @@ type AgentServiceServer interface {
 	InteractiveShell(grpc.BidiStreamingServer[ShellInput, ShellOutput]) error
 	// StreamLogs streams log entries from the sidecar ring buffer.
 	StreamLogs(*LogsRequest, grpc.ServerStreamingServer[LogEntry]) error
+	// GetIrohAddr returns the iroh direct-connect endpoint address written by
+	// the executor agent when EXECUTOR_PROTOCOL=v2.
+	GetIrohAddr(context.Context, *GetIrohAddrRequest) (*GetIrohAddrResponse, error)
 	mustEmbedUnimplementedAgentServiceServer()
 }
 
@@ -229,6 +246,9 @@ func (UnimplementedAgentServiceServer) InteractiveShell(grpc.BidiStreamingServer
 }
 func (UnimplementedAgentServiceServer) StreamLogs(*LogsRequest, grpc.ServerStreamingServer[LogEntry]) error {
 	return status.Error(codes.Unimplemented, "method StreamLogs not implemented")
+}
+func (UnimplementedAgentServiceServer) GetIrohAddr(context.Context, *GetIrohAddrRequest) (*GetIrohAddrResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetIrohAddr not implemented")
 }
 func (UnimplementedAgentServiceServer) mustEmbedUnimplementedAgentServiceServer() {}
 func (UnimplementedAgentServiceServer) testEmbeddedByValue()                      {}
@@ -352,6 +372,24 @@ func _AgentService_StreamLogs_Handler(srv interface{}, stream grpc.ServerStream)
 // This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
 type AgentService_StreamLogsServer = grpc.ServerStreamingServer[LogEntry]
 
+func _AgentService_GetIrohAddr_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetIrohAddrRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(AgentServiceServer).GetIrohAddr(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: AgentService_GetIrohAddr_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(AgentServiceServer).GetIrohAddr(ctx, req.(*GetIrohAddrRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // AgentService_ServiceDesc is the grpc.ServiceDesc for AgentService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -370,6 +408,10 @@ var AgentService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "WriteStdin",
 			Handler:    _AgentService_WriteStdin_Handler,
+		},
+		{
+			MethodName: "GetIrohAddr",
+			Handler:    _AgentService_GetIrohAddr_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

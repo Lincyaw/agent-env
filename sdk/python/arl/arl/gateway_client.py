@@ -787,6 +787,20 @@ class GatewayClient:
         """
         return self.delete_experiment_info(experiment_id).deleted
 
+    # --- Iroh direct-connect ---
+
+    def get_iroh_addr(self, session_id: str) -> str:
+        """Fetch the iroh direct-connect endpoint address for a session.
+
+        Returns an empty string if the executor is not running with v2
+        protocol or the address is not yet available.
+        """
+        resp = self._client.get(f"/v1/sessions/{session_id}/iroh-addr")
+        self._handle_error(resp)
+        data = resp.json()
+        addr: str = data.get("addr", "")
+        return addr
+
     # --- Health ---
 
     def health(self) -> bool:

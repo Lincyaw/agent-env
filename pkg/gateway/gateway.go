@@ -29,6 +29,7 @@ type GatewayConfig struct {
 	SidecarGRPCPort                 int
 	WorkspaceDir                    string
 	ExecutorAgentImage              string
+	ExecutorProtocol                string
 	ImagePullPolicy                 string
 	GRPCAuthToken                   string
 	GRPCAuthSecretName              string

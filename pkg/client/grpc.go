@@ -222,6 +222,22 @@ func (c *GRPCSidecarClient) callTimeout(requested int32) time.Duration {
 	return timeout
 }
 
+// GetIrohAddr fetches the iroh endpoint address from the sidecar via gRPC.
+func (c *GRPCSidecarClient) GetIrohAddr(ctx context.Context, podIP string) (string, error) {
+	conn, err := c.getOrCreateConn(podIP)
+	if err != nil {
+		return "", err
+	}
+	client := pb.NewAgentServiceClient(conn)
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	resp, err := client.GetIrohAddr(ctx, &pb.GetIrohAddrRequest{})
+	if err != nil {
+		return "", fmt.Errorf("gRPC GetIrohAddr failed: %w", err)
+	}
+	return resp.GetAddrJson(), nil
+}
+
 // HealthCheck checks if sidecar is healthy by verifying gRPC connection state
 func (c *GRPCSidecarClient) HealthCheck(ctx context.Context, podIP string) error {
 	conn, err := c.getOrCreateConn(podIP)

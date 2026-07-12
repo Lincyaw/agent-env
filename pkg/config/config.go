@@ -41,6 +41,7 @@ type Config struct {
 
 	// Executor agent configuration
 	ExecutorAgentImage string
+	ExecutorProtocol   string
 
 	// ImagePullPolicy is applied to the gateway-injected sidecar and
 	// executor-agent init containers. Defaults to "Always" (production:
@@ -142,6 +143,7 @@ func DefaultConfig() *Config {
 		TrajectoryDebug:         false,
 		ObservationPreviewBytes: 4096,
 		ExecutorAgentImage:      "arl-executor-agent:latest",
+		ExecutorProtocol:        "v1",
 		ImagePullPolicy:         "Always",
 		GatewayPort:             8080,
 		GatewayNamespace:        "default",
@@ -273,6 +275,9 @@ func LoadFromEnv() *Config {
 	// Executor agent configuration
 	if image := os.Getenv("EXECUTOR_AGENT_IMAGE"); image != "" {
 		cfg.ExecutorAgentImage = image
+	}
+	if v := os.Getenv("EXECUTOR_PROTOCOL"); v != "" {
+		cfg.ExecutorProtocol = v
 	}
 
 	if v := os.Getenv("IMAGE_PULL_POLICY"); v != "" {

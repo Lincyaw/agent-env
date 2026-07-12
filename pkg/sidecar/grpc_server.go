@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"net"
+	"os"
 	"strings"
 	"time"
 
@@ -314,6 +315,19 @@ func (s *GRPCServer) StreamLogs(req *pb.LogsRequest, stream grpc.ServerStreaming
 			return nil
 		}
 	}
+}
+
+// GetIrohAddr reads the iroh endpoint address file written by the executor
+// agent when running with EXECUTOR_PROTOCOL=v2.
+func (s *GRPCServer) GetIrohAddr(_ context.Context, _ *pb.GetIrohAddrRequest) (*pb.GetIrohAddrResponse, error) {
+	data, err := os.ReadFile("/var/run/arl/iroh-addr")
+	if err != nil {
+		if os.IsNotExist(err) {
+			return &pb.GetIrohAddrResponse{AddrJson: ""}, nil
+		}
+		return nil, status.Errorf(codes.Internal, "read iroh addr: %v", err)
+	}
+	return &pb.GetIrohAddrResponse{AddrJson: string(data)}, nil
 }
 
 // InteractiveShell implements bidirectional streaming for interactive shell sessions

@@ -133,6 +133,7 @@ func main() {
 		SidecarGRPCPort:                 cfg.SidecarGRPCPort,
 		WorkspaceDir:                    cfg.WorkspaceDir,
 		ExecutorAgentImage:              cfg.ExecutorAgentImage,
+		ExecutorProtocol:                cfg.ExecutorProtocol,
 		ImagePullPolicy:                 cfg.ImagePullPolicy,
 		GRPCAuthToken:                   cfg.GRPCAuthToken,
 		GRPCAuthSecretName:              cfg.GRPCAuthSecretName,

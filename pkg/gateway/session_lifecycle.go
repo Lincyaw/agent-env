@@ -187,6 +187,11 @@ func (g *Gateway) CreateSession(ctx context.Context, req CreateSessionRequest) (
 	if req.Mode == SessionModeDevbox {
 		info.ConnectionInfo = buildConnectionInfo(sessionID, allocation.PodIP, req.Devbox)
 	}
+	if strings.EqualFold(g.gwConfig.ExecutorProtocol, "v2") && allocation.PodIP != "" && g.sidecarClient != nil {
+		if addr, err := g.sidecarClient.GetIrohAddr(ctx, allocation.PodIP); err == nil && addr != "" {
+			info.IrohAddr = addr
+		}
+	}
 
 	g.store.Set(sessionID, &session{
 		Info:                info,
@@ -214,6 +219,28 @@ func (g *Gateway) CreateSession(ctx context.Context, req CreateSessionRequest) (
 	}
 
 	return &info, nil
+}
+
+// GetIrohAddr retrieves the iroh endpoint address from the sidecar for the
+// given session. Returns empty string if the executor is not running v2 or
+// the address file is not yet available.
+func (g *Gateway) GetIrohAddr(ctx context.Context, sessionID string) (string, error) {
+	s, ok := g.store.Get(sessionID)
+	if !ok {
+		return "", fmt.Errorf("session %s not found", sessionID)
+	}
+	s.mu.RLock()
+	podIP := s.Info.PodIP
+	s.mu.RUnlock()
+
+	if podIP == "" || g.sidecarClient == nil {
+		return "", nil
+	}
+	addr, err := g.sidecarClient.GetIrohAddr(ctx, podIP)
+	if err != nil {
+		return "", fmt.Errorf("get iroh addr from sidecar: %w", err)
+	}
+	return addr, nil
 }
 
 func (g *Gateway) allocationTimeout(req CreateSessionRequest) (time.Duration, error) {

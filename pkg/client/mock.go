@@ -50,6 +50,11 @@ func (m *MockSidecarClient) ReadFile(ctx context.Context, podIP string, path str
 	return nil, fmt.Errorf("not implemented")
 }
 
+// GetIrohAddr mocks iroh address retrieval
+func (m *MockSidecarClient) GetIrohAddr(_ context.Context, _ string) (string, error) {
+	return "", nil
+}
+
 // HealthCheck mocks health check
 func (m *MockSidecarClient) HealthCheck(ctx context.Context, podIP string) error {
 	if m.HealthCheckFunc != nil {

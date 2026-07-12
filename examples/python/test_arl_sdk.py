@@ -13,7 +13,11 @@ The suite validates the currently supported gateway surface:
 9. Interactive shell, when the optional websockets package is installed
 10. Detach and reattach
 11. Managed sessions
-12. Optional observability endpoints
+12. Stat file (existing file, directory, nonexistent file)
+13. List dir (workspace root, subdirectory)
+14. Iroh direct-connect address (when EXECUTOR_PROTOCOL=v2)
+15. Send stdin via interactive shell
+16. Optional observability endpoints
 
 Usage:
     uv run python examples/python/test_arl_sdk.py \
@@ -556,6 +560,180 @@ def test_managed_session(client: GatewayClient, args: argparse.Namespace) -> Non
                 client.delete_pool(auto_pool)
 
 
+def test_stat_file(args: argparse.Namespace) -> None:
+    with SandboxSession(
+        image=args.pool_image,
+        profile=args.pool_name,
+        gateway_url=args.gateway_url,
+    ) as session:
+        # Create a file and a subdirectory to stat
+        session.execute(
+            [
+                {
+                    "name": "setup",
+                    "command": [
+                        "sh",
+                        "-c",
+                        "echo hello > /workspace/stat-test.txt && mkdir -p /workspace/stat-dir",
+                    ],
+                },
+            ]
+        )
+
+        # stat existing file
+        result = session.execute(
+            [
+                {
+                    "name": "stat_file",
+                    "command": [
+                        "sh",
+                        "-c",
+                        "test -f /workspace/stat-test.txt"
+                        " && stat -c '%s %a' /workspace/stat-test.txt",
+                    ],
+                },
+            ]
+        )
+        step = result.results[0]
+        if step.output.exit_code != 0:
+            raise AssertionError(f"stat existing file failed: {step.output.stderr}")
+        parts = step.output.stdout.strip().split()
+        if len(parts) < 2:
+            raise AssertionError(f"unexpected stat output: {step.output.stdout!r}")
+        size = int(parts[0])
+        if size <= 0:
+            raise AssertionError(f"stat file size should be > 0, got {size}")
+
+        # stat directory
+        result = session.execute(
+            [
+                {
+                    "name": "stat_dir",
+                    "command": [
+                        "sh",
+                        "-c",
+                        "test -d /workspace/stat-dir && echo is_dir=true",
+                    ],
+                },
+            ]
+        )
+        assert_step_success(result, "is_dir=true")
+
+        # stat nonexistent file
+        result = session.execute(
+            [
+                {
+                    "name": "stat_missing",
+                    "command": [
+                        "sh",
+                        "-c",
+                        "test -e /workspace/no-such-file && echo exists=true || echo exists=false",
+                    ],
+                },
+            ]
+        )
+        assert_step_success(result, "exists=false")
+
+
+def test_list_dir(args: argparse.Namespace) -> None:
+    with SandboxSession(
+        image=args.pool_image,
+        profile=args.pool_name,
+        gateway_url=args.gateway_url,
+    ) as session:
+        # Create files and a subdirectory
+        session.execute(
+            [
+                {
+                    "name": "setup",
+                    "command": [
+                        "sh",
+                        "-c",
+                        "echo a > /workspace/a.txt && echo b > /workspace/b.txt "
+                        "&& mkdir -p /workspace/subdir && echo c > /workspace/subdir/c.txt",
+                    ],
+                },
+            ]
+        )
+
+        # List workspace root
+        result = session.execute(
+            [{"name": "ls_root", "command": ["ls", "-1", "/workspace"]}]
+        )
+        assert_step_success(result, "a.txt")
+        assert_step_success(result, "b.txt")
+        assert_step_success(result, "subdir")
+
+        # List subdirectory
+        result = session.execute(
+            [{"name": "ls_subdir", "command": ["ls", "-1", "/workspace/subdir"]}]
+        )
+        assert_step_success(result, "c.txt")
+
+
+def test_iroh_addr(client: GatewayClient, args: argparse.Namespace) -> None:
+    executor_protocol = os.environ.get("EXECUTOR_PROTOCOL", "v1")
+    if executor_protocol.lower() != "v2":
+        raise SkipTestError("EXECUTOR_PROTOCOL is not v2; iroh addr not available")
+
+    with SandboxSession(
+        image=args.pool_image,
+        profile=args.pool_name,
+        gateway_url=args.gateway_url,
+    ) as session:
+        assert session.session_id is not None
+
+        # The iroh addr may not be available immediately; retry briefly
+        addr = ""
+        deadline = time.time() + 10.0
+        while time.time() < deadline:
+            addr = client.get_iroh_addr(session.session_id)
+            if addr:
+                break
+            time.sleep(1)
+
+        if not addr:
+            raise AssertionError("get_iroh_addr returned empty after 10s wait")
+
+        # Verify it parses as valid JSON
+        try:
+            parsed = json.loads(addr)
+        except json.JSONDecodeError as exc:
+            raise AssertionError(f"iroh addr is not valid JSON: {exc}") from exc
+        if not isinstance(parsed, dict):
+            raise AssertionError(f"iroh addr JSON is not an object: {type(parsed)}")
+
+
+def test_send_stdin(args: argparse.Namespace) -> None:
+    """Test stdin delivery via interactive shell echo-back."""
+    try:
+        import websockets  # noqa: F401
+    except ImportError as exc:
+        raise SkipTestError("optional dependency 'websockets' is not installed") from exc
+
+    with SandboxSession(
+        image=args.pool_image,
+        profile=args.pool_name,
+        gateway_url=args.gateway_url,
+    ) as session:
+        assert session.session_id is not None
+        shell = InteractiveShellClient(gateway_url=args.gateway_url)
+        try:
+            shell.connect(session.session_id)
+            # Send a command that reads from stdin (via the shell prompt)
+            shell.send_input("cat <<'STDIN_EOF'\n")
+            shell.send_input("stdin-test-payload\n")
+            shell.send_input("STDIN_EOF\n")
+            output = ""
+            deadline = time.time() + 10.0
+            while time.time() < deadline and "stdin-test-payload" not in output:
+                output += shell.read_output(timeout=0.5)
+            if "stdin-test-payload" not in output:
+                raise AssertionError(f"stdin payload not echoed back: {output!r}")
+        finally:
+            shell.close()
+
+
 def test_observability(args: argparse.Namespace) -> None:
     if not any((args.metrics_url, args.prometheus_url, args.grafana_url, args.clickhouse_url)):
         raise SkipTestError("no observability endpoint URLs were provided")
@@ -703,6 +881,10 @@ def main() -> int:
         ("Interactive Shell", lambda: test_interactive_shell(args)),
         ("Detach/Reattach", lambda: test_detach_reattach(args)),
         ("Managed Sessions", lambda: test_managed_session(client, args)),
+        ("Stat File", lambda: test_stat_file(args)),
+        ("List Dir", lambda: test_list_dir(args)),
+        ("Iroh Addr", lambda: test_iroh_addr(client, args)),
+        ("Send Stdin", lambda: test_send_stdin(args)),
         ("Observability", lambda: test_observability(args)),
     ]
 

@@ -235,6 +235,7 @@ type SessionInfo struct {
 	DeletedAt      *time.Time      `json:"deletedAt,omitempty"`
 	DeletionReason string          `json:"deletionReason,omitempty"`
 	ConnectionInfo *ConnectionInfo `json:"connectionInfo,omitempty"`
+	IrohAddr       string          `json:"irohAddr,omitempty"`
 }
 
 // ExecuteResponse is the response for POST /v1/sessions/{id}/execute

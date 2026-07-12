@@ -75,6 +75,10 @@ type SidecarClient interface {
 	// StreamLogs streams log entries from the sidecar ring buffer.
 	StreamLogs(ctx context.Context, podIP string, follow bool, tailLines int32) (<-chan LogEntry, error)
 
+	// GetIrohAddr returns the iroh endpoint address from the sidecar.
+	// Returns empty string if the executor is not running with v2 protocol.
+	GetIrohAddr(ctx context.Context, podIP string) (string, error)
+
 	// HealthCheck checks if sidecar is healthy
 	HealthCheck(ctx context.Context, podIP string) error
 
