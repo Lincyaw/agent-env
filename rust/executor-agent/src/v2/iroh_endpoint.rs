@@ -1,5 +1,5 @@
 use super::connection::ConnectionHandler;
-use iroh::{Endpoint, RelayMode, SecretKey};
+use iroh::{Endpoint, RelayMode, SecretKey, endpoint::presets};
 use log::{error, info, warn};
 use std::io;
 use std::path::PathBuf;
@@ -18,16 +18,15 @@ impl IrohEndpoint {
     pub async fn new(addr_file: PathBuf) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let secret_key = load_or_generate_secret_key();
 
-        let endpoint = Endpoint::builder()
+        let endpoint = Endpoint::builder(presets::Minimal)
             .secret_key(secret_key)
             .alpns(vec![ALPN.to_vec()])
             .relay_mode(RelayMode::Disabled)
-            .clear_discovery()
             .bind()
             .await?;
 
         let ep = IrohEndpoint { endpoint, addr_file };
-        ep.write_addr_file().await?;
+        ep.write_addr_file()?;
         Ok(ep)
     }
 
@@ -35,7 +34,7 @@ impl IrohEndpoint {
         &self,
         workspace: String,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        info!("iroh endpoint listening, node_id={}", self.endpoint.node_id());
+        info!("iroh endpoint listening, node_id={}", self.endpoint.id());
 
         loop {
             let incoming = match self.endpoint.accept().await {
@@ -47,7 +46,7 @@ impl IrohEndpoint {
             };
 
             let conn = match incoming.accept() {
-                Ok(connecting) => match connecting.await {
+                Ok(accepting) => match accepting.await {
                     Ok(conn) => conn,
                     Err(e) => {
                         warn!("iroh connection failed: {e}");
@@ -72,12 +71,12 @@ impl IrohEndpoint {
         }
     }
 
-    async fn write_addr_file(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    fn write_addr_file(&self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         if let Some(parent) = self.addr_file.parent() {
             std::fs::create_dir_all(parent)?;
         }
 
-        let addr = self.endpoint.node_addr().await?;
+        let addr = self.endpoint.addr();
         let serialized = serde_json::to_string(&addr)?;
         std::fs::write(&self.addr_file, &serialized)?;
         info!("iroh addr written to {}", self.addr_file.display());
@@ -95,7 +94,7 @@ fn load_or_generate_secret_key() -> SecretKey {
         warn!("invalid secret key file, generating new key");
     }
 
-    let key = SecretKey::generate(rand_core::OsRng);
+    let key = SecretKey::generate();
     if let Err(e) = write_secret_key_file(&key) {
         warn!("failed to persist iroh secret key: {e}");
     }
@@ -120,17 +119,16 @@ mod tests {
 
     #[tokio::test]
     async fn test_iroh_ping_pong() {
-        let server_key = SecretKey::generate(rand_core::OsRng);
-        let server = Endpoint::builder()
+        let server_key = SecretKey::generate();
+        let server = Endpoint::builder(presets::Minimal)
             .secret_key(server_key)
             .alpns(vec![ALPN.to_vec()])
             .relay_mode(RelayMode::Disabled)
-            .clear_discovery()
             .bind()
             .await
             .expect("bind server");
 
-        let server_addr = server.node_addr().await.expect("server addr");
+        let server_addr = server.addr();
         let server_for_close = server.clone();
 
         let workspace = std::env::temp_dir()
@@ -144,15 +142,14 @@ mod tests {
         let ws = workspace.clone();
         let server_task = tokio::spawn(async move {
             let incoming = server.accept().await.expect("accept incoming");
-            let conn = incoming.accept().expect("accept").await.expect("connecting");
+            let conn = incoming.accept().expect("accept").await.expect("accepting");
 
             let handler = ConnectionHandler::new(conn, ws, server_handle);
             handler.run().await.expect("connection handler");
         });
 
-        let client = Endpoint::builder()
+        let client = Endpoint::builder(presets::Minimal)
             .relay_mode(RelayMode::Disabled)
-            .clear_discovery()
             .bind()
             .await
             .expect("bind client");

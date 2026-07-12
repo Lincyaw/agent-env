@@ -27,7 +27,7 @@ impl ConnectionHandler {
     }
 
     pub async fn run(self) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let peer_id = self.conn.remote_node_id()?;
+        let peer_id = self.conn.remote_id();
         info!("iroh connection from {peer_id}");
 
         // Accept the control stream (first bidi stream)
