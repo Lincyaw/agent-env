@@ -9,8 +9,8 @@ use tokio::runtime::Handle;
 /// Per-connection handler for iroh QUIC, supporting multi-stream.
 ///
 /// The first accepted bidirectional stream is the control stream, carrying
-/// length-delimited protobuf Envelopes. Additional streams are data streams,
-/// identified by a 5-byte header `[1B type][4B tag]`.
+/// typed length-delimited protobuf messages. Additional streams are data
+/// streams, identified by a 5-byte header `[1B type][4B tag]`.
 pub struct ConnectionHandler {
     conn: Connection,
     workspace: String,

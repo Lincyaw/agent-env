@@ -13,18 +13,25 @@ import (
 
 	"github.com/Lincyaw/agent-env/pkg/execagent"
 	"github.com/Lincyaw/agent-env/pkg/interfaces"
-	pb "github.com/Lincyaw/agent-env/pkg/pb/executor_v2"
+	pb "github.com/Lincyaw/agent-env/pkg/pb/executorv2"
 	"google.golang.org/protobuf/proto"
 )
 
 const fileTransferChunkSize = interfaces.FileTransferChunkSize
+
+// Wire-level message type bytes, matching the Rust executor agent.
+const (
+	msgTypeRequest  byte = 0x01
+	msgTypeResponse byte = 0x02
+	msgTypeEvent    byte = 0x03
+)
 
 // executorProtocol selects the wire format for sidecar-to-executor communication.
 type executorProtocol int
 
 const (
 	protocolV1JSON     executorProtocol = iota // JSON-over-Unix-socket (legacy)
-	protocolV2Protobuf                         // length-delimited protobuf Envelope
+	protocolV2Protobuf                         // typed length-delimited protobuf
 )
 
 // ExecutorClient communicates with the executor agent over a Unix socket.
@@ -56,48 +63,145 @@ func (c *ExecutorClient) dial() (net.Conn, error) {
 }
 
 // ---------------------------------------------------------------------------
-// Protobuf envelope helpers (V2)
+// Protobuf typed message helpers (V2)
+// Wire format: [1B type][4B big-endian length][protobuf bytes]
 // ---------------------------------------------------------------------------
 
-func writeEnvelope(conn net.Conn, env *pb.Envelope) error {
-	data, err := proto.Marshal(env)
-	if err != nil {
-		return fmt.Errorf("marshal envelope: %w", err)
+func writeTypedMessage(conn net.Conn, msgType byte, data []byte) error {
+	if _, err := conn.Write([]byte{msgType}); err != nil {
+		return err
 	}
 	lenBuf := make([]byte, 4)
 	binary.BigEndian.PutUint32(lenBuf, uint32(len(data)))
 	if _, err := conn.Write(lenBuf); err != nil {
 		return err
 	}
-	_, err = conn.Write(data)
+	_, err := conn.Write(data)
 	return err
 }
 
-func readEnvelope(conn net.Conn) (*pb.Envelope, error) {
+func readTypedMessage(conn net.Conn) (byte, []byte, error) {
+	typeBuf := make([]byte, 1)
+	if _, err := io.ReadFull(conn, typeBuf); err != nil {
+		return 0, nil, err
+	}
 	lenBuf := make([]byte, 4)
 	if _, err := io.ReadFull(conn, lenBuf); err != nil {
-		return nil, err
+		return 0, nil, err
 	}
 	msgLen := binary.BigEndian.Uint32(lenBuf)
 	if msgLen > 128*1024*1024 {
-		return nil, fmt.Errorf("envelope too large: %d bytes", msgLen)
+		return 0, nil, fmt.Errorf("message too large: %d bytes", msgLen)
 	}
 	data := make([]byte, msgLen)
 	if _, err := io.ReadFull(conn, data); err != nil {
-		return nil, err
+		return 0, nil, err
 	}
-	env := &pb.Envelope{}
-	if err := proto.Unmarshal(data, env); err != nil {
-		return nil, fmt.Errorf("unmarshal envelope: %w", err)
-	}
-	return env, nil
+	return typeBuf[0], data, nil
 }
 
-// sendRequest wraps a Request in an Envelope and writes it.
 func sendRequest(conn net.Conn, req *pb.Request) error {
-	return writeEnvelope(conn, &pb.Envelope{
-		Payload: &pb.Envelope_Request{Request: req},
-	})
+	data, err := proto.Marshal(req)
+	if err != nil {
+		return fmt.Errorf("marshal request: %w", err)
+	}
+	return writeTypedMessage(conn, msgTypeRequest, data)
+}
+
+func readResponse(conn net.Conn) (*pb.Response, error) {
+	msgType, data, err := readTypedMessage(conn)
+	if err != nil {
+		return nil, err
+	}
+	if msgType != msgTypeResponse {
+		return nil, fmt.Errorf("expected message type 0x%02x, got 0x%02x", msgTypeResponse, msgType)
+	}
+	resp := &pb.Response{}
+	if err := proto.Unmarshal(data, resp); err != nil {
+		return nil, fmt.Errorf("unmarshal response: %w", err)
+	}
+	return resp, nil
+}
+
+// readServerMessage reads the next message from the executor (Response or Event).
+type serverMessage struct {
+	Response *pb.Response
+	Event    *pb.Event
+}
+
+func readServerMessage(conn net.Conn) (*serverMessage, error) {
+	msgType, data, err := readTypedMessage(conn)
+	if err != nil {
+		return nil, err
+	}
+	switch msgType {
+	case msgTypeResponse:
+		resp := &pb.Response{}
+		if err := proto.Unmarshal(data, resp); err != nil {
+			return nil, fmt.Errorf("unmarshal response: %w", err)
+		}
+		return &serverMessage{Response: resp}, nil
+	case msgTypeEvent:
+		evt := &pb.Event{}
+		if err := proto.Unmarshal(data, evt); err != nil {
+			return nil, fmt.Errorf("unmarshal event: %w", err)
+		}
+		return &serverMessage{Event: evt}, nil
+	default:
+		return nil, fmt.Errorf("unexpected message type: 0x%02x", msgType)
+	}
+}
+
+// writeDataFrames writes raw data frames: [4B len][data]...[4B zero]
+func writeDataFrames(conn net.Conn, content io.Reader) (int64, error) {
+	buf := make([]byte, fileTransferChunkSize)
+	lenBuf := make([]byte, 4)
+	var total int64
+	for {
+		n, readErr := content.Read(buf)
+		if n > 0 {
+			binary.BigEndian.PutUint32(lenBuf, uint32(n))
+			if _, err := conn.Write(lenBuf); err != nil {
+				return total, err
+			}
+			if _, err := conn.Write(buf[:n]); err != nil {
+				return total, err
+			}
+			total += int64(n)
+		}
+		if readErr == io.EOF {
+			break
+		}
+		if readErr != nil {
+			return total, readErr
+		}
+	}
+	// terminator
+	binary.BigEndian.PutUint32(lenBuf, 0)
+	_, err := conn.Write(lenBuf)
+	return total, err
+}
+
+// readDataFrames reads raw data frames until zero-length terminator,
+// writing data to dst.
+func readDataFrames(conn net.Conn, dst io.Writer) (int64, error) {
+	lenBuf := make([]byte, 4)
+	var total int64
+	for {
+		if _, err := io.ReadFull(conn, lenBuf); err != nil {
+			return total, err
+		}
+		frameLen := binary.BigEndian.Uint32(lenBuf)
+		if frameLen == 0 {
+			break
+		}
+		n, err := io.CopyN(dst, conn, int64(frameLen))
+		total += n
+		if err != nil {
+			return total, err
+		}
+	}
+	return total, nil
 }
 
 // ---------------------------------------------------------------------------
@@ -144,23 +248,18 @@ func (c *ExecutorClient) pingV2() error {
 	defer conn.Close()
 
 	if err := sendRequest(conn, &pb.Request{
-		Id:     "ping-0",
-		Method: &pb.Request_Ping{Ping: &pb.PingRequest{}},
+		Tag:  0,
+		Kind: &pb.Request_Ping{Ping: &pb.PingRequest{}},
 	}); err != nil {
 		return fmt.Errorf("send ping: %w", err)
 	}
 
-	env, err := readEnvelope(conn)
+	resp, err := readResponse(conn)
 	if err != nil {
 		return fmt.Errorf("read ping response: %w", err)
 	}
-
-	resp := env.GetResponse()
-	if resp == nil {
-		return fmt.Errorf("unexpected envelope type in ping response")
-	}
 	if errResp := resp.GetError(); errResp != nil {
-		return fmt.Errorf("ping error: [%s] %s", errResp.GetCode(), errResp.GetMessage())
+		return fmt.Errorf("ping error: [%d] %s", errResp.GetCode(), errResp.GetMessage())
 	}
 	return nil
 }
@@ -224,16 +323,18 @@ func (c *ExecutorClient) executeV2(ctx context.Context, req execagent.Request) (
 		return nil, err
 	}
 
+	var tag uint32 = 1
+
 	spawnReq := &pb.SpawnRequest{
-		Cmd:         req.Cmd,
-		Env:         req.Env,
-		Workdir:     req.WorkDir,
-		TimeoutSecs: uint64(req.Timeout),
+		Command:        req.Cmd,
+		Env:            req.Env,
+		WorkingDir:     req.WorkDir,
+		TimeoutSeconds: int32(req.Timeout),
 	}
 
 	if err := sendRequest(conn, &pb.Request{
-		Id:     req.ID,
-		Method: &pb.Request_Spawn{Spawn: spawnReq},
+		Tag:  tag,
+		Kind: &pb.Request_Spawn{Spawn: spawnReq},
 	}); err != nil {
 		conn.Close()
 		return nil, fmt.Errorf("send spawn request: %w", err)
@@ -245,11 +346,8 @@ func (c *ExecutorClient) executeV2(ctx context.Context, req execagent.Request) (
 		defer close(ch)
 		defer conn.Close()
 
-		// The first response should be a SpawnResponse with the handle.
-		var handle string
-
 		for {
-			env, err := readEnvelope(conn)
+			msg, err := readServerMessage(conn)
 			if err != nil {
 				ch <- execagent.Response{ID: req.ID, Error: fmt.Sprintf("read: %v", err), Done: true}
 				return
@@ -258,15 +356,13 @@ func (c *ExecutorClient) executeV2(ctx context.Context, req execagent.Request) (
 			var resp execagent.Response
 			resp.ID = req.ID
 
-			switch p := env.GetPayload().(type) {
-			case *pb.Envelope_Response:
-				r := p.Response
-				switch result := r.GetResult().(type) {
+			if msg.Response != nil {
+				r := msg.Response
+				switch result := r.GetKind().(type) {
 				case *pb.Response_Spawn:
-					handle = result.Spawn.GetHandle()
-					_ = handle
+					_ = result.Spawn.GetProcessTag()
 					continue
-				case *pb.Response_Ok:
+				case *pb.Response_Ping:
 					resp.Done = true
 				case *pb.Response_Error:
 					resp.Error = result.Error.GetMessage()
@@ -275,10 +371,9 @@ func (c *ExecutorClient) executeV2(ctx context.Context, req execagent.Request) (
 					resp.Error = fmt.Sprintf("unexpected response type: %T", result)
 					resp.Done = true
 				}
-
-			case *pb.Envelope_Event:
-				e := p.Event
-				switch ev := e.GetEvent().(type) {
+			} else if msg.Event != nil {
+				e := msg.Event
+				switch ev := e.GetKind().(type) {
 				case *pb.Event_Stdout:
 					resp.Stdout = string(ev.Stdout.GetData())
 				case *pb.Event_Stderr:
@@ -290,10 +385,8 @@ func (c *ExecutorClient) executeV2(ctx context.Context, req execagent.Request) (
 				default:
 					continue
 				}
-
-			default:
-				resp.Error = fmt.Sprintf("unexpected envelope payload: %T", p)
-				resp.Done = true
+			} else {
+				continue
 			}
 
 			select {
@@ -317,7 +410,7 @@ func (c *ExecutorClient) executeV2(ctx context.Context, req execagent.Request) (
 
 func (c *ExecutorClient) Signal(pid int, signal string) error {
 	if c.protocol == protocolV2Protobuf {
-		return c.signalV2(fmt.Sprintf("pid-%d", pid), signal)
+		return c.signalV2(uint32(pid), signal)
 	}
 	return c.signalV1(pid, signal)
 }
@@ -348,7 +441,7 @@ func (c *ExecutorClient) signalV1(pid int, signal string) error {
 	return nil
 }
 
-func (c *ExecutorClient) signalV2(handle, signal string) error {
+func (c *ExecutorClient) signalV2(processTag uint32, signal string) error {
 	conn, err := c.dial()
 	if err != nil {
 		return err
@@ -356,25 +449,21 @@ func (c *ExecutorClient) signalV2(handle, signal string) error {
 	defer conn.Close()
 
 	if err := sendRequest(conn, &pb.Request{
-		Id: "sig-0",
-		Method: &pb.Request_Signal{Signal: &pb.SignalRequest{
-			Handle: handle,
-			Signal: signal,
+		Tag: 0,
+		Kind: &pb.Request_Signal{Signal: &pb.SignalRequest{
+			ProcessTag: processTag,
+			Signal:     signal,
 		}},
 	}); err != nil {
 		return fmt.Errorf("send signal request: %w", err)
 	}
 
-	env, err := readEnvelope(conn)
+	resp, err := readResponse(conn)
 	if err != nil {
 		return fmt.Errorf("read signal response: %w", err)
 	}
-	resp := env.GetResponse()
-	if resp == nil {
-		return fmt.Errorf("unexpected envelope type in signal response")
-	}
 	if errResp := resp.GetError(); errResp != nil {
-		return fmt.Errorf("signal error: [%s] %s", errResp.GetCode(), errResp.GetMessage())
+		return fmt.Errorf("signal error: [%d] %s", errResp.GetCode(), errResp.GetMessage())
 	}
 	return nil
 }
@@ -472,78 +561,37 @@ func (c *ExecutorClient) writeFileV2(ctx context.Context, path string, content i
 	}
 	defer conn.Close()
 
-	reqID := fmt.Sprintf("write-%d", time.Now().UnixNano())
-
 	if err := sendRequest(conn, &pb.Request{
-		Id: reqID,
-		Method: &pb.Request_WriteFile{WriteFile: &pb.WriteFileRequest{
+		Tag: 0,
+		Kind: &pb.Request_Write{Write: &pb.WriteRequest{
 			Path:           path,
 			ExpectedSha256: expectedSHA256,
 		}},
 	}); err != nil {
-		return nil, fmt.Errorf("send write_file request: %w", err)
+		return nil, fmt.Errorf("send write request: %w", err)
 	}
 
-	buf := make([]byte, fileTransferChunkSize)
-	for {
-		n, readErr := content.Read(buf)
-		if n > 0 {
-			chunk := make([]byte, n)
-			copy(chunk, buf[:n])
-			if err := sendRequest(conn, &pb.Request{
-				Id: reqID,
-				Method: &pb.Request_FileChunk{FileChunk: &pb.FileChunkData{
-					Content: chunk,
-				}},
-			}); err != nil {
-				return nil, fmt.Errorf("send file chunk: %w", err)
-			}
-		}
-		if readErr == io.EOF {
-			break
-		}
-		if readErr != nil {
-			return nil, fmt.Errorf("read upload content: %w", readErr)
-		}
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		default:
-		}
+	// Send raw data frames
+	if _, err := writeDataFrames(conn, content); err != nil {
+		return nil, fmt.Errorf("send file data: %w", err)
 	}
 
-	if err := sendRequest(conn, &pb.Request{
-		Id:     reqID,
-		Method: &pb.Request_FileDone{FileDone: &pb.FileDoneRequest{}},
-	}); err != nil {
-		return nil, fmt.Errorf("send file done: %w", err)
+	resp, err := readResponse(conn)
+	if err != nil {
+		return nil, fmt.Errorf("read write response: %w", err)
 	}
 
-	for {
-		env, err := readEnvelope(conn)
-		if err != nil {
-			return nil, fmt.Errorf("read write_file response: %w", err)
-		}
-
-		resp := env.GetResponse()
-		if resp == nil {
-			continue
-		}
-
-		switch result := resp.GetResult().(type) {
-		case *pb.Response_Error:
-			return nil, fmt.Errorf("write_file error: [%s] %s", result.Error.GetCode(), result.Error.GetMessage())
-		case *pb.Response_WriteFile:
-			return &FileWriteResult{
-				Path:         path,
-				BytesWritten: result.WriteFile.GetBytesWritten(),
-				SHA256:       result.WriteFile.GetSha256(),
-			}, nil
-		case *pb.Response_Ok:
-			continue
-		default:
-			return nil, fmt.Errorf("unexpected write_file response: %T", result)
-		}
+	switch result := resp.GetKind().(type) {
+	case *pb.Response_Error:
+		return nil, fmt.Errorf("write error: [%d] %s", result.Error.GetCode(), result.Error.GetMessage())
+	case *pb.Response_Write:
+		return &FileWriteResult{
+			Path:         path,
+			BytesWritten: result.Write.GetBytesWritten(),
+			SHA256:       result.Write.GetSha256(),
+		}, nil
+	default:
+		return nil, fmt.Errorf("unexpected write response: %T", result)
 	}
 }
 
@@ -616,52 +664,35 @@ func (c *ExecutorClient) readFileV2(ctx context.Context, path string, dst io.Wri
 	}
 	defer conn.Close()
 
-	reqID := fmt.Sprintf("read-%d", time.Now().UnixNano())
-
 	if err := sendRequest(conn, &pb.Request{
-		Id: reqID,
-		Method: &pb.Request_ReadFile{ReadFile: &pb.ReadFileRequest{
+		Tag: 0,
+		Kind: &pb.Request_Read{Read: &pb.ReadRequest{
 			Path: path,
 		}},
 	}); err != nil {
-		return nil, fmt.Errorf("send read_file request: %w", err)
+		return nil, fmt.Errorf("send read request: %w", err)
 	}
 
-	for {
-		env, err := readEnvelope(conn)
-		if err != nil {
-			return nil, fmt.Errorf("read read_file response: %w", err)
-		}
+	resp, err := readResponse(conn)
+	if err != nil {
+		return nil, fmt.Errorf("read response: %w", err)
+	}
 
-		resp := env.GetResponse()
-		if resp == nil {
-			continue
+	switch result := resp.GetKind().(type) {
+	case *pb.Response_Error:
+		return nil, fmt.Errorf("read error: [%d] %s", result.Error.GetCode(), result.Error.GetMessage())
+	case *pb.Response_Read:
+		// Read raw data frames
+		if _, err := readDataFrames(conn, dst); err != nil {
+			return nil, fmt.Errorf("read file data: %w", err)
 		}
-
-		switch result := resp.GetResult().(type) {
-		case *pb.Response_Error:
-			return nil, fmt.Errorf("read_file error: [%s] %s", result.Error.GetCode(), result.Error.GetMessage())
-		case *pb.Response_FileChunk:
-			if len(result.FileChunk.GetContent()) > 0 {
-				if _, err := dst.Write(result.FileChunk.GetContent()); err != nil {
-					return nil, fmt.Errorf("write downloaded content: %w", err)
-				}
-			}
-		case *pb.Response_FileDone:
-			return &FileReadResult{
-				Path:      path,
-				SizeBytes: result.FileDone.GetSizeBytes(),
-				SHA256:    result.FileDone.GetSha256(),
-			}, nil
-		default:
-			return nil, fmt.Errorf("unexpected read_file response: %T", result)
-		}
-
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		default:
-		}
+		return &FileReadResult{
+			Path:      path,
+			SizeBytes: result.Read.GetSizeBytes(),
+			SHA256:    result.Read.GetSha256(),
+		}, nil
+	default:
+		return nil, fmt.Errorf("unexpected read response: %T", result)
 	}
 }
 
@@ -704,7 +735,7 @@ type ShellSession struct {
 	encoder *json.Encoder
 
 	// V2 fields
-	handle string
+	processTag uint32
 
 	id     string
 	Output chan execagent.Response
@@ -780,58 +811,55 @@ func (c *ExecutorClient) startShellV2(ctx context.Context, workDir string, env m
 	}
 
 	id := fmt.Sprintf("shell-%d", time.Now().UnixNano())
+	var tag uint32 = 1
 
 	spawnReq := &pb.SpawnRequest{
-		Cmd:          []string{"/bin/bash", "-i"},
-		Env:          env,
-		Workdir:      workDir,
-		StdinEnabled: true,
-		Pty:          &pb.PtyConfig{Rows: 24, Cols: 80},
+		Command:    []string{"/bin/bash", "-i"},
+		Env:        env,
+		WorkingDir: workDir,
+		Stdin:      true,
+		Pty:        true,
+		Rows:       24,
+		Cols:       80,
 	}
 
 	if err := sendRequest(conn, &pb.Request{
-		Id:     id,
-		Method: &pb.Request_Spawn{Spawn: spawnReq},
+		Tag:  tag,
+		Kind: &pb.Request_Spawn{Spawn: spawnReq},
 	}); err != nil {
 		conn.Close()
 		return nil, fmt.Errorf("send shell spawn request: %w", err)
 	}
 
-	// Read the SpawnResponse to get the handle.
-	env2, err := readEnvelope(conn)
+	// Read the SpawnResponse to get the process tag.
+	resp, err := readResponse(conn)
 	if err != nil {
 		conn.Close()
 		return nil, fmt.Errorf("read shell spawn response: %w", err)
-	}
-
-	resp := env2.GetResponse()
-	if resp == nil {
-		conn.Close()
-		return nil, fmt.Errorf("unexpected envelope type in shell spawn response")
 	}
 	spawnResp := resp.GetSpawn()
 	if spawnResp == nil {
 		if errResp := resp.GetError(); errResp != nil {
 			conn.Close()
-			return nil, fmt.Errorf("shell spawn error: [%s] %s", errResp.GetCode(), errResp.GetMessage())
+			return nil, fmt.Errorf("shell spawn error: [%d] %s", errResp.GetCode(), errResp.GetMessage())
 		}
 		conn.Close()
-		return nil, fmt.Errorf("unexpected response type in shell spawn: %T", resp.GetResult())
+		return nil, fmt.Errorf("unexpected response type in shell spawn: %T", resp.GetKind())
 	}
 
 	session := &ShellSession{
-		conn:     conn,
-		protocol: protocolV2Protobuf,
-		handle:   spawnResp.GetHandle(),
-		id:       id,
-		Output:   make(chan execagent.Response, 100),
+		conn:       conn,
+		protocol:   protocolV2Protobuf,
+		processTag: spawnResp.GetProcessTag(),
+		id:         id,
+		Output:     make(chan execagent.Response, 100),
 	}
 
 	go func() {
 		defer close(session.Output)
 
 		for {
-			env, err := readEnvelope(conn)
+			msg, err := readServerMessage(conn)
 			if err != nil {
 				session.Output <- execagent.Response{ID: id, Error: fmt.Sprintf("read: %v", err), Done: true}
 				return
@@ -840,9 +868,8 @@ func (c *ExecutorClient) startShellV2(ctx context.Context, workDir string, env m
 			var out execagent.Response
 			out.ID = id
 
-			switch p := env.GetPayload().(type) {
-			case *pb.Envelope_Event:
-				switch ev := p.Event.GetEvent().(type) {
+			if msg.Event != nil {
+				switch ev := msg.Event.GetKind().(type) {
 				case *pb.Event_Stdout:
 					out.Stdout = string(ev.Stdout.GetData())
 				case *pb.Event_Stderr:
@@ -854,15 +881,15 @@ func (c *ExecutorClient) startShellV2(ctx context.Context, workDir string, env m
 				default:
 					continue
 				}
-			case *pb.Envelope_Response:
-				r := p.Response
+			} else if msg.Response != nil {
+				r := msg.Response
 				if errResp := r.GetError(); errResp != nil {
 					out.Error = errResp.GetMessage()
 					out.Done = true
 				} else {
 					continue
 				}
-			default:
+			} else {
 				continue
 			}
 
@@ -887,13 +914,11 @@ func (s *ShellSession) SendInput(data string) error {
 	defer s.mu.Unlock()
 
 	if s.protocol == protocolV2Protobuf {
-		return writeEnvelope(s.conn, &pb.Envelope{
-			Payload: &pb.Envelope_Request{Request: &pb.Request{
-				Id: s.id,
-				Method: &pb.Request_Stdin{Stdin: &pb.StdinRequest{
-					Handle: s.handle,
-					Data:   []byte(data),
-				}},
+		return sendRequest(s.conn, &pb.Request{
+			Tag: 0,
+			Kind: &pb.Request_WriteIn{WriteIn: &pb.WriteInRequest{
+				ProcessTag: s.processTag,
+				Data:       []byte(data),
 			}},
 		})
 	}
@@ -911,13 +936,11 @@ func (s *ShellSession) SendSignal(signal string) error {
 	defer s.mu.Unlock()
 
 	if s.protocol == protocolV2Protobuf {
-		return writeEnvelope(s.conn, &pb.Envelope{
-			Payload: &pb.Envelope_Request{Request: &pb.Request{
-				Id: s.id,
-				Method: &pb.Request_Signal{Signal: &pb.SignalRequest{
-					Handle: s.handle,
-					Signal: signal,
-				}},
+		return sendRequest(s.conn, &pb.Request{
+			Tag: 0,
+			Kind: &pb.Request_Signal{Signal: &pb.SignalRequest{
+				ProcessTag: s.processTag,
+				Signal:     signal,
 			}},
 		})
 	}
@@ -935,14 +958,12 @@ func (s *ShellSession) Resize(rows, cols int32) error {
 	defer s.mu.Unlock()
 
 	if s.protocol == protocolV2Protobuf {
-		return writeEnvelope(s.conn, &pb.Envelope{
-			Payload: &pb.Envelope_Request{Request: &pb.Request{
-				Id: s.id,
-				Method: &pb.Request_Resize{Resize: &pb.ResizeRequest{
-					Handle: s.handle,
-					Rows:   uint32(rows),
-					Cols:   uint32(cols),
-				}},
+		return sendRequest(s.conn, &pb.Request{
+			Tag: 0,
+			Kind: &pb.Request_Resize{Resize: &pb.ResizeRequest{
+				ProcessTag: s.processTag,
+				Rows:       rows,
+				Cols:       cols,
 			}},
 		})
 	}

@@ -12,7 +12,7 @@ use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use std::os::unix::net::UnixListener;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::{fs, thread};
 use tokio::sync::watch;
@@ -20,21 +20,20 @@ use tokio::sync::watch;
 const FILE_CHUNK_SIZE: usize = 1024 * 1024;
 const SIDECAR_SOCKET_GID: u32 = 65532;
 
+// Wire-level message type bytes.
+pub const MSG_TYPE_REQUEST: u8 = 0x01;
+pub const MSG_TYPE_RESPONSE: u8 = 0x02;
+pub const MSG_TYPE_EVENT: u8 = 0x03;
+
 struct ProcessHandle {
     child: Option<Child>,
     pty_master: Option<OwnedFd>,
     stdin_pipe: Option<std::process::ChildStdin>,
     pid: u32,
-    exit_subscribers: Vec<String>,
 }
 
-struct TunnelState {
-    tcp_writer: TcpStream,
-}
-
-struct SubscriptionState {
+struct WatchState {
     fs_shutdowns: Vec<Arc<AtomicBool>>,
-    watched_process_handles: Vec<String>,
 }
 
 /// V2 executor agent.
@@ -108,59 +107,64 @@ fn set_socket_permissions(path: &str) -> io::Result<()> {
 /// Transport-agnostic shared writer for responses and events.
 pub type SharedWriter = Arc<Mutex<Box<dyn io::Write + Send>>>;
 
-/// Write a length-delimited protobuf Envelope to the shared writer.
-pub fn send_envelope(writer: &SharedWriter, envelope: proto::Envelope) -> io::Result<()> {
-    let encoded = envelope.encode_to_vec();
+/// Write a typed, length-delimited protobuf message.
+/// Wire format: [1B type][4B big-endian length][protobuf bytes]
+fn write_typed_message(writer: &SharedWriter, msg_type: u8, encoded: &[u8]) -> io::Result<()> {
     let len = encoded.len() as u32;
     let mut w = writer.lock().unwrap();
+    w.write_all(&[msg_type])?;
     w.write_all(&len.to_be_bytes())?;
-    w.write_all(&encoded)?;
+    w.write_all(encoded)?;
     w.flush()
 }
 
-fn send_response(writer: &SharedWriter, id: String, result: proto::response::Result) -> io::Result<()> {
-    send_envelope(writer, proto::Envelope {
-        payload: Some(proto::envelope::Payload::Response(proto::Response {
-            id,
-            result: Some(result),
-        })),
-    })
+fn send_response(writer: &SharedWriter, tag: u32, kind: proto::response::Kind) -> io::Result<()> {
+    let resp = proto::Response {
+        tag,
+        kind: Some(kind),
+    };
+    write_typed_message(writer, MSG_TYPE_RESPONSE, &resp.encode_to_vec())
 }
 
-fn send_ok(writer: &SharedWriter, id: String) -> io::Result<()> {
-    send_response(writer, id, proto::response::Result::Ok(proto::OkResponse {}))
-}
-
-fn send_error(writer: &SharedWriter, id: String, code: &str, message: String) -> io::Result<()> {
-    send_response(writer, id, proto::response::Result::Error(proto::ErrorResponse {
-        code: code.to_string(),
+fn send_error(writer: &SharedWriter, tag: u32, code: i32, message: String) -> io::Result<()> {
+    send_response(writer, tag, proto::response::Kind::Error(proto::ErrorResponse {
+        code,
         message,
     }))
 }
 
-fn send_event(writer: &SharedWriter, event: proto::event::Event) -> io::Result<()> {
-    send_envelope(writer, proto::Envelope {
-        payload: Some(proto::envelope::Payload::Event(proto::Event {
-            event: Some(event),
-        })),
-    })
+fn send_event(writer: &SharedWriter, tag: u32, kind: proto::event::Kind) -> io::Result<()> {
+    let evt = proto::Event {
+        tag,
+        kind: Some(kind),
+    };
+    write_typed_message(writer, MSG_TYPE_EVENT, &evt.encode_to_vec())
 }
 
-/// Read a single length-delimited protobuf Envelope from a reader.
+/// Read a single typed, length-delimited protobuf Request from a reader.
+/// Wire format: [1B type][4B big-endian length][protobuf bytes]
 /// Returns None on clean EOF.
-pub fn read_envelope(reader: &mut impl io::Read) -> io::Result<Option<proto::Envelope>> {
-    let mut len_buf = [0u8; 4];
-    match reader.read_exact(&mut len_buf) {
+pub fn read_request(reader: &mut impl io::Read) -> io::Result<Option<proto::Request>> {
+    let mut type_buf = [0u8; 1];
+    match reader.read_exact(&mut type_buf) {
         Ok(()) => {}
         Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => return Ok(None),
         Err(e) => return Err(e),
     }
+    if type_buf[0] != MSG_TYPE_REQUEST {
+        return Err(io::Error::other(format!(
+            "expected message type 0x{:02x}, got 0x{:02x}",
+            MSG_TYPE_REQUEST, type_buf[0]
+        )));
+    }
+    let mut len_buf = [0u8; 4];
+    reader.read_exact(&mut len_buf)?;
     let len = u32::from_be_bytes(len_buf) as usize;
     let mut msg_buf = vec![0u8; len];
     reader.read_exact(&mut msg_buf)?;
-    let envelope = proto::Envelope::decode(&msg_buf[..])
+    let req = proto::Request::decode(&msg_buf[..])
         .map_err(|e| io::Error::other(format!("protobuf decode: {e}")))?;
-    Ok(Some(envelope))
+    Ok(Some(req))
 }
 
 fn handle_conn(
@@ -179,42 +183,35 @@ pub fn handle_v2_session(
     writer: SharedWriter,
     workspace: &str,
 ) -> io::Result<()> {
-    let processes: Arc<Mutex<HashMap<String, ProcessHandle>>> =
+    let processes: Arc<Mutex<HashMap<u32, ProcessHandle>>> =
         Arc::new(Mutex::new(HashMap::new()));
-    let tunnels: Arc<Mutex<HashMap<String, TunnelState>>> =
+    let watches: Arc<Mutex<HashMap<u32, WatchState>>> =
         Arc::new(Mutex::new(HashMap::new()));
-    let subscriptions: Arc<Mutex<HashMap<String, SubscriptionState>>> =
-        Arc::new(Mutex::new(HashMap::new()));
+    let watch_counter = Arc::new(AtomicU32::new(1));
 
     let result = handle_messages(
         reader,
         writer.clone(),
         workspace,
         &processes,
-        &tunnels,
-        &subscriptions,
+        &watches,
+        &watch_counter,
     );
 
     // Cleanup on disconnect
     let mut procs = processes.lock().unwrap();
-    for (handle, ph) in procs.iter_mut() {
+    for (ptag, ph) in procs.iter_mut() {
         if let Some(ref mut child) = ph.child {
-            log::info!("[cleanup] killing handle={handle} pid={}", ph.pid);
+            log::info!("[cleanup] killing process_tag={ptag} pid={}", ph.pid);
             let _ = child.kill();
             let _ = child.wait();
         }
     }
     procs.clear();
 
-    let mut tuns = tunnels.lock().unwrap();
-    for (handle, ts) in tuns.drain() {
-        log::info!("[cleanup] closing tunnel handle={handle}");
-        let _ = ts.tcp_writer.shutdown(std::net::Shutdown::Both);
-    }
-
-    let mut subs = subscriptions.lock().unwrap();
-    for (sub_id, state) in subs.drain() {
-        log::info!("[cleanup] removing subscription id={sub_id}");
+    let mut ws = watches.lock().unwrap();
+    for (wid, state) in ws.drain() {
+        log::info!("[cleanup] removing watch id={wid}");
         for flag in &state.fs_shutdowns {
             flag.store(true, Ordering::Relaxed);
         }
@@ -227,93 +224,70 @@ fn handle_messages(
     mut reader: impl io::Read,
     writer: SharedWriter,
     workspace: &str,
-    processes: &Arc<Mutex<HashMap<String, ProcessHandle>>>,
-    tunnels: &Arc<Mutex<HashMap<String, TunnelState>>>,
-    subscriptions: &Arc<Mutex<HashMap<String, SubscriptionState>>>,
+    processes: &Arc<Mutex<HashMap<u32, ProcessHandle>>>,
+    watches: &Arc<Mutex<HashMap<u32, WatchState>>>,
+    watch_counter: &Arc<AtomicU32>,
 ) -> io::Result<()> {
     loop {
-        let envelope = match read_envelope(&mut reader)? {
-            Some(e) => e,
+        let request = match read_request(&mut reader)? {
+            Some(r) => r,
             None => return Ok(()),
         };
 
-        let request = match envelope.payload {
-            Some(proto::envelope::Payload::Request(req)) => req,
-            _ => {
-                let _ = send_error(&writer, String::new(), "PARSE_ERROR", "expected Request envelope".into());
-                continue;
-            }
-        };
-
-        let id = request.id.clone();
-        let method = match request.method {
-            Some(m) => m,
+        let tag = request.tag;
+        let kind = match request.kind {
+            Some(k) => k,
             None => {
-                let _ = send_error(&writer, id, "PARSE_ERROR", "missing method".into());
+                let _ = send_error(&writer, tag, 1, "missing request kind".into());
                 continue;
             }
         };
 
-        match method {
-            proto::request::Method::Ping(_) => {
-                log::info!("[v2:ping] id={id}");
-                let _ = send_ok(&writer, id);
+        match kind {
+            proto::request::Kind::Ping(_) => {
+                log::info!("[v2:ping] tag={tag}");
+                let _ = send_response(&writer, tag, proto::response::Kind::Ping(proto::PingResponse {}));
             }
-            proto::request::Method::Spawn(params) => {
-                log::info!("[v2:spawn] id={id} cmd={:?}", params.cmd);
-                handle_spawn(&id, params, workspace, &writer, processes);
+            proto::request::Kind::Spawn(params) => {
+                log::info!("[v2:spawn] tag={tag} cmd={:?}", params.command);
+                handle_spawn(tag, params, workspace, &writer, processes);
             }
-            proto::request::Method::Stdin(params) => {
-                handle_stdin(&id, params, &writer, processes);
+            proto::request::Kind::WriteIn(params) => {
+                handle_write_in(tag, params, &writer, processes);
             }
-            proto::request::Method::Signal(params) => {
-                handle_signal(&id, params, &writer, processes);
+            proto::request::Kind::Signal(params) => {
+                handle_signal(tag, params, &writer, processes);
             }
-            proto::request::Method::Resize(params) => {
-                handle_resize(&id, params, &writer, processes);
+            proto::request::Kind::Resize(params) => {
+                handle_resize(tag, params, &writer, processes);
             }
-            proto::request::Method::WriteFile(params) => {
-                log::info!("[v2:write_file] id={id} path={}", params.path);
-                handle_write_file(&id, params, workspace, &writer, &mut reader);
+            proto::request::Kind::Read(params) => {
+                log::info!("[v2:read] tag={tag} path={}", params.path);
+                handle_read(tag, params, workspace, &writer);
             }
-            proto::request::Method::FileChunk(_) | proto::request::Method::FileDone(_) => {
-                let _ = send_error(
-                    &writer,
-                    id,
-                    "UNEXPECTED",
-                    "file_chunk/file_done without write_file".into(),
-                );
+            proto::request::Kind::Write(params) => {
+                log::info!("[v2:write] tag={tag} path={}", params.path);
+                handle_write(tag, params, workspace, &writer, &mut reader);
             }
-            proto::request::Method::ReadFile(params) => {
-                log::info!("[v2:read_file] id={id} path={}", params.path);
-                handle_read_file(&id, params, workspace, &writer);
+            proto::request::Kind::Stat(params) => {
+                log::info!("[v2:stat] tag={tag} path={}", params.path);
+                handle_stat(tag, params, workspace, &writer);
             }
-            proto::request::Method::Stat(params) => {
-                log::info!("[v2:stat] id={id} path={}", params.path);
-                handle_stat(&id, params, workspace, &writer);
+            proto::request::Kind::List(params) => {
+                log::info!("[v2:list] tag={tag} path={}", params.path);
+                handle_list(tag, params, workspace, &writer);
             }
-            proto::request::Method::ListDir(params) => {
-                log::info!("[v2:list_dir] id={id} path={}", params.path);
-                handle_list_dir(&id, params, workspace, &writer);
+            proto::request::Kind::Tunnel(params) => {
+                log::info!("[v2:tunnel] tag={tag} host={} port={}", params.host, params.port);
+                handle_tunnel(tag, params, &writer);
             }
-            proto::request::Method::Tunnel(params) => {
-                log::info!("[v2:tunnel] id={id} target={}", params.target);
-                handle_tunnel(&id, params, &writer, tunnels);
+            proto::request::Kind::Watch(params) => {
+                log::info!("[v2:watch] tag={tag} path={}", params.path);
+                handle_watch(tag, params, workspace, &writer, watches, watch_counter);
             }
-            proto::request::Method::TunnelData(params) => {
-                handle_tunnel_data(&id, params, &writer, tunnels);
-            }
-            proto::request::Method::TunnelClose(params) => {
-                log::info!("[v2:tunnel_close] id={id} handle={}", params.handle);
-                handle_tunnel_close(&id, params, &writer, tunnels);
-            }
-            proto::request::Method::Subscribe(params) => {
-                log::info!("[v2:subscribe] id={id} events={}", params.events.len());
-                handle_subscribe(&id, params, workspace, &writer, processes, subscriptions);
-            }
-            proto::request::Method::Unsubscribe(params) => {
-                log::info!("[v2:unsubscribe] id={id} sub={}", params.subscription_id);
-                handle_unsubscribe(&id, params, &writer, processes, subscriptions);
+            proto::request::Kind::Unwatch(params) => {
+                log::info!("[v2:unwatch] tag={tag} watch_id={}", params.watch_id);
+                handle_unwatch(tag, params, &writer, watches);
             }
         }
     }
@@ -324,57 +298,48 @@ fn handle_messages(
 // ---------------------------------------------------------------------------
 
 fn handle_spawn(
-    id: &str,
+    tag: u32,
     params: proto::SpawnRequest,
     workspace: &str,
     writer: &SharedWriter,
-    processes: &Arc<Mutex<HashMap<String, ProcessHandle>>>,
+    processes: &Arc<Mutex<HashMap<u32, ProcessHandle>>>,
 ) {
-    if params.cmd.is_empty() {
-        let _ = send_error(writer, id.into(), "SPAWN_FAILED", "empty command".into());
+    if params.command.is_empty() {
+        let _ = send_error(writer, tag, 2, "empty command".into());
         return;
     }
 
-    let workdir = if params.workdir.is_empty() {
+    let workdir = if params.working_dir.is_empty() {
         workspace.to_string()
     } else {
-        params.workdir.clone()
+        params.working_dir.clone()
     };
 
-    let handle = format!("proc-{}", &uuid::Uuid::new_v4().to_string()[..8]);
-    let handle_tag = rand_tag();
+    // Use the request tag as the process_tag.
+    let process_tag = tag;
 
-    if params.pty.is_some() {
-        handle_spawn_pty(id, &handle, handle_tag, params, &workdir, writer, processes);
+    if params.pty {
+        handle_spawn_pty(tag, process_tag, params, &workdir, writer, processes);
     } else {
-        handle_spawn_pipe(id, &handle, handle_tag, params, &workdir, writer, processes);
+        handle_spawn_pipe(tag, process_tag, params, &workdir, writer, processes);
     }
 }
 
-fn rand_tag() -> u32 {
-    use std::hash::{Hash, Hasher};
-    let mut h = std::collections::hash_map::DefaultHasher::new();
-    std::time::SystemTime::now().hash(&mut h);
-    std::thread::current().id().hash(&mut h);
-    h.finish() as u32
-}
-
 fn handle_spawn_pipe(
-    id: &str,
-    handle: &str,
-    handle_tag: u32,
+    tag: u32,
+    process_tag: u32,
     params: proto::SpawnRequest,
     workdir: &str,
     writer: &SharedWriter,
-    processes: &Arc<Mutex<HashMap<String, ProcessHandle>>>,
+    processes: &Arc<Mutex<HashMap<u32, ProcessHandle>>>,
 ) {
-    let mut cmd = Command::new(&params.cmd[0]);
-    cmd.args(&params.cmd[1..]);
+    let mut cmd = Command::new(&params.command[0]);
+    cmd.args(&params.command[1..]);
     cmd.current_dir(workdir);
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
 
-    if params.stdin_enabled {
+    if params.stdin {
         cmd.stdin(Stdio::piped());
     } else {
         cmd.stdin(Stdio::null());
@@ -387,7 +352,7 @@ fn handle_spawn_pipe(
     let mut child = match cmd.spawn() {
         Ok(c) => c,
         Err(e) => {
-            let _ = send_error(writer, id.into(), "SPAWN_FAILED", format!("{e}"));
+            let _ = send_error(writer, tag, 2, format!("{e}"));
             return;
         }
     };
@@ -402,21 +367,20 @@ fn handle_spawn_pipe(
         pty_master: None,
         stdin_pipe,
         pid,
-        exit_subscribers: Vec::new(),
     };
-    processes.lock().unwrap().insert(handle.to_string(), ph);
+    processes.lock().unwrap().insert(process_tag, ph);
 
     let _ = send_response(
         writer,
-        id.into(),
-        proto::response::Result::Spawn(proto::SpawnResponse {
-            handle: handle.into(),
-            handle_tag,
+        tag,
+        proto::response::Kind::Spawn(proto::SpawnResponse {
+            process_tag,
+            pid: pid as i32,
         }),
     );
 
     // Spawn stdout reader
-    let h1 = handle.to_string();
+    let pt1 = process_tag;
     let w1 = writer.clone();
     thread::spawn(move || {
         let mut buf = [0u8; 64 * 1024];
@@ -427,8 +391,9 @@ fn handle_spawn_pipe(
                 Ok(n) => {
                     let _ = send_event(
                         &w1,
-                        proto::event::Event::Stdout(proto::StdoutEvent {
-                            handle: h1.clone(),
+                        0,
+                        proto::event::Kind::Stdout(proto::StdoutEvent {
+                            process_tag: pt1,
                             data: buf[..n].to_vec(),
                         }),
                     );
@@ -438,7 +403,7 @@ fn handle_spawn_pipe(
     });
 
     // Spawn stderr reader
-    let h2 = handle.to_string();
+    let pt2 = process_tag;
     let w2 = writer.clone();
     thread::spawn(move || {
         let mut buf = [0u8; 64 * 1024];
@@ -449,8 +414,9 @@ fn handle_spawn_pipe(
                 Ok(n) => {
                     let _ = send_event(
                         &w2,
-                        proto::event::Event::Stderr(proto::StderrEvent {
-                            handle: h2.clone(),
+                        0,
+                        proto::event::Kind::Stderr(proto::StderrEvent {
+                            process_tag: pt2,
                             data: buf[..n].to_vec(),
                         }),
                     );
@@ -460,44 +426,42 @@ fn handle_spawn_pipe(
     });
 
     // Spawn waiter
-    let h3 = handle.to_string();
+    let pt3 = process_tag;
     let w3 = writer.clone();
     let procs = processes.clone();
-    let timeout = if params.timeout_secs > 0 {
-        Some(params.timeout_secs)
+    let timeout = if params.timeout_seconds > 0 {
+        Some(params.timeout_seconds as u64)
     } else {
         None
     };
     thread::spawn(move || {
-        wait_and_exit(&h3, &w3, &procs, timeout);
+        wait_and_exit(pt3, &w3, &procs, timeout);
     });
 }
 
 fn handle_spawn_pty(
-    id: &str,
-    handle: &str,
-    handle_tag: u32,
+    tag: u32,
+    process_tag: u32,
     params: proto::SpawnRequest,
     workdir: &str,
     writer: &SharedWriter,
-    processes: &Arc<Mutex<HashMap<String, ProcessHandle>>>,
+    processes: &Arc<Mutex<HashMap<u32, ProcessHandle>>>,
 ) {
-    let pty_cfg = params.pty.unwrap();
-    let rows = if pty_cfg.rows == 0 { 24 } else { pty_cfg.rows as u16 };
-    let cols = if pty_cfg.cols == 0 { 80 } else { pty_cfg.cols as u16 };
+    let rows = if params.rows == 0 { 24 } else { params.rows as u16 };
+    let cols = if params.cols == 0 { 80 } else { params.cols as u16 };
 
     let pty_pair = match pty_util::open_pty(rows, cols) {
         Ok(pair) => pair,
         Err(e) => {
-            let _ = send_error(writer, id.into(), "SPAWN_FAILED", format!("{e}"));
+            let _ = send_error(writer, tag, 2, format!("{e}"));
             return;
         }
     };
     let master = pty_pair.master;
     let slave = pty_pair.slave;
 
-    let mut cmd = Command::new(&params.cmd[0]);
-    cmd.args(&params.cmd[1..]);
+    let mut cmd = Command::new(&params.command[0]);
+    cmd.args(&params.command[1..]);
     cmd.current_dir(workdir);
 
     let mut has_term = false;
@@ -541,7 +505,7 @@ fn handle_spawn_pty(
     let child = match cmd.spawn() {
         Ok(c) => c,
         Err(e) => {
-            let _ = send_error(writer, id.into(), "SPAWN_FAILED", format!("{e}"));
+            let _ = send_error(writer, tag, 2, format!("{e}"));
             return;
         }
     };
@@ -554,23 +518,22 @@ fn handle_spawn_pty(
         pty_master: Some(master),
         stdin_pipe: None,
         pid,
-        exit_subscribers: Vec::new(),
     };
-    processes.lock().unwrap().insert(handle.to_string(), ph);
+    processes.lock().unwrap().insert(process_tag, ph);
 
     let _ = send_response(
         writer,
-        id.into(),
-        proto::response::Result::Spawn(proto::SpawnResponse {
-            handle: handle.into(),
-            handle_tag,
+        tag,
+        proto::response::Kind::Spawn(proto::SpawnResponse {
+            process_tag,
+            pid: pid as i32,
         }),
     );
 
     // Read from PTY master -> stdout events
     let master_read_fd = {
         let procs = processes.lock().unwrap();
-        let ph = procs.get(handle).unwrap();
+        let ph = procs.get(&process_tag).unwrap();
         let fd = ph.pty_master.as_ref().unwrap().as_raw_fd();
         let duped = unsafe { libc::dup(fd) };
         if duped == -1 {
@@ -580,7 +543,7 @@ fn handle_spawn_pty(
         unsafe { OwnedFd::from_raw_fd(duped) }
     };
 
-    let h1 = handle.to_string();
+    let pt1 = process_tag;
     let w1 = writer.clone();
     thread::spawn(move || {
         use std::os::fd::IntoRawFd;
@@ -593,8 +556,9 @@ fn handle_spawn_pty(
                 Ok(n) => {
                     let _ = send_event(
                         &w1,
-                        proto::event::Event::Stdout(proto::StdoutEvent {
-                            handle: h1.clone(),
+                        0,
+                        proto::event::Kind::Stdout(proto::StdoutEvent {
+                            process_tag: pt1,
                             data: buf[..n].to_vec(),
                         }),
                     );
@@ -604,28 +568,28 @@ fn handle_spawn_pty(
     });
 
     // Spawn waiter
-    let h2 = handle.to_string();
+    let pt2 = process_tag;
     let w2 = writer.clone();
     let procs = processes.clone();
-    let timeout = if params.timeout_secs > 0 {
-        Some(params.timeout_secs)
+    let timeout = if params.timeout_seconds > 0 {
+        Some(params.timeout_seconds as u64)
     } else {
         None
     };
     thread::spawn(move || {
-        wait_and_exit(&h2, &w2, &procs, timeout);
+        wait_and_exit(pt2, &w2, &procs, timeout);
     });
 }
 
 fn wait_and_exit(
-    handle: &str,
+    process_tag: u32,
     writer: &SharedWriter,
-    processes: &Arc<Mutex<HashMap<String, ProcessHandle>>>,
+    processes: &Arc<Mutex<HashMap<u32, ProcessHandle>>>,
     timeout: Option<u64>,
 ) {
     let mut child = {
         let mut procs = processes.lock().unwrap();
-        match procs.get_mut(handle) {
+        match procs.get_mut(&process_tag) {
             Some(ph) => match ph.child.take() {
                 Some(c) => c,
                 None => return,
@@ -664,59 +628,45 @@ fn wait_and_exit(
 
     thread::sleep(std::time::Duration::from_millis(50));
 
-    let exit_subs = {
+    {
         let mut procs = processes.lock().unwrap();
-        let subs = if let Some(ph) = procs.get_mut(handle) {
+        if let Some(ph) = procs.get_mut(&process_tag) {
             ph.pty_master.take();
             ph.stdin_pipe.take();
-            std::mem::take(&mut ph.exit_subscribers)
-        } else {
-            Vec::new()
-        };
-        procs.remove(handle);
-        subs
-    };
+        }
+        procs.remove(&process_tag);
+    }
 
-    log::info!("[v2:exit] handle={handle} exit_code={exit_code}");
+    log::info!("[v2:exit] process_tag={process_tag} exit_code={exit_code}");
     let _ = send_event(
         writer,
-        proto::event::Event::Exit(proto::ExitEvent {
-            handle: handle.into(),
+        0,
+        proto::event::Kind::Exit(proto::ExitEvent {
+            process_tag,
             exit_code,
         }),
     );
-
-    for sub_id in exit_subs {
-        let _ = send_event(
-            writer,
-            proto::event::Event::ProcessExit(proto::ProcessExitEvent {
-                subscription_id: sub_id,
-                handle: handle.into(),
-                exit_code,
-            }),
-        );
-    }
 }
 
 // ---------------------------------------------------------------------------
-// stdin
+// write_in (was: stdin)
 // ---------------------------------------------------------------------------
 
-fn handle_stdin(
-    id: &str,
-    params: proto::StdinRequest,
+fn handle_write_in(
+    tag: u32,
+    params: proto::WriteInRequest,
     writer: &SharedWriter,
-    processes: &Arc<Mutex<HashMap<String, ProcessHandle>>>,
+    processes: &Arc<Mutex<HashMap<u32, ProcessHandle>>>,
 ) {
     let mut procs = processes.lock().unwrap();
-    let ph = match procs.get_mut(&params.handle) {
+    let ph = match procs.get_mut(&params.process_tag) {
         Some(p) => p,
         None => {
             let _ = send_error(
                 writer,
-                id.into(),
-                "UNKNOWN_HANDLE",
-                format!("no process with handle {}", params.handle),
+                tag,
+                3,
+                format!("no process with tag {}", params.process_tag),
             );
             return;
         }
@@ -730,32 +680,32 @@ fn handle_stdin(
         if ret < 0 {
             let _ = send_error(
                 writer,
-                id.into(),
-                "STDIN_FAILED",
+                tag,
+                4,
                 format!("{}", io::Error::last_os_error()),
             );
             return;
         }
     } else if let Some(ref mut stdin_pipe) = ph.stdin_pipe {
         if let Err(e) = stdin_pipe.write_all(data) {
-            let _ = send_error(writer, id.into(), "STDIN_FAILED", format!("{e}"));
+            let _ = send_error(writer, tag, 4, format!("{e}"));
             return;
         }
         if let Err(e) = stdin_pipe.flush() {
-            let _ = send_error(writer, id.into(), "STDIN_FAILED", format!("{e}"));
+            let _ = send_error(writer, tag, 4, format!("{e}"));
             return;
         }
     } else {
         let _ = send_error(
             writer,
-            id.into(),
-            "STDIN_DISABLED",
+            tag,
+            4,
             "process was not spawned with stdin enabled".into(),
         );
         return;
     }
 
-    let _ = send_ok(writer, id.into());
+    let _ = send_response(writer, tag, proto::response::Kind::WriteIn(proto::WriteInResponse {}));
 }
 
 // ---------------------------------------------------------------------------
@@ -763,20 +713,20 @@ fn handle_stdin(
 // ---------------------------------------------------------------------------
 
 fn handle_signal(
-    id: &str,
+    tag: u32,
     params: proto::SignalRequest,
     writer: &SharedWriter,
-    processes: &Arc<Mutex<HashMap<String, ProcessHandle>>>,
+    processes: &Arc<Mutex<HashMap<u32, ProcessHandle>>>,
 ) {
     let procs = processes.lock().unwrap();
-    let ph = match procs.get(&params.handle) {
+    let ph = match procs.get(&params.process_tag) {
         Some(p) => p,
         None => {
             let _ = send_error(
                 writer,
-                id.into(),
-                "UNKNOWN_HANDLE",
-                format!("no process with handle {}", params.handle),
+                tag,
+                3,
+                format!("no process with tag {}", params.process_tag),
             );
             return;
         }
@@ -792,8 +742,8 @@ fn handle_signal(
         other => {
             let _ = send_error(
                 writer,
-                id.into(),
-                "INVALID_SIGNAL",
+                tag,
+                5,
                 format!("unsupported signal: {other}"),
             );
             return;
@@ -802,11 +752,11 @@ fn handle_signal(
 
     let pid = nix::unistd::Pid::from_raw(ph.pid as i32);
     if let Err(e) = nix::sys::signal::kill(pid, sig) {
-        let _ = send_error(writer, id.into(), "SIGNAL_FAILED", format!("{e}"));
+        let _ = send_error(writer, tag, 5, format!("{e}"));
         return;
     }
 
-    let _ = send_ok(writer, id.into());
+    let _ = send_response(writer, tag, proto::response::Kind::Signal(proto::SignalResponse {}));
 }
 
 // ---------------------------------------------------------------------------
@@ -814,20 +764,20 @@ fn handle_signal(
 // ---------------------------------------------------------------------------
 
 fn handle_resize(
-    id: &str,
+    tag: u32,
     params: proto::ResizeRequest,
     writer: &SharedWriter,
-    processes: &Arc<Mutex<HashMap<String, ProcessHandle>>>,
+    processes: &Arc<Mutex<HashMap<u32, ProcessHandle>>>,
 ) {
     let procs = processes.lock().unwrap();
-    let ph = match procs.get(&params.handle) {
+    let ph = match procs.get(&params.process_tag) {
         Some(p) => p,
         None => {
             let _ = send_error(
                 writer,
-                id.into(),
-                "UNKNOWN_HANDLE",
-                format!("no process with handle {}", params.handle),
+                tag,
+                3,
+                format!("no process with tag {}", params.process_tag),
             );
             return;
         }
@@ -836,89 +786,93 @@ fn handle_resize(
     let master = match &ph.pty_master {
         Some(m) => m,
         None => {
-            let _ = send_error(writer, id.into(), "NOT_PTY", "process has no PTY".into());
+            let _ = send_error(writer, tag, 6, "process has no PTY".into());
             return;
         }
     };
 
     if let Err(e) = pty_util::set_winsize(master.as_raw_fd(), params.rows as u16, params.cols as u16) {
-        let _ = send_error(writer, id.into(), "RESIZE_FAILED", format!("{e}"));
+        let _ = send_error(writer, tag, 6, format!("{e}"));
         return;
     }
 
-    let _ = send_ok(writer, id.into());
+    let _ = send_response(writer, tag, proto::response::Kind::Resize(proto::ResizeResponse {}));
 }
 
 // ---------------------------------------------------------------------------
-// read_file
+// read (file)
 // ---------------------------------------------------------------------------
 
-fn handle_read_file(
-    id: &str,
-    params: proto::ReadFileRequest,
+fn handle_read(
+    tag: u32,
+    params: proto::ReadRequest,
     workspace: &str,
     writer: &SharedWriter,
 ) {
+    if let Err(e) = handle_read_inner(tag, params, workspace, writer) {
+        log::error!("[v2:read] tag={tag} error: {e}");
+    }
+}
+
+fn handle_read_inner(
+    tag: u32,
+    params: proto::ReadRequest,
+    workspace: &str,
+    writer: &SharedWriter,
+) -> io::Result<()> {
     let target = match resolve_workspace_path(std::path::Path::new(workspace), &params.path) {
         Ok(p) => p,
         Err(e) => {
-            let _ = send_error(writer, id.into(), "PATH_ERROR", e);
-            return;
+            let _ = send_error(writer, tag, 7, e);
+            return Ok(());
         }
     };
 
-    let mut file = match fs::File::open(&target) {
-        Ok(f) => f,
+    let data = match fs::read(&target) {
+        Ok(d) => d,
         Err(e) => {
-            let _ = send_error(writer, id.into(), "READ_FAILED", format!("{e}"));
-            return;
+            let _ = send_error(writer, tag, 8, format!("{e}"));
+            return Ok(());
         }
     };
 
-    let mut hasher = Sha256::new();
-    let mut buf = vec![0u8; FILE_CHUNK_SIZE];
-    let mut offset: i64 = 0;
+    let sha = hex::encode(Sha256::digest(&data));
+    let size = data.len() as i64;
 
-    loop {
-        match file.read(&mut buf) {
-            Ok(0) => break,
-            Ok(n) => {
-                hasher.update(&buf[..n]);
-                let _ = send_response(
-                    writer,
-                    id.into(),
-                    proto::response::Result::FileChunk(proto::ReadFileChunk {
-                        offset,
-                        content: buf[..n].to_vec(),
-                    }),
-                );
-                offset += n as i64;
-            }
-            Err(e) => {
-                let _ = send_error(writer, id.into(), "READ_FAILED", format!("{e}"));
-                return;
-            }
-        }
-    }
-
-    let sha = hex::encode(hasher.finalize());
-    let _ = send_response(
-        writer,
-        id.into(),
-        proto::response::Result::FileDone(proto::ReadFileComplete {
-            size_bytes: offset,
+    let resp = proto::Response {
+        tag,
+        kind: Some(proto::response::Kind::Read(proto::ReadResponse {
+            size_bytes: size,
             sha256: sha,
-        }),
-    );
+        })),
+    };
+    let encoded = resp.encode_to_vec();
+
+    let mut w = writer.lock().unwrap();
+    w.write_all(&[MSG_TYPE_RESPONSE])?;
+    w.write_all(&(encoded.len() as u32).to_be_bytes())?;
+    w.write_all(&encoded)?;
+
+    // Raw data frames
+    let mut offset = 0;
+    while offset < data.len() {
+        let end = std::cmp::min(offset + FILE_CHUNK_SIZE, data.len());
+        let chunk = &data[offset..end];
+        w.write_all(&(chunk.len() as u32).to_be_bytes())?;
+        w.write_all(chunk)?;
+        offset = end;
+    }
+    w.write_all(&0u32.to_be_bytes())?;
+    w.flush()
 }
 
 // ---------------------------------------------------------------------------
-// write_file
+// write (file)
 // ---------------------------------------------------------------------------
 
-fn handle_write_file(
-    id: &str,
-    params: proto::WriteFileRequest,
+fn handle_write(
+    tag: u32,
+    params: proto::WriteRequest,
     workspace: &str,
     writer: &SharedWriter,
     reader: &mut impl io::Read,
@@ -926,7 +880,7 @@ fn handle_write_file(
     let target = match resolve_workspace_path(std::path::Path::new(workspace), &params.path) {
         Ok(p) => p,
         Err(e) => {
-            let _ = send_error(writer, id.into(), "PATH_ERROR", e);
+            let _ = send_error(writer, tag, 7, e);
             return;
         }
     };
@@ -934,13 +888,13 @@ fn handle_write_file(
     let parent = match target.parent() {
         Some(p) => p.to_path_buf(),
         None => {
-            let _ = send_error(writer, id.into(), "PATH_ERROR", "invalid target".into());
+            let _ = send_error(writer, tag, 7, "invalid target".into());
             return;
         }
     };
 
     if let Err(e) = fs::create_dir_all(&parent) {
-        let _ = send_error(writer, id.into(), "WRITE_FAILED", format!("mkdir: {e}"));
+        let _ = send_error(writer, tag, 9, format!("mkdir: {e}"));
         return;
     }
 
@@ -950,7 +904,7 @@ fn handle_write_file(
     let tmp_file = match fs::File::create(&tmp_path) {
         Ok(f) => f,
         Err(e) => {
-            let _ = send_error(writer, id.into(), "WRITE_FAILED", format!("create temp: {e}"));
+            let _ = send_error(writer, tag, 9, format!("create temp: {e}"));
             return;
         }
     };
@@ -959,74 +913,59 @@ fn handle_write_file(
     let mut hasher = Sha256::new();
     let mut written: i64 = 0;
 
+    // Read raw data frames from socket until zero-length terminator
     let result = (|| -> Result<(), String> {
         loop {
-            let envelope = read_envelope(reader)
-                .map_err(|e| format!("read: {e}"))?
-                .ok_or_else(|| "unexpected EOF during file upload".to_string())?;
-
-            let request = match envelope.payload {
-                Some(proto::envelope::Payload::Request(req)) => req,
-                _ => return Err("expected Request envelope during file upload".into()),
-            };
-
-            let method = request.method.ok_or("missing method")?;
-
-            match method {
-                proto::request::Method::FileChunk(chunk) => {
-                    if !request.id.is_empty() && request.id != id {
-                        return Err("file chunk id mismatch".into());
-                    }
-                    if chunk.content.is_empty() {
-                        continue;
-                    }
-                    use io::Write;
-                    tmp_writer.write_all(&chunk.content).map_err(|e| format!("write: {e}"))?;
-                    hasher.update(&chunk.content);
-                    written += chunk.content.len() as i64;
-                }
-                proto::request::Method::FileDone(_) => {
-                    use io::Write;
-                    tmp_writer.flush().map_err(|e| format!("flush: {e}"))?;
-                    drop(tmp_writer);
-
-                    let actual_sha = hex::encode(hasher.finalize());
-
-                    if !params.expected_sha256.is_empty()
-                        && !params.expected_sha256.eq_ignore_ascii_case(&actual_sha)
-                    {
-                        return Err(format!(
-                            "sha256 mismatch: expected {} got {actual_sha}",
-                            params.expected_sha256
-                        ));
-                    }
-
-                    use std::os::unix::fs::PermissionsExt;
-                    fs::set_permissions(&tmp_path, fs::Permissions::from_mode(0o644))
-                        .map_err(|e| format!("chmod: {e}"))?;
-                    fs::rename(&tmp_path, &target)
-                        .map_err(|e| format!("rename: {e}"))?;
-
-                    let _ = send_response(
-                        writer,
-                        id.into(),
-                        proto::response::Result::WriteFile(proto::WriteFileResponse {
-                            bytes_written: written,
-                            sha256: actual_sha,
-                        }),
-                    );
-                    return Ok(());
-                }
-                _ => {
-                    return Err("unexpected message during file upload".into());
-                }
+            let mut len_buf = [0u8; 4];
+            reader.read_exact(&mut len_buf).map_err(|e| format!("read frame length: {e}"))?;
+            let len = u32::from_be_bytes(len_buf) as usize;
+            if len == 0 {
+                break;
             }
+            let mut buf = vec![0u8; len];
+            reader.read_exact(&mut buf).map_err(|e| format!("read frame data: {e}"))?;
+
+            use io::Write;
+            tmp_writer.write_all(&buf).map_err(|e| format!("write: {e}"))?;
+            hasher.update(&buf);
+            written += buf.len() as i64;
         }
+
+        use io::Write;
+        tmp_writer.flush().map_err(|e| format!("flush: {e}"))?;
+        drop(tmp_writer);
+
+        let actual_sha = hex::encode(hasher.finalize());
+
+        if !params.expected_sha256.is_empty()
+            && !params.expected_sha256.eq_ignore_ascii_case(&actual_sha)
+        {
+            return Err(format!(
+                "sha256 mismatch: expected {} got {actual_sha}",
+                params.expected_sha256
+            ));
+        }
+
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(&tmp_path, fs::Permissions::from_mode(0o644))
+            .map_err(|e| format!("chmod: {e}"))?;
+        fs::rename(&tmp_path, &target)
+            .map_err(|e| format!("rename: {e}"))?;
+
+        let _ = send_response(
+            writer,
+            tag,
+            proto::response::Kind::Write(proto::WriteResponse {
+                bytes_written: written,
+                sha256: actual_sha,
+            }),
+        );
+        Ok(())
     })();
 
     if let Err(e) = result {
         let _ = fs::remove_file(&tmp_path);
-        let _ = send_error(writer, id.into(), "WRITE_FAILED", e);
+        let _ = send_error(writer, tag, 9, e);
     }
 }
 
@@ -1035,7 +974,7 @@ fn handle_write_file(
 // ---------------------------------------------------------------------------
 
 fn handle_stat(
-    id: &str,
+    tag: u32,
     params: proto::StatRequest,
     workspace: &str,
     writer: &SharedWriter,
@@ -1043,7 +982,7 @@ fn handle_stat(
     let target = match resolve_workspace_path(std::path::Path::new(workspace), &params.path) {
         Ok(p) => p,
         Err(e) => {
-            let _ = send_error(writer, id.into(), "PATH_ERROR", e);
+            let _ = send_error(writer, tag, 7, e);
             return;
         }
     };
@@ -1051,74 +990,62 @@ fn handle_stat(
     match fs::metadata(&target) {
         Ok(meta) => {
             use std::os::unix::fs::MetadataExt;
-            let modified = meta
+            let mod_time = meta
                 .modified()
                 .ok()
-                .map(|t| {
-                    let dt: chrono::DateTime<chrono::Utc> = t.into();
-                    dt.to_rfc3339()
-                })
-                .unwrap_or_default();
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_secs() as i64)
+                .unwrap_or(0);
             let mode_val = meta.mode();
             let _ = send_response(
                 writer,
-                id.into(),
-                proto::response::Result::Stat(proto::StatResponse {
-                    exists: true,
+                tag,
+                proto::response::Kind::Stat(proto::StatResponse {
+                    path: params.path,
                     is_dir: meta.is_dir(),
-                    size: meta.len(),
+                    size_bytes: meta.len() as i64,
                     mode: format!("{:04o}", mode_val & 0o7777),
-                    modified,
+                    mod_time_unix: mod_time,
                 }),
             );
         }
         Err(e) if e.kind() == io::ErrorKind::NotFound => {
-            let _ = send_response(
-                writer,
-                id.into(),
-                proto::response::Result::Stat(proto::StatResponse {
-                    exists: false,
-                    is_dir: false,
-                    size: 0,
-                    mode: String::new(),
-                    modified: String::new(),
-                }),
-            );
+            let _ = send_error(writer, tag, 10, format!("not found: {}", params.path));
         }
         Err(e) => {
-            let _ = send_error(writer, id.into(), "STAT_FAILED", format!("{e}"));
+            let _ = send_error(writer, tag, 10, format!("{e}"));
         }
     }
 }
 
 // ---------------------------------------------------------------------------
-// list_dir
+// list (directory)
 // ---------------------------------------------------------------------------
 
-fn handle_list_dir(
-    id: &str,
-    params: proto::ListDirRequest,
+fn handle_list(
+    tag: u32,
+    params: proto::ListRequest,
     workspace: &str,
     writer: &SharedWriter,
 ) {
     let target = match resolve_workspace_path(std::path::Path::new(workspace), &params.path) {
         Ok(p) => p,
         Err(e) => {
-            let _ = send_error(writer, id.into(), "PATH_ERROR", e);
+            let _ = send_error(writer, tag, 7, e);
             return;
         }
     };
 
     let mut entries = Vec::new();
     if let Err(e) = collect_entries(&target, &mut entries, params.recursive) {
-        let _ = send_error(writer, id.into(), "LIST_FAILED", format!("{e}"));
+        let _ = send_error(writer, tag, 11, format!("{e}"));
         return;
     }
 
     let _ = send_response(
         writer,
-        id.into(),
-        proto::response::Result::ListDir(proto::ListDirResponse { entries }),
+        tag,
+        proto::response::Kind::List(proto::ListResponse { entries }),
     );
 }
 
@@ -1127,272 +1054,95 @@ fn handle_list_dir(
 // ---------------------------------------------------------------------------
 
 fn handle_tunnel(
-    id: &str,
+    tag: u32,
     params: proto::TunnelRequest,
     writer: &SharedWriter,
-    tunnels: &Arc<Mutex<HashMap<String, TunnelState>>>,
 ) {
-    let tcp_stream = match TcpStream::connect(&params.target) {
-        Ok(s) => s,
+    let addr = format!("{}:{}", params.host, params.port);
+    match TcpStream::connect(&addr) {
+        Ok(_tcp) => {
+            // Connected successfully. On Unix socket, bidirectional data
+            // transfer requires QUIC data streams; the TCP connection is
+            // kept alive for the session lifetime but data cannot flow
+            // inline on the control channel.
+            let _ = send_response(
+                writer,
+                tag,
+                proto::response::Kind::Tunnel(proto::TunnelResponse {}),
+            );
+        }
         Err(e) => {
-            let _ = send_error(writer, id.into(), "TUNNEL_FAILED", format!("{e}"));
+            let _ = send_error(writer, tag, 12, format!("{e}"));
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// watch / unwatch (was: subscribe / unsubscribe)
+// ---------------------------------------------------------------------------
+
+fn handle_watch(
+    tag: u32,
+    params: proto::WatchRequest,
+    workspace: &str,
+    writer: &SharedWriter,
+    watches: &Arc<Mutex<HashMap<u32, WatchState>>>,
+    watch_counter: &Arc<AtomicU32>,
+) {
+    let watch_id = watch_counter.fetch_add(1, Ordering::Relaxed);
+
+    let watch_path = resolve_watch_path(Path::new(workspace), &params.path);
+    let watch_path = match watch_path {
+        Ok(p) => p,
+        Err(e) => {
+            let _ = send_error(writer, tag, 13, e);
             return;
         }
     };
 
-    let handle = if params.handle.is_empty() {
-        format!("tun-{}", &uuid::Uuid::new_v4().to_string()[..8])
-    } else {
-        params.handle.clone()
-    };
-    let handle_tag = rand_tag();
-
-    let reader_stream = match tcp_stream.try_clone() {
-        Ok(s) => s,
-        Err(e) => {
-            let _ = send_error(writer, id.into(), "TUNNEL_FAILED", format!("{e}"));
-            return;
-        }
+    let shutdown = Arc::new(AtomicBool::new(false));
+    let state = WatchState {
+        fs_shutdowns: vec![shutdown.clone()],
     };
 
-    tunnels.lock().unwrap().insert(
-        handle.clone(),
-        TunnelState {
-            tcp_writer: tcp_stream,
-        },
-    );
+    watches.lock().unwrap().insert(watch_id, state);
 
     let _ = send_response(
         writer,
-        id.into(),
-        proto::response::Result::Tunnel(proto::TunnelResponse {
-            handle: handle.clone(),
-            handle_tag,
-        }),
+        tag,
+        proto::response::Kind::Watch(proto::WatchResponse { watch_id }),
     );
 
     let w = writer.clone();
-    let h = handle.clone();
-    let tuns = tunnels.clone();
+    let recursive = params.recursive;
     thread::spawn(move || {
-        let mut buf = [0u8; 64 * 1024];
-        let mut stream = reader_stream;
-        loop {
-            match stream.read(&mut buf) {
-                Ok(0) => {
-                    let _ = send_event(
-                        &w,
-                        proto::event::Event::TunnelClosed(proto::TunnelClosedEvent {
-                            handle: h.clone(),
-                            reason: "remote closed".into(),
-                        }),
-                    );
-                    break;
-                }
-                Ok(n) => {
-                    let _ = send_event(
-                        &w,
-                        proto::event::Event::TunnelData(proto::TunnelDataEvent {
-                            handle: h.clone(),
-                            data: buf[..n].to_vec(),
-                        }),
-                    );
-                }
-                Err(e) => {
-                    let _ = send_event(
-                        &w,
-                        proto::event::Event::TunnelClosed(proto::TunnelClosedEvent {
-                            handle: h.clone(),
-                            reason: format!("{e}"),
-                        }),
-                    );
-                    break;
-                }
-            }
-        }
-        tuns.lock().unwrap().remove(&h);
+        run_fs_watcher(watch_path, recursive, watch_id, &shutdown, &w);
     });
 }
 
-fn handle_tunnel_data(
-    id: &str,
-    params: proto::TunnelDataRequest,
+fn handle_unwatch(
+    tag: u32,
+    params: proto::UnwatchRequest,
     writer: &SharedWriter,
-    tunnels: &Arc<Mutex<HashMap<String, TunnelState>>>,
+    watches: &Arc<Mutex<HashMap<u32, WatchState>>>,
 ) {
-    let mut tuns = tunnels.lock().unwrap();
-    let ts = match tuns.get_mut(&params.handle) {
-        Some(t) => t,
-        None => {
-            let _ = send_error(
-                writer,
-                id.into(),
-                "UNKNOWN_HANDLE",
-                format!("no tunnel with handle {}", params.handle),
-            );
-            return;
-        }
-    };
-
-    if let Err(e) = ts.tcp_writer.write_all(&params.data) {
-        let _ = send_error(writer, id.into(), "TUNNEL_WRITE_FAILED", format!("{e}"));
-        return;
-    }
-    if let Err(e) = ts.tcp_writer.flush() {
-        let _ = send_error(writer, id.into(), "TUNNEL_WRITE_FAILED", format!("{e}"));
-        return;
-    }
-
-    let _ = send_ok(writer, id.into());
-}
-
-fn handle_tunnel_close(
-    id: &str,
-    params: proto::TunnelCloseRequest,
-    writer: &SharedWriter,
-    tunnels: &Arc<Mutex<HashMap<String, TunnelState>>>,
-) {
-    let mut tuns = tunnels.lock().unwrap();
-    match tuns.remove(&params.handle) {
-        Some(ts) => {
-            let _ = ts.tcp_writer.shutdown(std::net::Shutdown::Both);
-            let _ = send_ok(writer, id.into());
-        }
-        None => {
-            let _ = send_error(
-                writer,
-                id.into(),
-                "UNKNOWN_HANDLE",
-                format!("no tunnel with handle {}", params.handle),
-            );
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
-// subscribe / unsubscribe
-// ---------------------------------------------------------------------------
-
-fn handle_subscribe(
-    id: &str,
-    params: proto::SubscribeRequest,
-    workspace: &str,
-    writer: &SharedWriter,
-    processes: &Arc<Mutex<HashMap<String, ProcessHandle>>>,
-    subscriptions: &Arc<Mutex<HashMap<String, SubscriptionState>>>,
-) {
-    let sub_id = format!("sub-{}", &uuid::Uuid::new_v4().to_string()[..8]);
-    let mut state = SubscriptionState {
-        fs_shutdowns: Vec::new(),
-        watched_process_handles: Vec::new(),
-    };
-
-    for spec in &params.events {
-        match &spec.spec {
-            Some(proto::subscribe_event_spec::Spec::FsChange(fs_spec)) => {
-                let watch_path = resolve_watch_path(Path::new(workspace), &fs_spec.path);
-                let watch_path = match watch_path {
-                    Ok(p) => p,
-                    Err(e) => {
-                        let _ = send_error(writer, id.into(), "SUBSCRIBE_FAILED", e);
-                        cleanup_partial_subscription(&state, processes);
-                        return;
-                    }
-                };
-
-                let shutdown = Arc::new(AtomicBool::new(false));
-                state.fs_shutdowns.push(shutdown.clone());
-
-                let w = writer.clone();
-                let sid = sub_id.clone();
-                let recursive = fs_spec.recursive;
-                thread::spawn(move || {
-                    run_fs_watcher(watch_path, recursive, &sid, &shutdown, &w);
-                });
-            }
-            Some(proto::subscribe_event_spec::Spec::ProcessExit(pe_spec)) => {
-                let mut procs = processes.lock().unwrap();
-                match procs.get_mut(&pe_spec.handle) {
-                    Some(ph) => {
-                        ph.exit_subscribers.push(sub_id.clone());
-                        state.watched_process_handles.push(pe_spec.handle.clone());
-                    }
-                    None => {
-                        drop(procs);
-                        let _ = send_error(
-                            writer,
-                            id.into(),
-                            "UNKNOWN_HANDLE",
-                            format!("no process with handle {}", pe_spec.handle),
-                        );
-                        cleanup_partial_subscription(&state, processes);
-                        return;
-                    }
-                }
-            }
-            None => {
-                let _ = send_error(writer, id.into(), "SUBSCRIBE_FAILED", "empty event spec".into());
-                cleanup_partial_subscription(&state, processes);
-                return;
-            }
-        }
-    }
-
-    subscriptions
-        .lock()
-        .unwrap()
-        .insert(sub_id.clone(), state);
-
-    let _ = send_response(
-        writer,
-        id.into(),
-        proto::response::Result::Subscribe(proto::SubscribeResponse {
-            subscription_id: sub_id,
-        }),
-    );
-}
-
-fn handle_unsubscribe(
-    id: &str,
-    params: proto::UnsubscribeRequest,
-    writer: &SharedWriter,
-    processes: &Arc<Mutex<HashMap<String, ProcessHandle>>>,
-    subscriptions: &Arc<Mutex<HashMap<String, SubscriptionState>>>,
-) {
-    let mut subs = subscriptions.lock().unwrap();
-    match subs.remove(&params.subscription_id) {
+    let mut ws = watches.lock().unwrap();
+    match ws.remove(&params.watch_id) {
         Some(state) => {
             for flag in &state.fs_shutdowns {
                 flag.store(true, Ordering::Relaxed);
             }
-            let mut procs = processes.lock().unwrap();
-            for ph_handle in &state.watched_process_handles {
-                if let Some(ph) = procs.get_mut(ph_handle) {
-                    ph.exit_subscribers
-                        .retain(|s| s != &params.subscription_id);
-                }
-            }
-            let _ = send_ok(writer, id.into());
+            let _ = send_response(writer, tag, proto::response::Kind::Unwatch(proto::UnwatchResponse {}));
         }
         None => {
             let _ = send_error(
                 writer,
-                id.into(),
-                "UNKNOWN_SUBSCRIPTION",
-                format!("no subscription with id {}", params.subscription_id),
+                tag,
+                14,
+                format!("no watch with id {}", params.watch_id),
             );
         }
     }
-}
-
-fn cleanup_partial_subscription(
-    state: &SubscriptionState,
-    processes: &Arc<Mutex<HashMap<String, ProcessHandle>>>,
-) {
-    for flag in &state.fs_shutdowns {
-        flag.store(true, Ordering::Relaxed);
-    }
-    let _ = processes;
 }
 
 fn resolve_watch_path(workspace: &Path, path: &str) -> Result<PathBuf, String> {
@@ -1420,7 +1170,7 @@ fn resolve_watch_path(workspace: &Path, path: &str) -> Result<PathBuf, String> {
 fn run_fs_watcher(
     path: PathBuf,
     recursive: bool,
-    subscription_id: &str,
+    watch_id: u32,
     shutdown: &AtomicBool,
     writer: &SharedWriter,
 ) {
@@ -1480,15 +1230,16 @@ fn run_fs_watcher(
                     };
 
                     let full_path = dir_path.join(&file_name);
-                    let change_type = mask_to_change_type(event.mask);
+                    let event_type = mask_to_event_type(event.mask);
 
-                    if let Some(ct) = change_type {
+                    if let Some(et) = event_type {
                         let _ = send_event(
                             writer,
-                            proto::event::Event::FsChange(proto::FsChangeEvent {
-                                subscription_id: subscription_id.to_string(),
+                            0,
+                            proto::event::Kind::FsChange(proto::FsChangeEvent {
+                                watch_id,
                                 path: full_path.to_string_lossy().into_owned(),
-                                change_type: ct.to_string(),
+                                event_type: et.to_string(),
                             }),
                         );
                     }
@@ -1537,7 +1288,7 @@ fn add_recursive_watches(
     }
 }
 
-fn mask_to_change_type(mask: EventMask) -> Option<&'static str> {
+fn mask_to_event_type(mask: EventMask) -> Option<&'static str> {
     if mask.contains(EventMask::CREATE) || mask.contains(EventMask::MOVED_TO) {
         Some("created")
     } else if mask.contains(EventMask::MODIFY) {
@@ -1562,10 +1313,19 @@ fn collect_entries(
         } else {
             entry.file_name().to_string_lossy().into_owned()
         };
+        use std::os::unix::fs::MetadataExt;
+        let mod_time = meta
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_secs() as i64)
+            .unwrap_or(0);
         entries.push(proto::DirEntry {
             name,
             is_dir: meta.is_dir(),
-            size: meta.len(),
+            size_bytes: meta.len() as i64,
+            mode: format!("{:04o}", meta.mode() & 0o7777),
+            mod_time_unix: mod_time,
         });
         if recursive && meta.is_dir() {
             collect_entries(&entry.path(), entries, true)?;
@@ -1608,40 +1368,64 @@ mod tests {
         (sock_path, tx)
     }
 
-    fn send_request_pb(stream: &mut UnixStream, id: &str, method: proto::request::Method) {
-        let envelope = proto::Envelope {
-            payload: Some(proto::envelope::Payload::Request(proto::Request {
-                id: id.to_string(),
-                method: Some(method),
-            })),
+    fn send_request_pb(stream: &mut UnixStream, tag: u32, kind: proto::request::Kind) {
+        let request = proto::Request {
+            tag,
+            kind: Some(kind),
         };
-        let encoded = envelope.encode_to_vec();
+        let encoded = request.encode_to_vec();
         let len = encoded.len() as u32;
+        stream.write_all(&[MSG_TYPE_REQUEST]).unwrap();
         stream.write_all(&len.to_be_bytes()).unwrap();
         stream.write_all(&encoded).unwrap();
         stream.flush().unwrap();
     }
 
-    fn read_envelope_from(stream: &mut UnixStream) -> proto::Envelope {
+    /// Read a typed message. Returns (type_byte, raw_bytes).
+    fn read_typed_msg(stream: &mut UnixStream) -> (u8, Vec<u8>) {
+        let mut type_buf = [0u8; 1];
+        stream.read_exact(&mut type_buf).unwrap();
         let mut len_buf = [0u8; 4];
         stream.read_exact(&mut len_buf).unwrap();
         let len = u32::from_be_bytes(len_buf) as usize;
         let mut msg_buf = vec![0u8; len];
         stream.read_exact(&mut msg_buf).unwrap();
-        proto::Envelope::decode(&msg_buf[..]).unwrap()
+        (type_buf[0], msg_buf)
     }
 
-    fn extract_response(env: &proto::Envelope) -> &proto::Response {
-        match &env.payload {
-            Some(proto::envelope::Payload::Response(r)) => r,
-            _ => panic!("expected Response"),
+    fn read_response(stream: &mut UnixStream) -> proto::Response {
+        let (typ, data) = read_typed_msg(stream);
+        assert_eq!(typ, MSG_TYPE_RESPONSE, "expected Response type byte");
+        proto::Response::decode(&data[..]).unwrap()
+    }
+
+    /// Read next server message, which is either a Response or Event.
+    enum ServerMsg {
+        Response(proto::Response),
+        Event(proto::Event),
+    }
+
+    fn read_server_msg(stream: &mut UnixStream) -> Option<ServerMsg> {
+        let mut type_buf = [0u8; 1];
+        match stream.read_exact(&mut type_buf) {
+            Ok(()) => {}
+            Err(_) => return None,
         }
-    }
-
-    fn extract_event(env: &proto::Envelope) -> &proto::Event {
-        match &env.payload {
-            Some(proto::envelope::Payload::Event(e)) => e,
-            _ => panic!("expected Event"),
+        let mut len_buf = [0u8; 4];
+        match stream.read_exact(&mut len_buf) {
+            Ok(()) => {}
+            Err(_) => return None,
+        }
+        let len = u32::from_be_bytes(len_buf) as usize;
+        let mut msg_buf = vec![0u8; len];
+        match stream.read_exact(&mut msg_buf) {
+            Ok(()) => {}
+            Err(_) => return None,
+        }
+        match type_buf[0] {
+            MSG_TYPE_RESPONSE => Some(ServerMsg::Response(proto::Response::decode(&msg_buf[..]).unwrap())),
+            MSG_TYPE_EVENT => Some(ServerMsg::Event(proto::Event::decode(&msg_buf[..]).unwrap())),
+            _ => None,
         }
     }
 
@@ -1652,12 +1436,11 @@ mod tests {
 
         let mut stream = UnixStream::connect(&sock).unwrap();
 
-        send_request_pb(&mut stream, "p1", proto::request::Method::Ping(proto::PingRequest {}));
+        send_request_pb(&mut stream, 1, proto::request::Kind::Ping(proto::PingRequest {}));
 
-        let env = read_envelope_from(&mut stream);
-        let resp = extract_response(&env);
-        assert_eq!(resp.id, "p1");
-        assert!(matches!(resp.result, Some(proto::response::Result::Ok(_))));
+        let resp = read_response(&mut stream);
+        assert_eq!(resp.tag, 1);
+        assert!(matches!(resp.kind, Some(proto::response::Kind::Ping(_))));
     }
 
     #[test]
@@ -1666,9 +1449,10 @@ mod tests {
         let (sock, _tx) = start_test_agent(ws.path().to_str().unwrap());
 
         let mut stream = UnixStream::connect(&sock).unwrap();
+        stream.set_read_timeout(Some(std::time::Duration::from_secs(5))).unwrap();
 
-        send_request_pb(&mut stream, "s1", proto::request::Method::Spawn(proto::SpawnRequest {
-            cmd: vec!["echo".into(), "hello v2".into()],
+        send_request_pb(&mut stream, 10, proto::request::Kind::Spawn(proto::SpawnRequest {
+            command: vec!["echo".into(), "hello v2".into()],
             ..Default::default()
         }));
 
@@ -1677,25 +1461,24 @@ mod tests {
         let mut got_exit = false;
 
         for _ in 0..20 {
-            let env = read_envelope_from(&mut stream);
-            match &env.payload {
-                Some(proto::envelope::Payload::Response(resp)) => {
-                    if resp.id == "s1" {
-                        if let Some(proto::response::Result::Spawn(s)) = &resp.result {
-                            assert!(s.handle.starts_with("proc-"));
+            match read_server_msg(&mut stream) {
+                Some(ServerMsg::Response(resp)) => {
+                    if resp.tag == 10 {
+                        if let Some(proto::response::Kind::Spawn(s)) = &resp.kind {
+                            assert_eq!(s.process_tag, 10);
                             got_spawn = true;
                         }
                     }
                 }
-                Some(proto::envelope::Payload::Event(evt)) => {
-                    match &evt.event {
-                        Some(proto::event::Event::Stdout(so)) => {
+                Some(ServerMsg::Event(evt)) => {
+                    match &evt.kind {
+                        Some(proto::event::Kind::Stdout(so)) => {
                             let text = String::from_utf8_lossy(&so.data);
                             if text.contains("hello v2") {
                                 got_stdout = true;
                             }
                         }
-                        Some(proto::event::Event::Exit(ex)) => {
+                        Some(proto::event::Kind::Exit(ex)) => {
                             assert_eq!(ex.exit_code, 0);
                             got_exit = true;
                             break;
@@ -1703,7 +1486,7 @@ mod tests {
                         _ => {}
                     }
                 }
-                _ => {}
+                None => break,
             }
         }
 
@@ -1722,23 +1505,23 @@ mod tests {
             .set_read_timeout(Some(std::time::Duration::from_secs(5)))
             .unwrap();
 
-        send_request_pb(&mut stream, "s2", proto::request::Method::Spawn(proto::SpawnRequest {
-            cmd: vec!["cat".into()],
-            stdin_enabled: true,
+        send_request_pb(&mut stream, 20, proto::request::Kind::Spawn(proto::SpawnRequest {
+            command: vec!["cat".into()],
+            stdin: true,
             ..Default::default()
         }));
 
         // Read spawn response
-        let env = read_envelope_from(&mut stream);
-        let resp = extract_response(&env);
-        let handle = match &resp.result {
-            Some(proto::response::Result::Spawn(s)) => s.handle.clone(),
+        let resp = read_response(&mut stream);
+        assert!(matches!(resp.kind, Some(proto::response::Kind::Spawn(_))));
+        let process_tag = match &resp.kind {
+            Some(proto::response::Kind::Spawn(s)) => s.process_tag,
             _ => panic!("expected spawn response"),
         };
 
-        // Send stdin
-        send_request_pb(&mut stream, "i1", proto::request::Method::Stdin(proto::StdinRequest {
-            handle: handle.clone(),
+        // Send write_in
+        send_request_pb(&mut stream, 21, proto::request::Kind::WriteIn(proto::WriteInRequest {
+            process_tag,
             data: b"test input\n".to_vec(),
         }));
 
@@ -1747,35 +1530,31 @@ mod tests {
         let mut signaled = false;
 
         for _ in 0..30 {
-            let env = match read_envelope_timeout(&mut stream) {
-                Some(e) => e,
-                None => break,
-            };
-            match &env.payload {
-                Some(proto::envelope::Payload::Response(_)) => continue,
-                Some(proto::envelope::Payload::Event(evt)) => {
-                    match &evt.event {
-                        Some(proto::event::Event::Stdout(so)) => {
+            match read_server_msg(&mut stream) {
+                Some(ServerMsg::Response(_)) => continue,
+                Some(ServerMsg::Event(evt)) => {
+                    match &evt.kind {
+                        Some(proto::event::Kind::Stdout(so)) => {
                             let text = String::from_utf8_lossy(&so.data);
                             if text.contains("test input") {
                                 got_output = true;
                                 if !signaled {
                                     signaled = true;
-                                    send_request_pb(&mut stream, "i2", proto::request::Method::Signal(proto::SignalRequest {
-                                        handle: handle.clone(),
+                                    send_request_pb(&mut stream, 22, proto::request::Kind::Signal(proto::SignalRequest {
+                                        process_tag,
                                         signal: "SIGTERM".into(),
                                     }));
                                 }
                             }
                         }
-                        Some(proto::event::Event::Exit(_)) => {
+                        Some(proto::event::Kind::Exit(_)) => {
                             got_exit = true;
                             break;
                         }
                         _ => {}
                     }
                 }
-                _ => {}
+                None => break,
             }
         }
 
@@ -1791,18 +1570,16 @@ mod tests {
 
         let mut stream = UnixStream::connect(&sock).unwrap();
 
-        send_request_pb(&mut stream, "st1", proto::request::Method::Stat(proto::StatRequest {
+        send_request_pb(&mut stream, 30, proto::request::Kind::Stat(proto::StatRequest {
             path: "hello.txt".into(),
         }));
 
-        let env = read_envelope_from(&mut stream);
-        let resp = extract_response(&env);
-        assert_eq!(resp.id, "st1");
-        match &resp.result {
-            Some(proto::response::Result::Stat(s)) => {
-                assert!(s.exists);
+        let resp = read_response(&mut stream);
+        assert_eq!(resp.tag, 30);
+        match &resp.kind {
+            Some(proto::response::Kind::Stat(s)) => {
                 assert!(!s.is_dir);
-                assert_eq!(s.size, 7);
+                assert_eq!(s.size_bytes, 7);
             }
             _ => panic!("expected stat response"),
         }
@@ -1815,18 +1592,17 @@ mod tests {
 
         let mut stream = UnixStream::connect(&sock).unwrap();
 
-        send_request_pb(&mut stream, "st2", proto::request::Method::Stat(proto::StatRequest {
+        send_request_pb(&mut stream, 31, proto::request::Kind::Stat(proto::StatRequest {
             path: "nope.txt".into(),
         }));
 
-        let env = read_envelope_from(&mut stream);
-        let resp = extract_response(&env);
-        assert_eq!(resp.id, "st2");
-        match &resp.result {
-            Some(proto::response::Result::Stat(s)) => {
-                assert!(!s.exists);
+        let resp = read_response(&mut stream);
+        assert_eq!(resp.tag, 31);
+        match &resp.kind {
+            Some(proto::response::Kind::Error(e)) => {
+                assert!(e.message.contains("not found"));
             }
-            _ => panic!("expected stat response"),
+            _ => panic!("expected error response for nonexistent file"),
         }
     }
 
@@ -1841,20 +1617,19 @@ mod tests {
 
         let mut stream = UnixStream::connect(&sock).unwrap();
 
-        send_request_pb(&mut stream, "ld1", proto::request::Method::ListDir(proto::ListDirRequest {
+        send_request_pb(&mut stream, 40, proto::request::Kind::List(proto::ListRequest {
             path: "mydir".into(),
             recursive: false,
         }));
 
-        let env = read_envelope_from(&mut stream);
-        let resp = extract_response(&env);
-        assert_eq!(resp.id, "ld1");
-        match &resp.result {
-            Some(proto::response::Result::ListDir(ld)) => {
+        let resp = read_response(&mut stream);
+        assert_eq!(resp.tag, 40);
+        match &resp.kind {
+            Some(proto::response::Kind::List(ld)) => {
                 assert_eq!(ld.entries.len(), 1);
                 assert_eq!(ld.entries[0].name, "c.txt");
             }
-            _ => panic!("expected list_dir response"),
+            _ => panic!("expected list response"),
         }
     }
 
@@ -1868,32 +1643,34 @@ mod tests {
 
         let mut stream = UnixStream::connect(&sock).unwrap();
 
-        send_request_pb(&mut stream, "rf1", proto::request::Method::ReadFile(proto::ReadFileRequest {
+        send_request_pb(&mut stream, 50, proto::request::Kind::Read(proto::ReadRequest {
             path: "data.txt".into(),
         }));
 
-        let mut chunks = Vec::new();
-        let mut final_result = None;
+        // Read ReadResponse
+        let resp = read_response(&mut stream);
+        assert_eq!(resp.tag, 50);
+        let (resp_size, resp_sha) = match &resp.kind {
+            Some(proto::response::Kind::Read(r)) => (r.size_bytes, r.sha256.clone()),
+            _ => panic!("expected read response"),
+        };
+        assert_eq!(resp_size, content.len() as i64);
+        assert!(!resp_sha.is_empty());
 
-        for _ in 0..10 {
-            let env = read_envelope_from(&mut stream);
-            let resp = extract_response(&env);
-            match &resp.result {
-                Some(proto::response::Result::FileChunk(fc)) => {
-                    chunks.extend_from_slice(&fc.content);
-                }
-                Some(proto::response::Result::FileDone(fd)) => {
-                    final_result = Some(fd.clone());
-                    break;
-                }
-                _ => {}
+        // Read raw data frames
+        let mut data = Vec::new();
+        loop {
+            let mut len_buf = [0u8; 4];
+            stream.read_exact(&mut len_buf).unwrap();
+            let len = u32::from_be_bytes(len_buf) as usize;
+            if len == 0 {
+                break;
             }
+            let mut buf = vec![0u8; len];
+            stream.read_exact(&mut buf).unwrap();
+            data.extend_from_slice(&buf);
         }
-
-        assert_eq!(String::from_utf8(chunks).unwrap(), content);
-        let result = final_result.unwrap();
-        assert_eq!(result.size_bytes, content.len() as i64);
-        assert!(!result.sha256.is_empty());
+        assert_eq!(String::from_utf8(data).unwrap(), content);
     }
 
     #[test]
@@ -1906,282 +1683,48 @@ mod tests {
             .set_read_timeout(Some(std::time::Duration::from_secs(5)))
             .unwrap();
 
-        send_request_pb(&mut stream, "p1", proto::request::Method::Spawn(proto::SpawnRequest {
-            cmd: vec!["echo".into(), "pty-test".into()],
-            pty: Some(proto::PtyConfig { rows: 24, cols: 80 }),
+        send_request_pb(&mut stream, 60, proto::request::Kind::Spawn(proto::SpawnRequest {
+            command: vec!["echo".into(), "pty-test".into()],
+            pty: true,
+            rows: 24,
+            cols: 80,
             ..Default::default()
         }));
 
-        let env = read_envelope_from(&mut stream);
-        let resp = extract_response(&env);
-        let handle = match &resp.result {
-            Some(proto::response::Result::Spawn(s)) => s.handle.clone(),
+        let resp = read_response(&mut stream);
+        match &resp.kind {
+            Some(proto::response::Kind::Spawn(s)) => {
+                assert_eq!(s.process_tag, 60);
+            }
             _ => panic!("expected spawn response"),
-        };
-        assert!(handle.starts_with("proc-"));
+        }
 
         let mut got_output = false;
         let mut got_exit = false;
         for _ in 0..20 {
-            match read_envelope_timeout(&mut stream) {
-                Some(env) => {
-                    match &env.payload {
-                        Some(proto::envelope::Payload::Event(evt)) => {
-                            match &evt.event {
-                                Some(proto::event::Event::Stdout(so)) => {
-                                    let text = String::from_utf8_lossy(&so.data);
-                                    if text.contains("pty-test") {
-                                        got_output = true;
-                                    }
-                                }
-                                Some(proto::event::Event::Exit(ex)) => {
-                                    assert_eq!(ex.exit_code, 0);
-                                    got_exit = true;
-                                    break;
-                                }
-                                _ => {}
+            match read_server_msg(&mut stream) {
+                Some(ServerMsg::Event(evt)) => {
+                    match &evt.kind {
+                        Some(proto::event::Kind::Stdout(so)) => {
+                            let text = String::from_utf8_lossy(&so.data);
+                            if text.contains("pty-test") {
+                                got_output = true;
                             }
+                        }
+                        Some(proto::event::Kind::Exit(ex)) => {
+                            assert_eq!(ex.exit_code, 0);
+                            got_exit = true;
+                            break;
                         }
                         _ => {}
                     }
                 }
-                None => break,
+                _ => {}
             }
         }
 
         assert!(got_output, "expected pty output");
         assert!(got_exit, "expected exit event");
-    }
-
-    fn read_envelope_timeout(stream: &mut UnixStream) -> Option<proto::Envelope> {
-        let mut len_buf = [0u8; 4];
-        match stream.read_exact(&mut len_buf) {
-            Ok(()) => {}
-            Err(_) => return None,
-        }
-        let len = u32::from_be_bytes(len_buf) as usize;
-        let mut msg_buf = vec![0u8; len];
-        match stream.read_exact(&mut msg_buf) {
-            Ok(()) => {}
-            Err(_) => return None,
-        }
-        proto::Envelope::decode(&msg_buf[..]).ok()
-    }
-
-    #[test]
-    fn test_tunnel_echo() {
-        use std::net::TcpListener;
-
-        let echo_listener = TcpListener::bind("127.0.0.1:0").unwrap();
-        let echo_addr = echo_listener.local_addr().unwrap();
-        thread::spawn(move || {
-            if let Ok((mut stream, _)) = echo_listener.accept() {
-                let mut buf = [0u8; 4096];
-                loop {
-                    match stream.read(&mut buf) {
-                        Ok(0) | Err(_) => break,
-                        Ok(n) => {
-                            if stream.write_all(&buf[..n]).is_err() {
-                                break;
-                            }
-                            stream.flush().ok();
-                        }
-                    }
-                }
-            }
-        });
-
-        let ws = tempfile::tempdir().unwrap();
-        let (sock, _tx) = start_test_agent(ws.path().to_str().unwrap());
-
-        let mut stream = UnixStream::connect(&sock).unwrap();
-        stream
-            .set_read_timeout(Some(std::time::Duration::from_secs(5)))
-            .unwrap();
-
-        send_request_pb(&mut stream, "t1", proto::request::Method::Tunnel(proto::TunnelRequest {
-            target: echo_addr.to_string(),
-            handle: "tun-echo".into(),
-        }));
-
-        let env = read_envelope_from(&mut stream);
-        let resp = extract_response(&env);
-        assert_eq!(resp.id, "t1");
-        match &resp.result {
-            Some(proto::response::Result::Tunnel(t)) => {
-                assert_eq!(t.handle, "tun-echo");
-            }
-            _ => panic!("expected tunnel response"),
-        }
-
-        let payload = b"hello tunnel";
-        send_request_pb(&mut stream, "d1", proto::request::Method::TunnelData(proto::TunnelDataRequest {
-            handle: "tun-echo".into(),
-            data: payload.to_vec(),
-        }));
-
-        let mut got_ack = false;
-        let mut got_echo = false;
-        for _ in 0..20 {
-            let env = match read_envelope_timeout(&mut stream) {
-                Some(e) => e,
-                None => break,
-            };
-            match &env.payload {
-                Some(proto::envelope::Payload::Response(resp)) => {
-                    if resp.id == "d1" {
-                        got_ack = true;
-                    }
-                }
-                Some(proto::envelope::Payload::Event(evt)) => {
-                    if let Some(proto::event::Event::TunnelData(td)) = &evt.event {
-                        assert_eq!(td.handle, "tun-echo");
-                        if td.data == payload {
-                            got_echo = true;
-                            break;
-                        }
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        assert!(got_ack, "expected tunnel_data ack");
-        assert!(got_echo, "expected echoed data from tunnel");
-
-        send_request_pb(&mut stream, "c1", proto::request::Method::TunnelClose(proto::TunnelCloseRequest {
-            handle: "tun-echo".into(),
-        }));
-        let env = read_envelope_from(&mut stream);
-        let resp = extract_response(&env);
-        assert_eq!(resp.id, "c1");
-        assert!(matches!(resp.result, Some(proto::response::Result::Ok(_))));
-    }
-
-    #[test]
-    fn test_subscribe_fs_change() {
-        let ws = tempfile::tempdir().unwrap();
-        let output_dir = ws.path().join("output");
-        fs::create_dir(&output_dir).unwrap();
-
-        let (sock, _tx) = start_test_agent(ws.path().to_str().unwrap());
-
-        let mut stream = UnixStream::connect(&sock).unwrap();
-        stream
-            .set_read_timeout(Some(std::time::Duration::from_secs(5)))
-            .unwrap();
-
-        send_request_pb(&mut stream, "sub1", proto::request::Method::Subscribe(proto::SubscribeRequest {
-            events: vec![proto::SubscribeEventSpec {
-                spec: Some(proto::subscribe_event_spec::Spec::FsChange(proto::FsChangeSpec {
-                    path: "output".into(),
-                    recursive: false,
-                })),
-            }],
-        }));
-
-        let env = read_envelope_from(&mut stream);
-        let resp = extract_response(&env);
-        assert_eq!(resp.id, "sub1");
-        let sub_id = match &resp.result {
-            Some(proto::response::Result::Subscribe(s)) => s.subscription_id.clone(),
-            _ => panic!("expected subscribe response"),
-        };
-        assert!(sub_id.starts_with("sub-"));
-
-        thread::sleep(std::time::Duration::from_millis(200));
-
-        fs::write(output_dir.join("model.bin"), "data").unwrap();
-
-        let mut got_event = false;
-        for _ in 0..30 {
-            let env = match read_envelope_timeout(&mut stream) {
-                Some(e) => e,
-                None => break,
-            };
-            if let Some(proto::envelope::Payload::Event(evt)) = &env.payload {
-                if let Some(proto::event::Event::FsChange(fc)) = &evt.event {
-                    assert_eq!(fc.subscription_id, sub_id);
-                    assert!(fc.path.contains("model.bin"), "path should contain model.bin, got: {}", fc.path);
-                    got_event = true;
-                    break;
-                }
-            }
-        }
-
-        assert!(got_event, "expected fs_change event");
-    }
-
-    #[test]
-    fn test_unsubscribe() {
-        let ws = tempfile::tempdir().unwrap();
-        let output_dir = ws.path().join("watched");
-        fs::create_dir(&output_dir).unwrap();
-
-        let (sock, _tx) = start_test_agent(ws.path().to_str().unwrap());
-
-        let mut stream = UnixStream::connect(&sock).unwrap();
-        stream
-            .set_read_timeout(Some(std::time::Duration::from_secs(2)))
-            .unwrap();
-
-        send_request_pb(&mut stream, "sub1", proto::request::Method::Subscribe(proto::SubscribeRequest {
-            events: vec![proto::SubscribeEventSpec {
-                spec: Some(proto::subscribe_event_spec::Spec::FsChange(proto::FsChangeSpec {
-                    path: "watched".into(),
-                    recursive: false,
-                })),
-            }],
-        }));
-
-        let env = read_envelope_from(&mut stream);
-        let resp = extract_response(&env);
-        let sub_id = match &resp.result {
-            Some(proto::response::Result::Subscribe(s)) => s.subscription_id.clone(),
-            _ => panic!("expected subscribe response"),
-        };
-
-        thread::sleep(std::time::Duration::from_millis(200));
-
-        send_request_pb(&mut stream, "u1", proto::request::Method::Unsubscribe(proto::UnsubscribeRequest {
-            subscription_id: sub_id.clone(),
-        }));
-
-        let env = read_envelope_from(&mut stream);
-        let resp = extract_response(&env);
-        assert_eq!(resp.id, "u1");
-        assert!(matches!(resp.result, Some(proto::response::Result::Ok(_))));
-
-        thread::sleep(std::time::Duration::from_millis(300));
-
-        fs::write(output_dir.join("should_not_fire.txt"), "data").unwrap();
-
-        thread::sleep(std::time::Duration::from_millis(300));
-
-        send_request_pb(&mut stream, "p1", proto::request::Method::Ping(proto::PingRequest {}));
-
-        let mut got_fs_event = false;
-        for _ in 0..10 {
-            let env = match read_envelope_timeout(&mut stream) {
-                Some(e) => e,
-                None => break,
-            };
-            match &env.payload {
-                Some(proto::envelope::Payload::Event(evt)) => {
-                    if matches!(&evt.event, Some(proto::event::Event::FsChange(_))) {
-                        got_fs_event = true;
-                    }
-                }
-                Some(proto::envelope::Payload::Response(resp)) => {
-                    if resp.id == "p1" {
-                        break;
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        assert!(!got_fs_event, "should not receive fs_change after unsubscribe");
     }
 
     #[test]
@@ -2191,27 +1734,32 @@ mod tests {
 
         let mut stream = UnixStream::connect(&sock).unwrap();
 
-        let content = b"hello write_file v2!";
+        let content = b"hello write v2!";
         let expected_sha = hex::encode(sha2::Sha256::digest(content));
 
-        send_request_pb(&mut stream, "wf1", proto::request::Method::WriteFile(proto::WriteFileRequest {
+        // Send WriteRequest
+        send_request_pb(&mut stream, 70, proto::request::Kind::Write(proto::WriteRequest {
             path: "test_output.txt".into(),
-            expected_sha256: expected_sha.clone(), stream_tag: 0,
+            expected_sha256: expected_sha.clone(),
+            size_hint: content.len() as i64,
         }));
-        send_request_pb(&mut stream, "wf1", proto::request::Method::FileChunk(proto::FileChunkData {
-            content: content.to_vec(),
-        }));
-        send_request_pb(&mut stream, "wf1", proto::request::Method::FileDone(proto::FileDoneRequest {}));
 
-        let env = read_envelope_from(&mut stream);
-        let resp = extract_response(&env);
-        assert_eq!(resp.id, "wf1");
-        match &resp.result {
-            Some(proto::response::Result::WriteFile(wf)) => {
+        // Send raw data frames
+        let len = content.len() as u32;
+        stream.write_all(&len.to_be_bytes()).unwrap();
+        stream.write_all(content).unwrap();
+        // terminator
+        stream.write_all(&0u32.to_be_bytes()).unwrap();
+        stream.flush().unwrap();
+
+        let resp = read_response(&mut stream);
+        assert_eq!(resp.tag, 70);
+        match &resp.kind {
+            Some(proto::response::Kind::Write(wf)) => {
                 assert_eq!(wf.bytes_written, content.len() as i64);
                 assert_eq!(wf.sha256, expected_sha);
             }
-            _ => panic!("expected write_file response"),
+            _ => panic!("expected write response, got {:?}", resp.kind),
         }
 
         let written = std::fs::read(ws.path().join("test_output.txt")).unwrap();
@@ -2225,21 +1773,23 @@ mod tests {
 
         let mut stream = UnixStream::connect(&sock).unwrap();
 
-        send_request_pb(&mut stream, "wf2", proto::request::Method::WriteFile(proto::WriteFileRequest {
+        send_request_pb(&mut stream, 71, proto::request::Kind::Write(proto::WriteRequest {
             path: "bad.txt".into(),
             expected_sha256: "0000000000000000000000000000000000000000000000000000000000000000".into(),
-            stream_tag: 0,
+            size_hint: 0,
         }));
-        send_request_pb(&mut stream, "wf2", proto::request::Method::FileChunk(proto::FileChunkData {
-            content: b"data".to_vec(),
-        }));
-        send_request_pb(&mut stream, "wf2", proto::request::Method::FileDone(proto::FileDoneRequest {}));
 
-        let env = read_envelope_from(&mut stream);
-        let resp = extract_response(&env);
-        assert_eq!(resp.id, "wf2");
-        match &resp.result {
-            Some(proto::response::Result::Error(e)) => {
+        // Send raw data
+        let data = b"data";
+        stream.write_all(&(data.len() as u32).to_be_bytes()).unwrap();
+        stream.write_all(data).unwrap();
+        stream.write_all(&0u32.to_be_bytes()).unwrap();
+        stream.flush().unwrap();
+
+        let resp = read_response(&mut stream);
+        assert_eq!(resp.tag, 71);
+        match &resp.kind {
+            Some(proto::response::Kind::Error(e)) => {
                 assert!(e.message.contains("sha256 mismatch"));
             }
             _ => panic!("expected error response"),
@@ -2261,50 +1811,170 @@ mod tests {
         }
         let expected_sha = hex::encode(full_hasher.finalize());
 
-        send_request_pb(&mut stream, "wf3", proto::request::Method::WriteFile(proto::WriteFileRequest {
+        // Write
+        send_request_pb(&mut stream, 72, proto::request::Kind::Write(proto::WriteRequest {
             path: "large.bin".into(),
             expected_sha256: String::new(),
-            stream_tag: 0,
+            size_hint: 0,
         }));
         for _ in 0..4 {
-            send_request_pb(&mut stream, "wf3", proto::request::Method::FileChunk(proto::FileChunkData {
-                content: chunk_data.clone(),
-            }));
+            let len = chunk_data.len() as u32;
+            stream.write_all(&len.to_be_bytes()).unwrap();
+            stream.write_all(&chunk_data).unwrap();
         }
-        send_request_pb(&mut stream, "wf3", proto::request::Method::FileDone(proto::FileDoneRequest {}));
+        stream.write_all(&0u32.to_be_bytes()).unwrap();
+        stream.flush().unwrap();
 
-        let env = read_envelope_from(&mut stream);
-        let resp = extract_response(&env);
-        assert_eq!(resp.id, "wf3");
-        match &resp.result {
-            Some(proto::response::Result::WriteFile(wf)) => {
+        let resp = read_response(&mut stream);
+        assert_eq!(resp.tag, 72);
+        match &resp.kind {
+            Some(proto::response::Kind::Write(wf)) => {
                 assert_eq!(wf.bytes_written, 2 * 1024 * 1024);
                 assert_eq!(wf.sha256, expected_sha);
             }
-            _ => panic!("expected write_file response"),
+            _ => panic!("expected write response"),
         }
 
         // Read it back
-        send_request_pb(&mut stream, "rf3", proto::request::Method::ReadFile(proto::ReadFileRequest {
+        send_request_pb(&mut stream, 73, proto::request::Kind::Read(proto::ReadRequest {
             path: "large.bin".into(),
         }));
 
-        let mut chunks = Vec::new();
+        let resp = read_response(&mut stream);
+        assert_eq!(resp.tag, 73);
+        match &resp.kind {
+            Some(proto::response::Kind::Read(r)) => {
+                assert_eq!(r.size_bytes, 2 * 1024 * 1024);
+                assert_eq!(r.sha256, expected_sha);
+            }
+            _ => panic!("expected read response"),
+        }
+
+        // Read raw data
+        let mut data = Vec::new();
         loop {
-            let env = read_envelope_from(&mut stream);
-            let resp = extract_response(&env);
-            match &resp.result {
-                Some(proto::response::Result::FileChunk(fc)) => {
-                    chunks.extend_from_slice(&fc.content);
-                }
-                Some(proto::response::Result::FileDone(fd)) => {
-                    assert_eq!(fd.size_bytes, 2 * 1024 * 1024);
-                    assert_eq!(fd.sha256, expected_sha);
-                    break;
+            let mut len_buf = [0u8; 4];
+            stream.read_exact(&mut len_buf).unwrap();
+            let len = u32::from_be_bytes(len_buf) as usize;
+            if len == 0 {
+                break;
+            }
+            let mut buf = vec![0u8; len];
+            stream.read_exact(&mut buf).unwrap();
+            data.extend_from_slice(&buf);
+        }
+        assert_eq!(data.len(), 2 * 1024 * 1024);
+    }
+
+    #[test]
+    fn test_watch_fs_change() {
+        let ws = tempfile::tempdir().unwrap();
+        let output_dir = ws.path().join("output");
+        fs::create_dir(&output_dir).unwrap();
+
+        let (sock, _tx) = start_test_agent(ws.path().to_str().unwrap());
+
+        let mut stream = UnixStream::connect(&sock).unwrap();
+        stream
+            .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+            .unwrap();
+
+        send_request_pb(&mut stream, 80, proto::request::Kind::Watch(proto::WatchRequest {
+            path: "output".into(),
+            recursive: false,
+            event_types: vec![],
+        }));
+
+        let resp = read_response(&mut stream);
+        assert_eq!(resp.tag, 80);
+        let watch_id = match &resp.kind {
+            Some(proto::response::Kind::Watch(w)) => w.watch_id,
+            _ => panic!("expected watch response"),
+        };
+        assert!(watch_id > 0);
+
+        thread::sleep(std::time::Duration::from_millis(200));
+
+        fs::write(output_dir.join("model.bin"), "data").unwrap();
+
+        let mut got_event = false;
+        for _ in 0..30 {
+            match read_server_msg(&mut stream) {
+                Some(ServerMsg::Event(evt)) => {
+                    if let Some(proto::event::Kind::FsChange(fc)) = &evt.kind {
+                        assert_eq!(fc.watch_id, watch_id);
+                        assert!(fc.path.contains("model.bin"), "path should contain model.bin, got: {}", fc.path);
+                        got_event = true;
+                        break;
+                    }
                 }
                 _ => {}
             }
         }
-        assert_eq!(chunks.len(), 2 * 1024 * 1024);
+
+        assert!(got_event, "expected fs_change event");
+    }
+
+    #[test]
+    fn test_unwatch() {
+        let ws = tempfile::tempdir().unwrap();
+        let output_dir = ws.path().join("watched");
+        fs::create_dir(&output_dir).unwrap();
+
+        let (sock, _tx) = start_test_agent(ws.path().to_str().unwrap());
+
+        let mut stream = UnixStream::connect(&sock).unwrap();
+        stream
+            .set_read_timeout(Some(std::time::Duration::from_secs(2)))
+            .unwrap();
+
+        send_request_pb(&mut stream, 90, proto::request::Kind::Watch(proto::WatchRequest {
+            path: "watched".into(),
+            recursive: false,
+            event_types: vec![],
+        }));
+
+        let resp = read_response(&mut stream);
+        let watch_id = match &resp.kind {
+            Some(proto::response::Kind::Watch(w)) => w.watch_id,
+            _ => panic!("expected watch response"),
+        };
+
+        thread::sleep(std::time::Duration::from_millis(200));
+
+        send_request_pb(&mut stream, 91, proto::request::Kind::Unwatch(proto::UnwatchRequest {
+            watch_id,
+        }));
+
+        let resp = read_response(&mut stream);
+        assert_eq!(resp.tag, 91);
+        assert!(matches!(resp.kind, Some(proto::response::Kind::Unwatch(_))));
+
+        thread::sleep(std::time::Duration::from_millis(300));
+
+        fs::write(output_dir.join("should_not_fire.txt"), "data").unwrap();
+
+        thread::sleep(std::time::Duration::from_millis(300));
+
+        send_request_pb(&mut stream, 92, proto::request::Kind::Ping(proto::PingRequest {}));
+
+        let mut got_fs_event = false;
+        for _ in 0..10 {
+            match read_server_msg(&mut stream) {
+                Some(ServerMsg::Event(evt)) => {
+                    if matches!(&evt.kind, Some(proto::event::Kind::FsChange(_))) {
+                        got_fs_event = true;
+                    }
+                }
+                Some(ServerMsg::Response(resp)) => {
+                    if resp.tag == 92 {
+                        break;
+                    }
+                }
+                None => break,
+            }
+        }
+
+        assert!(!got_fs_event, "should not receive fs_change after unwatch");
     }
 }

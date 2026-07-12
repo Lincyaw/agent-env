@@ -2,7 +2,7 @@ package execagent
 
 // V1 JSON protocol types. Used only when EXECUTOR_PROTOCOL != "v2".
 // The V2 protobuf protocol is defined in proto/executor_v2.proto and the
-// generated Go types live in pkg/pb/executor_v2.
+// generated Go types live in pkg/pb/executorv2.
 
 // Request is the JSON-over-socket protocol request from sidecar to executor agent (V1 only).
 type Request struct {

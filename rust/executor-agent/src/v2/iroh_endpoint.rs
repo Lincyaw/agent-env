@@ -112,7 +112,7 @@ fn write_secret_key_file(key: &SecretKey) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use super::super::agent::read_envelope;
+    use super::super::agent::MSG_TYPE_RESPONSE;
     use super::super::connection::SyncRecvStream;
     use super::super::proto;
     use prost::Message;
@@ -161,39 +161,44 @@ mod tests {
 
         let (mut send, recv) = conn.open_bi().await.expect("open bi");
 
-        // Send a protobuf ping
-        let ping = proto::Envelope {
-            payload: Some(proto::envelope::Payload::Request(proto::Request {
-                id: "test-1".into(),
-                method: Some(proto::request::Method::Ping(proto::PingRequest {})),
-            })),
+        // Send a typed protobuf ping: [1B type][4B len][proto]
+        let ping = proto::Request {
+            tag: 1,
+            kind: Some(proto::request::Kind::Ping(proto::PingRequest {})),
         };
         let encoded = ping.encode_to_vec();
         let len = encoded.len() as u32;
+        send.write_all(&[super::super::agent::MSG_TYPE_REQUEST])
+            .await
+            .expect("write type");
         send.write_all(&len.to_be_bytes())
             .await
             .expect("write len");
         send.write_all(&encoded).await.expect("write ping");
 
-        // Read protobuf response
+        // Read typed protobuf response: [1B type][4B len][proto]
         let handle = Handle::current();
         let response = tokio::task::spawn_blocking(move || {
             let mut reader = SyncRecvStream::new(recv, handle);
-            read_envelope(&mut reader).expect("read envelope")
+            // Read type byte
+            let mut type_buf = [0u8; 1];
+            std::io::Read::read_exact(&mut reader, &mut type_buf).expect("read type");
+            assert_eq!(type_buf[0], MSG_TYPE_RESPONSE);
+            // Read length
+            let mut len_buf = [0u8; 4];
+            std::io::Read::read_exact(&mut reader, &mut len_buf).expect("read len");
+            let msg_len = u32::from_be_bytes(len_buf) as usize;
+            let mut msg_buf = vec![0u8; msg_len];
+            std::io::Read::read_exact(&mut reader, &mut msg_buf).expect("read msg");
+            proto::Response::decode(&msg_buf[..]).expect("decode response")
         })
         .await
         .expect("blocking read");
 
         send.finish().expect("finish send");
 
-        let env = response.expect("expected envelope");
-        match env.payload {
-            Some(proto::envelope::Payload::Response(resp)) => {
-                assert_eq!(resp.id, "test-1");
-                assert!(matches!(resp.result, Some(proto::response::Result::Ok(_))));
-            }
-            _ => panic!("expected Response payload"),
-        }
+        assert_eq!(response.tag, 1);
+        assert!(matches!(response.kind, Some(proto::response::Kind::Ping(_))));
 
         server_task.await.ok();
         server_for_close.close().await;

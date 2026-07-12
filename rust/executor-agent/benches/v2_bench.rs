@@ -1,4 +1,5 @@
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use executor_agent::v2::agent::{MSG_TYPE_REQUEST, MSG_TYPE_RESPONSE, MSG_TYPE_EVENT};
 use executor_agent::v2::proto;
 use prost::Message;
 use std::io::{Read, Write};
@@ -33,27 +34,35 @@ fn connect(sock: &str) -> UnixStream {
     UnixStream::connect(sock).unwrap()
 }
 
-fn send_pb(stream: &mut UnixStream, id: &str, method: proto::request::Method) {
-    let envelope = proto::Envelope {
-        payload: Some(proto::envelope::Payload::Request(proto::Request {
-            id: id.to_string(),
-            method: Some(method),
-        })),
+fn send_pb(stream: &mut UnixStream, tag: u32, kind: proto::request::Kind) {
+    let request = proto::Request {
+        tag,
+        kind: Some(kind),
     };
-    let encoded = envelope.encode_to_vec();
+    let encoded = request.encode_to_vec();
     let len = encoded.len() as u32;
+    stream.write_all(&[MSG_TYPE_REQUEST]).unwrap();
     stream.write_all(&len.to_be_bytes()).unwrap();
     stream.write_all(&encoded).unwrap();
     stream.flush().unwrap();
 }
 
-fn recv_pb(stream: &mut UnixStream) -> proto::Envelope {
+/// Read a typed message, returns (type_byte, raw_bytes).
+fn recv_typed(stream: &mut UnixStream) -> (u8, Vec<u8>) {
+    let mut type_buf = [0u8; 1];
+    stream.read_exact(&mut type_buf).unwrap();
     let mut len_buf = [0u8; 4];
     stream.read_exact(&mut len_buf).unwrap();
     let len = u32::from_be_bytes(len_buf) as usize;
     let mut msg_buf = vec![0u8; len];
     stream.read_exact(&mut msg_buf).unwrap();
-    proto::Envelope::decode(&msg_buf[..]).unwrap()
+    (type_buf[0], msg_buf)
+}
+
+fn recv_response(stream: &mut UnixStream) -> proto::Response {
+    let (typ, data) = recv_typed(stream);
+    assert_eq!(typ, MSG_TYPE_RESPONSE);
+    proto::Response::decode(&data[..]).unwrap()
 }
 
 fn bench_ping(c: &mut Criterion) {
@@ -65,10 +74,10 @@ fn bench_ping(c: &mut Criterion) {
         b.iter(|| {
             send_pb(
                 &mut stream,
-                "b",
-                proto::request::Method::Ping(proto::PingRequest {}),
+                1,
+                proto::request::Kind::Ping(proto::PingRequest {}),
             );
-            recv_pb(&mut stream);
+            recv_response(&mut stream);
         });
     });
 }
@@ -77,21 +86,24 @@ fn bench_exec(c: &mut Criterion) {
     let ws = tempfile::tempdir().unwrap();
     let sock = start_agent(ws.path().to_str().unwrap());
     let mut stream = connect(&sock);
+    let mut tag = 100u32;
 
     c.bench_function("v2_exec_echo", |b| {
         b.iter(|| {
+            tag += 1;
             send_pb(
                 &mut stream,
-                "b",
-                proto::request::Method::Spawn(proto::SpawnRequest {
-                    cmd: vec!["echo".into(), "bench".into()],
+                tag,
+                proto::request::Kind::Spawn(proto::SpawnRequest {
+                    command: vec!["echo".into(), "bench".into()],
                     ..Default::default()
                 }),
             );
             loop {
-                let env = recv_pb(&mut stream);
-                if let Some(proto::envelope::Payload::Event(evt)) = &env.payload {
-                    if matches!(&evt.event, Some(proto::event::Event::Exit(_))) {
+                let (typ, data) = recv_typed(&mut stream);
+                if typ == MSG_TYPE_EVENT {
+                    let evt = proto::Event::decode(&data[..]).unwrap();
+                    if matches!(&evt.kind, Some(proto::event::Kind::Exit(_))) {
                         break;
                     }
                 }
@@ -121,26 +133,21 @@ fn bench_file_write(c: &mut Criterion) {
                     let fname = format!("bench_{i}.bin");
                     send_pb(
                         &mut stream,
-                        "w",
-                        proto::request::Method::WriteFile(proto::WriteFileRequest {
+                        i as u32,
+                        proto::request::Kind::Write(proto::WriteRequest {
                             path: fname,
                             expected_sha256: String::new(),
-                            stream_tag: 0,
+                            size_hint: data.len() as i64,
                         }),
                     );
-                    send_pb(
-                        &mut stream,
-                        "w",
-                        proto::request::Method::FileChunk(proto::FileChunkData {
-                            content: data.clone(),
-                        }),
-                    );
-                    send_pb(
-                        &mut stream,
-                        "w",
-                        proto::request::Method::FileDone(proto::FileDoneRequest {}),
-                    );
-                    recv_pb(&mut stream);
+                    // Send raw data frame
+                    let len = data.len() as u32;
+                    stream.write_all(&len.to_be_bytes()).unwrap();
+                    stream.write_all(data).unwrap();
+                    // terminator
+                    stream.write_all(&0u32.to_be_bytes()).unwrap();
+                    stream.flush().unwrap();
+                    recv_response(&mut stream);
                 });
             },
         );
@@ -168,21 +175,23 @@ fn bench_file_read(c: &mut Criterion) {
                 b.iter(|| {
                     send_pb(
                         &mut stream,
-                        "r",
-                        proto::request::Method::ReadFile(proto::ReadFileRequest {
+                        1,
+                        proto::request::Kind::Read(proto::ReadRequest {
                             path: fname.clone(),
                         }),
                     );
+                    // Read ReadResponse
+                    recv_response(&mut stream);
+                    // Read raw data frames until zero terminator
                     loop {
-                        let env = recv_pb(&mut stream);
-                        if let Some(proto::envelope::Payload::Response(resp)) = &env.payload {
-                            if matches!(
-                                &resp.result,
-                                Some(proto::response::Result::FileDone(_))
-                            ) {
-                                break;
-                            }
+                        let mut len_buf = [0u8; 4];
+                        stream.read_exact(&mut len_buf).unwrap();
+                        let len = u32::from_be_bytes(len_buf) as usize;
+                        if len == 0 {
+                            break;
                         }
+                        let mut buf = vec![0u8; len];
+                        stream.read_exact(&mut buf).unwrap();
                     }
                 });
             },
@@ -201,12 +210,12 @@ fn bench_stat(c: &mut Criterion) {
         b.iter(|| {
             send_pb(
                 &mut stream,
-                "s",
-                proto::request::Method::Stat(proto::StatRequest {
+                1,
+                proto::request::Kind::Stat(proto::StatRequest {
                     path: "s.txt".into(),
                 }),
             );
-            recv_pb(&mut stream);
+            recv_response(&mut stream);
         });
     });
 }
