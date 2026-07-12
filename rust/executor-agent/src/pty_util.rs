@@ -44,7 +44,8 @@ pub fn setup_slave_terminal(slave_fd: i32) -> io::Result<()> {
         .map_err(|e| io::Error::other(format!("setsid: {}", e)))?;
 
     // Set controlling terminal
-    let ret = unsafe { libc::ioctl(slave_fd, libc::TIOCSCTTY as libc::c_ulong, 0i32) };
+    #[allow(clippy::unnecessary_cast)]
+    let ret = unsafe { libc::ioctl(slave_fd, libc::TIOCSCTTY as libc::c_int, 0i32) };
     if ret < 0 {
         return Err(io::Error::last_os_error());
     }
