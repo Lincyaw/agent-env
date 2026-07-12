@@ -324,7 +324,6 @@ impl QuicTransport {
             })),
         };
         Self::send_typed(&mut send, MSG_TYPE_REQUEST, &req.encode_to_vec()).await?;
-        let _ = send.finish();
 
         let (_, resp_data) = Self::recv_typed(&mut recv).await?;
         let resp = proto::Response::decode(&resp_data[..])?;
@@ -347,6 +346,7 @@ impl QuicTransport {
             file_data.extend_from_slice(&chunk);
         }
 
+        let _ = send.finish();
         Ok(file_data)
     }
 

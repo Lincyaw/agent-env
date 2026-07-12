@@ -202,7 +202,7 @@ impl Client {
 
     pub async fn delete_experiment(&self, id: &str) -> Result<()> {
         self.http
-            .delete(format!("{}/v1/experiments/{id}", self.base_url))
+            .delete(format!("{}/v1/managed/experiments/{id}", self.base_url))
             .send()
             .await?
             .error_for_status()?;
@@ -212,7 +212,7 @@ impl Client {
     pub async fn list_experiments(&self) -> Result<Vec<ExperimentInfo>> {
         let resp = self
             .http
-            .get(format!("{}/v1/experiments", self.base_url))
+            .get(format!("{}/v1/managed/experiments", self.base_url))
             .send()
             .await?
             .error_for_status()?;
@@ -222,7 +222,10 @@ impl Client {
     pub async fn list_experiment_sessions(&self, id: &str) -> Result<Vec<SessionInfo>> {
         let resp = self
             .http
-            .get(format!("{}/v1/experiments/{id}/sessions", self.base_url))
+            .get(format!(
+                "{}/v1/managed/experiments/{id}/sessions",
+                self.base_url
+            ))
             .send()
             .await?
             .error_for_status()?;
@@ -267,7 +270,7 @@ impl Client {
     pub async fn scale_pool(&self, name: &str, replicas: i32) -> Result<()> {
         let body = serde_json::json!({"replicas": replicas});
         self.http
-            .patch(format!("{}/v1/pools/{name}/scale", self.base_url))
+            .patch(format!("{}/v1/pools/{name}", self.base_url))
             .json(&body)
             .send()
             .await?
