@@ -50,7 +50,7 @@ impl Transport {
         &self,
         session_id: &str,
         path: &str,
-        data: &[u8],
+        data: Vec<u8>,
     ) -> Result<UploadResult> {
         match self {
             Transport::Http(client) => client.upload_http(session_id, path, data).await,
@@ -83,16 +83,11 @@ impl QuicTransport {
         let (id_hex, relay_url) = parse_iroh_addr(iroh_addr_raw);
 
         let mut builder = iroh::Endpoint::builder(presets::Minimal)
-            .alpns(vec![ALPN.to_vec()]);
+            .alpns(vec![ALPN.to_vec()])
+            .relay_mode(iroh::RelayMode::Default);
 
-        if relay_url.is_some() {
-            // We have the relay URL from the executor — connect directly, skip DNS.
-            builder = builder.relay_mode(iroh::RelayMode::Default);
-        } else {
-            // No relay URL, need DNS to discover the remote address.
-            builder = builder
-                .address_lookup(DnsAddressLookup::n0_dns())
-                .relay_mode(iroh::RelayMode::Default);
+        if relay_url.is_none() {
+            builder = builder.address_lookup(DnsAddressLookup::n0_dns());
         }
 
         let endpoint = builder.bind().await?;
@@ -180,8 +175,8 @@ impl QuicTransport {
         };
         Self::send_typed(&mut send, MSG_TYPE_REQUEST, &req.encode_to_vec()).await?;
 
-        let mut stdout_parts = Vec::new();
-        let mut stderr_parts = Vec::new();
+        let mut stdout_buf = Vec::new();
+        let mut stderr_buf = Vec::new();
         let mut exit_code = 0i32;
 
         loop {
@@ -196,8 +191,8 @@ impl QuicTransport {
                 MSG_TYPE_EVENT => {
                     let evt = proto::Event::decode(&data[..])?;
                     match evt.kind {
-                        Some(proto::event::Kind::Stdout(so)) => stdout_parts.push(so.data),
-                        Some(proto::event::Kind::Stderr(se)) => stderr_parts.push(se.data),
+                        Some(proto::event::Kind::Stdout(so)) => stdout_buf.extend_from_slice(&so.data),
+                        Some(proto::event::Kind::Stderr(se)) => stderr_buf.extend_from_slice(&se.data),
                         Some(proto::event::Kind::Exit(ex)) => {
                             exit_code = ex.exit_code;
                             break;
@@ -212,8 +207,8 @@ impl QuicTransport {
         let _ = send.finish();
 
         Ok(ExecOutput {
-            stdout: String::from_utf8_lossy(&stdout_parts.concat()).to_string(),
-            stderr: String::from_utf8_lossy(&stderr_parts.concat()).to_string(),
+            stdout: String::from_utf8_lossy(&stdout_buf).into_owned(),
+            stderr: String::from_utf8_lossy(&stderr_buf).into_owned(),
             exit_code,
         })
     }
@@ -223,14 +218,15 @@ impl QuicTransport {
 
         let (mut send, mut recv) = self.open_control().await?;
 
+        let (term_cols, term_rows) = crossterm::terminal::size().unwrap_or((80, 24));
         let req = proto::Request {
             tag: 1,
             kind: Some(proto::request::Kind::Spawn(proto::SpawnRequest {
                 command: vec!["/bin/sh".into(), "-i".into()],
                 pty: true,
                 stdin: true,
-                rows: 24,
-                cols: 80,
+                rows: term_rows as i32,
+                cols: term_cols as i32,
                 ..Default::default()
             })),
         };
@@ -278,6 +274,7 @@ impl QuicTransport {
             }
         });
 
+        use std::io::Write;
         let mut exit_code = 0i32;
         loop {
             match Self::recv_typed(&mut recv).await {
@@ -285,12 +282,10 @@ impl QuicTransport {
                     let evt = proto::Event::decode(&data[..])?;
                     match evt.kind {
                         Some(proto::event::Kind::Stdout(so)) => {
-                            use std::io::Write;
                             let _ = std::io::stdout().write_all(&so.data);
                             let _ = std::io::stdout().flush();
                         }
                         Some(proto::event::Kind::Stderr(se)) => {
-                            use std::io::Write;
                             let _ = std::io::stderr().write_all(&se.data);
                         }
                         Some(proto::event::Kind::Exit(ex)) => {
@@ -317,7 +312,7 @@ impl QuicTransport {
         })
     }
 
-    pub async fn upload(&self, path: &str, data: &[u8]) -> Result<UploadResult> {
+    pub async fn upload(&self, path: &str, data: impl AsRef<[u8]>) -> Result<UploadResult> {
         use crate::proto;
 
         let (mut send, mut recv) = self.open_control().await?;
@@ -332,6 +327,7 @@ impl QuicTransport {
         Self::send_typed(&mut send, MSG_TYPE_REQUEST, &req.encode_to_vec()).await?;
 
         // Send raw data frames
+        let data = data.as_ref();
         let len_bytes = (data.len() as u32).to_be_bytes();
         send.write_all(&len_bytes).await?;
         send.write_all(data).await?;
@@ -483,8 +479,12 @@ async fn handle_tunnel_conn(
         },
     );
 
-    r1.ok();
-    r2.ok();
+    if let Err(e) = r1 {
+        eprintln!("tunnel tcp→quic: {e}");
+    }
+    if let Err(e) = r2 {
+        eprintln!("tunnel quic→tcp: {e}");
+    }
     Ok(())
 }
 
@@ -492,19 +492,12 @@ fn parse_iroh_addr(raw: &str) -> (String, Option<String>) {
     let trimmed = raw.trim();
     if let Ok(v) = serde_json::from_str::<serde_json::Value>(trimmed) {
         let id = v["id"].as_str().unwrap_or("").to_string();
-        let mut relay = v["relay_url"].as_str().map(String::from);
-
-        // Allow overriding the relay URL (e.g. when the gateway returns
-        // a cluster-internal IP that the CLI can't reach directly).
-        if let Ok(override_url) = std::env::var("IROH_RELAY_URL") {
-            relay = Some(override_url);
-        }
-
+        let relay = v["relay_url"].as_str().map(String::from);
         if !id.is_empty() {
             return (id, relay);
         }
     }
-    (trimmed.to_string(), std::env::var("IROH_RELAY_URL").ok())
+    (trimmed.to_string(), None)
 }
 
 struct RawTerminalGuard;

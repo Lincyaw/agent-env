@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"strings"
@@ -189,7 +190,7 @@ func (g *Gateway) CreateSession(ctx context.Context, req CreateSessionRequest) (
 	}
 	if strings.EqualFold(g.gwConfig.ExecutorProtocol, "v2") && allocation.PodIP != "" && g.sidecarClient != nil {
 		if addr, err := g.sidecarClient.GetIrohAddr(ctx, allocation.PodIP); err == nil && addr != "" {
-			info.IrohAddr = addr
+			info.IrohAddr = g.rewriteIrohAddr(addr)
 		}
 	}
 
@@ -240,7 +241,26 @@ func (g *Gateway) GetIrohAddr(ctx context.Context, sessionID string) (string, er
 	if err != nil {
 		return "", fmt.Errorf("get iroh addr from sidecar: %w", err)
 	}
-	return addr, nil
+	return g.rewriteIrohAddr(addr), nil
+}
+
+// rewriteIrohAddr replaces the relay_url in the iroh addr JSON with the
+// gateway's configured external relay URL, so clients outside the cluster
+// can reach the relay without env-var overrides.
+func (g *Gateway) rewriteIrohAddr(raw string) string {
+	if g.gwConfig.IrohRelayURL == "" || raw == "" {
+		return raw
+	}
+	var parsed map[string]interface{}
+	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
+		return raw
+	}
+	parsed["relay_url"] = g.gwConfig.IrohRelayURL
+	rewritten, err := json.Marshal(parsed)
+	if err != nil {
+		return raw
+	}
+	return string(rewritten)
 }
 
 func (g *Gateway) allocationTimeout(req CreateSessionRequest) (time.Duration, error) {

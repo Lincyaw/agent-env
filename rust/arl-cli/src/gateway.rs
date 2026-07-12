@@ -32,13 +32,7 @@ pub struct SessionInfo {
 
 impl SessionInfo {
     pub fn age_human(&self) -> String {
-        if self.created_at.is_empty() {
-            return "-".to_string();
-        }
-        match chrono_age(&self.created_at) {
-            Some(s) => s,
-            None => "-".to_string(),
-        }
+        chrono_age(&self.created_at).unwrap_or_else(|| "-".into())
     }
 }
 
@@ -336,13 +330,13 @@ impl Client {
         &self,
         session_id: &str,
         path: &str,
-        data: &[u8],
+        data: Vec<u8>,
     ) -> Result<UploadResult> {
         let body = reqwest::multipart::Form::new()
             .text("path", path.to_string())
             .part(
                 "file",
-                reqwest::multipart::Part::bytes(data.to_vec()).file_name("upload"),
+                reqwest::multipart::Part::bytes(data).file_name("upload"),
             );
         let resp = self
             .http

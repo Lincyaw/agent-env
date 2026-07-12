@@ -1,1 +1,1 @@
-include!("arl.executor.v2.rs");
+include!(concat!(env!("OUT_DIR"), "/arl.executor.v2.rs"));

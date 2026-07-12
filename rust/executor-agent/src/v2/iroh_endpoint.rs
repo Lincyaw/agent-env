@@ -96,7 +96,7 @@ impl IrohEndpoint {
             "id": id_str,
             "relay_url": relay_url,
         });
-        let content = serde_json::to_string(&json).unwrap_or(id_str.clone());
+        let content = serde_json::to_string(&json).expect("json serialize");
         std::fs::write(&self.addr_file, &content)?;
         info!("iroh endpoint addr written to {} (id={}, relay={:?})", self.addr_file.display(), id_str, relay_url);
         Ok(())

@@ -240,12 +240,11 @@ async fn main() {
 
         Commands::Create {
             image,
-            name,
             experiment,
-            idle_timeout,
-        } => cmd_create(&gateway_url, &image, name.as_deref(), experiment.as_deref(), idle_timeout.as_deref(), json_output).await,
+            ..
+        } => cmd_create(&gateway_url, &image, experiment.as_deref(), json_output).await,
 
-        Commands::Attach { session } => cmd_attach(&gateway_url, &session, json_output).await,
+        Commands::Attach { session } => cmd_attach(&gateway_url, &session).await,
 
         Commands::Exec { session, command } => {
             cmd_exec(&gateway_url, &session, &command, json_output).await
@@ -321,6 +320,10 @@ async fn cmd_run(
     let _ = client.delete_experiment(&exp_id).await;
 
     let output = result?;
+    print_and_exit(output, json_output)
+}
+
+fn print_and_exit(output: gateway::ExecOutput, json_output: bool) -> anyhow::Result<()> {
     if json_output {
         println!("{}", serde_json::to_string_pretty(&output)?);
     } else {
@@ -329,7 +332,6 @@ async fn cmd_run(
             eprint!("{}", output.stderr);
         }
     }
-
     if output.exit_code != 0 {
         std::process::exit(output.exit_code);
     }
@@ -339,9 +341,7 @@ async fn cmd_run(
 async fn cmd_create(
     gw: &str,
     image: &str,
-    _name: Option<&str>,
     experiment: Option<&str>,
-    _idle_timeout: Option<&str>,
     json_output: bool,
 ) -> anyhow::Result<()> {
     let client = gateway::Client::new(gw);
@@ -364,7 +364,7 @@ async fn cmd_create(
     Ok(())
 }
 
-async fn cmd_attach(gw: &str, session: &str, _json_output: bool) -> anyhow::Result<()> {
+async fn cmd_attach(gw: &str, session: &str) -> anyhow::Result<()> {
     let client = gateway::Client::new(gw);
     let info = client.get_session(session).await?;
     let transport = transport::connect(gw, &info).await;
@@ -388,19 +388,7 @@ async fn cmd_exec(
     let info = client.get_session(session).await?;
     let transport = transport::connect(gw, &info).await;
     let output = transport.exec(&info.id, command).await?;
-
-    if json_output {
-        println!("{}", serde_json::to_string_pretty(&output)?);
-    } else {
-        print!("{}", output.stdout);
-        if !output.stderr.is_empty() {
-            eprint!("{}", output.stderr);
-        }
-    }
-    if output.exit_code != 0 {
-        std::process::exit(output.exit_code);
-    }
-    Ok(())
+    print_and_exit(output, json_output)
 }
 
 async fn cmd_tunnel(
@@ -437,8 +425,8 @@ async fn cmd_cp(
     let transport = transport::connect(gw, &info).await;
 
     if is_upload {
-        let data = std::fs::read(&local_path)?;
-        let result = transport.upload(&info.id, &remote_path, &data).await?;
+        let data = tokio::fs::read(&local_path).await?;
+        let result = transport.upload(&info.id, &remote_path, data).await?;
         if json_output {
             println!("{}", serde_json::to_string_pretty(&result)?);
         } else {
@@ -446,7 +434,7 @@ async fn cmd_cp(
         }
     } else {
         let data = transport.download(&info.id, &remote_path).await?;
-        std::fs::write(&local_path, &data)?;
+        tokio::fs::write(&local_path, &data).await?;
         if !json_output {
             eprintln!("downloaded {} → {} ({} bytes)", remote_path, local_path, data.len());
         }
@@ -512,10 +500,18 @@ async fn cmd_logs(
 
 async fn cmd_kill(gw: &str, sessions: &[String], json_output: bool) -> anyhow::Result<()> {
     let client = gateway::Client::new(gw);
-    for sid in sessions {
-        client.delete_session(sid).await?;
-        if !json_output {
-            println!("killed {sid}");
+    let futs: Vec<_> = sessions
+        .iter()
+        .map(|sid| {
+            let c = &client;
+            async move { (sid.clone(), c.delete_session(sid).await) }
+        })
+        .collect();
+    for (sid, result) in futures::future::join_all(futs).await {
+        match result {
+            Ok(()) if !json_output => println!("killed {sid}"),
+            Err(e) => eprintln!("failed to kill {sid}: {e}"),
+            _ => {}
         }
     }
     Ok(())
@@ -523,8 +519,7 @@ async fn cmd_kill(gw: &str, sessions: &[String], json_output: bool) -> anyhow::R
 
 async fn cmd_status(gw: &str, json_output: bool) -> anyhow::Result<()> {
     let client = gateway::Client::new(gw);
-    let health = client.health().await;
-    let summary = client.summary().await;
+    let (health, summary) = tokio::join!(client.health(), client.summary());
 
     if json_output {
         let mut m = serde_json::Map::new();
@@ -565,10 +560,16 @@ async fn cmd_exp(gw: &str, sub: ExpCommands, json_output: bool) -> anyhow::Resul
             sessions: count,
             profile: _,
         } => {
+            let futs: Vec<_> = (0..count)
+                .map(|_| client.create_managed_session(&image, &id))
+                .collect();
+            let results = futures::future::join_all(futs).await;
             let mut created = Vec::new();
-            for _ in 0..count {
-                let s = client.create_managed_session(&image, &id).await?;
-                created.push(s);
+            for r in results {
+                match r {
+                    Ok(s) => created.push(s),
+                    Err(e) => eprintln!("session creation failed: {e}"),
+                }
             }
             if json_output {
                 println!("{}", serde_json::to_string_pretty(&created)?);
