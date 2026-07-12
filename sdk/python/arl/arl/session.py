@@ -16,11 +16,13 @@ from arl.types import (
     ContainerExecuteResponse,
     DevboxConfig,
     ExecuteResponse,
+    ListDirResult,
     LogEntry,
     PrivateContainerSpec,
     ReplayResponse,
     ResourceRequirements,
     SessionInfo,
+    StatResult,
     StepResult,
     ToolResult,
     ToolsRegistry,
@@ -291,6 +293,24 @@ class SandboxSession:
         if self._session_id is None:
             raise RuntimeError("No session created. Call create_sandbox() first.")
         self._client.download_path(self._session_id, remote_path, local_path)
+
+    def stat_file(self, path: str) -> StatResult:
+        """Get file metadata."""
+        if self._session_id is None:
+            raise RuntimeError("No session created. Call create_sandbox() first.")
+        return self._client.stat_file(self._session_id, path)
+
+    def list_dir(self, path: str, recursive: bool = False) -> ListDirResult:
+        """List directory contents."""
+        if self._session_id is None:
+            raise RuntimeError("No session created. Call create_sandbox() first.")
+        return self._client.list_dir(self._session_id, path, recursive=recursive)
+
+    def send_stdin(self, handle: str, data: str) -> None:
+        """Send stdin data to a running process."""
+        if self._session_id is None:
+            raise RuntimeError("No session created. Call create_sandbox() first.")
+        self._client.send_stdin(self._session_id, handle, data)
 
     def iter_download(self, path: str, chunk_size: int = 1024 * 1024) -> Iterator[bytes]:
         """Iterate over a session file as byte chunks."""

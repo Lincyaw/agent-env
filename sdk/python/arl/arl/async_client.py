@@ -12,6 +12,7 @@ import uuid
 from collections.abc import AsyncIterator, Callable, Iterable
 from pathlib import Path
 from typing import Any, BinaryIO, TypeVar
+from urllib.parse import quote
 
 import httpx
 from pydantic import BaseModel
@@ -35,6 +36,7 @@ from arl.types import (
     ExecuteResponse,
     ExperimentSummary,
     GatewaySummary,
+    ListDirResult,
     LogEntry,
     ManagedSessionInfo,
     PoolInfo,
@@ -44,6 +46,7 @@ from arl.types import (
     ResourceRequirements,
     SessionInfo,
     SessionListItem,
+    StatResult,
     StepResult,
     ToolsSpec,
     UploadFileResponse,
@@ -346,6 +349,37 @@ class AsyncGatewayClient:
         with target.open("wb") as file:
             async for chunk in self.iter_download_file(session_id, remote_path):
                 file.write(chunk)
+
+    async def stat_file(self, session_id: str, path: str) -> StatResult:
+        """Get file metadata without downloading."""
+        encoded = quote(path.lstrip("/"), safe="")
+        resp = await self._client.get(f"/v1/sessions/{session_id}/stat/{encoded}")
+        self._handle_error(resp)
+        return StatResult.model_validate(resp.json())
+
+    async def list_dir(
+        self,
+        session_id: str,
+        path: str,
+        recursive: bool = False,
+    ) -> ListDirResult:
+        """List directory contents."""
+        encoded = quote(path.lstrip("/"), safe="")
+        params = {"recursive": "true"} if recursive else {}
+        resp = await self._client.get(
+            f"/v1/sessions/{session_id}/ls/{encoded}",
+            params=params,
+        )
+        self._handle_error(resp)
+        return ListDirResult.model_validate(resp.json())
+
+    async def send_stdin(self, session_id: str, handle: str, data: str) -> None:
+        """Send stdin data to a running process."""
+        resp = await self._client.post(
+            f"/v1/sessions/{session_id}/stdin",
+            json={"handle": handle, "data": data},
+        )
+        self._handle_error(resp)
 
     async def replay_from(
         self,

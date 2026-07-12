@@ -551,6 +551,48 @@ class ToolsSpec(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+class StatResult(BaseModel):
+    """File metadata returned by the stat endpoint.
+
+    Attributes:
+        exists: Whether the path exists.
+        is_dir: Whether the path is a directory.
+        size: File size in bytes.
+        mode: Unix file mode string (e.g. "0644").
+        modified: Last modification time (ISO 8601).
+    """
+
+    exists: bool
+    is_dir: bool | None = None
+    size: int | None = None
+    mode: str | None = None
+    modified: str | None = None
+
+
+class DirEntry(BaseModel):
+    """A single entry in a directory listing.
+
+    Attributes:
+        name: File or directory name (relative path when recursive).
+        is_dir: Whether this entry is a directory.
+        size: File size in bytes.
+    """
+
+    name: str
+    is_dir: bool
+    size: int
+
+
+class ListDirResult(BaseModel):
+    """Response from a directory listing.
+
+    Attributes:
+        entries: List of directory entries.
+    """
+
+    entries: list[DirEntry]
+
+
 class ShellMessage(BaseModel):
     """A message received from the interactive shell WebSocket.
 

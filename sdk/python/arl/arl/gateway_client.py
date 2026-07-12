@@ -25,6 +25,7 @@ from arl.types import (
     ExecuteResponse,
     ExperimentSummary,
     GatewaySummary,
+    ListDirResult,
     LogEntry,
     ManagedSessionInfo,
     PoolCondition,
@@ -35,6 +36,7 @@ from arl.types import (
     ResourceRequirements,
     SessionInfo,
     SessionListItem,
+    StatResult,
     StepResult,
     ToolsSpec,
     UploadFileResponse,
@@ -431,6 +433,37 @@ class GatewayClient:
         with target.open("wb") as file:
             for chunk in self.iter_download_file(session_id, remote_path):
                 file.write(chunk)
+
+    def stat_file(self, session_id: str, path: str) -> StatResult:
+        """Get file metadata without downloading."""
+        encoded = quote(path.lstrip("/"), safe="")
+        resp = self._client.get(f"/v1/sessions/{session_id}/stat/{encoded}")
+        self._handle_error(resp)
+        return StatResult.model_validate(resp.json())
+
+    def list_dir(
+        self,
+        session_id: str,
+        path: str,
+        recursive: bool = False,
+    ) -> ListDirResult:
+        """List directory contents."""
+        encoded = quote(path.lstrip("/"), safe="")
+        params = {"recursive": "true"} if recursive else {}
+        resp = self._client.get(
+            f"/v1/sessions/{session_id}/ls/{encoded}",
+            params=params,
+        )
+        self._handle_error(resp)
+        return ListDirResult.model_validate(resp.json())
+
+    def send_stdin(self, session_id: str, handle: str, data: str) -> None:
+        """Send stdin data to a running process."""
+        resp = self._client.post(
+            f"/v1/sessions/{session_id}/stdin",
+            json={"handle": handle, "data": data},
+        )
+        self._handle_error(resp)
 
     def replay_from(
         self,
