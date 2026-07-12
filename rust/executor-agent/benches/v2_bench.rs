@@ -125,6 +125,7 @@ fn bench_file_write(c: &mut Criterion) {
                         proto::request::Method::WriteFile(proto::WriteFileRequest {
                             path: fname,
                             expected_sha256: String::new(),
+                            stream_tag: 0,
                         }),
                     );
                     send_pb(

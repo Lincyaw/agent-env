@@ -2196,7 +2196,7 @@ mod tests {
 
         send_request_pb(&mut stream, "wf1", proto::request::Method::WriteFile(proto::WriteFileRequest {
             path: "test_output.txt".into(),
-            expected_sha256: expected_sha.clone(),
+            expected_sha256: expected_sha.clone(), stream_tag: 0,
         }));
         send_request_pb(&mut stream, "wf1", proto::request::Method::FileChunk(proto::FileChunkData {
             content: content.to_vec(),
@@ -2228,6 +2228,7 @@ mod tests {
         send_request_pb(&mut stream, "wf2", proto::request::Method::WriteFile(proto::WriteFileRequest {
             path: "bad.txt".into(),
             expected_sha256: "0000000000000000000000000000000000000000000000000000000000000000".into(),
+            stream_tag: 0,
         }));
         send_request_pb(&mut stream, "wf2", proto::request::Method::FileChunk(proto::FileChunkData {
             content: b"data".to_vec(),
@@ -2263,6 +2264,7 @@ mod tests {
         send_request_pb(&mut stream, "wf3", proto::request::Method::WriteFile(proto::WriteFileRequest {
             path: "large.bin".into(),
             expected_sha256: String::new(),
+            stream_tag: 0,
         }));
         for _ in 0..4 {
             send_request_pb(&mut stream, "wf3", proto::request::Method::FileChunk(proto::FileChunkData {
