@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 pub struct Client {
     base_url: String,
     http: reqwest::Client,
+    api_key: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -112,10 +113,22 @@ pub struct UploadResult {
 }
 
 impl Client {
-    pub fn new(base_url: &str) -> Self {
+    pub fn with_api_key(base_url: &str, api_key: Option<String>) -> Self {
+        let key = api_key.filter(|k| !k.is_empty());
+        let mut headers = reqwest::header::HeaderMap::new();
+        if let Some(ref k) = key {
+            if let Ok(v) = reqwest::header::HeaderValue::from_str(&format!("Bearer {k}")) {
+                headers.insert(reqwest::header::AUTHORIZATION, v);
+            }
+        }
+        let http = reqwest::Client::builder()
+            .default_headers(headers)
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new());
         Self {
             base_url: base_url.trim_end_matches('/').to_string(),
-            http: reqwest::Client::new(),
+            http,
+            api_key: key,
         }
     }
 
@@ -179,7 +192,7 @@ impl Client {
     pub async fn list_sessions(&self, experiment: Option<&str>) -> Result<Vec<SessionInfo>> {
         let mut url = format!("{}/v1/sessions", self.base_url);
         if let Some(exp) = experiment {
-            url = format!("{}/v1/experiments/{exp}/sessions", self.base_url);
+            url = format!("{}/v1/managed/experiments/{exp}/sessions", self.base_url);
         }
         let resp = self.http.get(&url).send().await?.error_for_status()?;
         Ok(resp.json().await?)
@@ -332,19 +345,14 @@ impl Client {
         path: &str,
         data: Vec<u8>,
     ) -> Result<UploadResult> {
-        let body = reqwest::multipart::Form::new()
-            .text("path", path.to_string())
-            .part(
-                "file",
-                reqwest::multipart::Part::bytes(data).file_name("upload"),
-            );
+        let encoded_path = path.strip_prefix('/').unwrap_or(path);
         let resp = self
             .http
-            .post(format!(
-                "{}/v1/sessions/{session_id}/files",
+            .put(format!(
+                "{}/v1/sessions/{session_id}/files/{encoded_path}",
                 self.base_url
             ))
-            .multipart(body)
+            .body(data)
             .send()
             .await?
             .error_for_status()?;
@@ -352,10 +360,11 @@ impl Client {
     }
 
     pub async fn download_http(&self, session_id: &str, path: &str) -> Result<Vec<u8>> {
+        let encoded_path = path.strip_prefix('/').unwrap_or(path);
         let resp = self
             .http
             .get(format!(
-                "{}/v1/sessions/{session_id}/files?path={path}",
+                "{}/v1/sessions/{session_id}/files/{encoded_path}",
                 self.base_url
             ))
             .send()

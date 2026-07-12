@@ -135,6 +135,7 @@ func main() {
 		ExecutorAgentImage:              cfg.ExecutorAgentImage,
 		ExecutorProtocol:                cfg.ExecutorProtocol,
 		IrohRelayURL:                    cfg.IrohRelayURL,
+		IrohRelayExternalURL:            cfg.IrohRelayExternalURL,
 		ImagePullPolicy:                 cfg.ImagePullPolicy,
 		GRPCAuthToken:                   cfg.GRPCAuthToken,
 		GRPCAuthSecretName:              cfg.GRPCAuthSecretName,

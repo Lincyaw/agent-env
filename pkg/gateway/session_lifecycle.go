@@ -244,18 +244,20 @@ func (g *Gateway) GetIrohAddr(ctx context.Context, sessionID string) (string, er
 	return g.rewriteIrohAddr(addr), nil
 }
 
-// rewriteIrohAddr replaces the relay_url in the iroh addr JSON with the
-// gateway's configured external relay URL, so clients outside the cluster
-// can reach the relay without env-var overrides.
 func (g *Gateway) rewriteIrohAddr(raw string) string {
-	if g.gwConfig.IrohRelayURL == "" || raw == "" {
+	externalURL := g.gwConfig.IrohRelayExternalURL
+	if externalURL == "" {
+		externalURL = g.gwConfig.IrohRelayURL
+	}
+	if externalURL == "" || raw == "" {
 		return raw
 	}
-	var parsed map[string]interface{}
+	var parsed map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
 		return raw
 	}
-	parsed["relay_url"] = g.gwConfig.IrohRelayURL
+	relayBytes, _ := json.Marshal(externalURL)
+	parsed["relay_url"] = relayBytes
 	rewritten, err := json.Marshal(parsed)
 	if err != nil {
 		return raw

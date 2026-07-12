@@ -18,7 +18,9 @@ relay servers and address resolution via DNS/PKARR.
 
 **Before writing any iroh code, read `references/api.md` for the full API reference.**
 
-For tunneling/port-forwarding patterns, also read `references/tunneling.md`.
+For tunneling/port-forwarding patterns, read `references/tunneling.md`.
+
+For NAT traversal, relay deployment, and diagnosing direct-connect issues, read `references/nat-traversal.md`.
 
 ## Critical Rules
 

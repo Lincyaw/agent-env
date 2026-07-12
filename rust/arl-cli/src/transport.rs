@@ -14,7 +14,7 @@ pub enum Transport {
 }
 
 /// Try QUIC first (if irohAddr available), fall back to HTTP.
-pub async fn connect(gateway_url: &str, session: &SessionInfo) -> Transport {
+pub async fn connect(_gateway_url: &str, session: &SessionInfo, client: &Client) -> Transport {
     if !session.iroh_addr.is_empty() {
         match QuicTransport::connect(&session.iroh_addr).await {
             Ok(qt) => {
@@ -26,7 +26,7 @@ pub async fn connect(gateway_url: &str, session: &SessionInfo) -> Transport {
             }
         }
     }
-    Transport::Http(Client::new(gateway_url))
+    Transport::Http(client.clone())
 }
 
 impl Transport {
@@ -79,14 +79,13 @@ impl QuicTransport {
 
         let t0 = Instant::now();
 
-        // Parse iroh addr: either JSON {"id":"hex","relay_url":"..."} or plain hex ID.
-        let (id_hex, relay_url) = parse_iroh_addr(iroh_addr_raw);
+        let parsed = parse_iroh_addr(iroh_addr_raw);
 
         let mut builder = iroh::Endpoint::builder(presets::Minimal)
             .alpns(vec![ALPN.to_vec()])
             .relay_mode(iroh::RelayMode::Default);
 
-        if relay_url.is_none() {
+        if parsed.relay_url.is_none() {
             builder = builder.address_lookup(DnsAddressLookup::n0_dns());
         }
 
@@ -94,19 +93,20 @@ impl QuicTransport {
 
         let t1 = Instant::now();
 
-        let id_bytes = hex::decode(id_hex.trim())?;
+        let id_bytes = hex::decode(parsed.id.trim())?;
         let id_array: [u8; 32] = id_bytes
             .try_into()
             .map_err(|_| anyhow::anyhow!("invalid endpoint id length"))?;
         let remote_id = iroh::PublicKey::from_bytes(&id_array)?;
 
-        // If we have the relay URL, construct a full EndpointAddr for faster connect.
-        let connect_target: iroh::EndpointAddr = if let Some(ref url) = relay_url {
+        let mut connect_target = iroh::EndpointAddr::new(remote_id);
+        if let Some(ref url) = parsed.relay_url {
             let relay = iroh::RelayUrl::from(url::Url::parse(url)?);
-            iroh::EndpointAddr::new(remote_id).with_relay_url(relay)
-        } else {
-            iroh::EndpointAddr::new(remote_id)
-        };
+            connect_target = connect_target.with_relay_url(relay);
+        }
+        for addr in &parsed.direct_addresses {
+            connect_target = connect_target.with_ip_addr(*addr);
+        }
 
         let connect_fut = endpoint.connect(connect_target, ALPN);
         let conn = tokio::time::timeout(std::time::Duration::from_secs(15), connect_fut)
@@ -116,12 +116,18 @@ impl QuicTransport {
         let t2 = Instant::now();
 
         if std::env::var("ARL_DEBUG").is_ok() {
+            let paths = conn.paths();
+            let path_info: Vec<String> = paths.iter()
+                .map(|p| format!("{}(rtt={:?})", p.remote_addr(), p.rtt()))
+                .collect();
             eprintln!(
-                "iroh: bind={}ms connect={}ms total={}ms relay={}",
+                "iroh: bind={}ms connect={}ms total={}ms relay={} direct_addrs={} paths=[{}]",
                 (t1 - t0).as_millis(),
                 (t2 - t1).as_millis(),
                 (t2 - t0).as_millis(),
-                if relay_url.is_some() { "direct" } else { "dns" },
+                parsed.relay_url.as_deref().unwrap_or("none"),
+                parsed.direct_addresses.len(),
+                path_info.join(", "),
             );
         }
 
@@ -488,16 +494,30 @@ async fn handle_tunnel_conn(
     Ok(())
 }
 
-fn parse_iroh_addr(raw: &str) -> (String, Option<String>) {
+struct IrohAddr {
+    id: String,
+    relay_url: Option<String>,
+    direct_addresses: Vec<std::net::SocketAddr>,
+}
+
+fn parse_iroh_addr(raw: &str) -> IrohAddr {
     let trimmed = raw.trim();
     if let Ok(v) = serde_json::from_str::<serde_json::Value>(trimmed) {
         let id = v["id"].as_str().unwrap_or("").to_string();
         let relay = v["relay_url"].as_str().map(String::from);
+        let addrs: Vec<std::net::SocketAddr> = v["direct_addresses"]
+            .as_array()
+            .map(|arr| {
+                arr.iter()
+                    .filter_map(|a| a.as_str()?.parse().ok())
+                    .collect()
+            })
+            .unwrap_or_default();
         if !id.is_empty() {
-            return (id, relay);
+            return IrohAddr { id, relay_url: relay, direct_addresses: addrs };
         }
     }
-    (trimmed.to_string(), None)
+    IrohAddr { id: trimmed.to_string(), relay_url: None, direct_addresses: vec![] }
 }
 
 struct RawTerminalGuard;

@@ -38,15 +38,9 @@ enum Commands {
     Create {
         /// Container image
         image: String,
-        /// Human-friendly alias
-        #[arg(short, long)]
-        name: Option<String>,
         /// Experiment ID
         #[arg(short, long)]
         experiment: Option<String>,
-        /// Idle timeout (e.g. "1h", "30m")
-        #[arg(long)]
-        idle_timeout: Option<String>,
     },
 
     /// Attach to a persistent session (interactive shell)
@@ -214,7 +208,7 @@ enum ConfigCommands {
     Show,
     /// Set a configuration value
     Set {
-        /// Key (e.g. "gateway", "context")
+        /// Key (e.g. "gateway", "api-key")
         key: String,
         /// Value
         value: String,
@@ -229,25 +223,26 @@ async fn main() {
     let gateway_url = cli
         .gateway_url
         .unwrap_or_else(|| cfg.gateway_url.clone());
+    let api_key = if cfg.api_key.is_empty() { None } else { Some(cfg.api_key.clone()) };
     let json_output = cli.format == "json";
+    let client = gateway::Client::with_api_key(&gateway_url, api_key);
 
     let result = match cli.command {
         Commands::Run {
             image,
             command,
             experiment,
-        } => cmd_run(&gateway_url, &image, &command, experiment.as_deref(), json_output).await,
+        } => cmd_run(&client, &gateway_url, &image, &command, experiment.as_deref(), json_output).await,
 
         Commands::Create {
             image,
             experiment,
-            ..
-        } => cmd_create(&gateway_url, &image, experiment.as_deref(), json_output).await,
+        } => cmd_create(&client, &gateway_url, &image, experiment.as_deref(), json_output).await,
 
-        Commands::Attach { session } => cmd_attach(&gateway_url, &session).await,
+        Commands::Attach { session } => cmd_attach(&client, &gateway_url, &session).await,
 
         Commands::Exec { session, command } => {
-            cmd_exec(&gateway_url, &session, &command, json_output).await
+            cmd_exec(&client, &gateway_url, &session, &command, json_output).await
         }
 
         Commands::Tunnel {
@@ -257,33 +252,33 @@ async fn main() {
             remote_host,
         } => {
             cmd_tunnel(
-                &gateway_url,
-                &session,
+                &client,
                 &remote_host,
                 remote_port,
                 local.unwrap_or(remote_port),
+                &session,
             )
             .await
         }
 
-        Commands::Cp { src, dst } => cmd_cp(&gateway_url, &src, &dst, json_output).await,
+        Commands::Cp { src, dst } => cmd_cp(&client, &gateway_url, &src, &dst, json_output).await,
 
         Commands::Ps { all, experiment } => {
-            cmd_ps(&gateway_url, all, experiment.as_deref(), json_output).await
+            cmd_ps(&client, all, experiment.as_deref(), json_output).await
         }
 
         Commands::Logs {
             session,
             follow,
             tail,
-        } => cmd_logs(&gateway_url, &session, follow, tail).await,
+        } => cmd_logs(&client, &session, follow, tail).await,
 
-        Commands::Kill { sessions } => cmd_kill(&gateway_url, &sessions, json_output).await,
+        Commands::Kill { sessions } => cmd_kill(&client, &sessions, json_output).await,
 
-        Commands::Status => cmd_status(&gateway_url, json_output).await,
+        Commands::Status => cmd_status(&client, &gateway_url, json_output).await,
 
-        Commands::Exp(sub) => cmd_exp(&gateway_url, sub, json_output).await,
-        Commands::Pool(sub) => cmd_pool(&gateway_url, sub, json_output).await,
+        Commands::Exp(sub) => cmd_exp(&client, sub, json_output).await,
+        Commands::Pool(sub) => cmd_pool(&client, sub, json_output).await,
         Commands::Config(sub) => cmd_config(sub),
     };
 
@@ -294,13 +289,14 @@ async fn main() {
 }
 
 async fn cmd_run(
+    client: &gateway::Client,
     gw: &str,
     image: &str,
     command: &[String],
     experiment: Option<&str>,
     json_output: bool,
 ) -> anyhow::Result<()> {
-    let client = gateway::Client::new(gw);
+    let auto_exp = experiment.is_none();
     let exp_id = experiment
         .map(String::from)
         .unwrap_or_else(|| format!("run-{}", std::process::id()));
@@ -308,7 +304,7 @@ async fn cmd_run(
     let session = client.create_managed_session(image, &exp_id).await?;
     let sid = &session.id;
 
-    let transport = transport::connect(gw, &session).await;
+    let transport = transport::connect(gw, &session, client).await;
 
     let result = if command.is_empty() {
         transport.shell(sid).await
@@ -317,7 +313,9 @@ async fn cmd_run(
     };
 
     let _ = client.delete_session(sid).await;
-    let _ = client.delete_experiment(&exp_id).await;
+    if auto_exp {
+        let _ = client.delete_experiment(&exp_id).await;
+    }
 
     let output = result?;
     print_and_exit(output, json_output)
@@ -339,12 +337,13 @@ fn print_and_exit(output: gateway::ExecOutput, json_output: bool) -> anyhow::Res
 }
 
 async fn cmd_create(
+    client: &gateway::Client,
     gw: &str,
     image: &str,
     experiment: Option<&str>,
     json_output: bool,
 ) -> anyhow::Result<()> {
-    let client = gateway::Client::new(gw);
+    let _ = gw;
     let exp_id = experiment
         .map(String::from)
         .unwrap_or_else(|| format!("session-{}", std::process::id()));
@@ -364,10 +363,9 @@ async fn cmd_create(
     Ok(())
 }
 
-async fn cmd_attach(gw: &str, session: &str) -> anyhow::Result<()> {
-    let client = gateway::Client::new(gw);
+async fn cmd_attach(client: &gateway::Client, gw: &str, session: &str) -> anyhow::Result<()> {
     let info = client.get_session(session).await?;
-    let transport = transport::connect(gw, &info).await;
+    let transport = transport::connect(gw, &info, client).await;
     let output = transport.shell(&info.id).await?;
     if output.exit_code != 0 {
         std::process::exit(output.exit_code);
@@ -376,6 +374,7 @@ async fn cmd_attach(gw: &str, session: &str) -> anyhow::Result<()> {
 }
 
 async fn cmd_exec(
+    client: &gateway::Client,
     gw: &str,
     session: &str,
     command: &[String],
@@ -384,21 +383,19 @@ async fn cmd_exec(
     if command.is_empty() {
         anyhow::bail!("no command specified");
     }
-    let client = gateway::Client::new(gw);
     let info = client.get_session(session).await?;
-    let transport = transport::connect(gw, &info).await;
+    let transport = transport::connect(gw, &info, client).await;
     let output = transport.exec(&info.id, command).await?;
     print_and_exit(output, json_output)
 }
 
 async fn cmd_tunnel(
-    gw: &str,
-    session: &str,
+    client: &gateway::Client,
     remote_host: &str,
     remote_port: u16,
     local_port: u16,
+    session: &str,
 ) -> anyhow::Result<()> {
-    let client = gateway::Client::new(gw);
     let info = client.get_session(session).await?;
 
     if info.iroh_addr.is_empty() {
@@ -414,15 +411,15 @@ async fn cmd_tunnel(
 }
 
 async fn cmd_cp(
+    client: &gateway::Client,
     gw: &str,
     src: &str,
     dst: &str,
     json_output: bool,
 ) -> anyhow::Result<()> {
     let (session_id, remote_path, local_path, is_upload) = parse_cp_args(src, dst)?;
-    let client = gateway::Client::new(gw);
     let info = client.get_session(&session_id).await?;
-    let transport = transport::connect(gw, &info).await;
+    let transport = transport::connect(gw, &info, client).await;
 
     if is_upload {
         let data = tokio::fs::read(&local_path).await?;
@@ -453,12 +450,11 @@ fn parse_cp_args(src: &str, dst: &str) -> anyhow::Result<(String, String, String
 }
 
 async fn cmd_ps(
-    gw: &str,
+    client: &gateway::Client,
     _all: bool,
     experiment: Option<&str>,
     json_output: bool,
 ) -> anyhow::Result<()> {
-    let client = gateway::Client::new(gw);
     let sessions = client.list_sessions(experiment).await?;
 
     if json_output {
@@ -487,38 +483,41 @@ async fn cmd_ps(
 }
 
 async fn cmd_logs(
-    gw: &str,
+    client: &gateway::Client,
     session: &str,
     _follow: bool,
     _tail: usize,
 ) -> anyhow::Result<()> {
-    let client = gateway::Client::new(gw);
     let logs = client.get_logs(session).await?;
     print!("{logs}");
     Ok(())
 }
 
-async fn cmd_kill(gw: &str, sessions: &[String], json_output: bool) -> anyhow::Result<()> {
-    let client = gateway::Client::new(gw);
+async fn cmd_kill(client: &gateway::Client, sessions: &[String], json_output: bool) -> anyhow::Result<()> {
     let futs: Vec<_> = sessions
         .iter()
         .map(|sid| {
-            let c = &client;
-            async move { (sid.clone(), c.delete_session(sid).await) }
+            async move { (sid.clone(), client.delete_session(sid).await) }
         })
         .collect();
+    let mut failed = false;
     for (sid, result) in futures::future::join_all(futs).await {
         match result {
             Ok(()) if !json_output => println!("killed {sid}"),
-            Err(e) => eprintln!("failed to kill {sid}: {e}"),
+            Err(e) => {
+                eprintln!("failed to kill {sid}: {e}");
+                failed = true;
+            }
             _ => {}
         }
+    }
+    if failed {
+        anyhow::bail!("some sessions could not be killed");
     }
     Ok(())
 }
 
-async fn cmd_status(gw: &str, json_output: bool) -> anyhow::Result<()> {
-    let client = gateway::Client::new(gw);
+async fn cmd_status(client: &gateway::Client, gw: &str, json_output: bool) -> anyhow::Result<()> {
     let (health, summary) = tokio::join!(client.health(), client.summary());
 
     if json_output {
@@ -551,8 +550,7 @@ async fn cmd_status(gw: &str, json_output: bool) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn cmd_exp(gw: &str, sub: ExpCommands, json_output: bool) -> anyhow::Result<()> {
-    let client = gateway::Client::new(gw);
+async fn cmd_exp(client: &gateway::Client, sub: ExpCommands, json_output: bool) -> anyhow::Result<()> {
     match sub {
         ExpCommands::Create {
             id,
@@ -560,12 +558,12 @@ async fn cmd_exp(gw: &str, sub: ExpCommands, json_output: bool) -> anyhow::Resul
             sessions: count,
             profile: _,
         } => {
-            let futs: Vec<_> = (0..count)
-                .map(|_| client.create_managed_session(&image, &id))
-                .collect();
-            let results = futures::future::join_all(futs).await;
+            use futures::stream::{self, StreamExt};
             let mut created = Vec::new();
-            for r in results {
+            let mut stream = stream::iter(0..count)
+                .map(|_| client.create_managed_session(&image, &id))
+                .buffer_unordered(8);
+            while let Some(r) = stream.next().await {
                 match r {
                     Ok(s) => created.push(s),
                     Err(e) => eprintln!("session creation failed: {e}"),
@@ -619,8 +617,7 @@ async fn cmd_exp(gw: &str, sub: ExpCommands, json_output: bool) -> anyhow::Resul
     Ok(())
 }
 
-async fn cmd_pool(gw: &str, sub: PoolCommands, json_output: bool) -> anyhow::Result<()> {
-    let client = gateway::Client::new(gw);
+async fn cmd_pool(client: &gateway::Client, sub: PoolCommands, json_output: bool) -> anyhow::Result<()> {
     match sub {
         PoolCommands::Ls { all: _ } => {
             let pools = client.list_pools().await?;
@@ -690,12 +687,14 @@ fn cmd_config(sub: ConfigCommands) -> anyhow::Result<()> {
     match sub {
         ConfigCommands::Show => {
             let cfg = config::Config::load();
-            println!("gateway: {}", cfg.gateway_url);
+            println!("gateway:  {}", cfg.gateway_url);
+            println!("api-key:  {}", if cfg.api_key.is_empty() { "(not set)" } else { "(set)" });
         }
         ConfigCommands::Set { key, value } => {
             let mut cfg = config::Config::load();
             match key.as_str() {
                 "gateway" | "gateway-url" | "gateway_url" => cfg.gateway_url = value,
+                "api-key" | "api_key" => cfg.api_key = value,
                 other => anyhow::bail!("unknown config key: {other}"),
             }
             cfg.save()?;

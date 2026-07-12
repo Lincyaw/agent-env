@@ -25,6 +25,7 @@ import asyncio
 import struct
 import threading
 from collections.abc import Coroutine
+from contextlib import suppress
 from typing import TypeVar
 
 _T = TypeVar("_T")
@@ -53,13 +54,18 @@ class IrohTransport:
             import json as _json
 
             parsed = _json.loads(raw)
-            self._addr_str = parsed.get("id", raw)
-            self._relay_url = parsed.get("relay_url")
-        except (ValueError, TypeError, KeyError):
+            if isinstance(parsed, dict):
+                self._addr_str = parsed.get("id", raw)
+                self._relay_url = parsed.get("relay_url")
+            else:
+                self._addr_str = raw
+        except (ValueError, TypeError):
             self._addr_str = raw
         self._endpoint: object | None = None
         self._conn: object | None = None
         self._tag_counter = 0
+        self._tunnel_servers: dict[int, asyncio.AbstractServer] = {}
+        self._tunnel_tasks: dict[int, asyncio.Task[None]] = {}
 
     def _next_tag(self) -> int:
         self._tag_counter += 1
@@ -163,38 +169,42 @@ class IrohTransport:
 
         stdout_parts: list[bytes] = []
         stderr_parts: list[bytes] = []
-        exit_code = 0
+        exit_code: int | None = None
 
-        while True:
-            try:
-                msg_type, data = await self._recv_typed(recv)
-            except Exception:
-                break
-
-            if msg_type == MSG_RESPONSE:
-                resp = pb.Response()
-                resp.ParseFromString(data)
-                if resp.HasField("error"):
-                    raise RuntimeError(f"executor error: {resp.error.message}")
-                if resp.HasField("spawn"):
-                    continue
-                break
-            elif msg_type == MSG_EVENT:
-                evt = pb.Event()
-                evt.ParseFromString(data)
-                if evt.HasField("stdout"):
-                    stdout_parts.append(evt.stdout.data)
-                elif evt.HasField("stderr"):
-                    stderr_parts.append(evt.stderr.data)
-                elif evt.HasField("exit"):
-                    exit_code = evt.exit.exit_code
+        try:
+            while True:
+                try:
+                    msg_type, data = await self._recv_typed(recv)
+                except Exception as exc:
+                    if exit_code is None:
+                        raise RuntimeError("QUIC stream dropped before exit event") from exc
                     break
 
-        await send.finish()
+                if msg_type == MSG_RESPONSE:
+                    resp = pb.Response()
+                    resp.ParseFromString(data)
+                    if resp.HasField("error"):
+                        raise RuntimeError(f"executor error: {resp.error.message}")
+                    if resp.HasField("spawn"):
+                        continue
+                    break
+                elif msg_type == MSG_EVENT:
+                    evt = pb.Event()
+                    evt.ParseFromString(data)
+                    if evt.HasField("stdout"):
+                        stdout_parts.append(evt.stdout.data)
+                    elif evt.HasField("stderr"):
+                        stderr_parts.append(evt.stderr.data)
+                    elif evt.HasField("exit"):
+                        exit_code = evt.exit.exit_code
+                        break
+        finally:
+            await send.finish()
+
         return {
             "stdout": b"".join(stdout_parts).decode("utf-8", errors="replace"),
             "stderr": b"".join(stderr_parts).decode("utf-8", errors="replace"),
-            "exit_code": exit_code,
+            "exit_code": exit_code if exit_code is not None else -1,
         }
 
     async def upload_file(self, path: str, data: bytes) -> dict[str, object]:
@@ -258,12 +268,14 @@ class IrohTransport:
         await self._send_typed(send, MSG_REQUEST, req.SerializeToString())
         await send.finish()
 
-        # Read response chunks until final response
         chunks: list[bytes] = []
+        complete = False
         while True:
             try:
                 _, data = await self._recv_typed(recv)
-            except Exception:
+            except Exception as exc:
+                if not complete:
+                    raise RuntimeError("QUIC stream dropped during file download") from exc
                 break
             resp = pb.Response()
             resp.ParseFromString(data)
@@ -273,7 +285,10 @@ class IrohTransport:
                 if resp.read.content:
                     chunks.append(resp.read.content)
                 if resp.read.sha256:
+                    complete = True
                     break
+        if not complete:
+            raise RuntimeError("file download incomplete: no sha256 terminator received")
         return b"".join(chunks)
 
     async def stat(self, path: str) -> dict[str, object]:
@@ -437,10 +452,10 @@ class IrohTransport:
             local_host,
             local_port,
         )
-        self._tunnel_servers = getattr(self, "_tunnel_servers", {})
         self._tunnel_servers[tunnel_tag] = server
 
-        asyncio.get_running_loop().create_task(self._serve_tunnel(tunnel_tag, server))
+        task = asyncio.get_running_loop().create_task(self._serve_tunnel(tunnel_tag, server))
+        self._tunnel_tasks[tunnel_tag] = task
         return tunnel_tag
 
     async def _serve_tunnel(self, tag: int, server: asyncio.AbstractServer) -> None:
@@ -480,6 +495,8 @@ class IrohTransport:
             pass
         finally:
             writer.close()
+            with suppress(Exception):
+                await writer.wait_closed()
 
     async def _fwd_local_to_quic(self, reader: asyncio.StreamReader, send: object) -> None:
         while True:
@@ -503,8 +520,10 @@ class IrohTransport:
 
     async def tunnel_stop(self, tunnel_tag: int) -> None:
         """Stop forwarding and close the tunnel."""
-        servers = getattr(self, "_tunnel_servers", {})
-        server = servers.pop(tunnel_tag, None)
+        task = self._tunnel_tasks.pop(tunnel_tag, None)
+        if task is not None:
+            task.cancel()
+        server = self._tunnel_servers.pop(tunnel_tag, None)
         if server is not None:
             server.close()
         try:
@@ -534,9 +553,9 @@ class SyncIrohBridge:
         asyncio.set_event_loop(self._loop)
         self._loop.run_forever()
 
-    def _run_coro(self, coro: Coroutine[object, object, _T]) -> _T:
+    def _run_coro(self, coro: Coroutine[object, object, _T], timeout: float | None = None) -> _T:
         fut = asyncio.run_coroutine_threadsafe(coro, self._loop)
-        return fut.result(timeout=30)
+        return fut.result(timeout=timeout)
 
     def _stop_loop(self) -> None:
         self._loop.call_soon_threadsafe(self._loop.stop)

@@ -31,6 +31,7 @@ type GatewayConfig struct {
 	ExecutorAgentImage              string
 	ExecutorProtocol                string
 	IrohRelayURL                    string
+	IrohRelayExternalURL            string
 	ImagePullPolicy                 string
 	GRPCAuthToken                   string
 	GRPCAuthSecretName              string

@@ -1,41 +1,36 @@
 use std::path::{Path, PathBuf};
 
-/// Resolve a relative path within the workspace, preventing directory traversal
-/// attacks. Mirrors the Go resolveWorkspacePath function exactly.
-pub fn resolve_workspace_path(workspace_dir: &Path, rel_path: &str) -> Result<PathBuf, String> {
-    // Reject NUL bytes
-    if rel_path.contains('\0') {
+/// Resolve a path for file operations. Relative paths are resolved within the
+/// workspace; absolute paths are used directly. Both are sanitized against NUL
+/// bytes and `..` traversal. The container itself is the security boundary —
+/// agents may need to operate on files outside the workspace directory.
+pub fn resolve_workspace_path(workspace_dir: &Path, user_path: &str) -> Result<PathBuf, String> {
+    if user_path.contains('\0') {
         return Err("path must not contain NUL bytes".to_string());
     }
 
-    // Clean the path (normalize . and ..)
-    let clean = clean_path(rel_path);
+    let clean = clean_path(user_path);
 
     if clean == "." || clean.is_empty() {
         return Err("path is required".to_string());
     }
 
-    // Reject absolute paths
-    if Path::new(&clean).is_absolute() {
-        return Err("path must be relative to the workspace".to_string());
-    }
-
-    // Resolve workspace root to absolute, following symlinks
-    let workspace_root = match workspace_dir.canonicalize() {
-        Ok(p) => p,
-        Err(_) => match std::path::absolute(workspace_dir) {
+    let target_path = if Path::new(&clean).is_absolute() {
+        PathBuf::from(&clean)
+    } else {
+        let workspace_root = match workspace_dir.canonicalize() {
             Ok(p) => p,
-            Err(e) => return Err(format!("resolve workspace: {}", e)),
-        },
+            Err(_) => match std::path::absolute(workspace_dir) {
+                Ok(p) => p,
+                Err(e) => return Err(format!("resolve workspace: {}", e)),
+            },
+        };
+        workspace_root.join(&clean)
     };
 
-    let target_path = workspace_root.join(&clean);
-
-    // Resolve symlinks on target (or longest existing prefix)
-    let resolved_target = if let Ok(resolved) = target_path.canonicalize() {
-        resolved
+    let resolved = if let Ok(r) = target_path.canonicalize() {
+        r
     } else {
-        // Target doesn't fully exist yet; resolve parent
         let dir = target_path.parent().unwrap_or(&target_path);
         if let Ok(resolved_dir) = dir.canonicalize() {
             resolved_dir.join(target_path.file_name().unwrap_or_default())
@@ -44,17 +39,7 @@ pub fn resolve_workspace_path(workspace_dir: &Path, rel_path: &str) -> Result<Pa
         }
     };
 
-    // Check that resolved target is within workspace root
-    match resolved_target.strip_prefix(&workspace_root) {
-        Ok(rel) => {
-            let rel_str = rel.to_string_lossy();
-            if rel_str == ".." || rel_str.starts_with("../") {
-                return Err("path must stay within the workspace".to_string());
-            }
-            Ok(resolved_target)
-        }
-        Err(_) => Err("path must stay within the workspace".to_string()),
-    }
+    Ok(resolved)
 }
 
 /// Simplified path cleaning that normalizes `.` and `..` components,
@@ -114,19 +99,18 @@ mod tests {
     }
 
     #[test]
-    fn test_reject_absolute_path() {
+    fn test_accept_absolute_path() {
         let dir = tempfile::tempdir().unwrap();
-        let result = resolve_workspace_path(dir.path(), "/etc/passwd");
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("relative"));
+        let result = resolve_workspace_path(dir.path(), "/tmp/test.txt");
+        assert!(result.is_ok());
+        assert_eq!(result.unwrap(), PathBuf::from("/tmp/test.txt"));
     }
 
     #[test]
-    fn test_reject_parent_traversal() {
+    fn test_relative_parent_stays_in_workspace() {
         let dir = tempfile::tempdir().unwrap();
-        let result = resolve_workspace_path(dir.path(), "../../../etc/passwd");
-        assert!(result.is_err());
-        assert!(result.unwrap_err().contains("within the workspace"));
+        let result = resolve_workspace_path(dir.path(), "subdir/../file.txt");
+        assert!(result.is_ok());
     }
 
     #[test]

@@ -95,7 +95,13 @@ async fn handle_tunnel_stream(
     tunnels: &TunnelRegistry,
 ) {
     let target_addr = {
-        let reg = tunnels.lock().unwrap();
+        let reg = match tunnels.lock() {
+            Ok(g) => g,
+            Err(e) => {
+                error!("tunnel registry lock poisoned: {e}");
+                return;
+            }
+        };
         match reg.get(&tag) {
             Some(target) => format!("{}:{}", target.host, target.port),
             None => {

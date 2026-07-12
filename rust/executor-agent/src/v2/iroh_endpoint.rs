@@ -23,10 +23,17 @@ impl IrohEndpoint {
             .alpns(vec![ALPN.to_vec()]);
 
         if let Ok(relay_url) = std::env::var("IROH_RELAY_URL") {
-            info!("using custom relay: {relay_url}");
-            let url = iroh::RelayUrl::from(url::Url::parse(&relay_url)?);
-            let relay_map = iroh::RelayMap::from_iter([url]);
-            builder = builder.relay_mode(RelayMode::Custom(relay_map));
+            match url::Url::parse(&relay_url) {
+                Ok(parsed) => {
+                    info!("using custom relay: {relay_url}");
+                    let url = iroh::RelayUrl::from(parsed);
+                    let relay_map = iroh::RelayMap::from_iter([url]);
+                    builder = builder.relay_mode(RelayMode::Custom(relay_map));
+                }
+                Err(e) => {
+                    warn!("invalid IROH_RELAY_URL '{relay_url}': {e}, falling back to default relay");
+                }
+            }
         }
 
         let endpoint = builder.bind().await?;
@@ -91,14 +98,16 @@ impl IrohEndpoint {
         let id_str = self.endpoint.id().to_string();
         let addr = self.endpoint.addr();
         let relay_url = addr.relay_urls().next().map(|u| u.to_string());
+        let direct_addrs: Vec<String> = addr.ip_addrs().map(|a| a.to_string()).collect();
 
         let json = serde_json::json!({
             "id": id_str,
             "relay_url": relay_url,
+            "direct_addresses": direct_addrs,
         });
         let content = serde_json::to_string(&json).expect("json serialize");
         std::fs::write(&self.addr_file, &content)?;
-        info!("iroh endpoint addr written to {} (id={}, relay={:?})", self.addr_file.display(), id_str, relay_url);
+        info!("iroh endpoint addr written to {} (id={}, relay={:?}, direct={:?})", self.addr_file.display(), id_str, relay_url, direct_addrs);
         Ok(())
     }
 }
@@ -121,11 +130,18 @@ fn load_or_generate_secret_key() -> SecretKey {
 }
 
 fn write_secret_key_file(key: &SecretKey) -> io::Result<()> {
+    use std::os::unix::fs::OpenOptionsExt;
     let path = std::path::Path::new(SECRET_KEY_FILE);
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    std::fs::write(path, key.to_bytes())
+    let mut f = std::fs::OpenOptions::new()
+        .write(true)
+        .create(true)
+        .truncate(true)
+        .mode(0o600)
+        .open(path)?;
+    io::Write::write_all(&mut f, &key.to_bytes())
 }
 
 #[cfg(test)]

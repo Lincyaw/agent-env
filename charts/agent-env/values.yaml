@@ -71,6 +71,16 @@ executorAgent:
     repository: arl-executor-agent
     pullPolicy: IfNotPresent
     tag: ""
+  protocol: "v2"
+
+# Iroh relay for QUIC direct-connect (in-cluster, eliminates public relay latency)
+irohRelay:
+  enabled: true
+  image:
+    repository: arl-iroh-relay
+    tag: "v1.0.2"
+    pullPolicy: IfNotPresent
+  port: 3340
 
 # Gateway configuration
 gateway:

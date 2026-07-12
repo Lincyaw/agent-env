@@ -17,6 +17,7 @@ use std::{fs, thread};
 use tokio::sync::watch;
 
 const FILE_CHUNK_SIZE: usize = 1024 * 1024;
+const MAX_MSG_SIZE: usize = 64 * 1024 * 1024; // 64 MiB cap for protobuf messages
 const SIDECAR_SOCKET_GID: u32 = 65532;
 
 pub struct TunnelTarget {
@@ -166,6 +167,11 @@ pub fn read_request(reader: &mut impl io::Read) -> io::Result<Option<proto::Requ
     let mut len_buf = [0u8; 4];
     reader.read_exact(&mut len_buf)?;
     let len = u32::from_be_bytes(len_buf) as usize;
+    if len > MAX_MSG_SIZE {
+        return Err(io::Error::other(format!(
+            "message too large: {len} bytes (max {MAX_MSG_SIZE})"
+        )));
+    }
     let mut msg_buf = vec![0u8; len];
     reader.read_exact(&mut msg_buf)?;
     let req = proto::Request::decode(&msg_buf[..])
@@ -209,13 +215,18 @@ pub fn handle_v2_session(
         &tunnels,
     );
 
-    // Cleanup on disconnect
+    // Cleanup on disconnect — kill by pid since wait_and_exit takes the Child.
     let mut procs = processes.lock().unwrap();
     for (ptag, ph) in procs.iter_mut() {
+        log::info!("[cleanup] killing process_tag={ptag} pid={}", ph.pid);
         if let Some(ref mut child) = ph.child {
-            log::info!("[cleanup] killing process_tag={ptag} pid={}", ph.pid);
             let _ = child.kill();
             let _ = child.wait();
+        } else {
+            let _ = nix::sys::signal::kill(
+                nix::unistd::Pid::from_raw(ph.pid as i32),
+                nix::sys::signal::Signal::SIGKILL,
+            );
         }
     }
     procs.clear();
@@ -919,7 +930,7 @@ fn handle_write(
     }
 
     let base_name = target.file_name().unwrap_or_default().to_string_lossy();
-    let tmp_path = parent.join(format!(".{base_name}.{}.tmp", std::process::id()));
+    let tmp_path = parent.join(format!(".{base_name}.{}.{tag}.tmp", std::process::id()));
 
     let tmp_file = match fs::File::create(&tmp_path) {
         Ok(f) => f,
@@ -942,13 +953,17 @@ fn handle_write(
             if len == 0 {
                 break;
             }
-            let mut buf = vec![0u8; len];
-            reader.read_exact(&mut buf).map_err(|e| format!("read frame data: {e}"))?;
-
             use io::Write;
-            tmp_writer.write_all(&buf).map_err(|e| format!("write: {e}"))?;
-            hasher.update(&buf);
-            written += buf.len() as i64;
+            let mut remaining = len;
+            let mut buf = vec![0u8; std::cmp::min(remaining, FILE_CHUNK_SIZE)];
+            while remaining > 0 {
+                let to_read = std::cmp::min(remaining, buf.len());
+                reader.read_exact(&mut buf[..to_read]).map_err(|e| format!("read frame data: {e}"))?;
+                tmp_writer.write_all(&buf[..to_read]).map_err(|e| format!("write: {e}"))?;
+                hasher.update(&buf[..to_read]);
+                written += to_read as i64;
+                remaining -= to_read;
+            }
         }
 
         use io::Write;
@@ -1083,7 +1098,14 @@ fn handle_tunnel(
         host: params.host.clone(),
         port: params.port,
     };
-    tunnels.lock().unwrap().insert(tag, target);
+    match tunnels.lock() {
+        Ok(mut reg) => { reg.insert(tag, target); }
+        Err(e) => {
+            log::error!("[v2:tunnel] registry lock poisoned: {e}");
+            let _ = send_error(writer, tag, 13, "internal error".to_string());
+            return;
+        }
+    }
     log::info!("[v2:tunnel] registered tag={tag} -> {}:{}", params.host, params.port);
     let _ = send_response(
         writer,
@@ -1098,7 +1120,14 @@ fn handle_close_tunnel(
     writer: &SharedWriter,
     tunnels: &TunnelRegistry,
 ) {
-    let mut reg = tunnels.lock().unwrap();
+    let mut reg = match tunnels.lock() {
+        Ok(g) => g,
+        Err(e) => {
+            log::error!("[v2:close_tunnel] registry lock poisoned: {e}");
+            let _ = send_error(writer, tag, 13, "internal error".to_string());
+            return;
+        }
+    };
     if reg.remove(&params.tunnel_tag).is_some() {
         log::info!("[v2:close_tunnel] removed tunnel_tag={}", params.tunnel_tag);
         let _ = send_response(
@@ -1121,7 +1150,14 @@ fn handle_list_tunnels(
     writer: &SharedWriter,
     tunnels: &TunnelRegistry,
 ) {
-    let reg = tunnels.lock().unwrap();
+    let reg = match tunnels.lock() {
+        Ok(g) => g,
+        Err(e) => {
+            log::error!("[v2:list_tunnels] registry lock poisoned: {e}");
+            let _ = send_error(writer, tag, 13, "internal error".to_string());
+            return;
+        }
+    };
     let infos: Vec<proto::TunnelInfo> = reg
         .iter()
         .map(|(t, target)| proto::TunnelInfo {

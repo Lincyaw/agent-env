@@ -345,12 +345,17 @@ class SandboxSession:
         if iroh is not None:
             raw = self._read_content(content)
             result = iroh.upload_file(path, raw)
+            actual_sha = str(result.get("sha256", ""))
+            if sha256 and actual_sha and actual_sha != sha256:
+                raise RuntimeError(
+                    f"upload sha256 mismatch: expected {sha256}, got {actual_sha}"
+                )
             bw = result.get("bytes_written", len(raw))
             return UploadFileResponse.model_validate(
                 {
                     "path": str(result.get("path", path)),
                     "bytesWritten": int(str(bw)),
-                    "sha256": str(result.get("sha256", "")),
+                    "sha256": actual_sha,
                 }
             )
         return self._client.upload_file(

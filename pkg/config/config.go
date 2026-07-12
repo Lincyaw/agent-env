@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -42,7 +43,8 @@ type Config struct {
 	// Executor agent configuration
 	ExecutorAgentImage string
 	ExecutorProtocol   string
-	IrohRelayURL       string
+	IrohRelayURL         string
+	IrohRelayExternalURL string
 
 	// ImagePullPolicy is applied to the gateway-injected sidecar and
 	// executor-agent init containers. Defaults to "Always" (production:
@@ -283,6 +285,9 @@ func LoadFromEnv() *Config {
 	if v := os.Getenv("IROH_RELAY_URL"); v != "" {
 		cfg.IrohRelayURL = v
 	}
+	if v := os.Getenv("IROH_RELAY_EXTERNAL_URL"); v != "" {
+		cfg.IrohRelayExternalURL = v
+	}
 
 	if v := os.Getenv("IMAGE_PULL_POLICY"); v != "" {
 		cfg.ImagePullPolicy = v
@@ -519,6 +524,12 @@ func (c *Config) Validate() error {
 	}
 	if c.GRPCAuthSecretName == "" {
 		return fmt.Errorf("gRPC auth secret name is required")
+	}
+
+	if c.IrohRelayURL != "" {
+		if _, err := url.Parse(c.IrohRelayURL); err != nil {
+			return fmt.Errorf("invalid IROH_RELAY_URL %q: %w", c.IrohRelayURL, err)
+		}
 	}
 
 	// Validate ClickHouse configuration if enabled

@@ -69,6 +69,14 @@ spec:
               value: "{{ .Values.sidecar.httpPort }}"
             - name: EXECUTOR_AGENT_IMAGE
               value: "{{ .Values.executorAgent.image.repository }}:{{ .Values.executorAgent.image.tag | default .Chart.AppVersion }}"
+            {{- if .Values.executorAgent.protocol }}
+            - name: EXECUTOR_PROTOCOL
+              value: "{{ .Values.executorAgent.protocol }}"
+            {{- end }}
+            {{- if .Values.irohRelay.enabled }}
+            - name: IROH_RELAY_URL
+              value: "http://{{ include "agent-env.fullname" . }}-iroh-relay.{{ .Release.Namespace }}.svc:{{ .Values.irohRelay.port }}"
+            {{- end }}
             - name: IMAGE_PULL_POLICY
               value: "{{ .Values.image.injectedPullPolicy | default "Always" }}"
             - name: GATEWAY_IDLE_TIMEOUT

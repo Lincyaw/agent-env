@@ -5,6 +5,8 @@ use std::path::PathBuf;
 pub struct Config {
     #[serde(default = "default_gateway_url")]
     pub gateway_url: String,
+    #[serde(default)]
+    pub api_key: String,
 }
 
 fn default_gateway_url() -> String {
@@ -15,6 +17,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             gateway_url: default_gateway_url(),
+            api_key: String::new(),
         }
     }
 }
@@ -28,11 +31,15 @@ impl Config {
     }
 
     pub fn load() -> Self {
-        let path = Self::path();
-        match std::fs::read_to_string(&path) {
-            Ok(content) => toml::from_str(&content).unwrap_or_default(),
-            Err(_) => Self::default(),
+        let mut cfg: Config = std::fs::read_to_string(Self::path())
+            .ok()
+            .and_then(|c| toml::from_str(&c).ok())
+            .unwrap_or_default();
+
+        if let Ok(key) = std::env::var("ARL_API_KEY") {
+            cfg.api_key = key;
         }
+        cfg
     }
 
     pub fn save(&self) -> anyhow::Result<()> {
