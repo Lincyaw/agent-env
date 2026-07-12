@@ -46,7 +46,17 @@ class IrohTransport:
             raise ImportError(
                 "iroh package required for direct connect: pip install arl-env[direct]"
             ) from None
-        self._addr_str = addr_str.strip()
+        # Parse addr: either JSON {"id":"hex","relay_url":"..."} or plain hex ID.
+        raw = addr_str.strip()
+        self._relay_url: str | None = None
+        try:
+            import json as _json
+
+            parsed = _json.loads(raw)
+            self._addr_str = parsed.get("id", raw)
+            self._relay_url = parsed.get("relay_url")
+        except (ValueError, TypeError, KeyError):
+            self._addr_str = raw
         self._endpoint: object | None = None
         self._conn: object | None = None
         self._tag_counter = 0
@@ -74,7 +84,10 @@ class IrohTransport:
         self._endpoint = endpoint
 
         remote_id = iroh.EndpointId.from_string(self._addr_str)
-        remote_addr = iroh.EndpointAddr(id=remote_id, relay_url=None, addresses=[])
+        relay_url = None
+        if self._relay_url:
+            relay_url = iroh.RelayUrl.from_string(self._relay_url)
+        remote_addr = iroh.EndpointAddr(id=remote_id, relay_url=relay_url, addresses=[])
         self._conn = await endpoint.connect(remote_addr, ALPN)
 
     async def close(self) -> None:

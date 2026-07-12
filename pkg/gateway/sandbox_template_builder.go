@@ -361,9 +361,13 @@ func (g *Gateway) executorEnv() []corev1.EnvVar {
 	if protocol == "" {
 		protocol = "v1"
 	}
-	return []corev1.EnvVar{
+	envs := []corev1.EnvVar{
 		{Name: "EXECUTOR_PROTOCOL", Value: protocol},
 	}
+	if g.gwConfig.IrohRelayURL != "" {
+		envs = append(envs, corev1.EnvVar{Name: "IROH_RELAY_URL", Value: g.gwConfig.IrohRelayURL})
+	}
+	return envs
 }
 
 func (g *Gateway) injectProxyEnv(pod *corev1.PodSpec) {

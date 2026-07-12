@@ -42,6 +42,7 @@ type Config struct {
 	// Executor agent configuration
 	ExecutorAgentImage string
 	ExecutorProtocol   string
+	IrohRelayURL       string
 
 	// ImagePullPolicy is applied to the gateway-injected sidecar and
 	// executor-agent init containers. Defaults to "Always" (production:
@@ -278,6 +279,9 @@ func LoadFromEnv() *Config {
 	}
 	if v := os.Getenv("EXECUTOR_PROTOCOL"); v != "" {
 		cfg.ExecutorProtocol = v
+	}
+	if v := os.Getenv("IROH_RELAY_URL"); v != "" {
+		cfg.IrohRelayURL = v
 	}
 
 	if v := os.Getenv("IMAGE_PULL_POLICY"); v != "" {

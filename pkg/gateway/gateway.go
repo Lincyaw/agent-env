@@ -30,6 +30,7 @@ type GatewayConfig struct {
 	WorkspaceDir                    string
 	ExecutorAgentImage              string
 	ExecutorProtocol                string
+	IrohRelayURL                    string
 	ImagePullPolicy                 string
 	GRPCAuthToken                   string
 	GRPCAuthSecretName              string

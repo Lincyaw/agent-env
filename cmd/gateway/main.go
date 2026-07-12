@@ -134,6 +134,7 @@ func main() {
 		WorkspaceDir:                    cfg.WorkspaceDir,
 		ExecutorAgentImage:              cfg.ExecutorAgentImage,
 		ExecutorProtocol:                cfg.ExecutorProtocol,
+		IrohRelayURL:                    cfg.IrohRelayURL,
 		ImagePullPolicy:                 cfg.ImagePullPolicy,
 		GRPCAuthToken:                   cfg.GRPCAuthToken,
 		GRPCAuthSecretName:              cfg.GRPCAuthSecretName,

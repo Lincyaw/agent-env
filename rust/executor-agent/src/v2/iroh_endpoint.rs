@@ -1,7 +1,5 @@
 use super::connection::ConnectionHandler;
-use iroh::{Endpoint, SecretKey, endpoint::presets};
-#[cfg(test)]
-use iroh::RelayMode;
+use iroh::{Endpoint, RelayMode, SecretKey, endpoint::presets};
 use log::{error, info, warn};
 use std::io;
 use std::path::PathBuf;
@@ -20,13 +18,19 @@ impl IrohEndpoint {
     pub async fn new(addr_file: PathBuf) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let secret_key = load_or_generate_secret_key();
 
-        let endpoint = Endpoint::builder(presets::N0)
+        let mut builder = Endpoint::builder(presets::N0)
             .secret_key(secret_key)
-            .alpns(vec![ALPN.to_vec()])
-            .bind()
-            .await?;
+            .alpns(vec![ALPN.to_vec()]);
 
-        // Wait for relay connection + address publication via PKARR
+        if let Ok(relay_url) = std::env::var("IROH_RELAY_URL") {
+            info!("using custom relay: {relay_url}");
+            let url = iroh::RelayUrl::from(url::Url::parse(&relay_url)?);
+            let relay_map = iroh::RelayMap::from_iter([url]);
+            builder = builder.relay_mode(RelayMode::Custom(relay_map));
+        }
+
+        let endpoint = builder.bind().await?;
+
         endpoint.online().await;
         info!("iroh endpoint online, id={}", endpoint.id());
 
@@ -81,12 +85,20 @@ impl IrohEndpoint {
             std::fs::create_dir_all(parent)?;
         }
 
-        // Write just the EndpointId (hex string).
-        // With presets::N0, the address is published via PKARR/DNS —
-        // clients only need the ID to connect.
+        // Write JSON with both id and relay_url for fast client connection.
+        // Clients parse the JSON to get relay_url (skipping DNS lookup).
+        // Fallback: if content is a plain hex string, treat as EndpointId-only.
         let id_str = self.endpoint.id().to_string();
-        std::fs::write(&self.addr_file, &id_str)?;
-        info!("iroh endpoint id written to {}", self.addr_file.display());
+        let addr = self.endpoint.addr();
+        let relay_url = addr.relay_urls().next().map(|u| u.to_string());
+
+        let json = serde_json::json!({
+            "id": id_str,
+            "relay_url": relay_url,
+        });
+        let content = serde_json::to_string(&json).unwrap_or(id_str.clone());
+        std::fs::write(&self.addr_file, &content)?;
+        info!("iroh endpoint addr written to {} (id={}, relay={:?})", self.addr_file.display(), id_str, relay_url);
         Ok(())
     }
 }

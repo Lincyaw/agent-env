@@ -72,24 +72,63 @@ pub struct QuicTransport {
 }
 
 impl QuicTransport {
-    pub async fn connect(iroh_addr: &str) -> Result<Self> {
+    pub async fn connect(iroh_addr_raw: &str) -> Result<Self> {
+        use iroh::address_lookup::DnsAddressLookup;
         use iroh::endpoint::presets;
+        use std::time::Instant;
 
-        let endpoint = iroh::Endpoint::builder(presets::N0)
-            .alpns(vec![ALPN.to_vec()])
-            .bind()
-            .await?;
+        let t0 = Instant::now();
 
-        let id_bytes = hex::decode(iroh_addr.trim())?;
+        // Parse iroh addr: either JSON {"id":"hex","relay_url":"..."} or plain hex ID.
+        let (id_hex, relay_url) = parse_iroh_addr(iroh_addr_raw);
+
+        let mut builder = iroh::Endpoint::builder(presets::Minimal)
+            .alpns(vec![ALPN.to_vec()]);
+
+        if relay_url.is_some() {
+            // We have the relay URL from the executor — connect directly, skip DNS.
+            builder = builder.relay_mode(iroh::RelayMode::Default);
+        } else {
+            // No relay URL, need DNS to discover the remote address.
+            builder = builder
+                .address_lookup(DnsAddressLookup::n0_dns())
+                .relay_mode(iroh::RelayMode::Default);
+        }
+
+        let endpoint = builder.bind().await?;
+
+        let t1 = Instant::now();
+
+        let id_bytes = hex::decode(id_hex.trim())?;
         let id_array: [u8; 32] = id_bytes
             .try_into()
             .map_err(|_| anyhow::anyhow!("invalid endpoint id length"))?;
         let remote_id = iroh::PublicKey::from_bytes(&id_array)?;
 
-        let connect_fut = endpoint.connect(remote_id, ALPN);
+        // If we have the relay URL, construct a full EndpointAddr for faster connect.
+        let connect_target: iroh::EndpointAddr = if let Some(ref url) = relay_url {
+            let relay = iroh::RelayUrl::from(url::Url::parse(url)?);
+            iroh::EndpointAddr::new(remote_id).with_relay_url(relay)
+        } else {
+            iroh::EndpointAddr::new(remote_id)
+        };
+
+        let connect_fut = endpoint.connect(connect_target, ALPN);
         let conn = tokio::time::timeout(std::time::Duration::from_secs(15), connect_fut)
             .await
             .map_err(|_| anyhow::anyhow!("iroh connect timeout"))??;
+
+        let t2 = Instant::now();
+
+        if std::env::var("ARL_DEBUG").is_ok() {
+            eprintln!(
+                "iroh: bind={}ms connect={}ms total={}ms relay={}",
+                (t1 - t0).as_millis(),
+                (t2 - t1).as_millis(),
+                (t2 - t0).as_millis(),
+                if relay_url.is_some() { "direct" } else { "dns" },
+            );
+        }
 
         Ok(Self {
             conn,
@@ -447,6 +486,25 @@ async fn handle_tunnel_conn(
     r1.ok();
     r2.ok();
     Ok(())
+}
+
+fn parse_iroh_addr(raw: &str) -> (String, Option<String>) {
+    let trimmed = raw.trim();
+    if let Ok(v) = serde_json::from_str::<serde_json::Value>(trimmed) {
+        let id = v["id"].as_str().unwrap_or("").to_string();
+        let mut relay = v["relay_url"].as_str().map(String::from);
+
+        // Allow overriding the relay URL (e.g. when the gateway returns
+        // a cluster-internal IP that the CLI can't reach directly).
+        if let Ok(override_url) = std::env::var("IROH_RELAY_URL") {
+            relay = Some(override_url);
+        }
+
+        if !id.is_empty() {
+            return (id, relay);
+        }
+    }
+    (trimmed.to_string(), std::env::var("IROH_RELAY_URL").ok())
 }
 
 struct RawTerminalGuard;
