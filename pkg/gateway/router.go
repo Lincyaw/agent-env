@@ -49,6 +49,9 @@ func SetupRoutes(mux *http.ServeMux, gw *Gateway, authCfg *AuthConfig) {
 	route("GET /v1/sessions/{id}/operations/{operationID}", user(handleGetExecuteOperation(gw)))
 	route("PUT /v1/sessions/{id}/files/{path...}", user(handleUploadFile(gw)))
 	route("GET /v1/sessions/{id}/files/{path...}", user(handleDownloadFile(gw)))
+	route("GET /v1/sessions/{id}/stat/{path...}", user(handleStat(gw)))
+	route("GET /v1/sessions/{id}/ls/{path...}", user(handleListDir(gw)))
+	route("POST /v1/sessions/{id}/stdin", user(handleWriteStdin(gw)))
 	route("POST /v1/sessions/{id}/restore", user(handleRestore(gw)))
 	route("POST /v1/sessions/{id}/replay", user(handleReplay(gw)))
 
@@ -478,6 +481,81 @@ func pathBaseForHeader(filePath string) string {
 		return "download"
 	}
 	return strings.ReplaceAll(base, "\x00", "")
+}
+
+func handleStat(gw *Gateway) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		if checkOwnership(gw, w, r, id) == nil {
+			return
+		}
+
+		filePath := r.PathValue("path")
+		if filePath == "" {
+			writeError(w, http.StatusBadRequest, "path is required")
+			return
+		}
+
+		resp, err := gw.StatFile(r.Context(), id, filePath)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		writeJSON(w, http.StatusOK, resp)
+	}
+}
+
+func handleListDir(gw *Gateway) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		if checkOwnership(gw, w, r, id) == nil {
+			return
+		}
+
+		filePath := r.PathValue("path")
+		if filePath == "" {
+			writeError(w, http.StatusBadRequest, "path is required")
+			return
+		}
+
+		recursive := r.URL.Query().Get("recursive") == "true"
+
+		resp, err := gw.ListDir(r.Context(), id, filePath, recursive)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		writeJSON(w, http.StatusOK, resp)
+	}
+}
+
+func handleWriteStdin(gw *Gateway) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		if checkOwnership(gw, w, r, id) == nil {
+			return
+		}
+
+		var req WriteStdinRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+
+		if req.Handle == "" {
+			writeError(w, http.StatusBadRequest, "handle is required")
+			return
+		}
+
+		if err := gw.WriteStdin(r.Context(), id, req.Handle, req.Data); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+
+		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
+	}
 }
 
 func handleReplay(gw *Gateway) http.HandlerFunc {

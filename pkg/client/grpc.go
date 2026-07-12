@@ -448,6 +448,24 @@ func (c *GRPCSidecarClient) ReadFile(ctx context.Context, podIP string, path str
 	return &result, nil
 }
 
+// Stat returns file metadata. Not yet wired to a gRPC RPC; returns
+// "not implemented" until the sidecar proto adds a Stat RPC.
+func (c *GRPCSidecarClient) Stat(_ context.Context, _ string, _ string) (*interfaces.StatResult, error) {
+	return nil, fmt.Errorf("Stat: not implemented (awaiting sidecar proto)")
+}
+
+// ListDir lists directory contents. Not yet wired to a gRPC RPC; returns
+// "not implemented" until the sidecar proto adds a ListDir RPC.
+func (c *GRPCSidecarClient) ListDir(_ context.Context, _ string, _ string, _ bool) (*interfaces.ListDirResult, error) {
+	return nil, fmt.Errorf("ListDir: not implemented (awaiting sidecar proto)")
+}
+
+// WriteStdin sends data to a running process stdin. Not yet wired to a gRPC
+// RPC; returns "not implemented" until the sidecar proto adds a WriteStdin RPC.
+func (c *GRPCSidecarClient) WriteStdin(_ context.Context, _ string, _ string, _ string) error {
+	return fmt.Errorf("WriteStdin: not implemented (awaiting sidecar proto)")
+}
+
 // StreamLogs streams log entries from the sidecar ring buffer via gRPC.
 func (c *GRPCSidecarClient) StreamLogs(ctx context.Context, podIP string, follow bool, tailLines int32) (<-chan interfaces.LogEntry, error) {
 	conn, err := c.getOrCreateConn(podIP)

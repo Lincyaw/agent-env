@@ -3,6 +3,7 @@ package interfaces
 import (
 	"context"
 	"io"
+	"time"
 )
 
 // FileTransferChunkSize is the standard chunk size for streaming file operations.
@@ -30,6 +31,27 @@ type FileReadResult struct {
 	SHA256    string
 }
 
+// StatResult describes file metadata returned by Stat.
+type StatResult struct {
+	Exists   bool
+	IsDir    bool
+	Size     int64
+	Mode     string
+	Modified time.Time
+}
+
+// DirEntry describes a single entry in a directory listing.
+type DirEntry struct {
+	Name  string
+	IsDir bool
+	Size  int64
+}
+
+// ListDirResult describes the result of a directory listing.
+type ListDirResult struct {
+	Entries []DirEntry
+}
+
 // SidecarClient defines the interface for communicating with sidecar containers
 type SidecarClient interface {
 	// Execute sends command execution request to sidecar and returns aggregated result
@@ -43,6 +65,16 @@ type SidecarClient interface {
 
 	// ReadFile streams one file from the session workspace.
 	ReadFile(ctx context.Context, podIP string, path string, dst io.Writer) (*FileReadResult, error)
+
+	// Stat returns file metadata without downloading the file content.
+	Stat(ctx context.Context, podIP string, path string) (*StatResult, error)
+
+	// ListDir lists directory contents. When recursive is true, entries
+	// include paths relative to the listed directory.
+	ListDir(ctx context.Context, podIP string, path string, recursive bool) (*ListDirResult, error)
+
+	// WriteStdin sends data to the stdin of a running process identified by handle.
+	WriteStdin(ctx context.Context, podIP string, handle string, data string) error
 
 	// InteractiveShell opens a bidirectional shell session
 	InteractiveShell(ctx context.Context, podIP string) (ShellStream, error)
