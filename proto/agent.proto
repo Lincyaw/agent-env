@@ -15,6 +15,15 @@ service AgentService {
   // ReadFile streams one file from the executor workspace.
   rpc ReadFile(ReadFileRequest) returns (stream FileChunk);
 
+  // Stat returns file metadata for a path in the workspace.
+  rpc Stat(StatRequest) returns (StatResponse);
+
+  // ListDir lists directory contents in the workspace.
+  rpc ListDir(ListDirRequest) returns (ListDirResponse);
+
+  // WriteStdin sends data to the stdin of a running process.
+  rpc WriteStdin(WriteStdinRequest) returns (WriteStdinResponse);
+
   // InteractiveShell provides bidirectional streaming for interactive shell sessions
   rpc InteractiveShell(stream ShellInput) returns (stream ShellOutput);
 
@@ -101,3 +110,44 @@ message LogEntry {
   string message = 3;     // Log line content
   string source = 4;      // "sidecar", "executor", "exec"
 }
+
+// StatRequest asks for file metadata at a given path.
+message StatRequest {
+  string path = 1;
+}
+
+// StatResponse returns file metadata.
+message StatResponse {
+  bool exists = 1;
+  bool is_dir = 2;
+  uint64 size = 3;
+  string mode = 4;        // octal permission string, e.g. "0644"
+  string modified = 5;    // Unix timestamp as string
+}
+
+// ListDirRequest asks for directory listing.
+message ListDirRequest {
+  string path = 1;
+  bool recursive = 2;
+}
+
+// ListDirResponse contains the directory entries.
+message ListDirResponse {
+  repeated DirEntryProto entries = 1;
+}
+
+// DirEntryProto is a single directory entry.
+message DirEntryProto {
+  string name = 1;
+  bool is_dir = 2;
+  uint64 size = 3;
+}
+
+// WriteStdinRequest sends data to the stdin of a running process.
+message WriteStdinRequest {
+  string handle = 1;
+  bytes data = 2;
+}
+
+// WriteStdinResponse is returned after writing stdin data.
+message WriteStdinResponse {}

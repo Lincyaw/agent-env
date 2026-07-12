@@ -86,9 +86,9 @@ func (g *Gateway) StatFile(ctx context.Context, sessionID string, filePath strin
 	return &StatResponse{
 		Exists:   result.Exists,
 		IsDir:    result.IsDir,
-		Size:     result.Size,
+		Size:     int64(result.Size),
 		Mode:     result.Mode,
-		Modified: result.Modified.Format("2006-01-02T15:04:05Z"),
+		Modified: result.Modified,
 	}, nil
 }
 
@@ -109,12 +109,12 @@ func (g *Gateway) ListDir(ctx context.Context, sessionID string, filePath string
 		return nil, err
 	}
 
-	entries := make([]ListDirEntryResponse, len(result.Entries))
-	for i, e := range result.Entries {
+	entries := make([]ListDirEntryResponse, len(result))
+	for i, e := range result {
 		entries[i] = ListDirEntryResponse{
 			Name:  e.Name,
 			IsDir: e.IsDir,
-			Size:  e.Size,
+			Size:  int64(e.Size),
 		}
 	}
 
@@ -129,7 +129,7 @@ func (g *Gateway) WriteStdin(ctx context.Context, sessionID string, handle strin
 	}
 	defer releaseSession()
 
-	if err := g.sidecarClient.WriteStdin(ctx, podIP, handle, data); err != nil {
+	if err := g.sidecarClient.WriteStdin(ctx, podIP, handle, []byte(data)); err != nil {
 		return err
 	}
 

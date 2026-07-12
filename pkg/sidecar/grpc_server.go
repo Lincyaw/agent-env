@@ -1,6 +1,7 @@
 package sidecar
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"log"
@@ -211,6 +212,62 @@ func (s *GRPCServer) ReadFile(req *pb.ReadFileRequest, stream grpc.ServerStreami
 		Sha256:    result.SHA256,
 		Done:      true,
 	})
+}
+
+// Stat returns file metadata for a path.
+func (s *GRPCServer) Stat(ctx context.Context, req *pb.StatRequest) (*pb.StatResponse, error) {
+	if req.GetPath() == "" {
+		return nil, status.Error(codes.InvalidArgument, "path is required")
+	}
+
+	result, err := s.service.Stat(ctx, req.GetPath())
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "stat: %v", err)
+	}
+
+	return &pb.StatResponse{
+		Exists:   result.Exists,
+		IsDir:    result.IsDir,
+		Size:     result.Size,
+		Mode:     result.Mode,
+		Modified: result.Modified,
+	}, nil
+}
+
+// ListDir lists directory contents.
+func (s *GRPCServer) ListDir(ctx context.Context, req *pb.ListDirRequest) (*pb.ListDirResponse, error) {
+	if req.GetPath() == "" {
+		return nil, status.Error(codes.InvalidArgument, "path is required")
+	}
+
+	entries, err := s.service.ListDir(ctx, req.GetPath(), req.GetRecursive())
+	if err != nil {
+		return nil, status.Errorf(codes.Internal, "listdir: %v", err)
+	}
+
+	pbEntries := make([]*pb.DirEntryProto, len(entries))
+	for i, e := range entries {
+		pbEntries[i] = &pb.DirEntryProto{
+			Name:  e.Name,
+			IsDir: e.IsDir,
+			Size:  e.Size,
+		}
+	}
+
+	return &pb.ListDirResponse{Entries: pbEntries}, nil
+}
+
+// WriteStdin sends data to a running process.
+func (s *GRPCServer) WriteStdin(ctx context.Context, req *pb.WriteStdinRequest) (*pb.WriteStdinResponse, error) {
+	if req.GetHandle() == "" {
+		return nil, status.Error(codes.InvalidArgument, "handle is required")
+	}
+
+	if err := s.service.WriteStdin(ctx, req.GetHandle(), req.GetData()); err != nil {
+		return nil, status.Errorf(codes.Unimplemented, "%v", err)
+	}
+
+	return &pb.WriteStdinResponse{}, nil
 }
 
 // StreamLogs streams log entries from the sidecar ring buffer.

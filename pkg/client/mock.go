@@ -81,24 +81,24 @@ func (m *MockSidecarClient) InteractiveShell(ctx context.Context, podIP string) 
 	return nil, fmt.Errorf("interactive shell not supported in mock")
 }
 
+// StreamLogs mocks log streaming
+func (m *MockSidecarClient) StreamLogs(_ context.Context, _ string, _ bool, _ int32) (<-chan interfaces.LogEntry, error) {
+	ch := make(chan interfaces.LogEntry)
+	close(ch)
+	return ch, nil
+}
+
 // Stat mocks file stat
 func (m *MockSidecarClient) Stat(_ context.Context, _ string, _ string) (*interfaces.StatResult, error) {
 	return nil, fmt.Errorf("not implemented")
 }
 
 // ListDir mocks directory listing
-func (m *MockSidecarClient) ListDir(_ context.Context, _ string, _ string, _ bool) (*interfaces.ListDirResult, error) {
+func (m *MockSidecarClient) ListDir(_ context.Context, _ string, _ string, _ bool) ([]interfaces.DirEntry, error) {
 	return nil, fmt.Errorf("not implemented")
 }
 
-// WriteStdin mocks stdin write
-func (m *MockSidecarClient) WriteStdin(_ context.Context, _ string, _ string, _ string) error {
+// WriteStdin mocks writing to stdin
+func (m *MockSidecarClient) WriteStdin(_ context.Context, _ string, _ string, _ []byte) error {
 	return fmt.Errorf("not implemented")
-}
-
-// StreamLogs mocks log streaming
-func (m *MockSidecarClient) StreamLogs(_ context.Context, _ string, _ bool, _ int32) (<-chan interfaces.LogEntry, error) {
-	ch := make(chan interfaces.LogEntry)
-	close(ch)
-	return ch, nil
 }

@@ -448,24 +448,6 @@ func (c *GRPCSidecarClient) ReadFile(ctx context.Context, podIP string, path str
 	return &result, nil
 }
 
-// Stat returns file metadata. Not yet wired to a gRPC RPC; returns
-// "not implemented" until the sidecar proto adds a Stat RPC.
-func (c *GRPCSidecarClient) Stat(_ context.Context, _ string, _ string) (*interfaces.StatResult, error) {
-	return nil, fmt.Errorf("Stat: not implemented (awaiting sidecar proto)")
-}
-
-// ListDir lists directory contents. Not yet wired to a gRPC RPC; returns
-// "not implemented" until the sidecar proto adds a ListDir RPC.
-func (c *GRPCSidecarClient) ListDir(_ context.Context, _ string, _ string, _ bool) (*interfaces.ListDirResult, error) {
-	return nil, fmt.Errorf("ListDir: not implemented (awaiting sidecar proto)")
-}
-
-// WriteStdin sends data to a running process stdin. Not yet wired to a gRPC
-// RPC; returns "not implemented" until the sidecar proto adds a WriteStdin RPC.
-func (c *GRPCSidecarClient) WriteStdin(_ context.Context, _ string, _ string, _ string) error {
-	return fmt.Errorf("WriteStdin: not implemented (awaiting sidecar proto)")
-}
-
 // StreamLogs streams log entries from the sidecar ring buffer via gRPC.
 func (c *GRPCSidecarClient) StreamLogs(ctx context.Context, podIP string, follow bool, tailLines int32) (<-chan interfaces.LogEntry, error) {
 	conn, err := c.getOrCreateConn(podIP)
@@ -508,6 +490,78 @@ func (c *GRPCSidecarClient) StreamLogs(ctx context.Context, podIP string, follow
 		}
 	}()
 	return ch, nil
+}
+
+// Stat returns file metadata for a path via sidecar gRPC.
+func (c *GRPCSidecarClient) Stat(ctx context.Context, podIP string, path string) (*interfaces.StatResult, error) {
+	conn, err := c.getOrCreateConn(podIP)
+	if err != nil {
+		return nil, err
+	}
+
+	client := pb.NewAgentServiceClient(conn)
+	ctx, cancel := context.WithTimeout(ctx, c.timeout)
+	defer cancel()
+
+	resp, err := client.Stat(ctx, &pb.StatRequest{Path: path})
+	if err != nil {
+		return nil, fmt.Errorf("gRPC Stat failed: %w", err)
+	}
+
+	return &interfaces.StatResult{
+		Exists:   resp.GetExists(),
+		IsDir:    resp.GetIsDir(),
+		Size:     resp.GetSize(),
+		Mode:     resp.GetMode(),
+		Modified: resp.GetModified(),
+	}, nil
+}
+
+// ListDir lists directory contents via sidecar gRPC.
+func (c *GRPCSidecarClient) ListDir(ctx context.Context, podIP string, path string, recursive bool) ([]interfaces.DirEntry, error) {
+	conn, err := c.getOrCreateConn(podIP)
+	if err != nil {
+		return nil, err
+	}
+
+	client := pb.NewAgentServiceClient(conn)
+	ctx, cancel := context.WithTimeout(ctx, c.timeout)
+	defer cancel()
+
+	resp, err := client.ListDir(ctx, &pb.ListDirRequest{Path: path, Recursive: recursive})
+	if err != nil {
+		return nil, fmt.Errorf("gRPC ListDir failed: %w", err)
+	}
+
+	entries := make([]interfaces.DirEntry, len(resp.GetEntries()))
+	for i, e := range resp.GetEntries() {
+		entries[i] = interfaces.DirEntry{
+			Name:  e.GetName(),
+			IsDir: e.GetIsDir(),
+			Size:  e.GetSize(),
+		}
+	}
+
+	return entries, nil
+}
+
+// WriteStdin sends data to a running process via sidecar gRPC.
+func (c *GRPCSidecarClient) WriteStdin(ctx context.Context, podIP string, handle string, data []byte) error {
+	conn, err := c.getOrCreateConn(podIP)
+	if err != nil {
+		return err
+	}
+
+	client := pb.NewAgentServiceClient(conn)
+	ctx, cancel := context.WithTimeout(ctx, c.timeout)
+	defer cancel()
+
+	_, err = client.WriteStdin(ctx, &pb.WriteStdinRequest{Handle: handle, Data: data})
+	if err != nil {
+		return fmt.Errorf("gRPC WriteStdin failed: %w", err)
+	}
+
+	return nil
 }
 
 // InteractiveShell opens a bidirectional shell session via sidecar gRPC
