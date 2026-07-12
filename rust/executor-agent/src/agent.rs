@@ -914,78 +914,89 @@ impl AgentInner {
             }
         });
 
-        // Writer task: read JSON from connection, dispatch stdin/resize/signal
-        // Read sub-messages from the connection for this shell session
-        loop {
-            let line = match lines.next_line().await {
-                Ok(Some(line)) => line,
-                Ok(None) => break, // EOF, connection closed
-                Err(_) => break,
-            };
-
-            let sub: Request = match serde_json::from_str(&line) {
-                Ok(r) => r,
-                Err(_) => break,
-            };
-
-            match sub.req_type.as_str() {
-                "stdin" => {
-                    let data = sub.data.as_bytes();
-                    // Write to PTY master
-                    let result = async_master_writer.writable().await;
-                    if let Ok(mut guard) = result {
-                        let _ = guard.try_io(|inner| {
-                            let fd = inner.as_raw_fd();
-                            let n = unsafe {
-                                libc::write(
-                                    fd,
-                                    data.as_ptr() as *const libc::c_void,
-                                    data.len(),
-                                )
-                            };
-                            if n < 0 {
-                                Err(std::io::Error::last_os_error())
-                            } else {
-                                Ok(n as usize)
-                            }
-                        });
-                    }
-                }
-                "resize"
-                    if sub.rows > 0 && sub.cols > 0 => {
-                        let fd = async_master_writer.as_raw_fd();
-                        let _ = pty_util::set_winsize(fd, sub.rows as u16, sub.cols as u16);
-                    }
-                "signal" => {
-                    let sig = match sub.signal.to_uppercase().as_str() {
-                        "SIGTERM" => Some(nix::sys::signal::Signal::SIGTERM),
-                        "SIGKILL" => Some(nix::sys::signal::Signal::SIGKILL),
-                        "SIGINT" => Some(nix::sys::signal::Signal::SIGINT),
-                        _ => None,
-                    };
-                    if let Some(sig) = sig {
-                        let _ = nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid), sig);
-                    }
-                }
-                _ => {}
-            }
-        }
-
-        // Connection closed or reader done; wait for shell process to exit
-        // Use waitpid in a blocking task to avoid blocking the tokio runtime
-        let exit_code = tokio::task::spawn_blocking(move || {
+        // Wait for process exit in a background task, signaling via a channel
+        // so the main loop can break when the shell exits (matching Go's cmd.Wait()
+        // in the main goroutine).
+        let (exit_tx, mut exit_rx) = tokio::sync::oneshot::channel::<i32>();
+        tokio::task::spawn_blocking(move || {
             let mut status: i32 = 0;
             let ret = unsafe { libc::waitpid(pid, &mut status, 0) };
-            if ret < 0 {
+            let code = if ret < 0 {
                 1
             } else if libc::WIFEXITED(status) {
                 libc::WEXITSTATUS(status)
             } else {
                 1
+            };
+            let _ = exit_tx.send(code);
+        });
+
+        // Read sub-messages from the connection, but also watch for process exit.
+        // In Go, cmd.Wait() runs in the main goroutine and drives the exit sequence.
+        // Here we select! between connection input and the exit signal.
+        let mut exit_code = 1;
+        loop {
+            tokio::select! {
+                code = &mut exit_rx => {
+                    exit_code = code.unwrap_or(1);
+                    break;
+                }
+                line_result = lines.next_line() => {
+                    let line = match line_result {
+                        Ok(Some(line)) => line,
+                        Ok(None) => break,
+                        Err(_) => break,
+                    };
+                    let sub: Request = match serde_json::from_str(&line) {
+                        Ok(r) => r,
+                        Err(_) => break,
+                    };
+                    match sub.req_type.as_str() {
+                        "stdin" => {
+                            let data = sub.data.as_bytes();
+                            let result = async_master_writer.writable().await;
+                            if let Ok(mut guard) = result {
+                                let _ = guard.try_io(|inner| {
+                                    let fd = inner.as_raw_fd();
+                                    let n = unsafe {
+                                        libc::write(
+                                            fd,
+                                            data.as_ptr() as *const libc::c_void,
+                                            data.len(),
+                                        )
+                                    };
+                                    if n < 0 {
+                                        Err(std::io::Error::last_os_error())
+                                    } else {
+                                        Ok(n as usize)
+                                    }
+                                });
+                            }
+                        }
+                        "resize" if sub.rows > 0 && sub.cols > 0 => {
+                            let fd = async_master_writer.as_raw_fd();
+                            let _ = pty_util::set_winsize(fd, sub.rows as u16, sub.cols as u16);
+                        }
+                        "signal" => {
+                            let sig = match sub.signal.to_uppercase().as_str() {
+                                "SIGTERM" => Some(nix::sys::signal::Signal::SIGTERM),
+                                "SIGKILL" => Some(nix::sys::signal::Signal::SIGKILL),
+                                "SIGINT" => Some(nix::sys::signal::Signal::SIGINT),
+                                _ => None,
+                            };
+                            if let Some(sig) = sig {
+                                let _ = nix::sys::signal::kill(nix::unistd::Pid::from_raw(pid), sig);
+                            }
+                        }
+                        _ => {}
+                    }
+                }
             }
-        })
-        .await
-        .unwrap_or(1);
+        }
+
+        // Drop the async master fd to close the PTY — this unblocks the reader task
+        drop(async_master_writer);
+        drop(async_master);
 
         // Wait for reader task to finish
         let _ = reader_task.await;
