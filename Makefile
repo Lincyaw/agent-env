@@ -209,10 +209,10 @@ proto-go: ## Generate Go gRPC code from proto files
 
 .PHONY: proto-executor-v2
 proto-executor-v2: ## Generate Go code from executor V2 proto
-	@mkdir -p pkg/pb/executor_v2
+	@mkdir -p pkg/pb/executorv2
 	protoc --go_out=. --go_opt=paths=source_relative \
 		proto/executor_v2.proto
-	@mv proto/executor_v2.pb.go pkg/pb/executor_v2/ 2>/dev/null || true
+	@mv proto/executor_v2.pb.go pkg/pb/executorv2/ 2>/dev/null || true
 
 ##@ Python SDK
 

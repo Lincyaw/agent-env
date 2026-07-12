@@ -1,124 +1,269 @@
 syntax = "proto3";
+
 package arl.executor.v2;
-option go_package = "github.com/Lincyaw/agent-env/pkg/pb/executor_v2";
 
-// Envelope wraps all messages on the wire
-message Envelope {
-  oneof payload {
-    Request  request  = 1;
-    Response response = 2;
-    Event    event    = 3;
-  }
-}
+option go_package = "github.com/Lincyaw/agent-env/pkg/pb/executorv2";
 
+// Request is the top-level multiplexed client-to-server frame.
+// Each request carries a correlation tag returned verbatim in the
+// matching Response or subsequent Events.
 message Request {
-  string id = 1;
-  oneof method {
-    PingRequest        ping         = 10;
-    SpawnRequest       spawn        = 11;
-    StdinRequest       stdin        = 12;
-    SignalRequest      signal       = 13;
-    ResizeRequest      resize       = 14;
-    ReadFileRequest    read_file    = 15;
-    WriteFileRequest   write_file   = 16;
-    FileChunkData      file_chunk   = 17;
-    FileDoneRequest    file_done    = 18;
-    StatRequest        stat         = 19;
-    ListDirRequest     list_dir     = 20;
-    TunnelRequest      tunnel       = 21;
-    TunnelDataRequest  tunnel_data  = 22;
-    TunnelCloseRequest tunnel_close = 23;
-    SubscribeRequest   subscribe    = 24;
-    UnsubscribeRequest unsubscribe  = 25;
+  uint32 tag = 1;
+  oneof kind {
+    PingRequest    ping     = 2;
+    SpawnRequest   spawn    = 3;
+    WriteInRequest write_in = 4;
+    SignalRequest  signal   = 5;
+    ResizeRequest  resize   = 6;
+    ReadRequest    read     = 7;
+    WriteRequest   write    = 8;
+    StatRequest    stat     = 9;
+    ListRequest    list     = 10;
+    TunnelRequest  tunnel   = 11;
+    WatchRequest   watch    = 12;
+    UnwatchRequest unwatch  = 13;
   }
 }
 
+// Response is the top-level server-to-client reply frame.
 message Response {
-  string id = 1;
-  oneof result {
-    OkResponse        ok         = 2;
-    ErrorResponse     error      = 3;
-    SpawnResponse     spawn      = 11;
-    ReadFileChunk     file_chunk = 15;
-    ReadFileComplete  file_done  = 16;
-    WriteFileResponse write_file = 17;
-    StatResponse      stat       = 19;
-    ListDirResponse   list_dir   = 20;
-    TunnelResponse    tunnel     = 21;
-    SubscribeResponse subscribe  = 24;
+  uint32 tag = 1;
+  oneof kind {
+    PingResponse    ping     = 2;
+    SpawnResponse   spawn    = 3;
+    WriteInResponse write_in = 4;
+    SignalResponse  signal   = 5;
+    ResizeResponse  resize   = 6;
+    ReadResponse    read     = 7;
+    WriteResponse   write    = 8;
+    StatResponse    stat     = 9;
+    ListResponse    list     = 10;
+    TunnelResponse  tunnel   = 11;
+    WatchResponse   watch    = 12;
+    UnwatchResponse unwatch  = 13;
+    ErrorResponse   error    = 14;
   }
 }
 
+// Event is a server-pushed frame for asynchronous notifications.
+// Four event types only; tunnel and file data flow as raw bytes on
+// dedicated streams, not as protobuf Events.
 message Event {
-  oneof event {
-    StdoutEvent       stdout        = 1;
-    StderrEvent       stderr        = 2;
-    ExitEvent         exit          = 3;
-    TunnelDataEvent   tunnel_data   = 4;
-    TunnelClosedEvent tunnel_closed = 5;
-    FsChangeEvent     fs_change     = 6;
-    ProcessExitEvent  process_exit  = 7;
+  uint32 tag = 1;
+  oneof kind {
+    StdoutEvent   stdout    = 2;
+    StderrEvent   stderr    = 3;
+    ExitEvent     exit      = 4;
+    FsChangeEvent fs_change = 5;
   }
 }
 
-// Individual message types
+// ---------------------------------------------------------------------------
+// 1. ping — health check
+// ---------------------------------------------------------------------------
+
 message PingRequest {}
-message OkResponse {}
-message ErrorResponse { string code = 1; string message = 2; }
+
+message PingResponse {}
+
+// ---------------------------------------------------------------------------
+// 2. spawn — create a process
+// ---------------------------------------------------------------------------
 
 message SpawnRequest {
-  repeated string cmd = 1;
+  repeated string command = 1;
   map<string, string> env = 2;
-  string workdir = 3;
-  uint64 timeout_secs = 4;
-  PtyConfig pty = 5;
-  bool stdin_enabled = 6;
+  string working_dir = 3;
+  int32 timeout_seconds = 4;
+  bool pty = 5;
+  bool stdin = 6;
+  int32 rows = 7;
+  int32 cols = 8;
 }
-message PtyConfig { uint32 rows = 1; uint32 cols = 2; }
-message SpawnResponse { string handle = 1; fixed32 handle_tag = 2; }
 
-message StdinRequest { string handle = 1; bytes data = 2; }
-message SignalRequest { string handle = 1; string signal = 2; }
-message ResizeRequest { string handle = 1; uint32 rows = 2; uint32 cols = 3; }
-
-message ReadFileRequest { string path = 1; }
-message ReadFileChunk { int64 offset = 1; bytes content = 2; }
-message ReadFileComplete { int64 size_bytes = 1; string sha256 = 2; }
-
-message WriteFileRequest { string path = 1; string expected_sha256 = 2; fixed32 stream_tag = 3; }
-message FileChunkData { bytes content = 1; }
-message FileDoneRequest {}
-message WriteFileResponse { int64 bytes_written = 1; string sha256 = 2; }
-
-message StatRequest { string path = 1; }
-message StatResponse { bool exists = 1; bool is_dir = 2; uint64 size = 3; string mode = 4; string modified = 5; }
-
-message ListDirRequest { string path = 1; bool recursive = 2; }
-message ListDirResponse { repeated DirEntry entries = 1; }
-message DirEntry { string name = 1; bool is_dir = 2; uint64 size = 3; }
-
-message TunnelRequest { string target = 1; string handle = 2; }
-message TunnelResponse { string handle = 1; fixed32 handle_tag = 2; }
-message TunnelDataRequest { string handle = 1; bytes data = 2; }
-message TunnelCloseRequest { string handle = 1; }
-
-message SubscribeRequest { repeated SubscribeEventSpec events = 1; }
-message SubscribeEventSpec {
-  oneof spec {
-    FsChangeSpec fs_change = 1;
-    ProcessExitSpec process_exit = 2;
-  }
+message SpawnResponse {
+  uint32 process_tag = 1;
+  int32 pid = 2;
 }
-message FsChangeSpec { string path = 1; bool recursive = 2; }
-message ProcessExitSpec { string handle = 1; }
-message SubscribeResponse { string subscription_id = 1; }
-message UnsubscribeRequest { string subscription_id = 1; }
 
-// Events
-message StdoutEvent { string handle = 1; bytes data = 2; }
-message StderrEvent { string handle = 1; bytes data = 2; }
-message ExitEvent { string handle = 1; int32 exit_code = 2; }
-message TunnelDataEvent { string handle = 1; bytes data = 2; }
-message TunnelClosedEvent { string handle = 1; string reason = 2; }
-message FsChangeEvent { string subscription_id = 1; string path = 2; string change_type = 3; }
-message ProcessExitEvent { string subscription_id = 1; string handle = 2; int32 exit_code = 3; }
+// ---------------------------------------------------------------------------
+// 3. write_in — write bytes to process stdin
+// ---------------------------------------------------------------------------
+
+message WriteInRequest {
+  uint32 process_tag = 1;
+  bytes data = 2;
+}
+
+message WriteInResponse {}
+
+// ---------------------------------------------------------------------------
+// 4. signal — send signal to process
+// ---------------------------------------------------------------------------
+
+message SignalRequest {
+  uint32 process_tag = 1;
+  string signal = 2;
+}
+
+message SignalResponse {}
+
+// ---------------------------------------------------------------------------
+// 5. resize — change PTY window size
+// ---------------------------------------------------------------------------
+
+message ResizeRequest {
+  uint32 process_tag = 1;
+  int32 rows = 2;
+  int32 cols = 3;
+}
+
+message ResizeResponse {}
+
+// ---------------------------------------------------------------------------
+// 6. read — read file contents
+//
+// The ReadResponse confirms the request. Actual file bytes follow on the
+// underlying transport:
+//   QUIC  — uni stream tagged [0x03][tag:4B], raw bytes after header
+//   Unix  — [4B big-endian length][raw bytes] chunks, [4B zero] terminator
+// ---------------------------------------------------------------------------
+
+message ReadRequest {
+  string path = 1;
+}
+
+message ReadResponse {
+  int64 size_bytes = 1;
+  string sha256 = 2;
+}
+
+// ---------------------------------------------------------------------------
+// 7. write — write file contents
+//
+// The client sends WriteRequest, then pushes file bytes on the transport:
+//   QUIC  — uni stream tagged [0x04][tag:4B], raw bytes after header
+//   Unix  — [4B big-endian length][raw bytes] chunks, [4B zero] terminator
+// The server replies with WriteResponse after all bytes are received.
+// ---------------------------------------------------------------------------
+
+message WriteRequest {
+  string path = 1;
+  string expected_sha256 = 2;
+  int64 size_hint = 3;
+}
+
+message WriteResponse {
+  int64 bytes_written = 1;
+  string sha256 = 2;
+}
+
+// ---------------------------------------------------------------------------
+// 8. stat — file metadata
+// ---------------------------------------------------------------------------
+
+message StatRequest {
+  string path = 1;
+}
+
+message StatResponse {
+  string path = 1;
+  int64 size_bytes = 2;
+  string mode = 3;
+  int64 mod_time_unix = 4;
+  bool is_dir = 5;
+}
+
+// ---------------------------------------------------------------------------
+// 9. list — directory contents
+// ---------------------------------------------------------------------------
+
+message ListRequest {
+  string path = 1;
+  bool recursive = 2;
+}
+
+message ListResponse {
+  repeated DirEntry entries = 1;
+}
+
+message DirEntry {
+  string name = 1;
+  int64 size_bytes = 2;
+  string mode = 3;
+  int64 mod_time_unix = 4;
+  bool is_dir = 5;
+}
+
+// ---------------------------------------------------------------------------
+// 10. tunnel — TCP proxy (bidirectional stream)
+//
+// After TunnelResponse, raw bidirectional bytes flow on the transport:
+//   QUIC  — bidi stream tagged [0x05][tag:4B]
+//   Unix  — [4B big-endian length][raw bytes] framed, closing = [4B zero]
+// ---------------------------------------------------------------------------
+
+message TunnelRequest {
+  string host = 1;
+  uint32 port = 2;
+}
+
+message TunnelResponse {}
+
+// ---------------------------------------------------------------------------
+// 11. watch — subscribe to filesystem change events
+// ---------------------------------------------------------------------------
+
+message WatchRequest {
+  string path = 1;
+  bool recursive = 2;
+  repeated string event_types = 3;
+}
+
+message WatchResponse {
+  uint32 watch_id = 1;
+}
+
+// ---------------------------------------------------------------------------
+// 12. unwatch — unsubscribe from filesystem events
+// ---------------------------------------------------------------------------
+
+message UnwatchRequest {
+  uint32 watch_id = 1;
+}
+
+message UnwatchResponse {}
+
+// ---------------------------------------------------------------------------
+// ErrorResponse — returned in the Response.error slot on failure
+// ---------------------------------------------------------------------------
+
+message ErrorResponse {
+  int32 code = 1;
+  string message = 2;
+}
+
+// ---------------------------------------------------------------------------
+// Events (server → client, pushed asynchronously)
+// ---------------------------------------------------------------------------
+
+message StdoutEvent {
+  uint32 process_tag = 1;
+  bytes data = 2;
+}
+
+message StderrEvent {
+  uint32 process_tag = 1;
+  bytes data = 2;
+}
+
+message ExitEvent {
+  uint32 process_tag = 1;
+  int32 exit_code = 2;
+}
+
+message FsChangeEvent {
+  uint32 watch_id = 1;
+  string path = 2;
+  string event_type = 3;
+}

@@ -594,6 +594,23 @@ class ListDirResult(BaseModel):
     entries: list[DirEntry]
 
 
+class ExecResult(BaseModel):
+    """Simplified result of a single command execution.
+
+    A convenience model that flattens the most common fields from
+    :class:`ExecuteResponse` when exactly one step was submitted.
+
+    Attributes:
+        stdout: Standard output from the command.
+        stderr: Standard error from the command.
+        exit_code: Exit code (0 = success).
+    """
+
+    stdout: str = ""
+    stderr: str = ""
+    exit_code: int = 0
+
+
 class ShellMessage(BaseModel):
     """A message received from the interactive shell WebSocket.
 
