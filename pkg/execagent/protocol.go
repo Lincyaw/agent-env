@@ -1,6 +1,10 @@
 package execagent
 
-// Request is the JSON-over-socket protocol request from sidecar to executor agent.
+// V1 JSON protocol types. Used only when EXECUTOR_PROTOCOL != "v2".
+// The V2 protobuf protocol is defined in proto/executor_v2.proto and the
+// generated Go types live in pkg/pb/executor_v2.
+
+// Request is the JSON-over-socket protocol request from sidecar to executor agent (V1 only).
 type Request struct {
 	ID             string            `json:"id"`
 	Type           string            `json:"type"` // "exec", "signal", "ping", "shell", "stdin", "resize", "write_file_stream", "write_file_chunk", "write_file_finish", "read_file_stream"
@@ -18,7 +22,7 @@ type Request struct {
 	ExpectedSHA256 string            `json:"expected_sha256,omitempty"`
 }
 
-// Response is the JSON-over-socket protocol response from executor agent to sidecar.
+// Response is the JSON-over-socket protocol response from executor agent to sidecar (V1 only).
 type Response struct {
 	ID           string `json:"id"`
 	Stdout       string `json:"stdout,omitempty"`

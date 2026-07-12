@@ -197,7 +197,7 @@ check: fmt vet tidy ## Run all code quality checks
 ##@ Code Generation
 
 .PHONY: generate
-generate: proto-go ## Generate all code
+generate: proto-go proto-executor-v2 ## Generate all code
 
 .PHONY: proto-go
 proto-go: ## Generate Go gRPC code from proto files
@@ -206,6 +206,13 @@ proto-go: ## Generate Go gRPC code from proto files
 		--go-grpc_out=. --go-grpc_opt=paths=source_relative \
 		proto/agent.proto
 	@mv proto/*.pb.go pkg/pb/ 2>/dev/null || true
+
+.PHONY: proto-executor-v2
+proto-executor-v2: ## Generate Go code from executor V2 proto
+	@mkdir -p pkg/pb/executor_v2
+	protoc --go_out=. --go_opt=paths=source_relative \
+		proto/executor_v2.proto
+	@mv proto/executor_v2.pb.go pkg/pb/executor_v2/ 2>/dev/null || true
 
 ##@ Python SDK
 

@@ -1,0 +1,124 @@
+syntax = "proto3";
+package arl.executor.v2;
+option go_package = "github.com/Lincyaw/agent-env/pkg/pb/executor_v2";
+
+// Envelope wraps all messages on the wire
+message Envelope {
+  oneof payload {
+    Request  request  = 1;
+    Response response = 2;
+    Event    event    = 3;
+  }
+}
+
+message Request {
+  string id = 1;
+  oneof method {
+    PingRequest        ping         = 10;
+    SpawnRequest       spawn        = 11;
+    StdinRequest       stdin        = 12;
+    SignalRequest      signal       = 13;
+    ResizeRequest      resize       = 14;
+    ReadFileRequest    read_file    = 15;
+    WriteFileRequest   write_file   = 16;
+    FileChunkData      file_chunk   = 17;
+    FileDoneRequest    file_done    = 18;
+    StatRequest        stat         = 19;
+    ListDirRequest     list_dir     = 20;
+    TunnelRequest      tunnel       = 21;
+    TunnelDataRequest  tunnel_data  = 22;
+    TunnelCloseRequest tunnel_close = 23;
+    SubscribeRequest   subscribe    = 24;
+    UnsubscribeRequest unsubscribe  = 25;
+  }
+}
+
+message Response {
+  string id = 1;
+  oneof result {
+    OkResponse        ok         = 2;
+    ErrorResponse     error      = 3;
+    SpawnResponse     spawn      = 11;
+    ReadFileChunk     file_chunk = 15;
+    ReadFileComplete  file_done  = 16;
+    WriteFileResponse write_file = 17;
+    StatResponse      stat       = 19;
+    ListDirResponse   list_dir   = 20;
+    TunnelResponse    tunnel     = 21;
+    SubscribeResponse subscribe  = 24;
+  }
+}
+
+message Event {
+  oneof event {
+    StdoutEvent       stdout        = 1;
+    StderrEvent       stderr        = 2;
+    ExitEvent         exit          = 3;
+    TunnelDataEvent   tunnel_data   = 4;
+    TunnelClosedEvent tunnel_closed = 5;
+    FsChangeEvent     fs_change     = 6;
+    ProcessExitEvent  process_exit  = 7;
+  }
+}
+
+// Individual message types
+message PingRequest {}
+message OkResponse {}
+message ErrorResponse { string code = 1; string message = 2; }
+
+message SpawnRequest {
+  repeated string cmd = 1;
+  map<string, string> env = 2;
+  string workdir = 3;
+  uint64 timeout_secs = 4;
+  PtyConfig pty = 5;
+  bool stdin_enabled = 6;
+}
+message PtyConfig { uint32 rows = 1; uint32 cols = 2; }
+message SpawnResponse { string handle = 1; fixed32 handle_tag = 2; }
+
+message StdinRequest { string handle = 1; bytes data = 2; }
+message SignalRequest { string handle = 1; string signal = 2; }
+message ResizeRequest { string handle = 1; uint32 rows = 2; uint32 cols = 3; }
+
+message ReadFileRequest { string path = 1; }
+message ReadFileChunk { int64 offset = 1; bytes content = 2; }
+message ReadFileComplete { int64 size_bytes = 1; string sha256 = 2; }
+
+message WriteFileRequest { string path = 1; string expected_sha256 = 2; fixed32 stream_tag = 3; }
+message FileChunkData { bytes content = 1; }
+message FileDoneRequest {}
+message WriteFileResponse { int64 bytes_written = 1; string sha256 = 2; }
+
+message StatRequest { string path = 1; }
+message StatResponse { bool exists = 1; bool is_dir = 2; uint64 size = 3; string mode = 4; string modified = 5; }
+
+message ListDirRequest { string path = 1; bool recursive = 2; }
+message ListDirResponse { repeated DirEntry entries = 1; }
+message DirEntry { string name = 1; bool is_dir = 2; uint64 size = 3; }
+
+message TunnelRequest { string target = 1; string handle = 2; }
+message TunnelResponse { string handle = 1; fixed32 handle_tag = 2; }
+message TunnelDataRequest { string handle = 1; bytes data = 2; }
+message TunnelCloseRequest { string handle = 1; }
+
+message SubscribeRequest { repeated SubscribeEventSpec events = 1; }
+message SubscribeEventSpec {
+  oneof spec {
+    FsChangeSpec fs_change = 1;
+    ProcessExitSpec process_exit = 2;
+  }
+}
+message FsChangeSpec { string path = 1; bool recursive = 2; }
+message ProcessExitSpec { string handle = 1; }
+message SubscribeResponse { string subscription_id = 1; }
+message UnsubscribeRequest { string subscription_id = 1; }
+
+// Events
+message StdoutEvent { string handle = 1; bytes data = 2; }
+message StderrEvent { string handle = 1; bytes data = 2; }
+message ExitEvent { string handle = 1; int32 exit_code = 2; }
+message TunnelDataEvent { string handle = 1; bytes data = 2; }
+message TunnelClosedEvent { string handle = 1; string reason = 2; }
+message FsChangeEvent { string subscription_id = 1; string path = 2; string change_type = 3; }
+message ProcessExitEvent { string subscription_id = 1; string handle = 2; int32 exit_code = 3; }
