@@ -1,3 +1,5 @@
+pub mod proto;
 pub mod agent;
 pub mod iroh_endpoint;
-pub mod protocol;
+pub mod connection;
+pub mod streams;

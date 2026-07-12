@@ -1,6 +1,7 @@
-use base64::Engine;
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use std::io::{BufRead, BufReader, Write};
+use executor_agent::v2::proto;
+use prost::Message;
+use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
 use std::thread;
 use std::time::Duration;
@@ -28,33 +29,46 @@ fn start_agent(workspace: &str) -> String {
     sock_path
 }
 
-fn connect(sock: &str) -> (UnixStream, BufReader<UnixStream>) {
-    let stream = UnixStream::connect(sock).unwrap();
-    let reader = BufReader::new(stream.try_clone().unwrap());
-    (stream, reader)
+fn connect(sock: &str) -> UnixStream {
+    UnixStream::connect(sock).unwrap()
 }
 
-fn send(stream: &mut UnixStream, msg: &str) {
-    stream.write_all(msg.as_bytes()).unwrap();
-    stream.write_all(b"\n").unwrap();
+fn send_pb(stream: &mut UnixStream, id: &str, method: proto::request::Method) {
+    let envelope = proto::Envelope {
+        payload: Some(proto::envelope::Payload::Request(proto::Request {
+            id: id.to_string(),
+            method: Some(method),
+        })),
+    };
+    let encoded = envelope.encode_to_vec();
+    let len = encoded.len() as u32;
+    stream.write_all(&len.to_be_bytes()).unwrap();
+    stream.write_all(&encoded).unwrap();
     stream.flush().unwrap();
 }
 
-fn recv(reader: &mut BufReader<UnixStream>) -> String {
-    let mut line = String::new();
-    reader.read_line(&mut line).unwrap();
-    line
+fn recv_pb(stream: &mut UnixStream) -> proto::Envelope {
+    let mut len_buf = [0u8; 4];
+    stream.read_exact(&mut len_buf).unwrap();
+    let len = u32::from_be_bytes(len_buf) as usize;
+    let mut msg_buf = vec![0u8; len];
+    stream.read_exact(&mut msg_buf).unwrap();
+    proto::Envelope::decode(&msg_buf[..]).unwrap()
 }
 
 fn bench_ping(c: &mut Criterion) {
     let ws = tempfile::tempdir().unwrap();
     let sock = start_agent(ws.path().to_str().unwrap());
-    let (mut stream, mut reader) = connect(&sock);
+    let mut stream = connect(&sock);
 
     c.bench_function("v2_ping_roundtrip", |b| {
         b.iter(|| {
-            send(&mut stream, r#"{"id":"b","method":"ping"}"#);
-            recv(&mut reader);
+            send_pb(
+                &mut stream,
+                "b",
+                proto::request::Method::Ping(proto::PingRequest {}),
+            );
+            recv_pb(&mut stream);
         });
     });
 }
@@ -62,20 +76,24 @@ fn bench_ping(c: &mut Criterion) {
 fn bench_exec(c: &mut Criterion) {
     let ws = tempfile::tempdir().unwrap();
     let sock = start_agent(ws.path().to_str().unwrap());
-    let (mut stream, mut reader) = connect(&sock);
+    let mut stream = connect(&sock);
 
     c.bench_function("v2_exec_echo", |b| {
         b.iter(|| {
-            send(
+            send_pb(
                 &mut stream,
-                r#"{"id":"b","method":"spawn","params":{"cmd":["echo","bench"]}}"#,
+                "b",
+                proto::request::Method::Spawn(proto::SpawnRequest {
+                    cmd: vec!["echo".into(), "bench".into()],
+                    ..Default::default()
+                }),
             );
-            // Read spawn result + stdout + exit
             loop {
-                let line = recv(&mut reader);
-                let v: serde_json::Value = serde_json::from_str(line.trim()).unwrap();
-                if v.get("event").is_some() && v["event"] == "exit" {
-                    break;
+                let env = recv_pb(&mut stream);
+                if let Some(proto::envelope::Payload::Event(evt)) = &env.payload {
+                    if matches!(&evt.event, Some(proto::event::Event::Exit(_))) {
+                        break;
+                    }
                 }
             }
         });
@@ -90,27 +108,41 @@ fn bench_file_write(c: &mut Criterion) {
 
     for size_kb in [1, 64, 256, 1024] {
         let data = vec![0x55u8; size_kb * 1024];
-        let b64 = base64::engine::general_purpose::STANDARD.encode(&data);
 
         group.throughput(Throughput::Bytes((size_kb * 1024) as u64));
-        group.bench_with_input(BenchmarkId::from_parameter(format!("{size_kb}KB")), &b64, |b, b64| {
-            let (mut stream, mut reader) = connect(&sock);
-            let mut i = 0u64;
-            b.iter(|| {
-                i += 1;
-                let fname = format!("bench_{i}.bin");
-                send(
-                    &mut stream,
-                    &format!(r#"{{"id":"w","method":"write_file","params":{{"path":"{fname}"}}}}"#),
-                );
-                send(
-                    &mut stream,
-                    &format!(r#"{{"id":"w","method":"file_chunk","params":{{"content":"{b64}"}}}}"#),
-                );
-                send(&mut stream, r#"{"id":"w","method":"file_done"}"#);
-                recv(&mut reader);
-            });
-        });
+        group.bench_with_input(
+            BenchmarkId::from_parameter(format!("{size_kb}KB")),
+            &data,
+            |b, data| {
+                let mut stream = connect(&sock);
+                let mut i = 0u64;
+                b.iter(|| {
+                    i += 1;
+                    let fname = format!("bench_{i}.bin");
+                    send_pb(
+                        &mut stream,
+                        "w",
+                        proto::request::Method::WriteFile(proto::WriteFileRequest {
+                            path: fname,
+                            expected_sha256: String::new(),
+                        }),
+                    );
+                    send_pb(
+                        &mut stream,
+                        "w",
+                        proto::request::Method::FileChunk(proto::FileChunkData {
+                            content: data.clone(),
+                        }),
+                    );
+                    send_pb(
+                        &mut stream,
+                        "w",
+                        proto::request::Method::FileDone(proto::FileDoneRequest {}),
+                    );
+                    recv_pb(&mut stream);
+                });
+            },
+        );
     }
     group.finish();
 }
@@ -127,22 +159,33 @@ fn bench_file_read(c: &mut Criterion) {
         std::fs::write(ws.path().join(&fname), &data).unwrap();
 
         group.throughput(Throughput::Bytes((size_kb * 1024) as u64));
-        group.bench_with_input(BenchmarkId::from_parameter(format!("{size_kb}KB")), &fname, |b, fname| {
-            let (mut stream, mut reader) = connect(&sock);
-            b.iter(|| {
-                send(
-                    &mut stream,
-                    &format!(r#"{{"id":"r","method":"read_file","params":{{"path":"{fname}"}}}}"#),
-                );
-                loop {
-                    let line = recv(&mut reader);
-                    let v: serde_json::Value = serde_json::from_str(line.trim()).unwrap();
-                    if v.get("result").is_some() {
-                        break;
+        group.bench_with_input(
+            BenchmarkId::from_parameter(format!("{size_kb}KB")),
+            &fname,
+            |b, fname| {
+                let mut stream = connect(&sock);
+                b.iter(|| {
+                    send_pb(
+                        &mut stream,
+                        "r",
+                        proto::request::Method::ReadFile(proto::ReadFileRequest {
+                            path: fname.clone(),
+                        }),
+                    );
+                    loop {
+                        let env = recv_pb(&mut stream);
+                        if let Some(proto::envelope::Payload::Response(resp)) = &env.payload {
+                            if matches!(
+                                &resp.result,
+                                Some(proto::response::Result::FileDone(_))
+                            ) {
+                                break;
+                            }
+                        }
                     }
-                }
-            });
-        });
+                });
+            },
+        );
     }
     group.finish();
 }
@@ -151,15 +194,18 @@ fn bench_stat(c: &mut Criterion) {
     let ws = tempfile::tempdir().unwrap();
     std::fs::write(ws.path().join("s.txt"), "x").unwrap();
     let sock = start_agent(ws.path().to_str().unwrap());
-    let (mut stream, mut reader) = connect(&sock);
+    let mut stream = connect(&sock);
 
     c.bench_function("v2_stat", |b| {
         b.iter(|| {
-            send(
+            send_pb(
                 &mut stream,
-                r#"{"id":"s","method":"stat","params":{"path":"s.txt"}}"#,
+                "s",
+                proto::request::Method::Stat(proto::StatRequest {
+                    path: "s.txt".into(),
+                }),
             );
-            recv(&mut reader);
+            recv_pb(&mut stream);
         });
     });
 }

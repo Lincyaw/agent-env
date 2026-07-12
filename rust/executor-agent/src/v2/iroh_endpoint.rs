@@ -1,10 +1,8 @@
-use super::agent::handle_v2_session;
+use super::connection::ConnectionHandler;
 use iroh::{Endpoint, RelayMode, SecretKey};
-use iroh::endpoint::{RecvStream, SendStream};
 use log::{error, info, warn};
-use std::io::{self, BufReader, Read, Write};
+use std::io;
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
 use tokio::runtime::Handle;
 
 pub const ALPN: &[u8] = b"arl/executor/v2";
@@ -66,7 +64,8 @@ impl IrohEndpoint {
             let handle = Handle::current();
 
             tokio::spawn(async move {
-                if let Err(e) = handle_connection(conn, &workspace, handle).await {
+                let handler = ConnectionHandler::new(conn, workspace, handle);
+                if let Err(e) = handler.run().await {
                     error!("iroh connection error: {e}");
                 }
             });
@@ -82,87 +81,6 @@ impl IrohEndpoint {
         let serialized = serde_json::to_string(&addr)?;
         std::fs::write(&self.addr_file, &serialized)?;
         info!("iroh addr written to {}", self.addr_file.display());
-        Ok(())
-    }
-}
-
-async fn handle_connection(
-    conn: iroh::endpoint::Connection,
-    workspace: &str,
-    handle: Handle,
-) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-    let peer_id = conn.remote_node_id()?;
-    info!("iroh connection from {peer_id}");
-
-    loop {
-        let (send_stream, recv_stream) = match conn.accept_bi().await {
-            Ok(streams) => streams,
-            Err(e) => {
-                info!("iroh connection closed: {e}");
-                return Ok(());
-            }
-        };
-
-        let workspace = workspace.to_string();
-        let handle = handle.clone();
-
-        std::thread::spawn(move || {
-            let reader = BufReader::new(SyncRecvStream::new(recv_stream, handle.clone()));
-            let writer: Arc<Mutex<Box<dyn Write + Send>>> =
-                Arc::new(Mutex::new(Box::new(SyncSendStream::new(send_stream, handle))));
-
-            if let Err(e) = handle_v2_session(reader, writer, &workspace) {
-                error!("iroh v2 session error: {e}");
-            }
-        });
-    }
-}
-
-struct SyncRecvStream {
-    inner: RecvStream,
-    handle: Handle,
-}
-
-impl SyncRecvStream {
-    fn new(inner: RecvStream, handle: Handle) -> Self {
-        Self { inner, handle }
-    }
-}
-
-impl Read for SyncRecvStream {
-    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
-        self.handle.block_on(async {
-            match self.inner.read(buf).await {
-                Ok(Some(n)) => Ok(n),
-                Ok(None) => Ok(0),
-                Err(e) => Err(io::Error::other(format!("{e}"))),
-            }
-        })
-    }
-}
-
-struct SyncSendStream {
-    inner: SendStream,
-    handle: Handle,
-}
-
-impl SyncSendStream {
-    fn new(inner: SendStream, handle: Handle) -> Self {
-        Self { inner, handle }
-    }
-}
-
-impl Write for SyncSendStream {
-    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
-        self.handle.block_on(async {
-            self.inner
-                .write(buf)
-                .await
-                .map_err(|e| io::Error::other(format!("{e}")))
-        })
-    }
-
-    fn flush(&mut self) -> io::Result<()> {
         Ok(())
     }
 }
@@ -195,7 +113,10 @@ fn write_secret_key_file(key: &SecretKey) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::io::BufRead;
+    use super::super::agent::read_envelope;
+    use super::super::connection::SyncRecvStream;
+    use super::super::proto;
+    use prost::Message;
 
     #[tokio::test]
     async fn test_iroh_ping_pong() {
@@ -213,7 +134,7 @@ mod tests {
         let server_for_close = server.clone();
 
         let workspace = std::env::temp_dir()
-            .join("iroh_test_workspace")
+            .join("iroh_test_workspace_pb")
             .to_str()
             .unwrap()
             .to_string();
@@ -224,17 +145,9 @@ mod tests {
         let server_task = tokio::spawn(async move {
             let incoming = server.accept().await.expect("accept incoming");
             let conn = incoming.accept().expect("accept").await.expect("connecting");
-            let (send_stream, recv_stream) = conn.accept_bi().await.expect("accept bi");
 
-            let handle = server_handle;
-            tokio::task::spawn_blocking(move || {
-                let reader = BufReader::new(SyncRecvStream::new(recv_stream, handle.clone()));
-                let writer: Arc<Mutex<Box<dyn Write + Send>>> =
-                    Arc::new(Mutex::new(Box::new(SyncSendStream::new(send_stream, handle))));
-                handle_v2_session(reader, writer, &ws).expect("v2 session");
-            })
-            .await
-            .expect("blocking task");
+            let handler = ConnectionHandler::new(conn, ws, server_handle);
+            handler.run().await.expect("connection handler");
         });
 
         let client = Endpoint::builder()
@@ -251,28 +164,39 @@ mod tests {
 
         let (mut send, recv) = conn.open_bi().await.expect("open bi");
 
-        let ping = r#"{"id":"test-1","method":"ping"}"#;
-        send.write_all(ping.as_bytes())
+        // Send a protobuf ping
+        let ping = proto::Envelope {
+            payload: Some(proto::envelope::Payload::Request(proto::Request {
+                id: "test-1".into(),
+                method: Some(proto::request::Method::Ping(proto::PingRequest {})),
+            })),
+        };
+        let encoded = ping.encode_to_vec();
+        let len = encoded.len() as u32;
+        send.write_all(&len.to_be_bytes())
             .await
-            .expect("write ping");
-        send.write_all(b"\n").await.expect("write newline");
+            .expect("write len");
+        send.write_all(&encoded).await.expect("write ping");
 
+        // Read protobuf response
         let handle = Handle::current();
         let response = tokio::task::spawn_blocking(move || {
-            let mut reader = BufReader::new(SyncRecvStream::new(recv, handle));
-            let mut line = String::new();
-            reader.read_line(&mut line).expect("read response");
-            line
+            let mut reader = SyncRecvStream::new(recv, handle);
+            read_envelope(&mut reader).expect("read envelope")
         })
         .await
         .expect("blocking read");
 
         send.finish().expect("finish send");
 
-        let parsed: serde_json::Value =
-            serde_json::from_str(response.trim()).expect("parse response JSON");
-        assert_eq!(parsed["id"], "test-1");
-        assert!(parsed["result"].is_object());
+        let env = response.expect("expected envelope");
+        match env.payload {
+            Some(proto::envelope::Payload::Response(resp)) => {
+                assert_eq!(resp.id, "test-1");
+                assert!(matches!(resp.result, Some(proto::response::Result::Ok(_))));
+            }
+            _ => panic!("expected Response payload"),
+        }
 
         server_task.await.ok();
         server_for_close.close().await;
