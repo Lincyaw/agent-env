@@ -17,7 +17,9 @@ The suite validates the currently supported gateway surface:
 13. List dir (workspace root, subdirectory)
 14. Iroh direct-connect address (when EXECUTOR_PROTOCOL=v2)
 15. Send stdin via interactive shell
-16. Optional observability endpoints
+16. Iroh direct-connect (ping, execute, file upload/download, stat)
+17. Iroh tunnel (register, list, data-stream forwarding, close)
+18. Optional observability endpoints
 
 Usage:
     uv run python examples/python/test_arl_sdk.py \
@@ -732,6 +734,321 @@ def test_send_stdin(args: argparse.Namespace) -> None:
             shell.close()
 
 
+def test_iroh_direct_connect(args: argparse.Namespace) -> None:
+    """Test iroh QUIC direct-connect: ping, execute, stat, write, read on a single control stream."""
+    import asyncio
+    import struct
+
+    async def _run() -> None:
+        import iroh
+        import iroh.iroh_ffi
+
+        iroh.iroh_ffi.uniffi_set_event_loop(asyncio.get_running_loop())
+
+        from arl.pb import executor_v2_pb2 as pb
+
+        ALPN = b"arl/executor/v2"
+        MSG_REQUEST = 0x01
+        MSG_RESPONSE = 0x02
+        MSG_EVENT = 0x03
+
+        async def send_typed(send: object, msg_type: int, data: bytes) -> None:
+            header = struct.pack(">BI", msg_type, len(data))
+            await send.write_all(header + data)  # type: ignore[union-attr]
+
+        async def recv_typed(recv: object) -> tuple[int, bytes]:
+            header = await recv.read_exact(5)  # type: ignore[union-attr]
+            return header[0], await recv.read_exact(struct.unpack(">I", header[1:5])[0])  # type: ignore[union-attr]
+
+        experiment_id = f"iroh-dc-{int(time.time())}"
+        gw = GatewayClient(base_url=args.gateway_url)
+        tag_counter = [0]
+
+        def next_tag() -> int:
+            tag_counter[0] += 1
+            return tag_counter[0]
+
+        try:
+            info = gw.create_managed_session(
+                image=args.pool_image, experiment_id=experiment_id
+            )
+            sid = info.id
+            iroh_addr = info.iroh_addr
+            if not iroh_addr:
+                raise SkipTestError("session has no irohAddr (EXECUTOR_PROTOCOL != v2?)")
+
+            time.sleep(8)
+
+            ep = await iroh.Endpoint.bind(
+                iroh.EndpointOptions(preset=iroh.preset_n0(), alpns=[ALPN])
+            )
+            remote_addr = iroh.EndpointAddr(
+                id=iroh.EndpointId.from_string(iroh_addr),
+                relay_url=None,
+                addresses=[],
+            )
+            conn = await ep.connect(remote_addr, ALPN)
+
+            try:
+                ctrl = await conn.open_bi()
+                send, recv = ctrl.send(), ctrl.recv()
+
+                # Ping
+                tag = next_tag()
+                req = pb.Request(tag=tag)
+                req.ping.CopyFrom(pb.PingRequest())
+                await send_typed(send, MSG_REQUEST, req.SerializeToString())
+                _, data = await recv_typed(recv)
+                resp = pb.Response()
+                resp.ParseFromString(data)
+                if not resp.HasField("ping"):
+                    raise AssertionError(f"ping failed: {resp}")
+
+                # Execute
+                tag = next_tag()
+                req = pb.Request(tag=tag)
+                req.spawn.CopyFrom(pb.SpawnRequest(command=["echo", "iroh-dc-ok"]))
+                await send_typed(send, MSG_REQUEST, req.SerializeToString())
+                stdout_parts: list[bytes] = []
+                while True:
+                    mt, data = await recv_typed(recv)
+                    if mt == MSG_RESPONSE:
+                        continue
+                    if mt == MSG_EVENT:
+                        evt = pb.Event()
+                        evt.ParseFromString(data)
+                        if evt.HasField("stdout"):
+                            stdout_parts.append(evt.stdout.data)
+                        elif evt.HasField("exit"):
+                            break
+                stdout = b"".join(stdout_parts).decode()
+                if "iroh-dc-ok" not in stdout:
+                    raise AssertionError(f"execute stdout: {stdout!r}")
+
+                # Write file
+                tag = next_tag()
+                content = b"iroh-upload-test"
+                req = pb.Request(tag=tag)
+                req.write.CopyFrom(pb.WriteRequest(path="dc_test.txt"))
+                await send_typed(send, MSG_REQUEST, req.SerializeToString())
+                await send.write_all(struct.pack(">I", len(content)) + content)
+                await send.write_all(struct.pack(">I", 0))
+                _, data = await recv_typed(recv)
+                resp = pb.Response()
+                resp.ParseFromString(data)
+                if not resp.HasField("write"):
+                    raise AssertionError(f"write failed: {resp}")
+
+                # Stat
+                tag = next_tag()
+                req = pb.Request(tag=tag)
+                req.stat.CopyFrom(pb.StatRequest(path="dc_test.txt"))
+                await send_typed(send, MSG_REQUEST, req.SerializeToString())
+                _, data = await recv_typed(recv)
+                resp = pb.Response()
+                resp.ParseFromString(data)
+                if not resp.HasField("stat"):
+                    raise AssertionError(f"stat failed: {resp}")
+                if resp.stat.size_bytes != len(content):
+                    raise AssertionError(f"stat size mismatch: {resp.stat.size_bytes}")
+
+                # Read file
+                tag = next_tag()
+                req = pb.Request(tag=tag)
+                req.read.CopyFrom(pb.ReadRequest(path="dc_test.txt"))
+                await send_typed(send, MSG_REQUEST, req.SerializeToString())
+                _, data = await recv_typed(recv)
+                resp = pb.Response()
+                resp.ParseFromString(data)
+                if not resp.HasField("read"):
+                    raise AssertionError(f"read failed: {resp}")
+                file_data = bytearray()
+                while True:
+                    lb = await recv.read_exact(4)  # type: ignore[union-attr]
+                    cl = struct.unpack(">I", bytes(lb))[0]
+                    if cl == 0:
+                        break
+                    file_data.extend(await recv.read_exact(cl))  # type: ignore[union-attr]
+                if bytes(file_data) != content:
+                    raise AssertionError(f"read data mismatch: {file_data!r}")
+
+                await send.finish()
+            finally:
+                conn.close(0, b"done")
+                await ep.close()
+        finally:
+            with contextlib.suppress(Exception):
+                gw.delete_session(sid)
+            with contextlib.suppress(Exception):
+                gw.delete_experiment(experiment_id)
+            gw.close()
+
+    asyncio.run(_run())
+
+
+def test_iroh_tunnel(args: argparse.Namespace) -> None:
+    """Test tunnel: register, list, data-stream forwarding, close via iroh QUIC."""
+    import asyncio
+    import struct
+
+    async def _run() -> None:
+        import iroh
+        import iroh.iroh_ffi
+
+        iroh.iroh_ffi.uniffi_set_event_loop(asyncio.get_running_loop())
+
+        from arl.pb import executor_v2_pb2 as pb
+
+        ALPN = b"arl/executor/v2"
+        MSG_REQUEST = 0x01
+        MSG_RESPONSE = 0x02
+        MSG_EVENT = 0x03
+
+        async def send_typed(send: object, msg_type: int, data: bytes) -> None:
+            header = struct.pack(">BI", msg_type, len(data))
+            await send.write_all(header + data)  # type: ignore[union-attr]
+
+        async def recv_typed(recv: object) -> tuple[int, bytes]:
+            header = await recv.read_exact(5)  # type: ignore[union-attr]
+            msg_type = header[0]
+            length = struct.unpack(">I", header[1:5])[0]
+            data = await recv.read_exact(length)  # type: ignore[union-attr]
+            return msg_type, data
+
+        experiment_id = f"iroh-tunnel-{int(time.time())}"
+        gw = GatewayClient(base_url=args.gateway_url)
+        tag_counter = [0]
+
+        def next_tag() -> int:
+            tag_counter[0] += 1
+            return tag_counter[0]
+
+        try:
+            info = gw.create_managed_session(
+                image=args.pool_image,
+                experiment_id=experiment_id,
+            )
+            sid = info.id
+            iroh_addr = info.iroh_addr
+            if not iroh_addr:
+                raise SkipTestError("session has no irohAddr")
+
+            time.sleep(8)
+
+            ep = await iroh.Endpoint.bind(
+                iroh.EndpointOptions(preset=iroh.preset_n0(), alpns=[ALPN])
+            )
+            remote_addr = iroh.EndpointAddr(
+                id=iroh.EndpointId.from_string(iroh_addr),
+                relay_url=None,
+                addresses=[],
+            )
+            conn = await ep.connect(remote_addr, ALPN)
+
+            try:
+                ctrl = await conn.open_bi()
+                send, recv = ctrl.send(), ctrl.recv()
+
+                # Start TCP echo server in sandbox
+                tag = next_tag()
+                req = pb.Request(tag=tag)
+                req.spawn.CopyFrom(pb.SpawnRequest(command=[
+                    "python3", "-c",
+                    "import socket\n"
+                    "s=socket.socket()\n"
+                    "s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)\n"
+                    "s.bind(('0.0.0.0',9999))\n"
+                    "s.listen(1)\n"
+                    "print('LISTENING',flush=True)\n"
+                    "c,_=s.accept()\n"
+                    "d=c.recv(1024)\n"
+                    "c.sendall(b'ECHO:'+d)\n"
+                    "c.close()\n"
+                    "s.close()\n",
+                ]))
+                await send_typed(send, MSG_REQUEST, req.SerializeToString())
+
+                while True:
+                    mt, data = await recv_typed(recv)
+                    if mt == MSG_EVENT:
+                        evt = pb.Event()
+                        evt.ParseFromString(data)
+                        if evt.HasField("stdout") and b"LISTENING" in evt.stdout.data:
+                            break
+                        if evt.HasField("exit"):
+                            raise AssertionError("echo server exited early")
+
+                # Register tunnel
+                tunnel_tag = next_tag()
+                req = pb.Request(tag=tunnel_tag)
+                req.tunnel.CopyFrom(pb.TunnelRequest(host="127.0.0.1", port=9999))
+                await send_typed(send, MSG_REQUEST, req.SerializeToString())
+                _, data = await recv_typed(recv)
+                resp = pb.Response()
+                resp.ParseFromString(data)
+                if not resp.HasField("tunnel"):
+                    raise AssertionError(f"tunnel register failed: {resp}")
+
+                # List tunnels
+                tag = next_tag()
+                req = pb.Request(tag=tag)
+                req.list_tunnels.CopyFrom(pb.ListTunnelsRequest())
+                await send_typed(send, MSG_REQUEST, req.SerializeToString())
+                _, data = await recv_typed(recv)
+                resp = pb.Response()
+                resp.ParseFromString(data)
+                if len(resp.list_tunnels.tunnels) < 1:
+                    raise AssertionError("list_tunnels returned 0")
+
+                # Tunnel data stream
+                data_bi = await conn.open_bi()
+                ds, dr = data_bi.send(), data_bi.recv()
+                hdr = struct.pack(">BI", 0x05, tunnel_tag)
+                await ds.write_all(hdr)
+                await ds.write_all(b"hello tunnel")
+                await ds.finish()
+
+                echo_data = await asyncio.wait_for(dr.read_to_end(4096), timeout=10)
+                echo_str = bytes(echo_data).decode(errors="replace")
+                if "ECHO:hello tunnel" not in echo_str:
+                    raise AssertionError(f"tunnel echo mismatch: {echo_str!r}")
+
+                # Close tunnel
+                tag = next_tag()
+                req = pb.Request(tag=tag)
+                req.close_tunnel.CopyFrom(pb.CloseTunnelRequest(tunnel_tag=tunnel_tag))
+                await send_typed(send, MSG_REQUEST, req.SerializeToString())
+                _, data = await recv_typed(recv)
+                resp = pb.Response()
+                resp.ParseFromString(data)
+                if not resp.HasField("close_tunnel"):
+                    raise AssertionError(f"close_tunnel failed: {resp}")
+
+                # Verify empty
+                tag = next_tag()
+                req = pb.Request(tag=tag)
+                req.list_tunnels.CopyFrom(pb.ListTunnelsRequest())
+                await send_typed(send, MSG_REQUEST, req.SerializeToString())
+                _, data = await recv_typed(recv)
+                resp = pb.Response()
+                resp.ParseFromString(data)
+                if len(resp.list_tunnels.tunnels) != 0:
+                    raise AssertionError("tunnel not removed after close")
+
+                await send.finish()
+            finally:
+                conn.close(0, b"done")
+                await ep.close()
+        finally:
+            with contextlib.suppress(Exception):
+                gw.delete_session(sid)
+            with contextlib.suppress(Exception):
+                gw.delete_experiment(experiment_id)
+            gw.close()
+
+    asyncio.run(_run())
+
+
 def test_observability(args: argparse.Namespace) -> None:
     if not any((args.metrics_url, args.prometheus_url, args.grafana_url, args.clickhouse_url)):
         raise SkipTestError("no observability endpoint URLs were provided")
@@ -883,6 +1200,8 @@ def main() -> int:
         ("List Dir", lambda: test_list_dir(args)),
         ("Iroh Addr", lambda: test_iroh_addr(client, args)),
         ("Send Stdin", lambda: test_send_stdin(args)),
+        ("Iroh Direct Connect", lambda: test_iroh_direct_connect(args)),
+        ("Iroh Tunnel", lambda: test_iroh_tunnel(args)),
         ("Observability", lambda: test_observability(args)),
     ]
 

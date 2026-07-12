@@ -323,6 +323,185 @@ class IrohTransport:
         resp.ParseFromString(data)
         return resp.HasField("ping")
 
+    # ---- tunnel operations ----
+
+    async def tunnel_open(self, remote_host: str, remote_port: int) -> int:
+        """Register a tunnel target, return the tunnel tag for data streams."""
+        import iroh
+
+        from .pb import executor_v2_pb2 as pb
+
+        conn = self._require_conn()
+        if not isinstance(conn, iroh.Connection):
+            raise RuntimeError("Invalid connection")
+
+        bi = await conn.open_bi()
+        send = bi.send()
+        recv = bi.recv()
+
+        tag = self._next_tag()
+        req = pb.Request(tag=tag)
+        req.tunnel.CopyFrom(pb.TunnelRequest(host=remote_host, port=remote_port))
+        await self._send_typed(send, MSG_REQUEST, req.SerializeToString())
+        await send.finish()
+
+        _, data = await self._recv_typed(recv)
+        resp = pb.Response()
+        resp.ParseFromString(data)
+        if resp.HasField("error"):
+            raise RuntimeError(f"tunnel error: {resp.error.message}")
+        return tag
+
+    async def tunnel_close(self, tunnel_tag: int) -> None:
+        """Close a registered tunnel."""
+        import iroh
+
+        from .pb import executor_v2_pb2 as pb
+
+        conn = self._require_conn()
+        if not isinstance(conn, iroh.Connection):
+            raise RuntimeError("Invalid connection")
+
+        bi = await conn.open_bi()
+        send = bi.send()
+        recv = bi.recv()
+
+        tag = self._next_tag()
+        req = pb.Request(tag=tag)
+        req.close_tunnel.CopyFrom(pb.CloseTunnelRequest(tunnel_tag=tunnel_tag))
+        await self._send_typed(send, MSG_REQUEST, req.SerializeToString())
+        await send.finish()
+
+        _, data = await self._recv_typed(recv)
+        resp = pb.Response()
+        resp.ParseFromString(data)
+        if resp.HasField("error"):
+            raise RuntimeError(f"close_tunnel error: {resp.error.message}")
+
+    async def tunnel_list(self) -> list[dict[str, object]]:
+        """List active tunnels."""
+        import iroh
+
+        from .pb import executor_v2_pb2 as pb
+
+        conn = self._require_conn()
+        if not isinstance(conn, iroh.Connection):
+            raise RuntimeError("Invalid connection")
+
+        bi = await conn.open_bi()
+        send = bi.send()
+        recv = bi.recv()
+
+        tag = self._next_tag()
+        req = pb.Request(tag=tag)
+        req.list_tunnels.CopyFrom(pb.ListTunnelsRequest())
+        await self._send_typed(send, MSG_REQUEST, req.SerializeToString())
+        await send.finish()
+
+        _, data = await self._recv_typed(recv)
+        resp = pb.Response()
+        resp.ParseFromString(data)
+        if resp.HasField("error"):
+            raise RuntimeError(f"list_tunnels error: {resp.error.message}")
+        return [{"tag": t.tag, "host": t.host, "port": t.port} for t in resp.list_tunnels.tunnels]
+
+    async def tunnel_forward(
+        self,
+        remote_host: str,
+        remote_port: int,
+        local_port: int,
+        local_host: str = "127.0.0.1",
+    ) -> int:
+        """Forward local_port -> remote_host:remote_port through QUIC tunnel.
+
+        Returns the tunnel tag. The local TCP listener runs until the tunnel
+        is closed or the connection drops.
+        """
+        tunnel_tag = await self.tunnel_open(remote_host, remote_port)
+
+        server = await asyncio.start_server(
+            lambda r, w: self._handle_tunnel_conn(tunnel_tag, r, w),
+            local_host,
+            local_port,
+        )
+        self._tunnel_servers = getattr(self, "_tunnel_servers", {})
+        self._tunnel_servers[tunnel_tag] = server
+
+        asyncio.get_running_loop().create_task(self._serve_tunnel(tunnel_tag, server))
+        return tunnel_tag
+
+    async def _serve_tunnel(self, tag: int, server: asyncio.AbstractServer) -> None:
+        try:
+            async with server:
+                await server.serve_forever()
+        except asyncio.CancelledError:
+            pass
+
+    async def _handle_tunnel_conn(
+        self,
+        tunnel_tag: int,
+        reader: asyncio.StreamReader,
+        writer: asyncio.StreamWriter,
+    ) -> None:
+        import iroh
+
+        conn = self._conn
+        if not isinstance(conn, iroh.Connection):
+            writer.close()
+            return
+
+        try:
+            bi = await conn.open_bi()
+            send = bi.send()
+            recv = bi.recv()
+
+            hdr = struct.pack(">BI", STREAM_TYPE_TUNNEL, tunnel_tag)
+            await send.write_all(hdr)  # type: ignore[arg-type]
+
+            await asyncio.gather(
+                self._fwd_local_to_quic(reader, send),
+                self._fwd_quic_to_local(recv, writer),
+                return_exceptions=True,
+            )
+        except Exception:
+            pass
+        finally:
+            writer.close()
+
+    async def _fwd_local_to_quic(self, reader: asyncio.StreamReader, send: object) -> None:
+        while True:
+            data = await reader.read(8192)
+            if not data:
+                break
+            await send.write_all(data)  # type: ignore[union-attr]
+        await send.finish()  # type: ignore[union-attr]
+
+    async def _fwd_quic_to_local(self, recv: object, writer: asyncio.StreamWriter) -> None:
+        buf = bytearray(8192)
+        while True:
+            try:
+                n = await recv.read(buf)  # type: ignore[union-attr]
+                if n is None or n == 0:
+                    break
+                writer.write(bytes(buf[:n]))
+                await writer.drain()
+            except Exception:
+                break
+
+    async def tunnel_stop(self, tunnel_tag: int) -> None:
+        """Stop forwarding and close the tunnel."""
+        servers = getattr(self, "_tunnel_servers", {})
+        server = servers.pop(tunnel_tag, None)
+        if server is not None:
+            server.close()
+        try:
+            await self.tunnel_close(tunnel_tag)
+        except Exception:
+            pass
+
+
+STREAM_TYPE_TUNNEL = 0x05
+
 
 class SyncIrohBridge:
     """Synchronous wrapper running :class:`IrohTransport` in a background thread."""
@@ -364,7 +543,9 @@ class SyncIrohBridge:
         timeout_seconds: int | None = None,
     ) -> dict[str, object]:
         return self._run_coro(
-            self._transport.execute(cmd, env=env, work_dir=work_dir, timeout_seconds=timeout_seconds)
+            self._transport.execute(
+                cmd, env=env, work_dir=work_dir, timeout_seconds=timeout_seconds
+            )
         )
 
     def upload_file(self, path: str, data: bytes) -> dict[str, object]:
@@ -378,6 +559,29 @@ class SyncIrohBridge:
 
     def ping(self) -> bool:
         return self._run_coro(self._transport.ping())
+
+    def tunnel_open(self, remote_host: str, remote_port: int) -> int:
+        return self._run_coro(self._transport.tunnel_open(remote_host, remote_port))
+
+    def tunnel_close(self, tunnel_tag: int) -> None:
+        self._run_coro(self._transport.tunnel_close(tunnel_tag))
+
+    def tunnel_list(self) -> list[dict[str, object]]:
+        return self._run_coro(self._transport.tunnel_list())
+
+    def tunnel_forward(
+        self,
+        remote_host: str,
+        remote_port: int,
+        local_port: int,
+        local_host: str = "127.0.0.1",
+    ) -> int:
+        return self._run_coro(
+            self._transport.tunnel_forward(remote_host, remote_port, local_port, local_host)
+        )
+
+    def tunnel_stop(self, tunnel_tag: int) -> None:
+        self._run_coro(self._transport.tunnel_stop(tunnel_tag))
 
     def close(self) -> None:
         try:

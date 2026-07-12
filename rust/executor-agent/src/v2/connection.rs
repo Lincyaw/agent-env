@@ -1,16 +1,12 @@
-use super::agent::{handle_v2_session, SharedWriter};
+use super::agent::{handle_v2_session, SharedWriter, TunnelRegistry};
 use super::streams;
 use iroh::endpoint::Connection;
 use log::{error, info, warn};
+use std::collections::HashMap;
 use std::io::{self, Read, Write};
 use std::sync::{Arc, Mutex};
 use tokio::runtime::Handle;
 
-/// Per-connection handler for iroh QUIC, supporting multi-stream.
-///
-/// The first accepted bidirectional stream is the control stream, carrying
-/// typed length-delimited protobuf messages. Additional streams are data
-/// streams, identified by a 5-byte header `[1B type][4B tag]`.
 pub struct ConnectionHandler {
     conn: Connection,
     workspace: String,
@@ -30,7 +26,6 @@ impl ConnectionHandler {
         let peer_id = self.conn.remote_id();
         info!("iroh connection from {peer_id}");
 
-        // Accept the control stream (first bidi stream)
         let (send_stream, recv_stream) = match self.conn.accept_bi().await {
             Ok(streams) => streams,
             Err(e) => {
@@ -39,35 +34,45 @@ impl ConnectionHandler {
             }
         };
 
+        let tunnel_registry: TunnelRegistry = Arc::new(Mutex::new(HashMap::new()));
+
         let workspace = self.workspace.clone();
         let handle = self.handle.clone();
+        let tunnels_for_control = tunnel_registry.clone();
 
-        // Run the control stream handler in a blocking thread
-        // (handle_v2_session uses synchronous I/O)
         let control_task = tokio::task::spawn_blocking(move || {
             let reader = SyncRecvStream::new(recv_stream, handle.clone());
             let writer: SharedWriter =
                 Arc::new(Mutex::new(Box::new(SyncSendStream::new(send_stream, handle))));
 
-            if let Err(e) = handle_v2_session(reader, writer, &workspace) {
+            if let Err(e) = handle_v2_session(reader, writer, &workspace, Some(tunnels_for_control)) {
                 error!("iroh v2 session error: {e}");
             }
         });
 
-        // Accept additional data streams in the background
         let conn = self.conn.clone();
+        let tunnels_for_data = tunnel_registry.clone();
         let data_task = tokio::spawn(async move {
-            while let Ok((_send, mut recv)) = conn.accept_bi().await {
+            while let Ok((send, mut recv)) = conn.accept_bi().await {
+                let tunnels = tunnels_for_data.clone();
                 tokio::spawn(async move {
                     match streams::read_stream_header(&mut recv).await {
                         Ok((stream_type, tag)) => {
-                            info!(
-                                "data stream accepted: type=0x{stream_type:02x} tag={tag}"
-                            );
-                            // Data streams are forwarded as raw bytes.
-                            // The control-stream handler manages all state; a full
-                            // implementation would route by (type, tag).
-                            let _ = recv;
+                            info!("data stream accepted: type=0x{stream_type:02x} tag={tag}");
+                            match stream_type {
+                                streams::STREAM_TYPE_TUNNEL => {
+                                    handle_tunnel_stream(send, recv, tag, &tunnels).await;
+                                }
+                                streams::STREAM_TYPE_STDIN => {
+                                    info!("stdin data stream tag={tag} (not yet routed)");
+                                }
+                                streams::STREAM_TYPE_FILE_WRITE => {
+                                    info!("file_write data stream tag={tag} (not yet routed)");
+                                }
+                                _ => {
+                                    warn!("unknown data stream type 0x{stream_type:02x}");
+                                }
+                            }
                         }
                         Err(e) => {
                             warn!("failed to read data stream header: {e}");
@@ -83,7 +88,93 @@ impl ConnectionHandler {
     }
 }
 
-/// Synchronous wrapper around an iroh RecvStream for use with std::io::Read.
+async fn handle_tunnel_stream(
+    mut send: iroh::endpoint::SendStream,
+    recv: iroh::endpoint::RecvStream,
+    tag: u32,
+    tunnels: &TunnelRegistry,
+) {
+    let target_addr = {
+        let reg = tunnels.lock().unwrap();
+        match reg.get(&tag) {
+            Some(target) => format!("{}:{}", target.host, target.port),
+            None => {
+                warn!("tunnel data stream tag={tag}: no registered tunnel");
+                return;
+            }
+        }
+    };
+
+    info!("tunnel data stream tag={tag} connecting to {target_addr}");
+
+    let tcp = match tokio::net::TcpStream::connect(&target_addr).await {
+        Ok(s) => s,
+        Err(e) => {
+            error!("tunnel tag={tag}: TCP connect to {target_addr} failed: {e}");
+            return;
+        }
+    };
+
+    let (mut tcp_read, mut tcp_write) = tcp.into_split();
+
+    let (r1, r2) = tokio::join!(
+        forward_tcp_to_quic(&mut tcp_read, &mut send, tag),
+        forward_quic_to_tcp(recv, &mut tcp_write, tag),
+    );
+
+    if let Err(e) = r1 {
+        info!("tunnel tag={tag} tcp→quic ended: {e}");
+    }
+    if let Err(e) = r2 {
+        info!("tunnel tag={tag} quic→tcp ended: {e}");
+    }
+    info!("tunnel data stream tag={tag} closed");
+}
+
+async fn forward_tcp_to_quic(
+    tcp_read: &mut tokio::net::tcp::OwnedReadHalf,
+    quic_send: &mut iroh::endpoint::SendStream,
+    tag: u32,
+) -> io::Result<()> {
+    use tokio::io::AsyncReadExt;
+    let mut buf = [0u8; 8192];
+    loop {
+        let n = tcp_read.read(&mut buf).await?;
+        if n == 0 {
+            break;
+        }
+        quic_send
+            .write_all(&buf[..n])
+            .await
+            .map_err(|e| io::Error::other(format!("tunnel tag={tag} quic write: {e}")))?;
+    }
+    let _ = quic_send.finish();
+    Ok(())
+}
+
+async fn forward_quic_to_tcp(
+    mut quic_recv: iroh::endpoint::RecvStream,
+    tcp_write: &mut tokio::net::tcp::OwnedWriteHalf,
+    tag: u32,
+) -> io::Result<()> {
+    use tokio::io::AsyncWriteExt;
+    let mut buf = [0u8; 8192];
+    loop {
+        match quic_recv.read(&mut buf).await {
+            Ok(Some(n)) => {
+                tcp_write.write_all(&buf[..n]).await?;
+            }
+            Ok(None) => break,
+            Err(e) => {
+                return Err(io::Error::other(format!(
+                    "tunnel tag={tag} quic read: {e}"
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
 pub struct SyncRecvStream {
     inner: iroh::endpoint::RecvStream,
     handle: Handle,
@@ -107,7 +198,6 @@ impl Read for SyncRecvStream {
     }
 }
 
-/// Synchronous wrapper around an iroh SendStream for use with std::io::Write.
 pub struct SyncSendStream {
     inner: iroh::endpoint::SendStream,
     handle: Handle,

@@ -41,6 +41,8 @@ type Request struct {
 	//	*Request_Tunnel
 	//	*Request_Watch
 	//	*Request_Unwatch
+	//	*Request_CloseTunnel
+	//	*Request_ListTunnels
 	Kind          isRequest_Kind `protobuf_oneof:"kind"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -198,6 +200,24 @@ func (x *Request) GetUnwatch() *UnwatchRequest {
 	return nil
 }
 
+func (x *Request) GetCloseTunnel() *CloseTunnelRequest {
+	if x != nil {
+		if x, ok := x.Kind.(*Request_CloseTunnel); ok {
+			return x.CloseTunnel
+		}
+	}
+	return nil
+}
+
+func (x *Request) GetListTunnels() *ListTunnelsRequest {
+	if x != nil {
+		if x, ok := x.Kind.(*Request_ListTunnels); ok {
+			return x.ListTunnels
+		}
+	}
+	return nil
+}
+
 type isRequest_Kind interface {
 	isRequest_Kind()
 }
@@ -250,6 +270,14 @@ type Request_Unwatch struct {
 	Unwatch *UnwatchRequest `protobuf:"bytes,13,opt,name=unwatch,proto3,oneof"`
 }
 
+type Request_CloseTunnel struct {
+	CloseTunnel *CloseTunnelRequest `protobuf:"bytes,14,opt,name=close_tunnel,json=closeTunnel,proto3,oneof"`
+}
+
+type Request_ListTunnels struct {
+	ListTunnels *ListTunnelsRequest `protobuf:"bytes,15,opt,name=list_tunnels,json=listTunnels,proto3,oneof"`
+}
+
 func (*Request_Ping) isRequest_Kind() {}
 
 func (*Request_Spawn) isRequest_Kind() {}
@@ -274,6 +302,10 @@ func (*Request_Watch) isRequest_Kind() {}
 
 func (*Request_Unwatch) isRequest_Kind() {}
 
+func (*Request_CloseTunnel) isRequest_Kind() {}
+
+func (*Request_ListTunnels) isRequest_Kind() {}
+
 // Response is the top-level server-to-client reply frame.
 type Response struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -293,6 +325,8 @@ type Response struct {
 	//	*Response_Watch
 	//	*Response_Unwatch
 	//	*Response_Error
+	//	*Response_CloseTunnel
+	//	*Response_ListTunnels
 	Kind          isResponse_Kind `protobuf_oneof:"kind"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -459,6 +493,24 @@ func (x *Response) GetError() *ErrorResponse {
 	return nil
 }
 
+func (x *Response) GetCloseTunnel() *CloseTunnelResponse {
+	if x != nil {
+		if x, ok := x.Kind.(*Response_CloseTunnel); ok {
+			return x.CloseTunnel
+		}
+	}
+	return nil
+}
+
+func (x *Response) GetListTunnels() *ListTunnelsResponse {
+	if x != nil {
+		if x, ok := x.Kind.(*Response_ListTunnels); ok {
+			return x.ListTunnels
+		}
+	}
+	return nil
+}
+
 type isResponse_Kind interface {
 	isResponse_Kind()
 }
@@ -515,6 +567,14 @@ type Response_Error struct {
 	Error *ErrorResponse `protobuf:"bytes,14,opt,name=error,proto3,oneof"`
 }
 
+type Response_CloseTunnel struct {
+	CloseTunnel *CloseTunnelResponse `protobuf:"bytes,15,opt,name=close_tunnel,json=closeTunnel,proto3,oneof"`
+}
+
+type Response_ListTunnels struct {
+	ListTunnels *ListTunnelsResponse `protobuf:"bytes,16,opt,name=list_tunnels,json=listTunnels,proto3,oneof"`
+}
+
 func (*Response_Ping) isResponse_Kind() {}
 
 func (*Response_Spawn) isResponse_Kind() {}
@@ -540,6 +600,10 @@ func (*Response_Watch) isResponse_Kind() {}
 func (*Response_Unwatch) isResponse_Kind() {}
 
 func (*Response_Error) isResponse_Kind() {}
+
+func (*Response_CloseTunnel) isResponse_Kind() {}
+
+func (*Response_ListTunnels) isResponse_Kind() {}
 
 // Event is a server-pushed frame for asynchronous notifications.
 // Four event types only; tunnel and file data flow as raw bytes on
@@ -1934,6 +1998,226 @@ func (*UnwatchResponse) Descriptor() ([]byte, []int) {
 	return file_proto_executor_v2_proto_rawDescGZIP(), []int{27}
 }
 
+type CloseTunnelRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	TunnelTag     uint32                 `protobuf:"varint,1,opt,name=tunnel_tag,json=tunnelTag,proto3" json:"tunnel_tag,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CloseTunnelRequest) Reset() {
+	*x = CloseTunnelRequest{}
+	mi := &file_proto_executor_v2_proto_msgTypes[28]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CloseTunnelRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CloseTunnelRequest) ProtoMessage() {}
+
+func (x *CloseTunnelRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_executor_v2_proto_msgTypes[28]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CloseTunnelRequest.ProtoReflect.Descriptor instead.
+func (*CloseTunnelRequest) Descriptor() ([]byte, []int) {
+	return file_proto_executor_v2_proto_rawDescGZIP(), []int{28}
+}
+
+func (x *CloseTunnelRequest) GetTunnelTag() uint32 {
+	if x != nil {
+		return x.TunnelTag
+	}
+	return 0
+}
+
+type CloseTunnelResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *CloseTunnelResponse) Reset() {
+	*x = CloseTunnelResponse{}
+	mi := &file_proto_executor_v2_proto_msgTypes[29]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *CloseTunnelResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*CloseTunnelResponse) ProtoMessage() {}
+
+func (x *CloseTunnelResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_executor_v2_proto_msgTypes[29]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use CloseTunnelResponse.ProtoReflect.Descriptor instead.
+func (*CloseTunnelResponse) Descriptor() ([]byte, []int) {
+	return file_proto_executor_v2_proto_rawDescGZIP(), []int{29}
+}
+
+type ListTunnelsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListTunnelsRequest) Reset() {
+	*x = ListTunnelsRequest{}
+	mi := &file_proto_executor_v2_proto_msgTypes[30]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListTunnelsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListTunnelsRequest) ProtoMessage() {}
+
+func (x *ListTunnelsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_executor_v2_proto_msgTypes[30]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListTunnelsRequest.ProtoReflect.Descriptor instead.
+func (*ListTunnelsRequest) Descriptor() ([]byte, []int) {
+	return file_proto_executor_v2_proto_rawDescGZIP(), []int{30}
+}
+
+type ListTunnelsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Tunnels       []*TunnelInfo          `protobuf:"bytes,1,rep,name=tunnels,proto3" json:"tunnels,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListTunnelsResponse) Reset() {
+	*x = ListTunnelsResponse{}
+	mi := &file_proto_executor_v2_proto_msgTypes[31]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListTunnelsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListTunnelsResponse) ProtoMessage() {}
+
+func (x *ListTunnelsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_executor_v2_proto_msgTypes[31]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListTunnelsResponse.ProtoReflect.Descriptor instead.
+func (*ListTunnelsResponse) Descriptor() ([]byte, []int) {
+	return file_proto_executor_v2_proto_rawDescGZIP(), []int{31}
+}
+
+func (x *ListTunnelsResponse) GetTunnels() []*TunnelInfo {
+	if x != nil {
+		return x.Tunnels
+	}
+	return nil
+}
+
+type TunnelInfo struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Tag           uint32                 `protobuf:"varint,1,opt,name=tag,proto3" json:"tag,omitempty"`
+	Host          string                 `protobuf:"bytes,2,opt,name=host,proto3" json:"host,omitempty"`
+	Port          uint32                 `protobuf:"varint,3,opt,name=port,proto3" json:"port,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *TunnelInfo) Reset() {
+	*x = TunnelInfo{}
+	mi := &file_proto_executor_v2_proto_msgTypes[32]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *TunnelInfo) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*TunnelInfo) ProtoMessage() {}
+
+func (x *TunnelInfo) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_executor_v2_proto_msgTypes[32]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use TunnelInfo.ProtoReflect.Descriptor instead.
+func (*TunnelInfo) Descriptor() ([]byte, []int) {
+	return file_proto_executor_v2_proto_rawDescGZIP(), []int{32}
+}
+
+func (x *TunnelInfo) GetTag() uint32 {
+	if x != nil {
+		return x.Tag
+	}
+	return 0
+}
+
+func (x *TunnelInfo) GetHost() string {
+	if x != nil {
+		return x.Host
+	}
+	return ""
+}
+
+func (x *TunnelInfo) GetPort() uint32 {
+	if x != nil {
+		return x.Port
+	}
+	return 0
+}
+
 type ErrorResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Code          int32                  `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
@@ -1944,7 +2228,7 @@ type ErrorResponse struct {
 
 func (x *ErrorResponse) Reset() {
 	*x = ErrorResponse{}
-	mi := &file_proto_executor_v2_proto_msgTypes[28]
+	mi := &file_proto_executor_v2_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1956,7 +2240,7 @@ func (x *ErrorResponse) String() string {
 func (*ErrorResponse) ProtoMessage() {}
 
 func (x *ErrorResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_executor_v2_proto_msgTypes[28]
+	mi := &file_proto_executor_v2_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1969,7 +2253,7 @@ func (x *ErrorResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ErrorResponse.ProtoReflect.Descriptor instead.
 func (*ErrorResponse) Descriptor() ([]byte, []int) {
-	return file_proto_executor_v2_proto_rawDescGZIP(), []int{28}
+	return file_proto_executor_v2_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *ErrorResponse) GetCode() int32 {
@@ -1996,7 +2280,7 @@ type StdoutEvent struct {
 
 func (x *StdoutEvent) Reset() {
 	*x = StdoutEvent{}
-	mi := &file_proto_executor_v2_proto_msgTypes[29]
+	mi := &file_proto_executor_v2_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2008,7 +2292,7 @@ func (x *StdoutEvent) String() string {
 func (*StdoutEvent) ProtoMessage() {}
 
 func (x *StdoutEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_executor_v2_proto_msgTypes[29]
+	mi := &file_proto_executor_v2_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2021,7 +2305,7 @@ func (x *StdoutEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StdoutEvent.ProtoReflect.Descriptor instead.
 func (*StdoutEvent) Descriptor() ([]byte, []int) {
-	return file_proto_executor_v2_proto_rawDescGZIP(), []int{29}
+	return file_proto_executor_v2_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *StdoutEvent) GetProcessTag() uint32 {
@@ -2048,7 +2332,7 @@ type StderrEvent struct {
 
 func (x *StderrEvent) Reset() {
 	*x = StderrEvent{}
-	mi := &file_proto_executor_v2_proto_msgTypes[30]
+	mi := &file_proto_executor_v2_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2060,7 +2344,7 @@ func (x *StderrEvent) String() string {
 func (*StderrEvent) ProtoMessage() {}
 
 func (x *StderrEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_executor_v2_proto_msgTypes[30]
+	mi := &file_proto_executor_v2_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2073,7 +2357,7 @@ func (x *StderrEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StderrEvent.ProtoReflect.Descriptor instead.
 func (*StderrEvent) Descriptor() ([]byte, []int) {
-	return file_proto_executor_v2_proto_rawDescGZIP(), []int{30}
+	return file_proto_executor_v2_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *StderrEvent) GetProcessTag() uint32 {
@@ -2100,7 +2384,7 @@ type ExitEvent struct {
 
 func (x *ExitEvent) Reset() {
 	*x = ExitEvent{}
-	mi := &file_proto_executor_v2_proto_msgTypes[31]
+	mi := &file_proto_executor_v2_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2112,7 +2396,7 @@ func (x *ExitEvent) String() string {
 func (*ExitEvent) ProtoMessage() {}
 
 func (x *ExitEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_executor_v2_proto_msgTypes[31]
+	mi := &file_proto_executor_v2_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2125,7 +2409,7 @@ func (x *ExitEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExitEvent.ProtoReflect.Descriptor instead.
 func (*ExitEvent) Descriptor() ([]byte, []int) {
-	return file_proto_executor_v2_proto_rawDescGZIP(), []int{31}
+	return file_proto_executor_v2_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *ExitEvent) GetProcessTag() uint32 {
@@ -2153,7 +2437,7 @@ type FsChangeEvent struct {
 
 func (x *FsChangeEvent) Reset() {
 	*x = FsChangeEvent{}
-	mi := &file_proto_executor_v2_proto_msgTypes[32]
+	mi := &file_proto_executor_v2_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2165,7 +2449,7 @@ func (x *FsChangeEvent) String() string {
 func (*FsChangeEvent) ProtoMessage() {}
 
 func (x *FsChangeEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_executor_v2_proto_msgTypes[32]
+	mi := &file_proto_executor_v2_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2178,7 +2462,7 @@ func (x *FsChangeEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FsChangeEvent.ProtoReflect.Descriptor instead.
 func (*FsChangeEvent) Descriptor() ([]byte, []int) {
-	return file_proto_executor_v2_proto_rawDescGZIP(), []int{32}
+	return file_proto_executor_v2_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *FsChangeEvent) GetWatchId() uint32 {
@@ -2206,7 +2490,7 @@ var File_proto_executor_v2_proto protoreflect.FileDescriptor
 
 const file_proto_executor_v2_proto_rawDesc = "" +
 	"\n" +
-	"\x17proto/executor_v2.proto\x12\x0farl.executor.v2\"\xc1\x05\n" +
+	"\x17proto/executor_v2.proto\x12\x0farl.executor.v2\"\xd5\x06\n" +
 	"\aRequest\x12\x10\n" +
 	"\x03tag\x18\x01 \x01(\rR\x03tag\x122\n" +
 	"\x04ping\x18\x02 \x01(\v2\x1c.arl.executor.v2.PingRequestH\x00R\x04ping\x125\n" +
@@ -2221,8 +2505,10 @@ const file_proto_executor_v2_proto_rawDesc = "" +
 	" \x01(\v2\x1c.arl.executor.v2.ListRequestH\x00R\x04list\x128\n" +
 	"\x06tunnel\x18\v \x01(\v2\x1e.arl.executor.v2.TunnelRequestH\x00R\x06tunnel\x125\n" +
 	"\x05watch\x18\f \x01(\v2\x1d.arl.executor.v2.WatchRequestH\x00R\x05watch\x12;\n" +
-	"\aunwatch\x18\r \x01(\v2\x1f.arl.executor.v2.UnwatchRequestH\x00R\aunwatchB\x06\n" +
-	"\x04kind\"\x86\x06\n" +
+	"\aunwatch\x18\r \x01(\v2\x1f.arl.executor.v2.UnwatchRequestH\x00R\aunwatch\x12H\n" +
+	"\fclose_tunnel\x18\x0e \x01(\v2#.arl.executor.v2.CloseTunnelRequestH\x00R\vcloseTunnel\x12H\n" +
+	"\flist_tunnels\x18\x0f \x01(\v2#.arl.executor.v2.ListTunnelsRequestH\x00R\vlistTunnelsB\x06\n" +
+	"\x04kind\"\x9c\a\n" +
 	"\bResponse\x12\x10\n" +
 	"\x03tag\x18\x01 \x01(\rR\x03tag\x123\n" +
 	"\x04ping\x18\x02 \x01(\v2\x1d.arl.executor.v2.PingResponseH\x00R\x04ping\x126\n" +
@@ -2238,7 +2524,9 @@ const file_proto_executor_v2_proto_rawDesc = "" +
 	"\x06tunnel\x18\v \x01(\v2\x1f.arl.executor.v2.TunnelResponseH\x00R\x06tunnel\x126\n" +
 	"\x05watch\x18\f \x01(\v2\x1e.arl.executor.v2.WatchResponseH\x00R\x05watch\x12<\n" +
 	"\aunwatch\x18\r \x01(\v2 .arl.executor.v2.UnwatchResponseH\x00R\aunwatch\x126\n" +
-	"\x05error\x18\x0e \x01(\v2\x1e.arl.executor.v2.ErrorResponseH\x00R\x05errorB\x06\n" +
+	"\x05error\x18\x0e \x01(\v2\x1e.arl.executor.v2.ErrorResponseH\x00R\x05error\x12I\n" +
+	"\fclose_tunnel\x18\x0f \x01(\v2$.arl.executor.v2.CloseTunnelResponseH\x00R\vcloseTunnel\x12I\n" +
+	"\flist_tunnels\x18\x10 \x01(\v2$.arl.executor.v2.ListTunnelsResponseH\x00R\vlistTunnelsB\x06\n" +
 	"\x04kind\"\x82\x02\n" +
 	"\x05Event\x12\x10\n" +
 	"\x03tag\x18\x01 \x01(\rR\x03tag\x126\n" +
@@ -2329,7 +2617,19 @@ const file_proto_executor_v2_proto_rawDesc = "" +
 	"\bwatch_id\x18\x01 \x01(\rR\awatchId\"+\n" +
 	"\x0eUnwatchRequest\x12\x19\n" +
 	"\bwatch_id\x18\x01 \x01(\rR\awatchId\"\x11\n" +
-	"\x0fUnwatchResponse\"=\n" +
+	"\x0fUnwatchResponse\"3\n" +
+	"\x12CloseTunnelRequest\x12\x1d\n" +
+	"\n" +
+	"tunnel_tag\x18\x01 \x01(\rR\ttunnelTag\"\x15\n" +
+	"\x13CloseTunnelResponse\"\x14\n" +
+	"\x12ListTunnelsRequest\"L\n" +
+	"\x13ListTunnelsResponse\x125\n" +
+	"\atunnels\x18\x01 \x03(\v2\x1b.arl.executor.v2.TunnelInfoR\atunnels\"F\n" +
+	"\n" +
+	"TunnelInfo\x12\x10\n" +
+	"\x03tag\x18\x01 \x01(\rR\x03tag\x12\x12\n" +
+	"\x04host\x18\x02 \x01(\tR\x04host\x12\x12\n" +
+	"\x04port\x18\x03 \x01(\rR\x04port\"=\n" +
 	"\rErrorResponse\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x05R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\"B\n" +
@@ -2363,42 +2663,47 @@ func file_proto_executor_v2_proto_rawDescGZIP() []byte {
 	return file_proto_executor_v2_proto_rawDescData
 }
 
-var file_proto_executor_v2_proto_msgTypes = make([]protoimpl.MessageInfo, 34)
+var file_proto_executor_v2_proto_msgTypes = make([]protoimpl.MessageInfo, 39)
 var file_proto_executor_v2_proto_goTypes = []any{
-	(*Request)(nil),         // 0: arl.executor.v2.Request
-	(*Response)(nil),        // 1: arl.executor.v2.Response
-	(*Event)(nil),           // 2: arl.executor.v2.Event
-	(*PingRequest)(nil),     // 3: arl.executor.v2.PingRequest
-	(*PingResponse)(nil),    // 4: arl.executor.v2.PingResponse
-	(*SpawnRequest)(nil),    // 5: arl.executor.v2.SpawnRequest
-	(*SpawnResponse)(nil),   // 6: arl.executor.v2.SpawnResponse
-	(*WriteInRequest)(nil),  // 7: arl.executor.v2.WriteInRequest
-	(*WriteInResponse)(nil), // 8: arl.executor.v2.WriteInResponse
-	(*SignalRequest)(nil),   // 9: arl.executor.v2.SignalRequest
-	(*SignalResponse)(nil),  // 10: arl.executor.v2.SignalResponse
-	(*ResizeRequest)(nil),   // 11: arl.executor.v2.ResizeRequest
-	(*ResizeResponse)(nil),  // 12: arl.executor.v2.ResizeResponse
-	(*ReadRequest)(nil),     // 13: arl.executor.v2.ReadRequest
-	(*ReadResponse)(nil),    // 14: arl.executor.v2.ReadResponse
-	(*WriteRequest)(nil),    // 15: arl.executor.v2.WriteRequest
-	(*WriteResponse)(nil),   // 16: arl.executor.v2.WriteResponse
-	(*StatRequest)(nil),     // 17: arl.executor.v2.StatRequest
-	(*StatResponse)(nil),    // 18: arl.executor.v2.StatResponse
-	(*ListRequest)(nil),     // 19: arl.executor.v2.ListRequest
-	(*ListResponse)(nil),    // 20: arl.executor.v2.ListResponse
-	(*DirEntry)(nil),        // 21: arl.executor.v2.DirEntry
-	(*TunnelRequest)(nil),   // 22: arl.executor.v2.TunnelRequest
-	(*TunnelResponse)(nil),  // 23: arl.executor.v2.TunnelResponse
-	(*WatchRequest)(nil),    // 24: arl.executor.v2.WatchRequest
-	(*WatchResponse)(nil),   // 25: arl.executor.v2.WatchResponse
-	(*UnwatchRequest)(nil),  // 26: arl.executor.v2.UnwatchRequest
-	(*UnwatchResponse)(nil), // 27: arl.executor.v2.UnwatchResponse
-	(*ErrorResponse)(nil),   // 28: arl.executor.v2.ErrorResponse
-	(*StdoutEvent)(nil),     // 29: arl.executor.v2.StdoutEvent
-	(*StderrEvent)(nil),     // 30: arl.executor.v2.StderrEvent
-	(*ExitEvent)(nil),       // 31: arl.executor.v2.ExitEvent
-	(*FsChangeEvent)(nil),   // 32: arl.executor.v2.FsChangeEvent
-	nil,                     // 33: arl.executor.v2.SpawnRequest.EnvEntry
+	(*Request)(nil),             // 0: arl.executor.v2.Request
+	(*Response)(nil),            // 1: arl.executor.v2.Response
+	(*Event)(nil),               // 2: arl.executor.v2.Event
+	(*PingRequest)(nil),         // 3: arl.executor.v2.PingRequest
+	(*PingResponse)(nil),        // 4: arl.executor.v2.PingResponse
+	(*SpawnRequest)(nil),        // 5: arl.executor.v2.SpawnRequest
+	(*SpawnResponse)(nil),       // 6: arl.executor.v2.SpawnResponse
+	(*WriteInRequest)(nil),      // 7: arl.executor.v2.WriteInRequest
+	(*WriteInResponse)(nil),     // 8: arl.executor.v2.WriteInResponse
+	(*SignalRequest)(nil),       // 9: arl.executor.v2.SignalRequest
+	(*SignalResponse)(nil),      // 10: arl.executor.v2.SignalResponse
+	(*ResizeRequest)(nil),       // 11: arl.executor.v2.ResizeRequest
+	(*ResizeResponse)(nil),      // 12: arl.executor.v2.ResizeResponse
+	(*ReadRequest)(nil),         // 13: arl.executor.v2.ReadRequest
+	(*ReadResponse)(nil),        // 14: arl.executor.v2.ReadResponse
+	(*WriteRequest)(nil),        // 15: arl.executor.v2.WriteRequest
+	(*WriteResponse)(nil),       // 16: arl.executor.v2.WriteResponse
+	(*StatRequest)(nil),         // 17: arl.executor.v2.StatRequest
+	(*StatResponse)(nil),        // 18: arl.executor.v2.StatResponse
+	(*ListRequest)(nil),         // 19: arl.executor.v2.ListRequest
+	(*ListResponse)(nil),        // 20: arl.executor.v2.ListResponse
+	(*DirEntry)(nil),            // 21: arl.executor.v2.DirEntry
+	(*TunnelRequest)(nil),       // 22: arl.executor.v2.TunnelRequest
+	(*TunnelResponse)(nil),      // 23: arl.executor.v2.TunnelResponse
+	(*WatchRequest)(nil),        // 24: arl.executor.v2.WatchRequest
+	(*WatchResponse)(nil),       // 25: arl.executor.v2.WatchResponse
+	(*UnwatchRequest)(nil),      // 26: arl.executor.v2.UnwatchRequest
+	(*UnwatchResponse)(nil),     // 27: arl.executor.v2.UnwatchResponse
+	(*CloseTunnelRequest)(nil),  // 28: arl.executor.v2.CloseTunnelRequest
+	(*CloseTunnelResponse)(nil), // 29: arl.executor.v2.CloseTunnelResponse
+	(*ListTunnelsRequest)(nil),  // 30: arl.executor.v2.ListTunnelsRequest
+	(*ListTunnelsResponse)(nil), // 31: arl.executor.v2.ListTunnelsResponse
+	(*TunnelInfo)(nil),          // 32: arl.executor.v2.TunnelInfo
+	(*ErrorResponse)(nil),       // 33: arl.executor.v2.ErrorResponse
+	(*StdoutEvent)(nil),         // 34: arl.executor.v2.StdoutEvent
+	(*StderrEvent)(nil),         // 35: arl.executor.v2.StderrEvent
+	(*ExitEvent)(nil),           // 36: arl.executor.v2.ExitEvent
+	(*FsChangeEvent)(nil),       // 37: arl.executor.v2.FsChangeEvent
+	nil,                         // 38: arl.executor.v2.SpawnRequest.EnvEntry
 }
 var file_proto_executor_v2_proto_depIdxs = []int32{
 	3,  // 0: arl.executor.v2.Request.ping:type_name -> arl.executor.v2.PingRequest
@@ -2413,30 +2718,35 @@ var file_proto_executor_v2_proto_depIdxs = []int32{
 	22, // 9: arl.executor.v2.Request.tunnel:type_name -> arl.executor.v2.TunnelRequest
 	24, // 10: arl.executor.v2.Request.watch:type_name -> arl.executor.v2.WatchRequest
 	26, // 11: arl.executor.v2.Request.unwatch:type_name -> arl.executor.v2.UnwatchRequest
-	4,  // 12: arl.executor.v2.Response.ping:type_name -> arl.executor.v2.PingResponse
-	6,  // 13: arl.executor.v2.Response.spawn:type_name -> arl.executor.v2.SpawnResponse
-	8,  // 14: arl.executor.v2.Response.write_in:type_name -> arl.executor.v2.WriteInResponse
-	10, // 15: arl.executor.v2.Response.signal:type_name -> arl.executor.v2.SignalResponse
-	12, // 16: arl.executor.v2.Response.resize:type_name -> arl.executor.v2.ResizeResponse
-	14, // 17: arl.executor.v2.Response.read:type_name -> arl.executor.v2.ReadResponse
-	16, // 18: arl.executor.v2.Response.write:type_name -> arl.executor.v2.WriteResponse
-	18, // 19: arl.executor.v2.Response.stat:type_name -> arl.executor.v2.StatResponse
-	20, // 20: arl.executor.v2.Response.list:type_name -> arl.executor.v2.ListResponse
-	23, // 21: arl.executor.v2.Response.tunnel:type_name -> arl.executor.v2.TunnelResponse
-	25, // 22: arl.executor.v2.Response.watch:type_name -> arl.executor.v2.WatchResponse
-	27, // 23: arl.executor.v2.Response.unwatch:type_name -> arl.executor.v2.UnwatchResponse
-	28, // 24: arl.executor.v2.Response.error:type_name -> arl.executor.v2.ErrorResponse
-	29, // 25: arl.executor.v2.Event.stdout:type_name -> arl.executor.v2.StdoutEvent
-	30, // 26: arl.executor.v2.Event.stderr:type_name -> arl.executor.v2.StderrEvent
-	31, // 27: arl.executor.v2.Event.exit:type_name -> arl.executor.v2.ExitEvent
-	32, // 28: arl.executor.v2.Event.fs_change:type_name -> arl.executor.v2.FsChangeEvent
-	33, // 29: arl.executor.v2.SpawnRequest.env:type_name -> arl.executor.v2.SpawnRequest.EnvEntry
-	21, // 30: arl.executor.v2.ListResponse.entries:type_name -> arl.executor.v2.DirEntry
-	31, // [31:31] is the sub-list for method output_type
-	31, // [31:31] is the sub-list for method input_type
-	31, // [31:31] is the sub-list for extension type_name
-	31, // [31:31] is the sub-list for extension extendee
-	0,  // [0:31] is the sub-list for field type_name
+	28, // 12: arl.executor.v2.Request.close_tunnel:type_name -> arl.executor.v2.CloseTunnelRequest
+	30, // 13: arl.executor.v2.Request.list_tunnels:type_name -> arl.executor.v2.ListTunnelsRequest
+	4,  // 14: arl.executor.v2.Response.ping:type_name -> arl.executor.v2.PingResponse
+	6,  // 15: arl.executor.v2.Response.spawn:type_name -> arl.executor.v2.SpawnResponse
+	8,  // 16: arl.executor.v2.Response.write_in:type_name -> arl.executor.v2.WriteInResponse
+	10, // 17: arl.executor.v2.Response.signal:type_name -> arl.executor.v2.SignalResponse
+	12, // 18: arl.executor.v2.Response.resize:type_name -> arl.executor.v2.ResizeResponse
+	14, // 19: arl.executor.v2.Response.read:type_name -> arl.executor.v2.ReadResponse
+	16, // 20: arl.executor.v2.Response.write:type_name -> arl.executor.v2.WriteResponse
+	18, // 21: arl.executor.v2.Response.stat:type_name -> arl.executor.v2.StatResponse
+	20, // 22: arl.executor.v2.Response.list:type_name -> arl.executor.v2.ListResponse
+	23, // 23: arl.executor.v2.Response.tunnel:type_name -> arl.executor.v2.TunnelResponse
+	25, // 24: arl.executor.v2.Response.watch:type_name -> arl.executor.v2.WatchResponse
+	27, // 25: arl.executor.v2.Response.unwatch:type_name -> arl.executor.v2.UnwatchResponse
+	33, // 26: arl.executor.v2.Response.error:type_name -> arl.executor.v2.ErrorResponse
+	29, // 27: arl.executor.v2.Response.close_tunnel:type_name -> arl.executor.v2.CloseTunnelResponse
+	31, // 28: arl.executor.v2.Response.list_tunnels:type_name -> arl.executor.v2.ListTunnelsResponse
+	34, // 29: arl.executor.v2.Event.stdout:type_name -> arl.executor.v2.StdoutEvent
+	35, // 30: arl.executor.v2.Event.stderr:type_name -> arl.executor.v2.StderrEvent
+	36, // 31: arl.executor.v2.Event.exit:type_name -> arl.executor.v2.ExitEvent
+	37, // 32: arl.executor.v2.Event.fs_change:type_name -> arl.executor.v2.FsChangeEvent
+	38, // 33: arl.executor.v2.SpawnRequest.env:type_name -> arl.executor.v2.SpawnRequest.EnvEntry
+	21, // 34: arl.executor.v2.ListResponse.entries:type_name -> arl.executor.v2.DirEntry
+	32, // 35: arl.executor.v2.ListTunnelsResponse.tunnels:type_name -> arl.executor.v2.TunnelInfo
+	36, // [36:36] is the sub-list for method output_type
+	36, // [36:36] is the sub-list for method input_type
+	36, // [36:36] is the sub-list for extension type_name
+	36, // [36:36] is the sub-list for extension extendee
+	0,  // [0:36] is the sub-list for field type_name
 }
 
 func init() { file_proto_executor_v2_proto_init() }
@@ -2457,6 +2767,8 @@ func file_proto_executor_v2_proto_init() {
 		(*Request_Tunnel)(nil),
 		(*Request_Watch)(nil),
 		(*Request_Unwatch)(nil),
+		(*Request_CloseTunnel)(nil),
+		(*Request_ListTunnels)(nil),
 	}
 	file_proto_executor_v2_proto_msgTypes[1].OneofWrappers = []any{
 		(*Response_Ping)(nil),
@@ -2472,6 +2784,8 @@ func file_proto_executor_v2_proto_init() {
 		(*Response_Watch)(nil),
 		(*Response_Unwatch)(nil),
 		(*Response_Error)(nil),
+		(*Response_CloseTunnel)(nil),
+		(*Response_ListTunnels)(nil),
 	}
 	file_proto_executor_v2_proto_msgTypes[2].OneofWrappers = []any{
 		(*Event_Stdout)(nil),
@@ -2485,7 +2799,7 @@ func file_proto_executor_v2_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_executor_v2_proto_rawDesc), len(file_proto_executor_v2_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   34,
+			NumMessages:   39,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

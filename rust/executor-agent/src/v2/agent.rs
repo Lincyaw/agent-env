@@ -7,7 +7,6 @@ use prost::Message;
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::io::{self, Read, Write as _};
-use std::net::TcpStream;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use std::os::unix::net::UnixListener;
 use std::path::{Path, PathBuf};
@@ -19,6 +18,13 @@ use tokio::sync::watch;
 
 const FILE_CHUNK_SIZE: usize = 1024 * 1024;
 const SIDECAR_SOCKET_GID: u32 = 65532;
+
+pub struct TunnelTarget {
+    pub host: String,
+    pub port: u32,
+}
+
+pub type TunnelRegistry = Arc<Mutex<HashMap<u32, TunnelTarget>>>;
 
 // Wire-level message type bytes.
 pub const MSG_TYPE_REQUEST: u8 = 0x01;
@@ -174,20 +180,24 @@ fn handle_conn(
 ) -> io::Result<()> {
     let reader = stream.try_clone()?;
     let writer: SharedWriter = Arc::new(Mutex::new(Box::new(stream)));
-    handle_v2_session(reader, writer, workspace)
+    handle_v2_session(reader, writer, workspace, None)
 }
 
 /// Transport-agnostic V2 session handler. Called from both Unix socket and iroh QUIC paths.
+/// When `tunnel_registry` is Some, tunnel requests register targets for data-stream forwarding.
+/// When None (Unix socket), tunnel requests return an error.
 pub fn handle_v2_session(
     reader: impl io::Read,
     writer: SharedWriter,
     workspace: &str,
+    tunnel_registry: Option<TunnelRegistry>,
 ) -> io::Result<()> {
     let processes: Arc<Mutex<HashMap<u32, ProcessHandle>>> =
         Arc::new(Mutex::new(HashMap::new()));
     let watches: Arc<Mutex<HashMap<u32, WatchState>>> =
         Arc::new(Mutex::new(HashMap::new()));
     let watch_counter = Arc::new(AtomicU32::new(1));
+    let tunnels = tunnel_registry.unwrap_or_else(|| Arc::new(Mutex::new(HashMap::new())));
 
     let result = handle_messages(
         reader,
@@ -196,6 +206,7 @@ pub fn handle_v2_session(
         &processes,
         &watches,
         &watch_counter,
+        &tunnels,
     );
 
     // Cleanup on disconnect
@@ -227,6 +238,7 @@ fn handle_messages(
     processes: &Arc<Mutex<HashMap<u32, ProcessHandle>>>,
     watches: &Arc<Mutex<HashMap<u32, WatchState>>>,
     watch_counter: &Arc<AtomicU32>,
+    tunnels: &TunnelRegistry,
 ) -> io::Result<()> {
     loop {
         let request = match read_request(&mut reader)? {
@@ -279,7 +291,15 @@ fn handle_messages(
             }
             proto::request::Kind::Tunnel(params) => {
                 log::info!("[v2:tunnel] tag={tag} host={} port={}", params.host, params.port);
-                handle_tunnel(tag, params, &writer);
+                handle_tunnel(tag, params, &writer, tunnels);
+            }
+            proto::request::Kind::CloseTunnel(params) => {
+                log::info!("[v2:close_tunnel] tag={tag} tunnel_tag={}", params.tunnel_tag);
+                handle_close_tunnel(tag, params, &writer, tunnels);
+            }
+            proto::request::Kind::ListTunnels(_) => {
+                log::info!("[v2:list_tunnels] tag={tag}");
+                handle_list_tunnels(tag, &writer, tunnels);
             }
             proto::request::Kind::Watch(params) => {
                 log::info!("[v2:watch] tag={tag} path={}", params.path);
@@ -1057,24 +1077,64 @@ fn handle_tunnel(
     tag: u32,
     params: proto::TunnelRequest,
     writer: &SharedWriter,
+    tunnels: &TunnelRegistry,
 ) {
-    let addr = format!("{}:{}", params.host, params.port);
-    match TcpStream::connect(&addr) {
-        Ok(_tcp) => {
-            // Connected successfully. On Unix socket, bidirectional data
-            // transfer requires QUIC data streams; the TCP connection is
-            // kept alive for the session lifetime but data cannot flow
-            // inline on the control channel.
-            let _ = send_response(
-                writer,
-                tag,
-                proto::response::Kind::Tunnel(proto::TunnelResponse {}),
-            );
-        }
-        Err(e) => {
-            let _ = send_error(writer, tag, 12, format!("{e}"));
-        }
+    let target = TunnelTarget {
+        host: params.host.clone(),
+        port: params.port,
+    };
+    tunnels.lock().unwrap().insert(tag, target);
+    log::info!("[v2:tunnel] registered tag={tag} -> {}:{}", params.host, params.port);
+    let _ = send_response(
+        writer,
+        tag,
+        proto::response::Kind::Tunnel(proto::TunnelResponse {}),
+    );
+}
+
+fn handle_close_tunnel(
+    tag: u32,
+    params: proto::CloseTunnelRequest,
+    writer: &SharedWriter,
+    tunnels: &TunnelRegistry,
+) {
+    let mut reg = tunnels.lock().unwrap();
+    if reg.remove(&params.tunnel_tag).is_some() {
+        log::info!("[v2:close_tunnel] removed tunnel_tag={}", params.tunnel_tag);
+        let _ = send_response(
+            writer,
+            tag,
+            proto::response::Kind::CloseTunnel(proto::CloseTunnelResponse {}),
+        );
+    } else {
+        let _ = send_error(
+            writer,
+            tag,
+            12,
+            format!("no tunnel with tag {}", params.tunnel_tag),
+        );
     }
+}
+
+fn handle_list_tunnels(
+    tag: u32,
+    writer: &SharedWriter,
+    tunnels: &TunnelRegistry,
+) {
+    let reg = tunnels.lock().unwrap();
+    let infos: Vec<proto::TunnelInfo> = reg
+        .iter()
+        .map(|(t, target)| proto::TunnelInfo {
+            tag: *t,
+            host: target.host.clone(),
+            port: target.port,
+        })
+        .collect();
+    let _ = send_response(
+        writer,
+        tag,
+        proto::response::Kind::ListTunnels(proto::ListTunnelsResponse { tunnels: infos }),
+    );
 }
 
 // ---------------------------------------------------------------------------

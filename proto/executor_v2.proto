@@ -10,18 +10,20 @@ option go_package = "github.com/Lincyaw/agent-env/pkg/pb/executorv2";
 message Request {
   uint32 tag = 1;
   oneof kind {
-    PingRequest    ping     = 2;
-    SpawnRequest   spawn    = 3;
-    WriteInRequest write_in = 4;
-    SignalRequest  signal   = 5;
-    ResizeRequest  resize   = 6;
-    ReadRequest    read     = 7;
-    WriteRequest   write    = 8;
-    StatRequest    stat     = 9;
-    ListRequest    list     = 10;
-    TunnelRequest  tunnel   = 11;
-    WatchRequest   watch    = 12;
-    UnwatchRequest unwatch  = 13;
+    PingRequest         ping          = 2;
+    SpawnRequest        spawn         = 3;
+    WriteInRequest      write_in      = 4;
+    SignalRequest       signal        = 5;
+    ResizeRequest       resize        = 6;
+    ReadRequest         read          = 7;
+    WriteRequest        write         = 8;
+    StatRequest         stat          = 9;
+    ListRequest         list          = 10;
+    TunnelRequest       tunnel        = 11;
+    WatchRequest        watch         = 12;
+    UnwatchRequest      unwatch       = 13;
+    CloseTunnelRequest  close_tunnel  = 14;
+    ListTunnelsRequest  list_tunnels  = 15;
   }
 }
 
@@ -29,19 +31,21 @@ message Request {
 message Response {
   uint32 tag = 1;
   oneof kind {
-    PingResponse    ping     = 2;
-    SpawnResponse   spawn    = 3;
-    WriteInResponse write_in = 4;
-    SignalResponse  signal   = 5;
-    ResizeResponse  resize   = 6;
-    ReadResponse    read     = 7;
-    WriteResponse   write    = 8;
-    StatResponse    stat     = 9;
-    ListResponse    list     = 10;
-    TunnelResponse  tunnel   = 11;
-    WatchResponse   watch    = 12;
-    UnwatchResponse unwatch  = 13;
-    ErrorResponse   error    = 14;
+    PingResponse         ping          = 2;
+    SpawnResponse        spawn         = 3;
+    WriteInResponse      write_in      = 4;
+    SignalResponse       signal        = 5;
+    ResizeResponse       resize        = 6;
+    ReadResponse         read          = 7;
+    WriteResponse        write         = 8;
+    StatResponse         stat          = 9;
+    ListResponse         list          = 10;
+    TunnelResponse       tunnel        = 11;
+    WatchResponse        watch         = 12;
+    UnwatchResponse      unwatch       = 13;
+    ErrorResponse        error         = 14;
+    CloseTunnelResponse  close_tunnel  = 15;
+    ListTunnelsResponse  list_tunnels  = 16;
   }
 }
 
@@ -233,6 +237,32 @@ message UnwatchRequest {
 }
 
 message UnwatchResponse {}
+
+// ---------------------------------------------------------------------------
+// 13. close_tunnel — close an active tunnel
+// ---------------------------------------------------------------------------
+
+message CloseTunnelRequest {
+  uint32 tunnel_tag = 1;
+}
+
+message CloseTunnelResponse {}
+
+// ---------------------------------------------------------------------------
+// 14. list_tunnels — list active tunnels
+// ---------------------------------------------------------------------------
+
+message ListTunnelsRequest {}
+
+message ListTunnelsResponse {
+  repeated TunnelInfo tunnels = 1;
+}
+
+message TunnelInfo {
+  uint32 tag = 1;
+  string host = 2;
+  uint32 port = 3;
+}
 
 // ---------------------------------------------------------------------------
 // ErrorResponse — returned in the Response.error slot on failure

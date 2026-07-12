@@ -532,6 +532,45 @@ class SandboxSession:
         self._session_id = None
         self._session_info = None
 
+    # ---- tunnel (iroh direct-connect only) ----
+
+    def tunnel_forward(
+        self,
+        remote_host: str = "localhost",
+        remote_port: int = 22,
+        local_port: int = 0,
+        local_host: str = "127.0.0.1",
+    ) -> int:
+        """Forward a local TCP port to a remote target inside the sandbox.
+
+        Requires iroh direct-connect (pass ``iroh_addr`` when creating the session).
+        Returns the tunnel tag that can be passed to :meth:`tunnel_stop`.
+
+        Example::
+
+            tag = session.tunnel_forward(remote_port=22, local_port=2222)
+            # ssh -p 2222 localhost  →  sandbox port 22
+            session.tunnel_stop(tag)
+        """
+        iroh = self._get_iroh()
+        if iroh is None:
+            raise RuntimeError("tunnel requires iroh direct-connect (pass iroh_addr)")
+        return iroh.tunnel_forward(remote_host, remote_port, local_port, local_host)
+
+    def tunnel_stop(self, tunnel_tag: int) -> None:
+        """Stop a tunnel previously started with :meth:`tunnel_forward`."""
+        iroh = self._get_iroh()
+        if iroh is None:
+            raise RuntimeError("tunnel requires iroh direct-connect")
+        iroh.tunnel_stop(tunnel_tag)
+
+    def tunnel_list(self) -> list[dict[str, object]]:
+        """List active tunnels on this connection."""
+        iroh = self._get_iroh()
+        if iroh is None:
+            raise RuntimeError("tunnel requires iroh direct-connect")
+        return iroh.tunnel_list()
+
     def close(self) -> None:
         """Close the underlying HTTP client and iroh transport (if any)."""
         if self._iroh is not None:
