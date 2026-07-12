@@ -292,7 +292,9 @@ func TestCreatePoolUsesConfiguredDefaultSandboxResources(t *testing.T) {
 			DefaultSandboxRequestCPU:    "250m",
 			DefaultSandboxRequestMemory: "256Mi",
 			DefaultSandboxLimitCPU:      "8",
-			DefaultSandboxLimitMemory:   "16Gi",
+			DefaultSandboxLimitMemory:       "16Gi",
+			DefaultEphemeralStorageLimit:    "10Gi",
+			DefaultEphemeralStorageRequest:  "100Mi",
 		},
 	}
 

@@ -51,6 +51,8 @@ type GatewayConfig struct {
 	DefaultSandboxRequestMemory     string
 	DefaultSandboxLimitCPU          string
 	DefaultSandboxLimitMemory       string
+	DefaultEphemeralStorageLimit    string
+	DefaultEphemeralStorageRequest  string
 	SandboxNetworkPolicyManagement  string
 	SandboxRuntimeClassName         string
 	SandboxSeccompProfileType       string

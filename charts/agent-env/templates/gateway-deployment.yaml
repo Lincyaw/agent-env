@@ -115,6 +115,10 @@ spec:
               value: {{ .Values.gateway.sandboxResources.limits.cpu | quote }}
             - name: SANDBOX_DEFAULT_LIMIT_MEMORY
               value: {{ .Values.gateway.sandboxResources.limits.memory | quote }}
+            - name: SANDBOX_DEFAULT_EPHEMERAL_STORAGE_LIMIT
+              value: {{ .Values.gateway.sandboxResources.limits.ephemeralStorage | quote }}
+            - name: SANDBOX_DEFAULT_EPHEMERAL_STORAGE_REQUEST
+              value: {{ .Values.gateway.sandboxResources.requests.ephemeralStorage | quote }}
             - name: SANDBOX_NETWORK_POLICY_MANAGEMENT
               value: "{{ .Values.gateway.sandboxSecurity.networkPolicyManagement }}"
             {{- if .Values.gateway.sandboxSecurity.runtimeClassName }}

@@ -142,9 +142,11 @@ gateway:
     requests:
       cpu: "500m"
       memory: 512Mi
+      ephemeralStorage: 100Mi
     limits:
       cpu: "8"
       memory: 16Gi
+      ephemeralStorage: 10Gi
   # Security policy applied to generated sandbox templates.
   sandboxSecurity:
     # Supported values: Managed, Unmanaged.

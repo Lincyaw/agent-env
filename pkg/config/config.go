@@ -108,6 +108,10 @@ type Config struct {
 	DefaultSandboxLimitCPU      string
 	DefaultSandboxLimitMemory   string
 
+	// Default ephemeral storage limits/requests for sandbox containers.
+	DefaultEphemeralStorageLimit   string
+	DefaultEphemeralStorageRequest string
+
 	// Devbox persistent storage default StorageClass.
 	DevboxStorageClassName string
 
@@ -179,6 +183,8 @@ func DefaultConfig() *Config {
 		DefaultSandboxRequestMemory:     "512Mi",
 		DefaultSandboxLimitCPU:          "8",
 		DefaultSandboxLimitMemory:       "16Gi",
+		DefaultEphemeralStorageLimit:    "10Gi",
+		DefaultEphemeralStorageRequest:  "100Mi",
 		SandboxNetworkPolicyManagement:  "Unmanaged",
 		SandboxRuntimeClassName:         "",
 		SandboxSeccompProfileType:       "RuntimeDefault",
@@ -460,6 +466,12 @@ func LoadFromEnv() *Config {
 	if v := os.Getenv("SANDBOX_DEFAULT_LIMIT_MEMORY"); v != "" {
 		cfg.DefaultSandboxLimitMemory = v
 	}
+	if v := os.Getenv("SANDBOX_DEFAULT_EPHEMERAL_STORAGE_LIMIT"); v != "" {
+		cfg.DefaultEphemeralStorageLimit = v
+	}
+	if v := os.Getenv("SANDBOX_DEFAULT_EPHEMERAL_STORAGE_REQUEST"); v != "" {
+		cfg.DefaultEphemeralStorageRequest = v
+	}
 	if v := os.Getenv("SANDBOX_NETWORK_POLICY_MANAGEMENT"); v != "" {
 		cfg.SandboxNetworkPolicyManagement = v
 	}
@@ -608,6 +620,8 @@ func (c *Config) Validate() error {
 		{name: "sandbox default request memory", value: c.DefaultSandboxRequestMemory},
 		{name: "sandbox default limit cpu", value: c.DefaultSandboxLimitCPU},
 		{name: "sandbox default limit memory", value: c.DefaultSandboxLimitMemory},
+		{name: "sandbox default ephemeral storage limit", value: c.DefaultEphemeralStorageLimit},
+		{name: "sandbox default ephemeral storage request", value: c.DefaultEphemeralStorageRequest},
 	} {
 		if err := validatePositiveQuantity(item.name, item.value); err != nil {
 			return err

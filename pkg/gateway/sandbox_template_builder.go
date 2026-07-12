@@ -148,7 +148,7 @@ func (g *Gateway) sandboxPodSpec(
 				Image:           image,
 				ImagePullPolicy: corev1.PullIfNotPresent,
 				Command:         []string{"/bin/sh", "-c", executorCommand},
-				Resources:       ensureEphemeralStorage(resources),
+				Resources:       g.ensureEphemeralStorage(resources),
 				VolumeMounts: []corev1.VolumeMount{
 					{Name: "workspace", MountPath: workspaceDir},
 					{Name: "arl-bin", MountPath: "/arl-bin"},
@@ -235,7 +235,7 @@ func (g *Gateway) sandboxPrivateContainer(spec PrivateContainerSpec, workspaceDi
 		container.Command = []string{"sh", "-c", "sleep infinity"}
 	}
 	if spec.Resources != nil {
-		container.Resources = ensureEphemeralStorage(*spec.Resources)
+		container.Resources = g.ensureEphemeralStorage(*spec.Resources)
 	}
 	if spec.MountWorkspace {
 		mountPath := strings.TrimSpace(spec.WorkspaceMountPath)
@@ -379,18 +379,26 @@ func (g *Gateway) injectProxyEnv(pod *corev1.PodSpec) {
 	}
 }
 
-func ensureEphemeralStorage(resources corev1.ResourceRequirements) corev1.ResourceRequirements {
+func (g *Gateway) ensureEphemeralStorage(resources corev1.ResourceRequirements) corev1.ResourceRequirements {
+	limitStr := g.gwConfig.DefaultEphemeralStorageLimit
+	if limitStr == "" {
+		limitStr = "10Gi"
+	}
+	requestStr := g.gwConfig.DefaultEphemeralStorageRequest
+	if requestStr == "" {
+		requestStr = "100Mi"
+	}
 	if resources.Limits == nil {
 		resources.Limits = corev1.ResourceList{}
 	}
 	if _, ok := resources.Limits[corev1.ResourceEphemeralStorage]; !ok {
-		resources.Limits[corev1.ResourceEphemeralStorage] = resource.MustParse("10Gi")
+		resources.Limits[corev1.ResourceEphemeralStorage] = resource.MustParse(limitStr)
 	}
 	if resources.Requests == nil {
 		resources.Requests = corev1.ResourceList{}
 	}
 	if _, ok := resources.Requests[corev1.ResourceEphemeralStorage]; !ok {
-		resources.Requests[corev1.ResourceEphemeralStorage] = resource.MustParse("100Mi")
+		resources.Requests[corev1.ResourceEphemeralStorage] = resource.MustParse(requestStr)
 	}
 	return resources
 }

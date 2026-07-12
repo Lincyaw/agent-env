@@ -155,6 +155,8 @@ func main() {
 		DefaultSandboxRequestMemory:     cfg.DefaultSandboxRequestMemory,
 		DefaultSandboxLimitCPU:          cfg.DefaultSandboxLimitCPU,
 		DefaultSandboxLimitMemory:       cfg.DefaultSandboxLimitMemory,
+		DefaultEphemeralStorageLimit:    cfg.DefaultEphemeralStorageLimit,
+		DefaultEphemeralStorageRequest:  cfg.DefaultEphemeralStorageRequest,
 		SandboxNetworkPolicyManagement:  cfg.SandboxNetworkPolicyManagement,
 		SandboxRuntimeClassName:         cfg.SandboxRuntimeClassName,
 		SandboxSeccompProfileType:       cfg.SandboxSeccompProfileType,
