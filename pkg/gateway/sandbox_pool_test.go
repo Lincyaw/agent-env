@@ -288,13 +288,13 @@ func TestCreatePoolUsesConfiguredDefaultSandboxResources(t *testing.T) {
 	gw := &Gateway{
 		k8sClient: k8sClient,
 		gwConfig: GatewayConfig{
-			GRPCAuthToken:               "test-token",
-			DefaultSandboxRequestCPU:    "250m",
-			DefaultSandboxRequestMemory: "256Mi",
-			DefaultSandboxLimitCPU:      "8",
-			DefaultSandboxLimitMemory:       "16Gi",
-			DefaultEphemeralStorageLimit:    "10Gi",
-			DefaultEphemeralStorageRequest:  "100Mi",
+			GRPCAuthToken:                  "test-token",
+			DefaultSandboxRequestCPU:       "250m",
+			DefaultSandboxRequestMemory:    "256Mi",
+			DefaultSandboxLimitCPU:         "8",
+			DefaultSandboxLimitMemory:      "16Gi",
+			DefaultEphemeralStorageLimit:   "10Gi",
+			DefaultEphemeralStorageRequest: "100Mi",
 		},
 	}
 

@@ -312,7 +312,9 @@ def create_websocket_proxy(
         InteractiveShellClient instance.
     """
     shell_client = InteractiveShellClient(
-        gateway_url=gateway_url, api_key=api_key, iroh_addr=iroh_addr,
+        gateway_url=gateway_url,
+        api_key=api_key,
+        iroh_addr=iroh_addr,
     )
     try:
         shell_client.connect(session_id)

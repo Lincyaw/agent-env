@@ -80,5 +80,9 @@ exclude = [
 module = ["kubernetes.*"]
 ignore_missing_imports = true
 
+[[tool.mypy.overrides]]
+module = ["iroh", "iroh.*"]
+ignore_missing_imports = true
+
 [tool.uv.sources]
 arl-env = { editable = true, workspace = true }

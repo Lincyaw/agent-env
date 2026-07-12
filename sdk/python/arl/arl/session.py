@@ -220,21 +220,20 @@ class SandboxSession:
             cmd: list[str] = step.get("command", [])
             env_raw = step.get("env")
             env: dict[str, str] | None = (
-                {str(k): str(v) for k, v in env_raw.items()}
-                if isinstance(env_raw, dict)
-                else None
+                {str(k): str(v) for k, v in env_raw.items()} if isinstance(env_raw, dict) else None
             )
             work_dir_raw = step.get("workDir") or step.get("work_dir")
             work_dir = str(work_dir_raw) if work_dir_raw else None
             timeout_raw = (
-                step.get("timeoutSeconds")
-                or step.get("timeout_seconds")
-                or step.get("timeout")
+                step.get("timeoutSeconds") or step.get("timeout_seconds") or step.get("timeout")
             )
             timeout_s = int(str(timeout_raw)) if timeout_raw is not None else None
 
             raw = self._iroh.execute(
-                cmd, env=env, work_dir=work_dir, timeout_seconds=timeout_s,
+                cmd,
+                env=env,
+                work_dir=work_dir,
+                timeout_seconds=timeout_s,
             )
             exit_code_val = raw.get("exit_code", 0)
             output = StepOutput(
@@ -248,11 +247,13 @@ class SandboxSession:
             if on_output is not None:
                 on_output(output.stdout, output.stderr)
 
-        return ExecuteResponse.model_validate({
-            "sessionID": self._session_id or "",
-            "results": [r.model_dump() for r in results],
-            "totalDurationMs": 0,
-        })
+        return ExecuteResponse.model_validate(
+            {
+                "sessionID": self._session_id or "",
+                "results": [r.model_dump() for r in results],
+                "totalDurationMs": 0,
+            }
+        )
 
     def execute(
         self,
@@ -345,11 +346,13 @@ class SandboxSession:
             raw = self._read_content(content)
             result = iroh.upload_file(path, raw)
             bw = result.get("bytes_written", len(raw))
-            return UploadFileResponse.model_validate({
-                "path": str(result.get("path", path)),
-                "bytesWritten": int(str(bw)),
-                "sha256": str(result.get("sha256", "")),
-            })
+            return UploadFileResponse.model_validate(
+                {
+                    "path": str(result.get("path", path)),
+                    "bytesWritten": int(str(bw)),
+                    "sha256": str(result.get("sha256", "")),
+                }
+            )
         return self._client.upload_file(
             self._session_id,
             path=path,

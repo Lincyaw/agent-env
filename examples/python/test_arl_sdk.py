@@ -657,9 +657,7 @@ def test_list_dir(args: argparse.Namespace) -> None:
         )
 
         # List workspace root
-        result = session.execute(
-            [{"name": "ls_root", "command": ["ls", "-1", "/workspace"]}]
-        )
+        result = session.execute([{"name": "ls_root", "command": ["ls", "-1", "/workspace"]}])
         assert_step_success(result, "a.txt")
         assert_step_success(result, "b.txt")
         assert_step_success(result, "subdir")

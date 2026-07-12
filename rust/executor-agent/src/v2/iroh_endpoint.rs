@@ -1,5 +1,7 @@
 use super::connection::ConnectionHandler;
-use iroh::{Endpoint, RelayMode, SecretKey, endpoint::presets};
+use iroh::{Endpoint, SecretKey, endpoint::presets};
+#[cfg(test)]
+use iroh::RelayMode;
 use log::{error, info, warn};
 use std::io;
 use std::path::PathBuf;
@@ -18,12 +20,15 @@ impl IrohEndpoint {
     pub async fn new(addr_file: PathBuf) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let secret_key = load_or_generate_secret_key();
 
-        let endpoint = Endpoint::builder(presets::Minimal)
+        let endpoint = Endpoint::builder(presets::N0)
             .secret_key(secret_key)
             .alpns(vec![ALPN.to_vec()])
-            .relay_mode(RelayMode::Disabled)
             .bind()
             .await?;
+
+        // Wait for relay connection + address publication via PKARR
+        endpoint.online().await;
+        info!("iroh endpoint online, id={}", endpoint.id());
 
         let ep = IrohEndpoint { endpoint, addr_file };
         ep.write_addr_file()?;
@@ -34,7 +39,7 @@ impl IrohEndpoint {
         &self,
         workspace: String,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        info!("iroh endpoint listening, node_id={}", self.endpoint.id());
+        info!("iroh endpoint serving, id={}", self.endpoint.id());
 
         loop {
             let incoming = match self.endpoint.accept().await {
@@ -76,10 +81,12 @@ impl IrohEndpoint {
             std::fs::create_dir_all(parent)?;
         }
 
-        let addr = self.endpoint.addr();
-        let serialized = serde_json::to_string(&addr)?;
-        std::fs::write(&self.addr_file, &serialized)?;
-        info!("iroh addr written to {}", self.addr_file.display());
+        // Write just the EndpointId (hex string).
+        // With presets::N0, the address is published via PKARR/DNS —
+        // clients only need the ID to connect.
+        let id_str = self.endpoint.id().to_string();
+        std::fs::write(&self.addr_file, &id_str)?;
+        info!("iroh endpoint id written to {}", self.addr_file.display());
         Ok(())
     }
 }
@@ -119,11 +126,14 @@ mod tests {
 
     #[tokio::test]
     async fn test_iroh_ping_pong() {
+        // Tests use Minimal + RelayMode::Default to avoid depending on
+        // n0 DNS infrastructure. Both sides are in-process so direct
+        // addr exchange works.
         let server_key = SecretKey::generate();
         let server = Endpoint::builder(presets::Minimal)
             .secret_key(server_key)
             .alpns(vec![ALPN.to_vec()])
-            .relay_mode(RelayMode::Disabled)
+            .relay_mode(RelayMode::Default)
             .bind()
             .await
             .expect("bind server");
@@ -149,7 +159,7 @@ mod tests {
         });
 
         let client = Endpoint::builder(presets::Minimal)
-            .relay_mode(RelayMode::Disabled)
+            .relay_mode(RelayMode::Default)
             .bind()
             .await
             .expect("bind client");
@@ -161,7 +171,6 @@ mod tests {
 
         let (mut send, recv) = conn.open_bi().await.expect("open bi");
 
-        // Send a typed protobuf ping: [1B type][4B len][proto]
         let ping = proto::Request {
             tag: 1,
             kind: Some(proto::request::Kind::Ping(proto::PingRequest {})),
@@ -176,15 +185,12 @@ mod tests {
             .expect("write len");
         send.write_all(&encoded).await.expect("write ping");
 
-        // Read typed protobuf response: [1B type][4B len][proto]
         let handle = Handle::current();
         let response = tokio::task::spawn_blocking(move || {
             let mut reader = SyncRecvStream::new(recv, handle);
-            // Read type byte
             let mut type_buf = [0u8; 1];
             std::io::Read::read_exact(&mut reader, &mut type_buf).expect("read type");
             assert_eq!(type_buf[0], MSG_TYPE_RESPONSE);
-            // Read length
             let mut len_buf = [0u8; 4];
             std::io::Read::read_exact(&mut reader, &mut len_buf).expect("read len");
             let msg_len = u32::from_be_bytes(len_buf) as usize;

@@ -171,4 +171,3 @@ func (g *Gateway) getOrStartExecuteOperation(sessionID string, req ExecuteReques
 
 	return op, true, nil
 }
-

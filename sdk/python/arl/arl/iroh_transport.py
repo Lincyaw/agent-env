@@ -1,90 +1,83 @@
 """iroh QUIC direct-connect transport for high-performance data-plane operations.
 
-When the ``iroh`` package is installed (``pip install arl-env[direct]``),
-:class:`IrohTransport` opens a QUIC connection to an executor agent,
-bypassing the gateway HTTP path for file I/O, command execution, and
+When ``iroh`` and ``protobuf`` are installed (``pip install arl-env[direct]``),
+:class:`IrohTransport` opens a QUIC connection to an executor agent via iroh,
+bypassing the gateway HTTP path for command execution, file I/O, and
 interactive shell streaming.
 
-Wire protocol -- each QUIC bidi stream carries typed frames::
+Wire protocol -- typed framing on each QUIC bidi stream::
 
-    [1 byte frame type] [4 bytes big-endian payload length] [JSON payload]
+    [1 byte msg type] [4 bytes big-endian length] [protobuf payload]
 
-Frame types:
+Message types:
 
-- ``0x01`` -- Request  (client -> executor)
-- ``0x02`` -- Response (executor -> client, final)
-- ``0x03`` -- Event    (executor -> client, streaming)
+- ``0x01`` -- Request  (client -> executor, protobuf ``Request``)
+- ``0x02`` -- Response (executor -> client, protobuf ``Response``)
+- ``0x03`` -- Event    (executor -> client, protobuf ``Event``)
 
-The ``addr_str`` parameter accepts an iroh endpoint ID as a hex string.
+The ``addr_str`` accepts an iroh EndpointId hex string. With ``preset_n0``,
+iroh resolves the full address via DNS/PKARR automatically.
 """
 
 from __future__ import annotations
 
 import asyncio
-import json
 import struct
 import threading
-import uuid
-from collections.abc import AsyncIterator, Coroutine
+from collections.abc import Coroutine
 from typing import TypeVar
 
 _T = TypeVar("_T")
 
 ALPN = b"arl/executor/v2"
-FRAME_REQUEST = 0x01
-FRAME_RESPONSE = 0x02
-FRAME_EVENT = 0x03
-_MAX_FRAME_SIZE = 64 * 1024 * 1024  # 64 MiB safety cap
+MSG_REQUEST = 0x01
+MSG_RESPONSE = 0x02
+MSG_EVENT = 0x03
+_MAX_MSG_SIZE = 64 * 1024 * 1024
 
 
 class IrohTransport:
-    """Async QUIC connection to an executor agent via iroh.
-
-    All public methods are coroutines.  For synchronous usage wrap
-    with :class:`SyncIrohBridge`.
-    """
+    """Async QUIC connection to an executor agent via iroh."""
 
     def __init__(self, addr_str: str) -> None:
         try:
             __import__("iroh")
         except ImportError:
             raise ImportError(
-                "iroh package required for direct connect: "
-                "pip install arl-env[direct]"
+                "iroh package required for direct connect: pip install arl-env[direct]"
             ) from None
-        self._addr_str = addr_str
+        self._addr_str = addr_str.strip()
         self._endpoint: object | None = None
         self._conn: object | None = None
+        self._tag_counter = 0
+
+    def _next_tag(self) -> int:
+        self._tag_counter += 1
+        return self._tag_counter
 
     @property
     def is_connected(self) -> bool:
-        """True when a QUIC connection is established."""
         return self._conn is not None
 
     async def connect(self) -> None:
-        """Establish the QUIC connection to the remote executor."""
         import iroh
         import iroh.iroh_ffi
 
         loop = asyncio.get_running_loop()
-        # uniffi requires a BaseEventLoop; the running loop satisfies this.
         iroh.iroh_ffi.uniffi_set_event_loop(loop)  # type: ignore[arg-type]
 
         opts = iroh.EndpointOptions(
-            preset=iroh.preset_minimal(),
+            preset=iroh.preset_n0(),
             alpns=[ALPN],
         )
-
         endpoint = await iroh.Endpoint.bind(opts)
         self._endpoint = endpoint
+
         remote_id = iroh.EndpointId.from_string(self._addr_str)
-        remote_addr = iroh.EndpointAddr(
-            id=remote_id, relay_url=None, addresses=[],
-        )
+        remote_addr = iroh.EndpointAddr(id=remote_id, relay_url=None, addresses=[])
         self._conn = await endpoint.connect(remote_addr, ALPN)
 
     async def close(self) -> None:
-        """Tear down the connection and endpoint."""
         import iroh
 
         conn = self._conn
@@ -96,41 +89,26 @@ class IrohTransport:
             await ep.close()
         self._endpoint = None
 
-    # ---- framing helpers ----
+    # ---- wire helpers ----
 
     @staticmethod
-    async def _send_frame(send: object, frame_type: int, data: bytes) -> None:
-        """Write ``[1B type][4B BE length][payload]`` to a QUIC send stream."""
-        import iroh
-
-        header = struct.pack(">BI", frame_type, len(data))
-        if isinstance(send, iroh.SendStream):
-            await send.write_all(header + data)
-        else:
-            await send.write_all(header + data)  # type: ignore[attr-defined]
+    async def _send_typed(send: object, msg_type: int, data: bytes) -> None:
+        header = struct.pack(">BI", msg_type, len(data))
+        await send.write_all(header + data)  # type: ignore[attr-defined]
 
     @staticmethod
-    async def _recv_frame(recv: object) -> tuple[int, bytes]:
-        """Read one typed frame from a QUIC recv stream."""
-        import iroh
-
-        if isinstance(recv, iroh.RecvStream):
-            header = await recv.read_exact(5)
-        else:
-            header = await recv.read_exact(5)  # type: ignore[attr-defined]
-        frame_type = header[0]
+    async def _recv_typed(recv: object) -> tuple[int, bytes]:
+        header = await recv.read_exact(5)  # type: ignore[attr-defined]
+        msg_type = header[0]
         length = struct.unpack(">I", header[1:5])[0]
-        if length > _MAX_FRAME_SIZE:
-            raise ValueError(f"frame exceeds {_MAX_FRAME_SIZE} byte limit: {length}")
-        if isinstance(recv, iroh.RecvStream):
-            data = await recv.read_exact(length)
-        else:
-            data = await recv.read_exact(length)  # type: ignore[attr-defined]
-        return frame_type, data
+        if length > _MAX_MSG_SIZE:
+            raise ValueError(f"message too large: {length}")
+        data = await recv.read_exact(length)  # type: ignore[attr-defined]
+        return msg_type, data
 
     def _require_conn(self) -> object:
         if self._conn is None:
-            raise RuntimeError("Not connected. Call connect() first.")
+            raise RuntimeError("Not connected")
         return self._conn
 
     # ---- data-plane operations ----
@@ -143,191 +121,216 @@ class IrohTransport:
         work_dir: str | None = None,
         timeout_seconds: int | None = None,
     ) -> dict[str, object]:
-        """Run a command and return ``{stdout, stderr, exit_code}``."""
+        """Run a command, collect stdout/stderr/exit_code."""
         import iroh
+
+        from .pb import executor_v2_pb2 as pb
 
         conn = self._require_conn()
         if not isinstance(conn, iroh.Connection):
-            raise RuntimeError("Invalid connection state")
+            raise RuntimeError("Invalid connection")
+
         bi = await conn.open_bi()
-        send_stream = bi.send()
-        recv_stream = bi.recv()
+        send = bi.send()
+        recv = bi.recv()
 
-        req: dict[str, object] = {
-            "id": str(uuid.uuid4()),
-            "type": "exec",
-            "cmd": cmd,
-        }
+        tag = self._next_tag()
+        req = pb.Request(tag=tag)
+        spawn = pb.SpawnRequest(command=cmd, stdin=False)
         if env:
-            req["env"] = env
+            for k, v in env.items():
+                spawn.env[k] = v
         if work_dir:
-            req["workdir"] = work_dir
-        if timeout_seconds is not None:
-            req["timeout"] = timeout_seconds
+            spawn.working_dir = work_dir
+        if timeout_seconds:
+            spawn.timeout_seconds = timeout_seconds
+        req.spawn.CopyFrom(spawn)
 
-        await self._send_frame(send_stream, FRAME_REQUEST, json.dumps(req).encode())
-        await send_stream.finish()
+        await self._send_typed(send, MSG_REQUEST, req.SerializeToString())
 
-        stdout_parts: list[str] = []
-        stderr_parts: list[str] = []
+        stdout_parts: list[bytes] = []
+        stderr_parts: list[bytes] = []
         exit_code = 0
 
         while True:
             try:
-                frame_type, data = await self._recv_frame(recv_stream)
+                msg_type, data = await self._recv_typed(recv)
             except Exception:
                 break
-            msg: dict[str, object] = json.loads(data)
-            out = msg.get("stdout", "")
-            err = msg.get("stderr", "")
-            if isinstance(out, str) and out:
-                stdout_parts.append(out)
-            if isinstance(err, str) and err:
-                stderr_parts.append(err)
-            if frame_type == FRAME_RESPONSE:
-                ec = msg.get("exit_code", 0)
-                if isinstance(ec, int):
-                    exit_code = ec
-                break
 
+            if msg_type == MSG_RESPONSE:
+                resp = pb.Response()
+                resp.ParseFromString(data)
+                if resp.HasField("error"):
+                    raise RuntimeError(f"executor error: {resp.error.message}")
+                if resp.HasField("spawn"):
+                    continue
+                break
+            elif msg_type == MSG_EVENT:
+                evt = pb.Event()
+                evt.ParseFromString(data)
+                if evt.HasField("stdout"):
+                    stdout_parts.append(evt.stdout.data)
+                elif evt.HasField("stderr"):
+                    stderr_parts.append(evt.stderr.data)
+                elif evt.HasField("exit"):
+                    exit_code = evt.exit.exit_code
+                    break
+
+        await send.finish()
         return {
-            "stdout": "".join(stdout_parts),
-            "stderr": "".join(stderr_parts),
+            "stdout": b"".join(stdout_parts).decode("utf-8", errors="replace"),
+            "stderr": b"".join(stderr_parts).decode("utf-8", errors="replace"),
             "exit_code": exit_code,
         }
 
-    async def execute_stream(
-        self,
-        cmd: list[str],
-        *,
-        env: dict[str, str] | None = None,
-        work_dir: str | None = None,
-        timeout_seconds: int | None = None,
-    ) -> AsyncIterator[dict[str, object]]:
-        """Run a command and yield output events as they arrive."""
-        import iroh
-
-        conn = self._require_conn()
-        if not isinstance(conn, iroh.Connection):
-            raise RuntimeError("Invalid connection state")
-        bi = await conn.open_bi()
-        send_stream = bi.send()
-        recv_stream = bi.recv()
-
-        req: dict[str, object] = {
-            "id": str(uuid.uuid4()),
-            "type": "exec",
-            "cmd": cmd,
-        }
-        if env:
-            req["env"] = env
-        if work_dir:
-            req["workdir"] = work_dir
-        if timeout_seconds is not None:
-            req["timeout"] = timeout_seconds
-
-        await self._send_frame(send_stream, FRAME_REQUEST, json.dumps(req).encode())
-        await send_stream.finish()
-
-        while True:
-            try:
-                frame_type, data = await self._recv_frame(recv_stream)
-            except Exception:
-                break
-            msg: dict[str, object] = json.loads(data)
-            yield msg
-            if frame_type == FRAME_RESPONSE:
-                break
-
     async def upload_file(self, path: str, data: bytes) -> dict[str, object]:
-        """Upload a file -- raw bytes on the QUIC stream, no base64."""
+        """Upload file via protobuf write request + raw data frames."""
         import iroh
+
+        from .pb import executor_v2_pb2 as pb
 
         conn = self._require_conn()
         if not isinstance(conn, iroh.Connection):
-            raise RuntimeError("Invalid connection state")
+            raise RuntimeError("Invalid connection")
+
         bi = await conn.open_bi()
-        send_stream = bi.send()
-        recv_stream = bi.recv()
+        send = bi.send()
+        recv = bi.recv()
 
-        req_payload = json.dumps(
-            {"id": str(uuid.uuid4()), "type": "write", "path": path}
-        ).encode()
-        await self._send_frame(send_stream, FRAME_REQUEST, req_payload)
-        # Raw file bytes follow the request frame -- no framing overhead.
-        await send_stream.write_all(data)
-        await send_stream.finish()
+        tag = self._next_tag()
+        req = pb.Request(tag=tag)
+        req.write.CopyFrom(pb.WriteRequest(path=path))
+        await self._send_typed(send, MSG_REQUEST, req.SerializeToString())
 
-        _, resp_data = await self._recv_frame(recv_stream)
-        resp: dict[str, object] = json.loads(resp_data)
-        return resp
+        # Send raw data as length-prefixed frames: [4B len][bytes]...[4B zero]
+        chunk_size = 1024 * 1024
+        offset = 0
+        while offset < len(data):
+            chunk = data[offset : offset + chunk_size]
+            await send.write_all(struct.pack(">I", len(chunk)) + chunk)  # type: ignore[attr-defined]
+            offset += len(chunk)
+        await send.write_all(struct.pack(">I", 0))  # type: ignore[attr-defined]
+        await send.finish()
+
+        _, resp_data = await self._recv_typed(recv)
+        resp = pb.Response()
+        resp.ParseFromString(resp_data)
+        if resp.HasField("error"):
+            raise RuntimeError(f"write error: {resp.error.message}")
+        if resp.HasField("write"):
+            return {
+                "bytes_written": resp.write.bytes_written,
+                "sha256": resp.write.sha256,
+            }
+        return {}
 
     async def download_file(self, path: str) -> bytes:
-        """Download a file -- raw bytes from the QUIC stream."""
+        """Download file via protobuf read request + raw data frames."""
         import iroh
+
+        from .pb import executor_v2_pb2 as pb
 
         conn = self._require_conn()
         if not isinstance(conn, iroh.Connection):
-            raise RuntimeError("Invalid connection state")
+            raise RuntimeError("Invalid connection")
+
         bi = await conn.open_bi()
-        send_stream = bi.send()
-        recv_stream = bi.recv()
+        send = bi.send()
+        recv = bi.recv()
 
-        req_payload = json.dumps(
-            {"id": str(uuid.uuid4()), "type": "read", "path": path}
-        ).encode()
-        await self._send_frame(send_stream, FRAME_REQUEST, req_payload)
-        await send_stream.finish()
+        tag = self._next_tag()
+        req = pb.Request(tag=tag)
+        req.read.CopyFrom(pb.ReadRequest(path=path))
+        await self._send_typed(send, MSG_REQUEST, req.SerializeToString())
+        await send.finish()
 
+        # Read response chunks until final response
         chunks: list[bytes] = []
         while True:
             try:
-                chunk = await recv_stream.read(65536)
-                if not chunk:
-                    break
-                chunks.append(chunk)
+                _, data = await self._recv_typed(recv)
             except Exception:
                 break
+            resp = pb.Response()
+            resp.ParseFromString(data)
+            if resp.HasField("error"):
+                raise RuntimeError(f"read error: {resp.error.message}")
+            if resp.HasField("read"):
+                if resp.read.content:
+                    chunks.append(resp.read.content)
+                if resp.read.sha256:
+                    break
         return b"".join(chunks)
 
-    async def open_shell(self) -> tuple[object, object]:
-        """Open a bidi stream for an interactive shell session.
-
-        Returns ``(send_stream, recv_stream)`` for the caller to drive.
-        The initial shell request frame is sent before returning.
-        """
+    async def stat(self, path: str) -> dict[str, object]:
+        """Get file metadata."""
         import iroh
+
+        from .pb import executor_v2_pb2 as pb
 
         conn = self._require_conn()
         if not isinstance(conn, iroh.Connection):
-            raise RuntimeError("Invalid connection state")
+            raise RuntimeError("Invalid connection")
+
         bi = await conn.open_bi()
-        send_stream = bi.send()
-        recv_stream = bi.recv()
+        send = bi.send()
+        recv = bi.recv()
 
-        req_payload = json.dumps(
-            {"id": str(uuid.uuid4()), "type": "shell"}
-        ).encode()
-        await self._send_frame(send_stream, FRAME_REQUEST, req_payload)
+        tag = self._next_tag()
+        req = pb.Request(tag=tag)
+        req.stat.CopyFrom(pb.StatRequest(path=path))
+        await self._send_typed(send, MSG_REQUEST, req.SerializeToString())
+        await send.finish()
 
-        return send_stream, recv_stream
+        _, data = await self._recv_typed(recv)
+        resp = pb.Response()
+        resp.ParseFromString(data)
+        if resp.HasField("error"):
+            raise RuntimeError(f"stat error: {resp.error.message}")
+        if resp.HasField("stat"):
+            return {
+                "exists": resp.stat.exists,
+                "is_dir": resp.stat.is_dir,
+                "size": resp.stat.size,
+                "mode": resp.stat.mode,
+                "modified": resp.stat.modified,
+            }
+        return {"exists": False}
+
+    async def ping(self) -> bool:
+        """Send a ping, return True if pong received."""
+        import iroh
+
+        from .pb import executor_v2_pb2 as pb
+
+        conn = self._require_conn()
+        if not isinstance(conn, iroh.Connection):
+            raise RuntimeError("Invalid connection")
+
+        bi = await conn.open_bi()
+        send = bi.send()
+        recv = bi.recv()
+
+        tag = self._next_tag()
+        req = pb.Request(tag=tag)
+        req.ping.CopyFrom(pb.PingRequest())
+        await self._send_typed(send, MSG_REQUEST, req.SerializeToString())
+        await send.finish()
+
+        _, data = await self._recv_typed(recv)
+        resp = pb.Response()
+        resp.ParseFromString(data)
+        return resp.HasField("ping")
 
 
 class SyncIrohBridge:
-    """Synchronous wrapper that runs :class:`IrohTransport` in a background thread.
-
-    The QUIC connection is established during construction; if it fails
-    the background thread is cleaned up and the exception propagates.
-    """
+    """Synchronous wrapper running :class:`IrohTransport` in a background thread."""
 
     def __init__(self, addr_str: str) -> None:
         self._transport = IrohTransport(addr_str)
         self._loop = asyncio.new_event_loop()
-        self._thread = threading.Thread(
-            target=self._run_loop,
-            daemon=True,
-            name="iroh-bridge",
-        )
+        self._thread = threading.Thread(target=self._run_loop, daemon=True, name="iroh-bridge")
         self._thread.start()
         try:
             self._run_coro(self._transport.connect())
@@ -341,7 +344,7 @@ class SyncIrohBridge:
 
     def _run_coro(self, coro: Coroutine[object, object, _T]) -> _T:
         fut = asyncio.run_coroutine_threadsafe(coro, self._loop)
-        return fut.result()
+        return fut.result(timeout=30)
 
     def _stop_loop(self) -> None:
         self._loop.call_soon_threadsafe(self._loop.stop)
@@ -350,7 +353,6 @@ class SyncIrohBridge:
 
     @property
     def is_connected(self) -> bool:
-        """True when the underlying QUIC connection is established."""
         return self._transport.is_connected
 
     def execute(
@@ -361,26 +363,23 @@ class SyncIrohBridge:
         work_dir: str | None = None,
         timeout_seconds: int | None = None,
     ) -> dict[str, object]:
-        """Run a command synchronously via QUIC."""
         return self._run_coro(
-            self._transport.execute(
-                cmd,
-                env=env,
-                work_dir=work_dir,
-                timeout_seconds=timeout_seconds,
-            )
+            self._transport.execute(cmd, env=env, work_dir=work_dir, timeout_seconds=timeout_seconds)
         )
 
     def upload_file(self, path: str, data: bytes) -> dict[str, object]:
-        """Upload a file synchronously via QUIC."""
         return self._run_coro(self._transport.upload_file(path, data))
 
     def download_file(self, path: str) -> bytes:
-        """Download a file synchronously via QUIC."""
         return self._run_coro(self._transport.download_file(path))
 
+    def stat(self, path: str) -> dict[str, object]:
+        return self._run_coro(self._transport.stat(path))
+
+    def ping(self) -> bool:
+        return self._run_coro(self._transport.ping())
+
     def close(self) -> None:
-        """Close the connection and stop the background thread."""
         try:
             self._run_coro(self._transport.close())
         except Exception:
