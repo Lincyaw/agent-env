@@ -8,7 +8,7 @@ import re
 from collections.abc import Callable, Iterable, Iterator
 from contextlib import suppress
 from pathlib import Path
-from typing import Any, BinaryIO
+from typing import TYPE_CHECKING, Any, BinaryIO
 
 from arl.configenv import ConfigEnvSpec
 from arl.gateway_client import GatewayClient
@@ -16,19 +16,21 @@ from arl.types import (
     ContainerExecuteResponse,
     DevboxConfig,
     ExecuteResponse,
-    ListDirResult,
     LogEntry,
     PrivateContainerSpec,
     ReplayResponse,
     ResourceRequirements,
     SessionInfo,
-    StatResult,
+    StepOutput,
     StepResult,
     ToolResult,
     ToolsRegistry,
     ToolsSpec,
     UploadFileResponse,
 )
+
+if TYPE_CHECKING:
+    from arl.iroh_transport import SyncIrohBridge
 
 _SAFE_TOOL_NAME = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]*$")
 
@@ -87,6 +89,7 @@ class SandboxSession:
         allocation_timeout_seconds: int | None = None,
         api_key: str | None = None,
         private_containers: Iterable[PrivateContainerSpec | dict[str, Any]] | None = None,
+        iroh_addr: str | None = None,
     ) -> None:
         self.image = image or ""
         self.profile = profile or ""
@@ -101,6 +104,8 @@ class SandboxSession:
         self._session_id: str | None = None
         self._session_info: SessionInfo | None = None
         self._delete_on_exit = True
+        self._iroh_addr = iroh_addr
+        self._iroh: SyncIrohBridge | None = None
 
     @classmethod
     def attach(
@@ -109,6 +114,7 @@ class SandboxSession:
         gateway_url: str = "",
         timeout: float = 300.0,
         api_key: str | None = None,
+        iroh_addr: str | None = None,
     ) -> SandboxSession:
         """Attach to an existing session by session ID.
 
@@ -121,6 +127,7 @@ class SandboxSession:
             gateway_url: Gateway base URL.
             timeout: HTTP request timeout.
             api_key: API key for authentication.
+            iroh_addr: Optional iroh endpoint address for direct QUIC transport.
 
         Returns:
             SandboxSession bound to the existing session.
@@ -134,6 +141,7 @@ class SandboxSession:
             gateway_url=gateway_url,
             timeout=timeout,
             api_key=api_key,
+            iroh_addr=iroh_addr,
         )
         try:
             info = instance._client.get_session(session_id)
@@ -176,6 +184,76 @@ class SandboxSession:
         self.profile = info.profile
         return info
 
+    def _get_iroh(self) -> SyncIrohBridge | None:
+        """Lazily create the iroh QUIC transport on first use."""
+        if self._iroh_addr is None:
+            return None
+        if self._iroh is None:
+            from arl.iroh_transport import SyncIrohBridge
+
+            self._iroh = SyncIrohBridge(self._iroh_addr)
+        return self._iroh
+
+    @staticmethod
+    def _read_content(content: str | bytes | Iterable[bytes] | BinaryIO) -> bytes:
+        """Materialize mixed content types into a single bytes object."""
+        if isinstance(content, str):
+            return content.encode()
+        if isinstance(content, bytes):
+            return content
+        read_fn = getattr(content, "read", None)
+        if callable(read_fn):
+            result: bytes = read_fn()
+            return result
+        return b"".join(content)
+
+    def _execute_via_iroh(
+        self,
+        steps: list[dict[str, Any]],
+        on_output: Callable[[str, str], None] | None = None,
+    ) -> ExecuteResponse:
+        """Execute steps directly via iroh QUIC, bypassing the gateway."""
+        if self._iroh is None:
+            raise RuntimeError("iroh transport not initialized")
+        results: list[StepResult] = []
+        for i, step in enumerate(steps):
+            cmd: list[str] = step.get("command", [])
+            env_raw = step.get("env")
+            env: dict[str, str] | None = (
+                {str(k): str(v) for k, v in env_raw.items()}
+                if isinstance(env_raw, dict)
+                else None
+            )
+            work_dir_raw = step.get("workDir") or step.get("work_dir")
+            work_dir = str(work_dir_raw) if work_dir_raw else None
+            timeout_raw = (
+                step.get("timeoutSeconds")
+                or step.get("timeout_seconds")
+                or step.get("timeout")
+            )
+            timeout_s = int(str(timeout_raw)) if timeout_raw is not None else None
+
+            raw = self._iroh.execute(
+                cmd, env=env, work_dir=work_dir, timeout_seconds=timeout_s,
+            )
+            exit_code_val = raw.get("exit_code", 0)
+            output = StepOutput(
+                stdout=str(raw.get("stdout", "")),
+                stderr=str(raw.get("stderr", "")),
+                exit_code=int(str(exit_code_val)),
+            )
+            results.append(
+                StepResult(index=i, name=step.get("name", ""), output=output),
+            )
+            if on_output is not None:
+                on_output(output.stdout, output.stderr)
+
+        return ExecuteResponse.model_validate({
+            "sessionID": self._session_id or "",
+            "results": [r.model_dump() for r in results],
+            "totalDurationMs": 0,
+        })
+
     def execute(
         self,
         steps: list[dict[str, Any]],
@@ -196,6 +274,9 @@ class SandboxSession:
         """
         if self._session_id is None:
             raise RuntimeError("No session created. Call create_sandbox() first.")
+        iroh = self._get_iroh()
+        if iroh is not None:
+            return self._execute_via_iroh(steps, on_output=on_output)
         return self._client.execute(
             self._session_id,
             steps,
@@ -259,6 +340,16 @@ class SandboxSession:
         """
         if self._session_id is None:
             raise RuntimeError("No session created. Call create_sandbox() first.")
+        iroh = self._get_iroh()
+        if iroh is not None:
+            raw = self._read_content(content)
+            result = iroh.upload_file(path, raw)
+            bw = result.get("bytes_written", len(raw))
+            return UploadFileResponse.model_validate({
+                "path": str(result.get("path", path)),
+                "bytesWritten": int(str(bw)),
+                "sha256": str(result.get("sha256", "")),
+            })
         return self._client.upload_file(
             self._session_id,
             path=path,
@@ -270,6 +361,9 @@ class SandboxSession:
         """Download one file from the session workspace into memory."""
         if self._session_id is None:
             raise RuntimeError("No session created. Call create_sandbox() first.")
+        iroh = self._get_iroh()
+        if iroh is not None:
+            return iroh.download_file(path)
         return self._client.download_file(self._session_id, path)
 
     def upload_path(
@@ -293,24 +387,6 @@ class SandboxSession:
         if self._session_id is None:
             raise RuntimeError("No session created. Call create_sandbox() first.")
         self._client.download_path(self._session_id, remote_path, local_path)
-
-    def stat_file(self, path: str) -> StatResult:
-        """Get file metadata."""
-        if self._session_id is None:
-            raise RuntimeError("No session created. Call create_sandbox() first.")
-        return self._client.stat_file(self._session_id, path)
-
-    def list_dir(self, path: str, recursive: bool = False) -> ListDirResult:
-        """List directory contents."""
-        if self._session_id is None:
-            raise RuntimeError("No session created. Call create_sandbox() first.")
-        return self._client.list_dir(self._session_id, path, recursive=recursive)
-
-    def send_stdin(self, handle: str, data: str) -> None:
-        """Send stdin data to a running process."""
-        if self._session_id is None:
-            raise RuntimeError("No session created. Call create_sandbox() first.")
-        self._client.send_stdin(self._session_id, handle, data)
 
     def iter_download(self, path: str, chunk_size: int = 1024 * 1024) -> Iterator[bytes]:
         """Iterate over a session file as byte chunks."""
@@ -433,16 +509,6 @@ class SandboxSession:
             stderr=step.output.stderr,
         )
 
-    def get_iroh_addr(self) -> str:
-        """Fetch the iroh direct-connect endpoint address for this session.
-
-        Returns an empty string if the executor is not running with v2
-        protocol or the address is not yet available.
-        """
-        if self._session_id is None:
-            raise RuntimeError("No session created. Call create_sandbox() first.")
-        return self._client.get_iroh_addr(self._session_id)
-
     def suspend(self) -> None:
         """Suspend the devbox session (keeps storage, terminates pod)."""
         if self._session_id is None:
@@ -464,7 +530,10 @@ class SandboxSession:
         self._session_info = None
 
     def close(self) -> None:
-        """Close the underlying HTTP client."""
+        """Close the underlying HTTP client and iroh transport (if any)."""
+        if self._iroh is not None:
+            self._iroh.close()
+            self._iroh = None
         self._client.close()
 
     def __enter__(self) -> SandboxSession:
@@ -534,6 +603,7 @@ class ManagedSession(SandboxSession):
         api_key: str | None = None,
         private_containers: Iterable[PrivateContainerSpec | dict[str, Any]] | None = None,
         mode: str | None = None,
+        iroh_addr: str | None = None,
     ) -> None:
         super().__init__(
             image=image,
@@ -544,6 +614,7 @@ class ManagedSession(SandboxSession):
             api_key=api_key,
             allocation_timeout_seconds=allocation_timeout_seconds,
             private_containers=private_containers,
+            iroh_addr=iroh_addr,
         )
         self._image = image
         self._profile = profile
@@ -628,6 +699,7 @@ class DevboxSession(SandboxSession):
         allocation_timeout_seconds: int | None = None,
         api_key: str | None = None,
         private_containers: Iterable[PrivateContainerSpec | dict[str, Any]] | None = None,
+        iroh_addr: str | None = None,
     ) -> None:
         super().__init__(
             image=image,
@@ -640,4 +712,5 @@ class DevboxSession(SandboxSession):
             allocation_timeout_seconds=allocation_timeout_seconds,
             api_key=api_key,
             private_containers=private_containers,
+            iroh_addr=iroh_addr,
         )
