@@ -51,6 +51,26 @@ pub enum V2Request {
     Ping {
         id: String,
     },
+    Tunnel {
+        id: String,
+        params: TunnelParams,
+    },
+    TunnelData {
+        id: String,
+        params: TunnelDataParams,
+    },
+    TunnelClose {
+        id: String,
+        params: TunnelCloseParams,
+    },
+    Subscribe {
+        id: String,
+        params: SubscribeParams,
+    },
+    Unsubscribe {
+        id: String,
+        params: UnsubscribeParams,
+    },
 }
 
 impl V2Request {
@@ -67,6 +87,11 @@ impl V2Request {
             Self::Stat { id, .. } => id,
             Self::ListDir { id, .. } => id,
             Self::Ping { id } => id,
+            Self::Tunnel { id, .. } => id,
+            Self::TunnelData { id, .. } => id,
+            Self::TunnelClose { id, .. } => id,
+            Self::Subscribe { id, .. } => id,
+            Self::Unsubscribe { id, .. } => id,
         }
     }
 }
@@ -150,6 +175,47 @@ pub struct ListDirParams {
     pub recursive: bool,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct TunnelParams {
+    pub target: String,
+    #[serde(default)]
+    pub handle: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TunnelDataParams {
+    pub handle: String,
+    pub data: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TunnelCloseParams {
+    pub handle: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SubscribeParams {
+    pub events: Vec<SubscribeEventSpec>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum SubscribeEventSpec {
+    FsChange {
+        path: String,
+        #[serde(default)]
+        recursive: bool,
+    },
+    ProcessExit {
+        handle: String,
+    },
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UnsubscribeParams {
+    pub subscription_id: String,
+}
+
 // ---------------------------------------------------------------------------
 // Responses (server -> client, correlated by id)
 // ---------------------------------------------------------------------------
@@ -223,6 +289,10 @@ pub enum V2Event {
     Stdout { handle: String, data: String },
     Stderr { handle: String, data: String },
     Exit { handle: String, exit_code: i32 },
+    TunnelData { handle: String, data: String },
+    TunnelClosed { handle: String, reason: String },
+    FsChange { subscription_id: String, path: String, change_type: String },
+    ProcessExit { subscription_id: String, handle: String, exit_code: i32 },
 }
 
 // ---------------------------------------------------------------------------
@@ -275,6 +345,16 @@ pub struct DirEntry {
     pub name: String,
     pub is_dir: bool,
     pub size: u64,
+}
+
+#[derive(Debug, Serialize)]
+pub struct TunnelResult {
+    pub handle: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SubscribeResult {
+    pub subscription_id: String,
 }
 
 #[cfg(test)]
@@ -410,5 +490,128 @@ mod tests {
         let json = serde_json::to_string(&ev).unwrap();
         assert!(json.contains("\"event\":\"exit\""));
         assert!(json.contains("\"exit_code\":0"));
+    }
+
+    #[test]
+    fn test_deserialize_tunnel() {
+        let json = r#"{"id":"t1","method":"tunnel","params":{"target":"localhost:8501"}}"#;
+        let req: V2Request = serde_json::from_str(json).unwrap();
+        if let V2Request::Tunnel { id, params } = req {
+            assert_eq!(id, "t1");
+            assert_eq!(params.target, "localhost:8501");
+            assert!(params.handle.is_none());
+        } else {
+            panic!("expected Tunnel");
+        }
+    }
+
+    #[test]
+    fn test_deserialize_tunnel_with_handle() {
+        let json = r#"{"id":"t2","method":"tunnel","params":{"target":"localhost:8501","handle":"tun-abc"}}"#;
+        let req: V2Request = serde_json::from_str(json).unwrap();
+        if let V2Request::Tunnel { params, .. } = req {
+            assert_eq!(params.handle.as_deref(), Some("tun-abc"));
+        } else {
+            panic!("expected Tunnel");
+        }
+    }
+
+    #[test]
+    fn test_deserialize_tunnel_data() {
+        let json = r#"{"id":"d1","method":"tunnel_data","params":{"handle":"tun-abc","data":"aGVsbG8="}}"#;
+        let req: V2Request = serde_json::from_str(json).unwrap();
+        if let V2Request::TunnelData { params, .. } = req {
+            assert_eq!(params.handle, "tun-abc");
+            assert_eq!(params.data, "aGVsbG8=");
+        } else {
+            panic!("expected TunnelData");
+        }
+    }
+
+    #[test]
+    fn test_deserialize_tunnel_close() {
+        let json = r#"{"id":"c1","method":"tunnel_close","params":{"handle":"tun-abc"}}"#;
+        let req: V2Request = serde_json::from_str(json).unwrap();
+        assert!(matches!(req, V2Request::TunnelClose { .. }));
+    }
+
+    #[test]
+    fn test_deserialize_subscribe() {
+        let json = r#"{
+            "id": "s1",
+            "method": "subscribe",
+            "params": {
+                "events": [
+                    {"type": "fs_change", "path": "/workspace/output/", "recursive": true},
+                    {"type": "process_exit", "handle": "proc-abc"}
+                ]
+            }
+        }"#;
+        let req: V2Request = serde_json::from_str(json).unwrap();
+        if let V2Request::Subscribe { params, .. } = req {
+            assert_eq!(params.events.len(), 2);
+            assert!(matches!(params.events[0], SubscribeEventSpec::FsChange { recursive: true, .. }));
+            assert!(matches!(params.events[1], SubscribeEventSpec::ProcessExit { .. }));
+        } else {
+            panic!("expected Subscribe");
+        }
+    }
+
+    #[test]
+    fn test_deserialize_unsubscribe() {
+        let json = r#"{"id":"u1","method":"unsubscribe","params":{"subscription_id":"sub-abc"}}"#;
+        let req: V2Request = serde_json::from_str(json).unwrap();
+        if let V2Request::Unsubscribe { params, .. } = req {
+            assert_eq!(params.subscription_id, "sub-abc");
+        } else {
+            panic!("expected Unsubscribe");
+        }
+    }
+
+    #[test]
+    fn test_serialize_event_tunnel_data() {
+        let ev = V2Event::TunnelData {
+            handle: "tun-abc".into(),
+            data: "aGVsbG8=".into(),
+        };
+        let json = serde_json::to_string(&ev).unwrap();
+        assert!(json.contains("\"event\":\"tunnel_data\""));
+        assert!(json.contains("\"handle\":\"tun-abc\""));
+    }
+
+    #[test]
+    fn test_serialize_event_tunnel_closed() {
+        let ev = V2Event::TunnelClosed {
+            handle: "tun-abc".into(),
+            reason: "remote closed".into(),
+        };
+        let json = serde_json::to_string(&ev).unwrap();
+        assert!(json.contains("\"event\":\"tunnel_closed\""));
+        assert!(json.contains("remote closed"));
+    }
+
+    #[test]
+    fn test_serialize_event_fs_change() {
+        let ev = V2Event::FsChange {
+            subscription_id: "sub-abc".into(),
+            path: "/workspace/output/model.bin".into(),
+            change_type: "modified".into(),
+        };
+        let json = serde_json::to_string(&ev).unwrap();
+        assert!(json.contains("\"event\":\"fs_change\""));
+        assert!(json.contains("\"change_type\":\"modified\""));
+    }
+
+    #[test]
+    fn test_serialize_event_process_exit() {
+        let ev = V2Event::ProcessExit {
+            subscription_id: "sub-abc".into(),
+            handle: "proc-abc".into(),
+            exit_code: 42,
+        };
+        let json = serde_json::to_string(&ev).unwrap();
+        assert!(json.contains("\"event\":\"process_exit\""));
+        assert!(json.contains("\"exit_code\":42"));
+        assert!(json.contains("\"subscription_id\":\"sub-abc\""));
     }
 }

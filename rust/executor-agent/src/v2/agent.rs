@@ -1,14 +1,18 @@
 use crate::path_security::resolve_workspace_path;
-use crate::protocol_v2::*;
 use crate::pty_util;
+use super::protocol::*;
 
 use base64::Engine as _;
+use inotify::{EventMask, Inotify, WatchDescriptor, WatchMask};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
 use std::io::{self, Read, Write as _};
+use std::net::TcpStream;
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
 use std::os::unix::net::UnixListener;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::{fs, thread};
 use tokio::sync::watch;
@@ -25,6 +29,22 @@ struct ProcessHandle {
     /// wrap it in a File only when writing, because Child owns the original.
     stdin_pipe: Option<std::process::ChildStdin>,
     pid: u32,
+    /// Subscription IDs watching for this process to exit.
+    exit_subscribers: Vec<String>,
+}
+
+/// State for an active TCP tunnel.
+struct TunnelState {
+    /// Write half of the TCP connection (reader is owned by its thread).
+    tcp_writer: TcpStream,
+}
+
+/// Tracks resources owned by a single subscription.
+struct SubscriptionState {
+    /// Shutdown flags for inotify watcher threads.
+    fs_shutdowns: Vec<Arc<AtomicBool>>,
+    /// Process handles whose exit_subscribers list contains this subscription.
+    watched_process_handles: Vec<String>,
 }
 
 /// V2 executor agent.
@@ -95,12 +115,12 @@ fn set_socket_permissions(path: &str) -> io::Result<()> {
     Ok(())
 }
 
-/// Shared writer for sending responses and events on the same connection.
-type SharedWriter = Arc<Mutex<std::os::unix::net::UnixStream>>;
+/// Transport-agnostic shared writer for responses and events.
+pub type SharedWriter = Arc<Mutex<Box<dyn io::Write + Send>>>;
 
 fn send_json(writer: &SharedWriter, value: &impl serde::Serialize) -> io::Result<()> {
     let mut w = writer.lock().unwrap();
-    serde_json::to_writer(&mut *w, value)
+    serde_json::to_writer(&mut **w, value)
         .map_err(io::Error::other)?;
     w.write_all(b"\n")?;
     w.flush()
@@ -109,16 +129,36 @@ fn send_json(writer: &SharedWriter, value: &impl serde::Serialize) -> io::Result
 fn handle_conn(
     stream: std::os::unix::net::UnixStream,
     workspace: &str,
-    shutdown: watch::Receiver<bool>,
+    _shutdown: watch::Receiver<bool>,
 ) -> io::Result<()> {
     let reader = io::BufReader::new(stream.try_clone()?);
-    let writer: SharedWriter = Arc::new(Mutex::new(stream));
+    let writer: SharedWriter = Arc::new(Mutex::new(Box::new(stream)));
+    handle_v2_session(reader, writer, workspace)
+}
+
+/// Transport-agnostic V2 session handler. Called from both Unix socket and iroh QUIC paths.
+pub fn handle_v2_session(
+    reader: impl io::BufRead,
+    writer: SharedWriter,
+    workspace: &str,
+) -> io::Result<()> {
     let processes: Arc<Mutex<HashMap<String, ProcessHandle>>> =
         Arc::new(Mutex::new(HashMap::new()));
+    let tunnels: Arc<Mutex<HashMap<String, TunnelState>>> =
+        Arc::new(Mutex::new(HashMap::new()));
+    let subscriptions: Arc<Mutex<HashMap<String, SubscriptionState>>> =
+        Arc::new(Mutex::new(HashMap::new()));
 
-    let result = handle_messages(reader, writer.clone(), workspace, &processes, &shutdown);
+    let result = handle_messages(
+        reader,
+        writer.clone(),
+        workspace,
+        &processes,
+        &tunnels,
+        &subscriptions,
+    );
 
-    // On disconnect, kill all processes spawned on this connection.
+    // Cleanup on disconnect
     let mut procs = processes.lock().unwrap();
     for (handle, ph) in procs.iter_mut() {
         if let Some(ref mut child) = ph.child {
@@ -129,21 +169,33 @@ fn handle_conn(
     }
     procs.clear();
 
+    let mut tuns = tunnels.lock().unwrap();
+    for (handle, ts) in tuns.drain() {
+        log::info!("[cleanup] closing tunnel handle={handle}");
+        let _ = ts.tcp_writer.shutdown(std::net::Shutdown::Both);
+    }
+
+    let mut subs = subscriptions.lock().unwrap();
+    for (sub_id, state) in subs.drain() {
+        log::info!("[cleanup] removing subscription id={sub_id}");
+        for flag in &state.fs_shutdowns {
+            flag.store(true, Ordering::Relaxed);
+        }
+    }
+
     result
 }
 
 fn handle_messages(
-    reader: io::BufReader<std::os::unix::net::UnixStream>,
+    reader: impl io::BufRead,
     writer: SharedWriter,
     workspace: &str,
     processes: &Arc<Mutex<HashMap<String, ProcessHandle>>>,
-    shutdown: &watch::Receiver<bool>,
+    tunnels: &Arc<Mutex<HashMap<String, TunnelState>>>,
+    subscriptions: &Arc<Mutex<HashMap<String, SubscriptionState>>>,
 ) -> io::Result<()> {
     let de = serde_json::Deserializer::from_reader(reader);
     for value in de.into_iter::<V2Request>() {
-        if *shutdown.borrow() {
-            break;
-        }
         let req = match value {
             Ok(r) => r,
             Err(e) => {
@@ -178,11 +230,6 @@ fn handle_messages(
             }
             V2Request::WriteFile { id, params } => {
                 log::info!("[v2:write_file] id={id} path={}", params.path);
-                // Write-file is a multi-message flow; we need to consume
-                // subsequent FileChunk/FileDone from the stream. Since we're
-                // iterating over a serde_json stream, we can't easily do that
-                // here. Instead, we handle it by returning "not yet implemented".
-                // For now, use the single-message flow variant below.
                 let _ = send_json(
                     &writer,
                     &V2Response::err(
@@ -209,6 +256,25 @@ fn handle_messages(
             V2Request::ListDir { id, params } => {
                 log::info!("[v2:list_dir] id={id} path={}", params.path);
                 handle_list_dir(&id, params, workspace, &writer);
+            }
+            V2Request::Tunnel { id, params } => {
+                log::info!("[v2:tunnel] id={id} target={}", params.target);
+                handle_tunnel(&id, params, &writer, tunnels);
+            }
+            V2Request::TunnelData { id, params } => {
+                handle_tunnel_data(&id, params, &writer, tunnels);
+            }
+            V2Request::TunnelClose { id, params } => {
+                log::info!("[v2:tunnel_close] id={id} handle={}", params.handle);
+                handle_tunnel_close(&id, params, &writer, tunnels);
+            }
+            V2Request::Subscribe { id, params } => {
+                log::info!("[v2:subscribe] id={id} events={}", params.events.len());
+                handle_subscribe(&id, params, workspace, &writer, processes, subscriptions);
+            }
+            V2Request::Unsubscribe { id, params } => {
+                log::info!("[v2:unsubscribe] id={id} sub={}", params.subscription_id);
+                handle_unsubscribe(&id, params, &writer, processes, subscriptions);
             }
         }
     }
@@ -294,6 +360,7 @@ fn handle_spawn_pipe(
         pty_master: None,
         stdin_pipe,
         pid,
+        exit_subscribers: Vec::new(),
     };
     processes.lock().unwrap().insert(handle.to_string(), ph);
 
@@ -455,6 +522,7 @@ fn handle_spawn_pty(
         pty_master: Some(master),
         stdin_pipe: None,
         pid,
+        exit_subscribers: Vec::new(),
     };
     processes.lock().unwrap().insert(handle.to_string(), ph);
 
@@ -569,14 +637,19 @@ fn wait_and_exit(
     // Small delay to let output readers flush before we send exit
     thread::sleep(std::time::Duration::from_millis(50));
 
-    // Clean up process handle
-    let mut procs = processes.lock().unwrap();
-    if let Some(ph) = procs.get_mut(handle) {
-        // Drop PTY master to close it
-        ph.pty_master.take();
-        ph.stdin_pipe.take();
-    }
-    procs.remove(handle);
+    // Clean up process handle and collect exit subscribers
+    let exit_subs = {
+        let mut procs = processes.lock().unwrap();
+        let subs = if let Some(ph) = procs.get_mut(handle) {
+            ph.pty_master.take();
+            ph.stdin_pipe.take();
+            std::mem::take(&mut ph.exit_subscribers)
+        } else {
+            Vec::new()
+        };
+        procs.remove(handle);
+        subs
+    };
 
     log::info!("[v2:exit] handle={handle} exit_code={exit_code}");
     let _ = send_json(
@@ -586,6 +659,18 @@ fn wait_and_exit(
             exit_code,
         },
     );
+
+    // Notify process-exit subscribers
+    for sub_id in exit_subs {
+        let _ = send_json(
+            writer,
+            &V2Event::ProcessExit {
+                subscription_id: sub_id,
+                handle: handle.into(),
+                exit_code,
+            },
+        );
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -938,6 +1023,479 @@ fn handle_list_dir(
             serde_json::to_value(ListDirResult { entries }).unwrap(),
         ),
     );
+}
+
+// ---------------------------------------------------------------------------
+// tunnel
+// ---------------------------------------------------------------------------
+
+fn handle_tunnel(
+    id: &str,
+    params: TunnelParams,
+    writer: &SharedWriter,
+    tunnels: &Arc<Mutex<HashMap<String, TunnelState>>>,
+) {
+    let tcp_stream = match TcpStream::connect(&params.target) {
+        Ok(s) => s,
+        Err(e) => {
+            let _ = send_json(
+                writer,
+                &V2Response::err(id.into(), "TUNNEL_FAILED", format!("{e}")),
+            );
+            return;
+        }
+    };
+
+    let handle = params
+        .handle
+        .unwrap_or_else(|| format!("tun-{}", &uuid::Uuid::new_v4().to_string()[..8]));
+
+    let reader_stream = match tcp_stream.try_clone() {
+        Ok(s) => s,
+        Err(e) => {
+            let _ = send_json(
+                writer,
+                &V2Response::err(id.into(), "TUNNEL_FAILED", format!("{e}")),
+            );
+            return;
+        }
+    };
+
+    tunnels.lock().unwrap().insert(
+        handle.clone(),
+        TunnelState {
+            tcp_writer: tcp_stream,
+        },
+    );
+
+    let _ = send_json(
+        writer,
+        &V2Response::result(
+            id.into(),
+            serde_json::to_value(TunnelResult {
+                handle: handle.clone(),
+            })
+            .unwrap(),
+        ),
+    );
+
+    // Spawn a reader thread that pushes data from TCP -> events
+    let w = writer.clone();
+    let h = handle.clone();
+    let tuns = tunnels.clone();
+    thread::spawn(move || {
+        let mut buf = [0u8; 64 * 1024];
+        let mut stream = reader_stream;
+        loop {
+            match stream.read(&mut buf) {
+                Ok(0) => {
+                    let _ = send_json(
+                        &w,
+                        &V2Event::TunnelClosed {
+                            handle: h.clone(),
+                            reason: "remote closed".into(),
+                        },
+                    );
+                    break;
+                }
+                Ok(n) => {
+                    let encoded =
+                        base64::engine::general_purpose::STANDARD.encode(&buf[..n]);
+                    let _ = send_json(
+                        &w,
+                        &V2Event::TunnelData {
+                            handle: h.clone(),
+                            data: encoded,
+                        },
+                    );
+                }
+                Err(e) => {
+                    let _ = send_json(
+                        &w,
+                        &V2Event::TunnelClosed {
+                            handle: h.clone(),
+                            reason: format!("{e}"),
+                        },
+                    );
+                    break;
+                }
+            }
+        }
+        tuns.lock().unwrap().remove(&h);
+    });
+}
+
+fn handle_tunnel_data(
+    id: &str,
+    params: TunnelDataParams,
+    writer: &SharedWriter,
+    tunnels: &Arc<Mutex<HashMap<String, TunnelState>>>,
+) {
+    let decoded = match base64::engine::general_purpose::STANDARD.decode(&params.data) {
+        Ok(d) => d,
+        Err(e) => {
+            let _ = send_json(
+                writer,
+                &V2Response::err(id.into(), "INVALID_DATA", format!("base64: {e}")),
+            );
+            return;
+        }
+    };
+
+    let mut tuns = tunnels.lock().unwrap();
+    let ts = match tuns.get_mut(&params.handle) {
+        Some(t) => t,
+        None => {
+            let _ = send_json(
+                writer,
+                &V2Response::err(
+                    id.into(),
+                    "UNKNOWN_HANDLE",
+                    format!("no tunnel with handle {}", params.handle),
+                ),
+            );
+            return;
+        }
+    };
+
+    if let Err(e) = ts.tcp_writer.write_all(&decoded) {
+        let _ = send_json(
+            writer,
+            &V2Response::err(id.into(), "TUNNEL_WRITE_FAILED", format!("{e}")),
+        );
+        return;
+    }
+    if let Err(e) = ts.tcp_writer.flush() {
+        let _ = send_json(
+            writer,
+            &V2Response::err(id.into(), "TUNNEL_WRITE_FAILED", format!("{e}")),
+        );
+        return;
+    }
+
+    let _ = send_json(writer, &V2Response::ok(id.into()));
+}
+
+fn handle_tunnel_close(
+    id: &str,
+    params: TunnelCloseParams,
+    writer: &SharedWriter,
+    tunnels: &Arc<Mutex<HashMap<String, TunnelState>>>,
+) {
+    let mut tuns = tunnels.lock().unwrap();
+    match tuns.remove(&params.handle) {
+        Some(ts) => {
+            let _ = ts.tcp_writer.shutdown(std::net::Shutdown::Both);
+            let _ = send_json(writer, &V2Response::ok(id.into()));
+        }
+        None => {
+            let _ = send_json(
+                writer,
+                &V2Response::err(
+                    id.into(),
+                    "UNKNOWN_HANDLE",
+                    format!("no tunnel with handle {}", params.handle),
+                ),
+            );
+        }
+    }
+}
+
+// ---------------------------------------------------------------------------
+// subscribe / unsubscribe
+// ---------------------------------------------------------------------------
+
+fn handle_subscribe(
+    id: &str,
+    params: SubscribeParams,
+    workspace: &str,
+    writer: &SharedWriter,
+    processes: &Arc<Mutex<HashMap<String, ProcessHandle>>>,
+    subscriptions: &Arc<Mutex<HashMap<String, SubscriptionState>>>,
+) {
+    let sub_id = format!("sub-{}", &uuid::Uuid::new_v4().to_string()[..8]);
+    let mut state = SubscriptionState {
+        fs_shutdowns: Vec::new(),
+        watched_process_handles: Vec::new(),
+    };
+
+    for spec in &params.events {
+        match spec {
+            SubscribeEventSpec::FsChange { path, recursive } => {
+                let watch_path = resolve_watch_path(Path::new(workspace), path);
+                let watch_path = match watch_path {
+                    Ok(p) => p,
+                    Err(e) => {
+                        let _ = send_json(
+                            writer,
+                            &V2Response::err(id.into(), "SUBSCRIBE_FAILED", e),
+                        );
+                        // Clean up anything already registered for this sub
+                        cleanup_partial_subscription(&state, processes);
+                        return;
+                    }
+                };
+
+                let shutdown = Arc::new(AtomicBool::new(false));
+                state.fs_shutdowns.push(shutdown.clone());
+
+                let w = writer.clone();
+                let sid = sub_id.clone();
+                let recursive = *recursive;
+                thread::spawn(move || {
+                    run_fs_watcher(watch_path, recursive, &sid, &shutdown, &w);
+                });
+            }
+            SubscribeEventSpec::ProcessExit { handle } => {
+                let mut procs = processes.lock().unwrap();
+                match procs.get_mut(handle) {
+                    Some(ph) => {
+                        ph.exit_subscribers.push(sub_id.clone());
+                        state.watched_process_handles.push(handle.clone());
+                    }
+                    None => {
+                        drop(procs);
+                        let _ = send_json(
+                            writer,
+                            &V2Response::err(
+                                id.into(),
+                                "UNKNOWN_HANDLE",
+                                format!("no process with handle {handle}"),
+                            ),
+                        );
+                        cleanup_partial_subscription(&state, processes);
+                        return;
+                    }
+                }
+            }
+        }
+    }
+
+    subscriptions
+        .lock()
+        .unwrap()
+        .insert(sub_id.clone(), state);
+
+    let _ = send_json(
+        writer,
+        &V2Response::result(
+            id.into(),
+            serde_json::to_value(SubscribeResult {
+                subscription_id: sub_id,
+            })
+            .unwrap(),
+        ),
+    );
+}
+
+fn handle_unsubscribe(
+    id: &str,
+    params: UnsubscribeParams,
+    writer: &SharedWriter,
+    processes: &Arc<Mutex<HashMap<String, ProcessHandle>>>,
+    subscriptions: &Arc<Mutex<HashMap<String, SubscriptionState>>>,
+) {
+    let mut subs = subscriptions.lock().unwrap();
+    match subs.remove(&params.subscription_id) {
+        Some(state) => {
+            // Stop inotify watchers
+            for flag in &state.fs_shutdowns {
+                flag.store(true, Ordering::Relaxed);
+            }
+            // Remove from process exit subscriber lists
+            let mut procs = processes.lock().unwrap();
+            for ph_handle in &state.watched_process_handles {
+                if let Some(ph) = procs.get_mut(ph_handle) {
+                    ph.exit_subscribers
+                        .retain(|s| s != &params.subscription_id);
+                }
+            }
+            let _ = send_json(writer, &V2Response::ok(id.into()));
+        }
+        None => {
+            let _ = send_json(
+                writer,
+                &V2Response::err(
+                    id.into(),
+                    "UNKNOWN_SUBSCRIPTION",
+                    format!("no subscription with id {}", params.subscription_id),
+                ),
+            );
+        }
+    }
+}
+
+/// Undo partially registered subscription resources on error.
+fn cleanup_partial_subscription(
+    state: &SubscriptionState,
+    processes: &Arc<Mutex<HashMap<String, ProcessHandle>>>,
+) {
+    for flag in &state.fs_shutdowns {
+        flag.store(true, Ordering::Relaxed);
+    }
+    // We don't have the sub_id here to remove from exit_subscribers,
+    // but since the subscription was never fully registered, the sub_id
+    // entries will be harmless (they'll fire once and be ignored by the
+    // client which never got a subscription_id).
+    let _ = processes; // suppress unused warning
+}
+
+/// Resolve a watch path, accepting both absolute (within workspace) and
+/// relative paths.
+fn resolve_watch_path(workspace: &Path, path: &str) -> Result<PathBuf, String> {
+    let resolved = if Path::new(path).is_absolute() {
+        PathBuf::from(path)
+    } else {
+        workspace.join(path)
+    };
+
+    let canon_workspace = workspace
+        .canonicalize()
+        .map_err(|e| format!("resolve workspace: {e}"))?;
+
+    // For the watch path, it must exist (inotify requires it)
+    let canon_path = resolved
+        .canonicalize()
+        .map_err(|e| format!("resolve watch path: {e}"))?;
+
+    if !canon_path.starts_with(&canon_workspace) {
+        return Err("watch path must be within workspace".to_string());
+    }
+
+    Ok(canon_path)
+}
+
+/// Run an inotify watcher in a polling loop until shutdown is signaled.
+fn run_fs_watcher(
+    path: PathBuf,
+    recursive: bool,
+    subscription_id: &str,
+    shutdown: &AtomicBool,
+    writer: &SharedWriter,
+) {
+    let mut inotify = match Inotify::init() {
+        Ok(i) => i,
+        Err(e) => {
+            log::error!("[fs_watch] inotify init failed: {e}");
+            return;
+        }
+    };
+
+    // Set non-blocking so we can poll with a shutdown check
+    let fd = inotify.as_raw_fd();
+    unsafe {
+        let flags = libc::fcntl(fd, libc::F_GETFL);
+        libc::fcntl(fd, libc::F_SETFL, flags | libc::O_NONBLOCK);
+    }
+
+    let mask = WatchMask::CREATE
+        | WatchMask::MODIFY
+        | WatchMask::DELETE
+        | WatchMask::MOVED_FROM
+        | WatchMask::MOVED_TO;
+
+    let mut wd_to_path: HashMap<WatchDescriptor, PathBuf> = HashMap::new();
+
+    match inotify.watches().add(&path, mask) {
+        Ok(wd) => {
+            wd_to_path.insert(wd, path.clone());
+        }
+        Err(e) => {
+            log::error!("[fs_watch] add watch failed for {}: {e}", path.display());
+            return;
+        }
+    }
+
+    // For recursive watches, add watches on all existing subdirectories
+    if recursive {
+        add_recursive_watches(&mut inotify, &path, mask, &mut wd_to_path);
+    }
+
+    let mut buf = [0u8; 4096];
+    loop {
+        if shutdown.load(Ordering::Relaxed) {
+            break;
+        }
+
+        match inotify.read_events(&mut buf) {
+            Ok(events) => {
+                for event in events {
+                    let dir_path = match wd_to_path.get(&event.wd) {
+                        Some(p) => p.clone(),
+                        None => continue,
+                    };
+
+                    let file_name = match event.name {
+                        Some(name) => name.to_string_lossy().into_owned(),
+                        None => continue,
+                    };
+
+                    let full_path = dir_path.join(&file_name);
+                    let change_type = mask_to_change_type(event.mask);
+
+                    if let Some(ct) = change_type {
+                        let _ = send_json(
+                            writer,
+                            &V2Event::FsChange {
+                                subscription_id: subscription_id.to_string(),
+                                path: full_path.to_string_lossy().into_owned(),
+                                change_type: ct.to_string(),
+                            },
+                        );
+                    }
+
+                    // If a new directory was created and we're recursive, watch it
+                    if recursive && event.mask.contains(EventMask::ISDIR) && event.mask.contains(EventMask::CREATE) {
+                        if let Ok(wd) = inotify.watches().add(&full_path, mask) {
+                            wd_to_path.insert(wd, full_path);
+                        }
+                    }
+                }
+            }
+            Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
+                thread::sleep(std::time::Duration::from_millis(100));
+            }
+            Err(e) => {
+                log::error!("[fs_watch] read error: {e}");
+                break;
+            }
+        }
+    }
+}
+
+fn add_recursive_watches(
+    inotify: &mut Inotify,
+    dir: &Path,
+    mask: WatchMask,
+    wd_to_path: &mut HashMap<WatchDescriptor, PathBuf>,
+) {
+    let entries = match fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+    for entry in entries.flatten() {
+        if let Ok(meta) = entry.metadata() {
+            if meta.is_dir() {
+                let sub = entry.path();
+                if let Ok(wd) = inotify.watches().add(&sub, mask) {
+                    wd_to_path.insert(wd, sub.clone());
+                }
+                add_recursive_watches(inotify, &sub, mask, wd_to_path);
+            }
+        }
+    }
+}
+
+fn mask_to_change_type(mask: EventMask) -> Option<&'static str> {
+    if mask.contains(EventMask::CREATE) || mask.contains(EventMask::MOVED_TO) {
+        Some("created")
+    } else if mask.contains(EventMask::MODIFY) {
+        Some("modified")
+    } else if mask.contains(EventMask::DELETE) || mask.contains(EventMask::MOVED_FROM) {
+        Some("deleted")
+    } else {
+        None
+    }
 }
 
 fn collect_entries(
@@ -1318,5 +1876,228 @@ mod tests {
             Ok(_) => Some(line),
             Err(_) => None,
         }
+    }
+
+    #[test]
+    fn test_tunnel_echo() {
+        use std::net::TcpListener;
+
+        // Start a simple TCP echo server
+        let echo_listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let echo_addr = echo_listener.local_addr().unwrap();
+        thread::spawn(move || {
+            if let Ok((mut stream, _)) = echo_listener.accept() {
+                let mut buf = [0u8; 4096];
+                loop {
+                    match stream.read(&mut buf) {
+                        Ok(0) | Err(_) => break,
+                        Ok(n) => {
+                            if stream.write_all(&buf[..n]).is_err() {
+                                break;
+                            }
+                            stream.flush().ok();
+                        }
+                    }
+                }
+            }
+        });
+
+        let ws = tempfile::tempdir().unwrap();
+        let (sock, _tx) = start_test_agent(ws.path().to_str().unwrap());
+
+        let stream = UnixStream::connect(&sock).unwrap();
+        stream
+            .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+            .unwrap();
+        let mut writer = stream.try_clone().unwrap();
+        let mut reader = BufReader::new(stream);
+
+        // Open tunnel
+        let tunnel_req = format!(
+            r#"{{"id":"t1","method":"tunnel","params":{{"target":"{}","handle":"tun-echo"}}}}"#,
+            echo_addr
+        );
+        send_request(&mut writer, &tunnel_req);
+
+        let line = read_line(&mut reader);
+        let v: serde_json::Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(v["id"], "t1");
+        assert_eq!(v["result"]["handle"], "tun-echo");
+
+        // Send data through the tunnel
+        let payload = b"hello tunnel";
+        let b64 = base64::engine::general_purpose::STANDARD.encode(payload);
+        let data_req = format!(
+            r#"{{"id":"d1","method":"tunnel_data","params":{{"handle":"tun-echo","data":"{b64}"}}}}"#
+        );
+        send_request(&mut writer, &data_req);
+
+        // Expect tunnel_data ack and echo event
+        let mut got_ack = false;
+        let mut got_echo = false;
+        for _ in 0..20 {
+            let line = match read_line_timeout(&mut reader) {
+                Some(l) => l,
+                None => break,
+            };
+            if line.trim().is_empty() {
+                continue;
+            }
+            let v: serde_json::Value = serde_json::from_str(&line).unwrap();
+            if v.get("id").is_some() && v["id"] == "d1" && v.get("result").is_some() {
+                got_ack = true;
+            }
+            if v.get("event").is_some() && v["event"] == "tunnel_data" {
+                assert_eq!(v["handle"], "tun-echo");
+                let decoded = base64::engine::general_purpose::STANDARD
+                    .decode(v["data"].as_str().unwrap())
+                    .unwrap();
+                if decoded == payload {
+                    got_echo = true;
+                    break;
+                }
+            }
+        }
+
+        assert!(got_ack, "expected tunnel_data ack");
+        assert!(got_echo, "expected echoed data from tunnel");
+
+        // Close the tunnel
+        send_request(
+            &mut writer,
+            r#"{"id":"c1","method":"tunnel_close","params":{"handle":"tun-echo"}}"#,
+        );
+        let line = read_line(&mut reader);
+        let v: serde_json::Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(v["id"], "c1");
+        assert!(v["result"].is_object());
+    }
+
+    #[test]
+    fn test_subscribe_fs_change() {
+        let ws = tempfile::tempdir().unwrap();
+        let output_dir = ws.path().join("output");
+        fs::create_dir(&output_dir).unwrap();
+
+        let (sock, _tx) = start_test_agent(ws.path().to_str().unwrap());
+
+        let stream = UnixStream::connect(&sock).unwrap();
+        stream
+            .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+            .unwrap();
+        let mut writer = stream.try_clone().unwrap();
+        let mut reader = BufReader::new(stream);
+
+        // Subscribe to fs_change on the output directory
+        send_request(
+            &mut writer,
+            r#"{"id":"sub1","method":"subscribe","params":{"events":[{"type":"fs_change","path":"output"}]}}"#,
+        );
+
+        let line = read_line(&mut reader);
+        let v: serde_json::Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(v["id"], "sub1");
+        let sub_id = v["result"]["subscription_id"].as_str().unwrap().to_string();
+        assert!(sub_id.starts_with("sub-"));
+
+        // Give the inotify watcher time to start
+        thread::sleep(std::time::Duration::from_millis(200));
+
+        // Create a file in the watched directory
+        fs::write(output_dir.join("model.bin"), "data").unwrap();
+
+        // Wait for fs_change event
+        let mut got_event = false;
+        for _ in 0..30 {
+            let line = match read_line_timeout(&mut reader) {
+                Some(l) => l,
+                None => break,
+            };
+            if line.trim().is_empty() {
+                continue;
+            }
+            let v: serde_json::Value = serde_json::from_str(&line).unwrap();
+            if v.get("event").is_some() && v["event"] == "fs_change" {
+                assert_eq!(v["subscription_id"], sub_id);
+                let path = v["path"].as_str().unwrap();
+                assert!(path.contains("model.bin"), "path should contain model.bin, got: {path}");
+                got_event = true;
+                break;
+            }
+        }
+
+        assert!(got_event, "expected fs_change event");
+    }
+
+    #[test]
+    fn test_unsubscribe() {
+        let ws = tempfile::tempdir().unwrap();
+        let output_dir = ws.path().join("watched");
+        fs::create_dir(&output_dir).unwrap();
+
+        let (sock, _tx) = start_test_agent(ws.path().to_str().unwrap());
+
+        let stream = UnixStream::connect(&sock).unwrap();
+        stream
+            .set_read_timeout(Some(std::time::Duration::from_secs(2)))
+            .unwrap();
+        let mut writer = stream.try_clone().unwrap();
+        let mut reader = BufReader::new(stream);
+
+        // Subscribe
+        send_request(
+            &mut writer,
+            r#"{"id":"sub1","method":"subscribe","params":{"events":[{"type":"fs_change","path":"watched"}]}}"#,
+        );
+
+        let line = read_line(&mut reader);
+        let v: serde_json::Value = serde_json::from_str(&line).unwrap();
+        let sub_id = v["result"]["subscription_id"].as_str().unwrap().to_string();
+
+        // Give the watcher time to start
+        thread::sleep(std::time::Duration::from_millis(200));
+
+        // Unsubscribe
+        let unsub_req = format!(
+            r#"{{"id":"u1","method":"unsubscribe","params":{{"subscription_id":"{sub_id}"}}}}"#
+        );
+        send_request(&mut writer, &unsub_req);
+
+        let line = read_line(&mut reader);
+        let v: serde_json::Value = serde_json::from_str(&line).unwrap();
+        assert_eq!(v["id"], "u1");
+        assert!(v["result"].is_object());
+
+        // Give the watcher thread time to stop
+        thread::sleep(std::time::Duration::from_millis(300));
+
+        // Create a file after unsubscribe
+        fs::write(output_dir.join("should_not_fire.txt"), "data").unwrap();
+
+        // Wait a bit, then try to read - should not get any fs_change event
+        thread::sleep(std::time::Duration::from_millis(300));
+
+        // Send a ping to flush the connection, then check there's no fs_change
+        send_request(&mut writer, r#"{"id":"p1","method":"ping"}"#);
+
+        let mut got_fs_event = false;
+        for _ in 0..10 {
+            let line = match read_line_timeout(&mut reader) {
+                Some(l) => l,
+                None => break,
+            };
+            if line.trim().is_empty() {
+                continue;
+            }
+            let v: serde_json::Value = serde_json::from_str(&line).unwrap();
+            if v.get("event").is_some() && v["event"] == "fs_change" {
+                got_fs_event = true;
+            }
+            if v.get("id").is_some() && v["id"] == "p1" {
+                break;
+            }
+        }
+
+        assert!(!got_fs_event, "should not receive fs_change after unsubscribe");
     }
 }

@@ -1,6 +1,6 @@
 use crate::path_security;
-use crate::protocol::{Request, Response};
 use crate::pty_util;
+use super::protocol::{Request, Response};
 
 use sha2::{Digest, Sha256};
 use std::collections::HashSet;
