@@ -78,3 +78,5 @@ site/
 
 # Codex compatibility artifacts generated from Claude Code commands
 plugin/.codex-generated-skills/
+target
+.cargo
