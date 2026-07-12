@@ -1,11 +1,11 @@
-FROM rust:1.87-alpine AS builder
-RUN apk add --no-cache musl-dev
+FROM rust:alpine AS builder
+RUN apk add --no-cache musl-dev protobuf-dev
 WORKDIR /build
-COPY rust/executor-agent/ .
-# Alpine default target is already x86_64-unknown-linux-musl.
-# Remove .cargo/config.toml which specifies a cross-linker not available here.
+COPY proto/executor_v2.proto proto/
+COPY rust/executor-agent/ rust/executor-agent/
+WORKDIR /build/rust/executor-agent
 RUN rm -f .cargo/config.toml && cargo build --release
 
 FROM busybox:latest
-COPY --from=builder /build/target/release/executor-agent /executor-agent
+COPY --from=builder /build/rust/executor-agent/target/release/executor-agent /executor-agent
 ENTRYPOINT ["/executor-agent"]
