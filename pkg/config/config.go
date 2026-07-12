@@ -143,7 +143,7 @@ func DefaultConfig() *Config {
 		TrajectoryDebug:         false,
 		ObservationPreviewBytes: 4096,
 		ExecutorAgentImage:      "arl-executor-agent:latest",
-		ExecutorProtocol:        "v1",
+		ExecutorProtocol:        "v2",
 		ImagePullPolicy:         "Always",
 		GatewayPort:             8080,
 		GatewayNamespace:        "default",

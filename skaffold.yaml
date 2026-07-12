@@ -15,7 +15,7 @@ build:
         dockerfile: Dockerfile.gateway
     - image: arl-executor-agent
       docker:
-        dockerfile: Dockerfile.executor-agent
+        dockerfile: Dockerfile.executor-agent-rs
     - image: arl-image-locality-scheduler
       docker:
         dockerfile: Dockerfile.image-locality-scheduler
@@ -72,11 +72,7 @@ profiles:
                 dest: /app
         - image: arl-executor-agent
           docker:
-            dockerfile: Dockerfile.executor-agent
-          sync:
-            manual:
-              - src: "cmd/executor-agent/**/*.go"
-                dest: /app
+            dockerfile: Dockerfile.executor-agent-rs
         - image: arl-image-locality-scheduler
           docker:
             dockerfile: Dockerfile.image-locality-scheduler
