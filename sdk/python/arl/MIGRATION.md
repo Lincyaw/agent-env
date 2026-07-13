@@ -273,10 +273,12 @@ Use `idle_timeout_seconds` when you need an explicit server-side idle limit.
 
 ## Execute and Timeout Recovery
 
-Non-streaming `execute()` now sends an `operationID`. If the HTTP request times
-out, the gateway may still complete the operation.
-
-Before, most callers retried the same command after a timeout:
+Non-streaming `execute()` sends an `operationID`, and since 0.20.0 the SDK
+recovers dropped connections by itself: on a read timeout, a connection reset,
+or a gateway restart it polls the operation to completion (resubmitting the
+identical request if the gateway never received it) and returns the result as
+if the connection had never broken. Callers no longer need to catch
+`GatewayOperationTimeout` or poll `get_execute_operation`:
 
 ```python
 result = session.execute([
@@ -284,25 +286,10 @@ result = session.execute([
 ])
 ```
 
-After, catch `GatewayOperationTimeout` and query the original operation:
-
-```python
-from arl import GatewayClient, GatewayOperationTimeout
-
-client = GatewayClient(base_url="http://localhost:8080", timeout=5.0)
-session = client.create_session(image="python:3.12")
-
-try:
-    result = client.execute(
-        session.id,
-        [{"name": "long", "command": ["sh", "-c", "sleep 60; echo done"]}],
-    )
-except GatewayOperationTimeout as exc:
-    operation = client.get_execute_operation(session.id, exc.operation_id)
-    if operation.result is None:
-        raise RuntimeError(f"operation still {operation.status}") from exc
-    result = operation.result
-```
+To bound the recovery wait, pass `recover_timeout` (seconds); when it elapses
+while the operation is still pending, `GatewayOperationTimeout` is raised with
+the `operation_id`. To opt out entirely and keep the pre-0.20.0 behavior, pass
+`recover=False`.
 
 To stream partial stdout and stderr, keep passing `on_output`. Streaming calls
 still use the SSE endpoint:

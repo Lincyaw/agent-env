@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-07-13
+
+### Changed
+- Non-streaming `execute` now recovers from dropped connections by itself.
+  Every request already carries an idempotent `operationID`; on any transport
+  failure (read timeout, connection reset, gateway restart) the client now
+  polls the operation to completion and returns the result as if the
+  connection had never broken. If the gateway never received the request, the
+  identical request is resubmitted under the same `operationID` (the gateway
+  dedupes). Callers no longer need to catch `GatewayOperationTimeout` and poll
+  `get_execute_operation` themselves.
+- `execute` accepts `recover` (default `True`) and `recover_timeout` (default
+  unbounded). With `recover=False` the previous behavior is preserved:
+  timeouts raise `GatewayOperationTimeout`, other transport errors propagate.
+  When `recover_timeout` elapses while the operation is still pending,
+  `GatewayOperationTimeout` is raised with the `operation_id`.
+- Streaming execution (`on_output`) is unchanged: it bypasses operation
+  tracking and is not recoverable.
+
 ## [0.18.0] - 2026-07-03
 
 ### Added

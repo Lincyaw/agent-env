@@ -365,7 +365,7 @@ def test_delete_experiment_info_surfaces_backend_error_field() -> None:
             raise AssertionError("expected delete_experiment_info to surface error")
 
 
-def test_execute_timeout_surfaces_operation_id_without_retry() -> None:
+def test_execute_timeout_without_recover_surfaces_operation_id() -> None:
     calls = 0
 
     def handler(request: httpx.Request) -> httpx.Response:
@@ -375,9 +375,148 @@ def test_execute_timeout_surfaces_operation_id_without_retry() -> None:
 
     with _client_with_handler(handler) as client:
         try:
-            client.execute("gw-1", [{"name": "sleep", "command": ["sleep", "60"]}])
+            client.execute(
+                "gw-1",
+                [{"name": "sleep", "command": ["sleep", "60"]}],
+                recover=False,
+            )
         except GatewayOperationTimeout as exc:
             assert exc.operation_id
         else:
             raise AssertionError("expected GatewayOperationTimeout")
     assert calls == 1
+
+
+def _operation_payload(
+    op_id: str,
+    status: str,
+    result: dict[str, object] | None = None,
+    error: str = "",
+) -> dict[str, object]:
+    payload: dict[str, object] = {
+        "operationID": op_id,
+        "sessionID": "gw-1",
+        "status": status,
+        "error": error,
+    }
+    if result is not None:
+        payload["result"] = result
+    return payload
+
+
+def test_execute_recovers_result_after_connection_drop() -> None:
+    posted_op_ids: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST" and request.url.path == "/v1/sessions/gw-1/execute":
+            posted_op_ids.append(json.loads(request.content)["operationID"])
+            raise httpx.ReadError("connection reset by peer", request=request)
+        if request.method == "GET" and "/operations/" in request.url.path:
+            op_id = request.url.path.rsplit("/", 1)[-1]
+            return httpx.Response(
+                200,
+                json=_operation_payload(
+                    op_id,
+                    "done",
+                    result={
+                        "sessionID": "gw-1",
+                        "operationID": op_id,
+                        "results": [],
+                        "totalDurationMs": 3,
+                    },
+                ),
+            )
+        return httpx.Response(404, json={"error": "unexpected request"})
+
+    with _client_with_handler(handler) as client:
+        result = client.execute("gw-1", [{"name": "noop", "command": ["true"]}])
+        assert posted_op_ids and result.operation_id == posted_op_ids[0]
+        assert result.total_duration_ms == 3
+
+
+def test_execute_resubmits_when_gateway_never_saw_operation() -> None:
+    posts = 0
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal posts
+        if request.method == "POST" and request.url.path == "/v1/sessions/gw-1/execute":
+            posts += 1
+            if posts == 1:
+                raise httpx.ConnectError("connection refused", request=request)
+            body = json.loads(request.content)
+            return httpx.Response(
+                200,
+                json={
+                    "sessionID": "gw-1",
+                    "operationID": body["operationID"],
+                    "results": [],
+                    "totalDurationMs": 0,
+                },
+            )
+        if request.method == "GET" and "/operations/" in request.url.path:
+            op_id = request.url.path.rsplit("/", 1)[-1]
+            return httpx.Response(404, json={"error": f"operation {op_id} not found"})
+        return httpx.Response(404, json={"error": "unexpected request"})
+
+    with _client_with_handler(handler) as client:
+        result = client.execute("gw-1", [{"name": "noop", "command": ["true"]}])
+        assert result.operation_id
+    assert posts == 2
+
+
+def test_execute_recovery_surfaces_operation_error() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST" and request.url.path == "/v1/sessions/gw-1/execute":
+            raise httpx.ReadError("connection reset by peer", request=request)
+        if request.method == "GET" and "/operations/" in request.url.path:
+            op_id = request.url.path.rsplit("/", 1)[-1]
+            return httpx.Response(200, json=_operation_payload(op_id, "error", error="boom"))
+        return httpx.Response(404, json={"error": "unexpected request"})
+
+    with _client_with_handler(handler) as client:
+        try:
+            client.execute("gw-1", [{"name": "noop", "command": ["true"]}])
+        except GatewayError as exc:
+            assert "boom" in str(exc)
+        else:
+            raise AssertionError("expected GatewayError")
+
+
+def test_execute_recovery_respects_recover_timeout() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST" and request.url.path == "/v1/sessions/gw-1/execute":
+            raise httpx.ReadTimeout("timed out", request=request)
+        if request.method == "GET" and "/operations/" in request.url.path:
+            op_id = request.url.path.rsplit("/", 1)[-1]
+            return httpx.Response(200, json=_operation_payload(op_id, "running"))
+        return httpx.Response(404, json={"error": "unexpected request"})
+
+    with _client_with_handler(handler) as client:
+        try:
+            client.execute(
+                "gw-1",
+                [{"name": "sleep", "command": ["sleep", "60"]}],
+                recover_timeout=0.05,
+            )
+        except GatewayOperationTimeout as exc:
+            assert exc.operation_id
+        else:
+            raise AssertionError("expected GatewayOperationTimeout")
+
+
+def test_execute_recovery_stops_when_session_is_gone() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.method == "POST" and request.url.path == "/v1/sessions/gw-1/execute":
+            raise httpx.ReadError("connection reset by peer", request=request)
+        if request.method == "GET" and "/operations/" in request.url.path:
+            return httpx.Response(404, json={"error": "session gw-1 not found"})
+        return httpx.Response(404, json={"error": "unexpected request"})
+
+    with _client_with_handler(handler) as client:
+        try:
+            client.execute("gw-1", [{"name": "noop", "command": ["true"]}])
+        except GatewayError as exc:
+            assert exc.status_code == 404
+            assert "session" in exc.error
+        else:
+            raise AssertionError("expected GatewayError")

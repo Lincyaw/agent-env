@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 import uuid
 from collections.abc import Callable, Iterable, Iterator
 from pathlib import Path
@@ -43,6 +44,10 @@ from arl.types import (
 )
 
 _ModelT = TypeVar("_ModelT", bound=BaseModel)
+
+_OPERATION_POLL_INTERVAL_SECONDS = 2.0
+_OPERATION_STATUS_DONE = "done"
+_OPERATION_STATUS_ERROR = "error"
 
 
 def _serialize_config_env(
@@ -236,7 +241,26 @@ class GatewayClient:
         trace_id: str | None = None,
         operation_id: str | None = None,
         on_output: Callable[[str, str], None] | None = None,
+        recover: bool = True,
+        recover_timeout: float | None = None,
     ) -> ExecuteResponse:
+        """Execute steps in a session.
+
+        Non-streaming calls are idempotent: an operationID is always attached,
+        so a dropped connection (timeout, peer reset, gateway restart) does not
+        lose the execution. With ``recover=True`` (default) the client polls
+        the operation after a transport failure — resubmitting the identical
+        request if the gateway never saw it — and returns the result as if the
+        connection had never broken. ``recover_timeout`` bounds the total
+        recovery wait; when exceeded, GatewayOperationTimeout is raised with
+        the operation_id.
+
+        With ``recover=False``, a timeout raises GatewayOperationTimeout
+        immediately and other transport errors propagate unchanged.
+
+        Streaming calls (``on_output``) bypass operation tracking and are not
+        recoverable.
+        """
         body: dict[str, Any] = {"steps": steps}
         if trace_id is not None:
             body["traceID"] = trace_id
@@ -247,10 +271,19 @@ class GatewayClient:
 
         op_id = operation_id or str(uuid.uuid4())
         body["operationID"] = op_id
+        deadline = time.monotonic() + recover_timeout if recover_timeout is not None else None
         try:
             resp = self._client.post(f"/v1/sessions/{session_id}/execute", json=body)
-        except httpx.TimeoutException as exc:
-            raise GatewayOperationTimeout(op_id, "execute operation is still pending") from exc
+        except httpx.TransportError as exc:
+            if recover:
+                return self._poll_execute_operation(
+                    session_id, op_id, deadline=deadline, resubmit_body=body
+                )
+            if isinstance(exc, httpx.TimeoutException):
+                raise GatewayOperationTimeout(
+                    op_id, "execute operation is still pending"
+                ) from exc
+            raise
         self._handle_error(resp)
         result = ExecuteResponse.model_validate(resp.json())
         if not result.operation_id:
@@ -265,6 +298,69 @@ class GatewayClient:
         resp = self._client.get(f"/v1/sessions/{session_id}/operations/{operation_id}")
         self._handle_error(resp)
         return ExecuteOperationInfo.model_validate(resp.json())
+
+    def _poll_execute_operation(
+        self,
+        session_id: str,
+        operation_id: str,
+        *,
+        deadline: float | None,
+        resubmit_body: dict[str, Any] | None = None,
+    ) -> ExecuteResponse:
+        """Poll an operation to completion, tolerating transient transport errors.
+
+        When ``resubmit_body`` is given and the gateway does not know the
+        operation (never received or already expired), the identical request is
+        resubmitted under the same operationID — the gateway dedupes by ID and
+        request hash, so this never runs the steps twice concurrently.
+        """
+        while True:
+            op: ExecuteOperationInfo | None = None
+            try:
+                op = self.get_execute_operation(session_id, operation_id)
+            except httpx.TransportError:
+                pass
+            except GatewayError as exc:
+                if exc.status_code != 404 or "operation" not in exc.error:
+                    raise
+                if resubmit_body is not None:
+                    try:
+                        resp = self._client.post(
+                            f"/v1/sessions/{session_id}/execute", json=resubmit_body
+                        )
+                    except httpx.TransportError:
+                        pass
+                    else:
+                        self._handle_error(resp)
+                        result = ExecuteResponse.model_validate(resp.json())
+                        if not result.operation_id:
+                            result.operation_id = operation_id
+                        return result
+                else:
+                    raise
+            if op is not None:
+                status = op.status.lower()
+                if status == _OPERATION_STATUS_ERROR:
+                    raise GatewayError(
+                        500, op.error or f"execute operation {operation_id} failed"
+                    )
+                if op.result is not None:
+                    if not op.result.operation_id:
+                        op.result.operation_id = operation_id
+                    return op.result
+                if status == _OPERATION_STATUS_DONE:
+                    raise GatewayError(
+                        500, f"execute operation {operation_id} finished without result"
+                    )
+            sleep_for = _OPERATION_POLL_INTERVAL_SECONDS
+            if deadline is not None:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise GatewayOperationTimeout(
+                        operation_id, "execute operation is still pending"
+                    )
+                sleep_for = min(sleep_for, remaining)
+            time.sleep(sleep_for)
 
     def execute_container(
         self,

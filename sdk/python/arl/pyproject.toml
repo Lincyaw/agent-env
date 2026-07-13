@@ -1,6 +1,6 @@
 [project]
 name = "arl-env"
-version = "0.19.9"
+version = "0.20.0"
 description = "ARL Infrastructure - Python SDK for Kubernetes-based Agent Runtime Layer"
 readme = "README.md"
 requires-python = ">=3.10"

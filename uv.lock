@@ -217,7 +217,7 @@ wheels = [
 
 [[package]]
 name = "arl-env"
-version = "0.18.0"
+version = "0.20.0"
 source = { editable = "sdk/python/arl" }
 dependencies = [
     { name = "httpx" },

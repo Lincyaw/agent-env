@@ -209,14 +209,74 @@ class TestAsyncGatewayClient:
             result = await client.execute("gw-1", [{"name": "noop", "command": ["true"]}])
             assert result.operation_id
 
-    async def test_execute_timeout_surfaces_operation_id(self) -> None:
+    async def test_execute_timeout_without_recover_surfaces_operation_id(self) -> None:
         def handler(request: httpx.Request) -> httpx.Response:
             raise httpx.ReadTimeout("timed out", request=request)
 
         async with _async_client_with_handler(handler) as client:
             with pytest.raises(GatewayOperationTimeout) as exc_info:
-                await client.execute("gw-1", [{"name": "sleep", "command": ["sleep", "60"]}])
+                await client.execute(
+                    "gw-1",
+                    [{"name": "sleep", "command": ["sleep", "60"]}],
+                    recover=False,
+                )
             assert exc_info.value.operation_id
+
+    async def test_execute_recovers_result_after_connection_drop(self) -> None:
+        def handler(request: httpx.Request) -> httpx.Response:
+            if request.method == "POST" and request.url.path == "/v1/sessions/gw-1/execute":
+                raise httpx.ReadError("connection reset by peer", request=request)
+            if request.method == "GET" and "/operations/" in request.url.path:
+                op_id = request.url.path.rsplit("/", 1)[-1]
+                return httpx.Response(
+                    200,
+                    json={
+                        "operationID": op_id,
+                        "sessionID": "gw-1",
+                        "status": "done",
+                        "result": {
+                            "sessionID": "gw-1",
+                            "operationID": op_id,
+                            "results": [],
+                            "totalDurationMs": 3,
+                        },
+                    },
+                )
+            return httpx.Response(404, json={"error": "unexpected request"})
+
+        async with _async_client_with_handler(handler) as client:
+            result = await client.execute("gw-1", [{"name": "noop", "command": ["true"]}])
+            assert result.operation_id
+            assert result.total_duration_ms == 3
+
+    async def test_execute_resubmits_when_gateway_never_saw_operation(self) -> None:
+        posts = 0
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            nonlocal posts
+            if request.method == "POST" and request.url.path == "/v1/sessions/gw-1/execute":
+                posts += 1
+                if posts == 1:
+                    raise httpx.ConnectError("connection refused", request=request)
+                body = json.loads(request.content)
+                return httpx.Response(
+                    200,
+                    json={
+                        "sessionID": "gw-1",
+                        "operationID": body["operationID"],
+                        "results": [],
+                        "totalDurationMs": 0,
+                    },
+                )
+            if request.method == "GET" and "/operations/" in request.url.path:
+                op_id = request.url.path.rsplit("/", 1)[-1]
+                return httpx.Response(404, json={"error": f"operation {op_id} not found"})
+            return httpx.Response(404, json={"error": "unexpected request"})
+
+        async with _async_client_with_handler(handler) as client:
+            result = await client.execute("gw-1", [{"name": "noop", "command": ["true"]}])
+            assert result.operation_id
+        assert posts == 2
 
     async def test_replay_response_is_typed(self) -> None:
         def handler(request: httpx.Request) -> httpx.Response:

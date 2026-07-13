@@ -261,14 +261,27 @@ class SandboxSession:
         trace_id: str | None = None,
         operation_id: str | None = None,
         on_output: Callable[[str, str], None] | None = None,
+        recover: bool = True,
+        recover_timeout: float | None = None,
     ) -> ExecuteResponse:
         """Execute steps in the sandbox. Returns synchronously.
+
+        Non-streaming execution survives dropped connections: the SDK attaches
+        an idempotent operationID and, when the HTTP request breaks (timeout,
+        peer reset, gateway restart), polls the operation to completion instead
+        of surfacing the transport error. Set ``recover_timeout`` to bound that
+        wait, or ``recover=False`` to opt out and handle
+        GatewayOperationTimeout yourself.
 
         Args:
             steps: List of step dicts, each with 'name' and 'command'.
             trace_id: Optional trace ID for distributed tracing.
             on_output: Optional callback invoked with (stdout_chunk, stderr_chunk)
                 for each partial output event during streaming execution.
+                Streaming bypasses operation tracking and is not recoverable.
+            recover: Poll the operation after a dropped connection (default True).
+            recover_timeout: Max seconds to wait during recovery before raising
+                GatewayOperationTimeout. None waits until the operation resolves.
 
         Returns:
             ExecuteResponse with per-step results, snapshot IDs, and durations.
@@ -284,6 +297,8 @@ class SandboxSession:
             trace_id,
             operation_id=operation_id,
             on_output=on_output,
+            recover=recover,
+            recover_timeout=recover_timeout,
         )
 
     def execute_container(

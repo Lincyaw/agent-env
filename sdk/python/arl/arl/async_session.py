@@ -236,8 +236,14 @@ class AsyncSandboxSession:
         trace_id: str | None = None,
         operation_id: str | None = None,
         on_output: Callable[[str, str], None] | None = None,
+        recover: bool = True,
+        recover_timeout: float | None = None,
     ) -> ExecuteResponse:
-        """Execute steps in the sandbox."""
+        """Execute steps in the sandbox.
+
+        See :meth:`arl.session.SandboxSession.execute` for the recovery
+        semantics of ``recover`` and ``recover_timeout``.
+        """
         if self._session_id is None:
             raise RuntimeError("No session created. Call create_sandbox() first.")
         iroh = await self._get_iroh()
@@ -249,6 +255,8 @@ class AsyncSandboxSession:
             trace_id,
             operation_id=operation_id,
             on_output=on_output,
+            recover=recover,
+            recover_timeout=recover_timeout,
         )
 
     async def get_execute_operation(
