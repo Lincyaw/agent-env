@@ -23,6 +23,7 @@ spec:
         - name: iroh-relay
           image: "{{ .Values.irohRelay.image.repository }}:{{ .Values.irohRelay.image.tag }}"
           imagePullPolicy: {{ .Values.irohRelay.image.pullPolicy }}
+          args: ["--dev"]
           ports:
             - name: http
               containerPort: {{ .Values.irohRelay.port }}
@@ -54,7 +55,7 @@ metadata:
     {{- include "agent-env.labels" . | nindent 4 }}
     app.kubernetes.io/component: iroh-relay
 spec:
-  type: ClusterIP
+  type: {{ .Values.irohRelay.service.type | default "LoadBalancer" }}
   ports:
     - port: {{ .Values.irohRelay.port }}
       targetPort: http

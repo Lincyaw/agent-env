@@ -77,10 +77,12 @@ executorAgent:
 irohRelay:
   enabled: true
   image:
-    repository: arl-iroh-relay
+    repository: n0computer/iroh-relay
     tag: "v1.0.2"
     pullPolicy: IfNotPresent
   port: 3340
+  service:
+    type: LoadBalancer
 
 # Gateway configuration
 gateway:
@@ -94,7 +96,7 @@ gateway:
   internalPort: 9091        # Metrics, debug, AlertManager webhook (no auth)
   sidecarGrpcPort: 9090
   service:
-    type: ClusterIP
+    type: LoadBalancer
     port: ""      # external service port; defaults to gateway.port (8080) if empty
     nodePort: ""  # e.g. 30080, only used when type is NodePort
   serviceAccount:
@@ -156,7 +158,7 @@ gateway:
     limits:
       cpu: "8"
       memory: 16Gi
-      ephemeralStorage: 10Gi
+      ephemeralStorage: 50Gi
   # Security policy applied to generated sandbox templates.
   sandboxSecurity:
     # Supported values: Managed, Unmanaged.

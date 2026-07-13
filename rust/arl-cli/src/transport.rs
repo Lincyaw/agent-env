@@ -116,6 +116,15 @@ impl QuicTransport {
         let t2 = Instant::now();
 
         if std::env::var("ARL_DEBUG").is_ok() {
+            if std::env::var("ARL_WAIT_DIRECT").is_ok() {
+                eprintln!("iroh: waiting up to 5s for direct path...");
+                for _ in 0..10 {
+                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                    if conn.paths().len() > 1 {
+                        break;
+                    }
+                }
+            }
             let paths = conn.paths();
             let path_info: Vec<String> = paths.iter()
                 .map(|p| format!("{}(rtt={:?})", p.remote_addr(), p.rtt()))
