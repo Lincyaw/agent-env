@@ -90,6 +90,7 @@ class SandboxSession:
         api_key: str | None = None,
         private_containers: Iterable[PrivateContainerSpec | dict[str, Any]] | None = None,
         iroh_addr: str | None = None,
+        allow_internet: bool | None = None,
     ) -> None:
         self.image = image or ""
         self.profile = profile or ""
@@ -98,6 +99,7 @@ class SandboxSession:
         self.idle_timeout_seconds = idle_timeout_seconds
         self.allocation_timeout_seconds = allocation_timeout_seconds
         self.private_containers = private_containers
+        self.allow_internet = allow_internet
 
         self._client = GatewayClient(base_url=gateway_url, timeout=timeout, api_key=api_key)
         self._api_key = api_key
@@ -177,6 +179,7 @@ class SandboxSession:
             idle_timeout_seconds=self.idle_timeout_seconds,
             allocation_timeout_seconds=self.allocation_timeout_seconds,
             private_containers=self.private_containers,
+            allow_internet=self.allow_internet,
         )
         self._session_id = info.id
         self._session_info = info
@@ -666,6 +669,7 @@ class ManagedSession(SandboxSession):
         private_containers: Iterable[PrivateContainerSpec | dict[str, Any]] | None = None,
         mode: str | None = None,
         iroh_addr: str | None = None,
+        allow_internet: bool | None = None,
     ) -> None:
         super().__init__(
             image=image,
@@ -677,6 +681,7 @@ class ManagedSession(SandboxSession):
             allocation_timeout_seconds=allocation_timeout_seconds,
             private_containers=private_containers,
             iroh_addr=iroh_addr,
+            allow_internet=allow_internet,
         )
         self._image = image
         self._profile = profile
@@ -714,6 +719,7 @@ class ManagedSession(SandboxSession):
             idle_timeout_seconds=self._idle_timeout_seconds,
             allocation_timeout_seconds=self._allocation_timeout_seconds,
             private_containers=self._private_containers,
+            allow_internet=self.allow_internet,
         )
         self._session_id = info.id
         self._session_info = info

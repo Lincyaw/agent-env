@@ -59,7 +59,7 @@ func (g *Gateway) CreateManagedSession(ctx context.Context, req CreateManagedSes
 	}
 	image := normalizeImage(req.Image)
 	profile := normalizeProfile(req.Profile)
-	poolName, err := managedPoolName(image, ns, profile, req.PrivateContainers)
+	poolName, err := managedPoolName(image, ns, profile, req.PrivateContainers, req.AllowInternet)
 	if err != nil {
 		recordSpanErr(span, err)
 		return nil, fmt.Errorf("derive managed pool name: %w", err)
@@ -74,6 +74,7 @@ func (g *Gateway) CreateManagedSession(ctx context.Context, req CreateManagedSes
 		Resources:         req.Resources,
 		WorkspaceDir:      req.WorkspaceDir,
 		PrivateContainers: req.PrivateContainers,
+		AllowInternet:     req.AllowInternet,
 		Managed:           true,
 	}); err != nil && !errors.IsAlreadyExists(err) {
 		recordSpanErr(span, err)
@@ -96,6 +97,7 @@ func (g *Gateway) CreateManagedSession(ctx context.Context, req CreateManagedSes
 		Managed:                  true,
 		ExperimentID:             req.ExperimentID,
 		PrivateContainers:        req.PrivateContainers,
+		AllowInternet:            req.AllowInternet,
 	})
 	if err != nil {
 		// CreateSession already ran doomed detection; reuse its verdict.

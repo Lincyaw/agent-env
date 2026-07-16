@@ -236,7 +236,7 @@ func (g *Gateway) ensureImageBackedSessionPool(ctx context.Context, req CreateSe
 		return req, "", nil
 	}
 
-	poolName, err := managedPoolName(req.Image, namespace, req.Profile, req.PrivateContainers)
+	poolName, err := managedPoolName(req.Image, namespace, req.Profile, req.PrivateContainers, req.AllowInternet)
 	if err != nil {
 		return req, "", err
 	}
@@ -248,6 +248,7 @@ func (g *Gateway) ensureImageBackedSessionPool(ctx context.Context, req CreateSe
 		Replicas:          1,
 		Namespace:         namespace,
 		PrivateContainers: req.PrivateContainers,
+		AllowInternet:     req.AllowInternet,
 		Managed:           true,
 	}); err != nil && !k8serrors.IsAlreadyExists(err) {
 		return req, "", fmt.Errorf("ensure sandbox pool for image %q profile %q: %w", req.Image, req.Profile, err)

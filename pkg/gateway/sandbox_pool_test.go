@@ -394,7 +394,7 @@ func TestCreateManagedSessionKeepsPoolWarmingOnWaitTimeout(t *testing.T) {
 		t.Fatal("CreateManagedSession succeeded, want allocation error")
 	}
 
-	poolName, err := managedPoolName("python:3.12", "default", "code", nil)
+	poolName, err := managedPoolName("python:3.12", "default", "code", nil, nil)
 	if err != nil {
 		t.Fatalf("managedPoolName returned error: %v", err)
 	}
@@ -440,7 +440,7 @@ func TestCreateManagedSessionPassesConfigEnvToRuntimeAllocation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateManagedSession returned error: %v", err)
 	}
-	poolName, err := managedPoolName("python:3.12", "default", "code", nil)
+	poolName, err := managedPoolName("python:3.12", "default", "code", nil, nil)
 	if err != nil {
 		t.Fatalf("managedPoolName returned error: %v", err)
 	}
@@ -465,7 +465,7 @@ func TestCreateManagedSessionPassesConfigEnvToRuntimeAllocation(t *testing.T) {
 
 func TestCreateManagedSessionPatchesExistingPoolForClaimEnv(t *testing.T) {
 	scheme := newGatewayTestScheme(t)
-	poolName, err := managedPoolName("python:3.12", "default", "code", nil)
+	poolName, err := managedPoolName("python:3.12", "default", "code", nil, nil)
 	if err != nil {
 		t.Fatalf("managedPoolName returned error: %v", err)
 	}

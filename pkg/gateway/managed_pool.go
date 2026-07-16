@@ -42,6 +42,7 @@ func managedPoolName(
 	namespace string,
 	profile string,
 	privateContainers []PrivateContainerSpec,
+	allowInternet *bool,
 ) (string, error) {
 	image = strings.TrimSpace(image)
 	if image != "" {
@@ -54,6 +55,9 @@ func managedPoolName(
 			return "", fmt.Errorf("marshal privateContainers identity: %w", err)
 		}
 		identity += "/privateContainers=" + string(raw)
+	}
+	if allowInternet != nil && !*allowInternet {
+		identity += "/noInternet"
 	}
 	h := sha256.Sum256([]byte(identity))
 	hash := hex.EncodeToString(h[:6])

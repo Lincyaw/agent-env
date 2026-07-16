@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	corev1 "k8s.io/api/core/v1"
+	networkingv1 "k8s.io/api/networking/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -77,6 +78,29 @@ func (g *Gateway) sandboxNetworkPolicyManagement() extensionsv1beta1.NetworkPoli
 		return extensionsv1beta1.NetworkPolicyManagementManaged
 	default:
 		return extensionsv1beta1.NetworkPolicyManagementUnmanaged
+	}
+}
+
+// denyInternetEgressPolicy returns a NetworkPolicySpec that blocks outbound
+// internet while allowing cluster-internal DNS and RFC-1918 service traffic.
+func denyInternetEgressPolicy() *extensionsv1beta1.NetworkPolicySpec {
+	udp := corev1.ProtocolUDP
+	tcp := corev1.ProtocolTCP
+	return &extensionsv1beta1.NetworkPolicySpec{
+		Egress: []networkingv1.NetworkPolicyEgressRule{
+			{
+				Ports: []networkingv1.NetworkPolicyPort{
+					{Port: &intstr.IntOrString{Type: intstr.Int, IntVal: 53}, Protocol: &udp},
+					{Port: &intstr.IntOrString{Type: intstr.Int, IntVal: 53}, Protocol: &tcp},
+				},
+			},
+			{
+				To: []networkingv1.NetworkPolicyPeer{
+					{IPBlock: &networkingv1.IPBlock{CIDR: "10.0.0.0/8"}},
+					{IPBlock: &networkingv1.IPBlock{CIDR: "172.16.0.0/12"}},
+				},
+			},
+		},
 	}
 }
 

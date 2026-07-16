@@ -188,6 +188,7 @@ class GatewayClient:
         idle_timeout_seconds: int | None = None,
         allocation_timeout_seconds: int | None = None,
         private_containers: Iterable[PrivateContainerSpec | dict[str, Any]] | None = None,
+        allow_internet: bool | None = None,
     ) -> SessionInfo:
         if not image and not profile:
             raise ValueError("image or profile is required")
@@ -213,6 +214,8 @@ class GatewayClient:
         private_container_payload = _serialize_private_containers(private_containers)
         if private_container_payload is not None:
             body["privateContainers"] = private_container_payload
+        if allow_internet is not None:
+            body["allowInternet"] = allow_internet
         resp = self._client.post("/v1/sessions", json=body)
         self._handle_error(resp)
         return SessionInfo.model_validate(resp.json())
@@ -776,6 +779,7 @@ class GatewayClient:
         allocation_timeout_seconds: int | None = None,
         config_env: ConfigEnvSpec | dict[str, Any] | None = None,
         private_containers: Iterable[PrivateContainerSpec | dict[str, Any]] | None = None,
+        allow_internet: bool | None = None,
     ) -> ManagedSessionInfo:
         """Create a managed session with automatic pool management.
 
@@ -821,6 +825,8 @@ class GatewayClient:
         private_container_payload = _serialize_private_containers(private_containers)
         if private_container_payload is not None:
             body["privateContainers"] = private_container_payload
+        if allow_internet is not None:
+            body["allowInternet"] = allow_internet
         resp = self._client.post("/v1/managed/sessions", json=body)
         self._handle_error(resp)
         return ManagedSessionInfo.model_validate(resp.json())

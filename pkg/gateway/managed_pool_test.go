@@ -8,7 +8,7 @@ import (
 )
 
 func TestManagedPoolNameIncludesImageSlug(t *testing.T) {
-	name, err := managedPoolName("docker.io/library/python:3.12", "arl", "code", nil)
+	name, err := managedPoolName("docker.io/library/python:3.12", "arl", "code", nil, nil)
 	if err != nil {
 		t.Fatalf("managedPoolName returned error: %v", err)
 	}
@@ -22,11 +22,11 @@ func TestManagedPoolNameIncludesImageSlug(t *testing.T) {
 }
 
 func TestManagedPoolNameNormalizesDockerLibraryImage(t *testing.T) {
-	fromFullRef, err := managedPoolName("docker.io/library/python:3.12", "arl", "code", nil)
+	fromFullRef, err := managedPoolName("docker.io/library/python:3.12", "arl", "code", nil, nil)
 	if err != nil {
 		t.Fatalf("managedPoolName full ref returned error: %v", err)
 	}
-	fromShortRef, err := managedPoolName("python:3.12", "arl", "code", nil)
+	fromShortRef, err := managedPoolName("python:3.12", "arl", "code", nil, nil)
 	if err != nil {
 		t.Fatalf("managedPoolName short ref returned error: %v", err)
 	}
@@ -37,18 +37,18 @@ func TestManagedPoolNameNormalizesDockerLibraryImage(t *testing.T) {
 }
 
 func TestManagedPoolNameHashSeparatesPoolIdentity(t *testing.T) {
-	codePool, err := managedPoolName("python:3.12", "arl", "code", nil)
+	codePool, err := managedPoolName("python:3.12", "arl", "code", nil, nil)
 	if err != nil {
 		t.Fatalf("managedPoolName code returned error: %v", err)
 	}
-	defaultPool, err := managedPoolName("python:3.12", "arl", "default", nil)
+	defaultPool, err := managedPoolName("python:3.12", "arl", "default", nil, nil)
 	if err != nil {
 		t.Fatalf("managedPoolName default returned error: %v", err)
 	}
 	privatePool, err := managedPoolName("python:3.12", "arl", "code", []PrivateContainerSpec{{
 		Name:  "db",
 		Image: "postgres:16",
-	}})
+	}}, nil)
 	if err != nil {
 		t.Fatalf("managedPoolName private returned error: %v", err)
 	}
@@ -67,7 +67,7 @@ func TestManagedPoolNameHashSeparatesPoolIdentity(t *testing.T) {
 }
 
 func TestManagedPoolNameTruncatesLongImageSlug(t *testing.T) {
-	name, err := managedPoolName("registry.example.com/org/some-extremely-long-runtime-image-name-with-extra-build-metadata:20260703", "arl", "code", nil)
+	name, err := managedPoolName("registry.example.com/org/some-extremely-long-runtime-image-name-with-extra-build-metadata:20260703", "arl", "code", nil, nil)
 	if err != nil {
 		t.Fatalf("managedPoolName returned error: %v", err)
 	}
@@ -95,7 +95,7 @@ func TestManagedPoolNameTruncatesLongImageSlug(t *testing.T) {
 }
 
 func TestManagedPoolNameUsesRepositoryNameForDigestImages(t *testing.T) {
-	name, err := managedPoolName("ghcr.io/acme/runner@sha256:abcdef", "arl", "code", nil)
+	name, err := managedPoolName("ghcr.io/acme/runner@sha256:abcdef", "arl", "code", nil, nil)
 	if err != nil {
 		t.Fatalf("managedPoolName returned error: %v", err)
 	}

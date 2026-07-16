@@ -293,7 +293,7 @@ func TestEnsureImageBackedSessionPoolCreatesProfiledPool(t *testing.T) {
 		t.Fatalf("ensureImageBackedSessionPool returned error: %v", err)
 	}
 
-	wantPool, err := managedPoolName("python:3.12", "default", "code", nil)
+	wantPool, err := managedPoolName("python:3.12", "default", "code", nil, nil)
 	if err != nil {
 		t.Fatalf("managedPoolName returned error: %v", err)
 	}
@@ -314,7 +314,7 @@ func TestEnsureImageBackedSessionPoolCreatesProfiledPool(t *testing.T) {
 
 func TestEnsureImageBackedSessionPoolAvoidsFullPoolSnapshot(t *testing.T) {
 	scheme := newGatewayTestScheme(t)
-	poolName, err := managedPoolName("python:3.12", "default", "code", nil)
+	poolName, err := managedPoolName("python:3.12", "default", "code", nil, nil)
 	if err != nil {
 		t.Fatalf("managedPoolName returned error: %v", err)
 	}

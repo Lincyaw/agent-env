@@ -83,6 +83,7 @@ type CreateSessionRequest struct {
 	IdleTimeoutSeconds       int                    `json:"idleTimeoutSeconds,omitempty"`
 	AllocationTimeoutSeconds *int                   `json:"allocationTimeoutSeconds,omitempty"`
 	PrivateContainers        []PrivateContainerSpec `json:"privateContainers,omitempty"`
+	AllowInternet            *bool                  `json:"allowInternet,omitempty"`
 	PoolName                 string                 `json:"-"` // internal pinned SandboxWarmPool, not part of the public API
 	ExtraLabels              map[string]string      `json:"-"` // internal use only, not exposed via JSON
 	Managed                  bool                   `json:"-"`
@@ -126,6 +127,7 @@ type CreateManagedSessionRequest struct {
 	IdleTimeoutSeconds       int                          `json:"idleTimeoutSeconds,omitempty"`
 	AllocationTimeoutSeconds *int                         `json:"allocationTimeoutSeconds,omitempty"`
 	PrivateContainers        []PrivateContainerSpec       `json:"privateContainers,omitempty"`
+	AllowInternet            *bool                        `json:"allowInternet,omitempty"`
 }
 
 // ExecuteRequest is the body for POST /v1/sessions/{id}/execute
@@ -202,6 +204,7 @@ type CreatePoolRequest struct {
 	WorkspaceDir      string                       `json:"workspaceDir,omitempty"`
 	ImageLocality     json.RawMessage              `json:"imageLocality,omitempty"`
 	PrivateContainers []PrivateContainerSpec       `json:"privateContainers,omitempty"`
+	AllowInternet     *bool                        `json:"allowInternet,omitempty"`
 	Managed           bool                         `json:"-"`
 }
 
