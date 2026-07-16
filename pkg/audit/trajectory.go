@@ -29,6 +29,18 @@ func (TrajectoryEntry) TableName() string {
 	return "trajectory"
 }
 
+// FileBlob stores file content keyed by SHA256 for replay of uploaded files.
+type FileBlob struct {
+	SHA256    string    `gorm:"column:sha256;type:String;primaryKey" json:"sha256"`
+	Content   []byte    `gorm:"column:content;type:String" json:"content"`
+	Size      int64     `gorm:"column:size;type:Int64" json:"size"`
+	CreatedAt time.Time `gorm:"column:created_at;type:DateTime64(3);autoCreateTime:milli" json:"created_at"`
+}
+
+func (FileBlob) TableName() string {
+	return "file_blobs"
+}
+
 // TrajectoryWriter manages trajectory storage in ClickHouse using GORM
 type TrajectoryWriter struct {
 	db *gorm.DB
@@ -93,6 +105,19 @@ func NewTrajectoryWriter(cfg TrajectoryConfig) (*TrajectoryWriter, error) {
 		return nil, fmt.Errorf("failed to create trajectory table: %w", err)
 	}
 
+	createBlobsSQL := `
+	CREATE TABLE IF NOT EXISTS file_blobs (
+		sha256 String,
+		content String,
+		size Int64,
+		created_at DateTime64(3) DEFAULT now64(3)
+	) ENGINE = ReplacingMergeTree()
+	ORDER BY sha256
+	`
+	if _, err := sqlDB.Exec(createBlobsSQL); err != nil {
+		return nil, fmt.Errorf("failed to create file_blobs table: %w", err)
+	}
+
 	return &TrajectoryWriter{db: db}, nil
 }
 
@@ -148,6 +173,28 @@ func (w *TrajectoryWriter) DeleteTrajectory(ctx context.Context, sessionID strin
 		return fmt.Errorf("failed to delete trajectory: %w", err)
 	}
 	return nil
+}
+
+// StoreBlob stores file content keyed by SHA256 for later replay retrieval.
+func (w *TrajectoryWriter) StoreBlob(ctx context.Context, sha256 string, content []byte) error {
+	blob := FileBlob{
+		SHA256:  sha256,
+		Content: content,
+		Size:    int64(len(content)),
+	}
+	if err := w.db.WithContext(ctx).Create(&blob).Error; err != nil {
+		return fmt.Errorf("failed to store file blob: %w", err)
+	}
+	return nil
+}
+
+// GetBlob retrieves file content by SHA256 hash.
+func (w *TrajectoryWriter) GetBlob(ctx context.Context, sha256 string) ([]byte, error) {
+	var blob FileBlob
+	if err := w.db.WithContext(ctx).Where("sha256 = ?", sha256).First(&blob).Error; err != nil {
+		return nil, fmt.Errorf("failed to get file blob: %w", err)
+	}
+	return blob.Content, nil
 }
 
 // Close closes the database connection

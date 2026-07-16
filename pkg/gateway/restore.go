@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -9,23 +10,15 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Lincyaw/agent-env/pkg/audit"
 	"github.com/Lincyaw/agent-env/pkg/sidecar"
 )
 
 // ReplayFrom replays steps from a source session into the target session's sandbox.
 func (g *Gateway) ReplayFrom(ctx context.Context, targetSessionID string, req ReplayRequest) (*ReplayResponse, error) {
-	sourceSession, ok := g.store.Get(req.SourceSessionID)
-	if !ok {
-		sourceSession, ok = g.store.GetHistorical(req.SourceSessionID)
-		if !ok {
-			return nil, fmt.Errorf("source session %s not found", req.SourceSessionID)
-		}
-	}
-	var records []StepRecord
-	if req.UpToStep != nil {
-		records = sourceSession.History.GetUpTo(*req.UpToStep)
-	} else {
-		records = sourceSession.History.GetAll()
+	records, err := g.replayRecords(ctx, req.SourceSessionID, req.UpToStep)
+	if err != nil {
+		return nil, err
 	}
 
 	_, podIP, releaseSession, err := g.acquireSessionPodIP(ctx, targetSessionID)
@@ -39,6 +32,12 @@ func (g *Gateway) ReplayFrom(ctx context.Context, targetSessionID string, req Re
 
 	for _, record := range records {
 		if record.Name == uploadFileStepName {
+			if err := g.replayUpload(ctx, podIP, record); err != nil {
+				log.Printf("Warning: replay upload step %d failed: %v", record.Index, err)
+				errors++
+			} else {
+				replayed++
+			}
 			continue
 		}
 
@@ -62,6 +61,68 @@ func (g *Gateway) ReplayFrom(ctx context.Context, targetSessionID string, req Re
 
 	g.touchLastTaskTime(targetSessionID)
 	return &ReplayResponse{StepsReplayed: replayed, Errors: errors}, nil
+}
+
+func (g *Gateway) replayRecords(ctx context.Context, sourceSessionID string, upToStep *int) ([]StepRecord, error) {
+	sourceSession, ok := g.store.Get(sourceSessionID)
+	if !ok {
+		sourceSession, ok = g.store.GetHistorical(sourceSessionID)
+	}
+	if ok {
+		if upToStep != nil {
+			return sourceSession.History.GetUpTo(*upToStep), nil
+		}
+		return sourceSession.History.GetAll(), nil
+	}
+	return g.replayRecordsFromTrajectory(ctx, sourceSessionID, upToStep)
+}
+
+func (g *Gateway) replayRecordsFromTrajectory(ctx context.Context, sessionID string, upToStep *int) ([]StepRecord, error) {
+	if g.trajectoryWriter == nil {
+		return nil, fmt.Errorf("source session %s not found", sessionID)
+	}
+	var entries []audit.TrajectoryEntry
+	var err error
+	if upToStep != nil {
+		entries, err = g.trajectoryWriter.GetTrajectoryUpTo(ctx, sessionID, *upToStep)
+	} else {
+		entries, err = g.trajectoryWriter.GetTrajectory(ctx, sessionID)
+	}
+	if err != nil {
+		return nil, fmt.Errorf("source session %s not found in store or trajectory: %w", sessionID, err)
+	}
+	if len(entries) == 0 {
+		return nil, fmt.Errorf("source session %s not found", sessionID)
+	}
+	records := make([]StepRecord, len(entries))
+	for i, e := range entries {
+		records[i] = StepRecord{
+			Index:     e.Step,
+			Name:      e.Name,
+			Input:     e.Action,
+			Timestamp: e.Timestamp,
+		}
+	}
+	return records, nil
+}
+
+func (g *Gateway) replayUpload(ctx context.Context, podIP string, record StepRecord) error {
+	var upload uploadRecord
+	if err := json.Unmarshal(record.Input, &upload); err != nil {
+		return fmt.Errorf("unmarshal upload record: %w", err)
+	}
+	if upload.SHA256 == "" || upload.Path == "" {
+		return fmt.Errorf("upload record missing path or sha256")
+	}
+	if g.trajectoryWriter == nil {
+		return fmt.Errorf("no trajectory writer for blob retrieval")
+	}
+	content, err := g.trajectoryWriter.GetBlob(ctx, upload.SHA256)
+	if err != nil {
+		return fmt.Errorf("retrieve blob %s: %w", upload.SHA256[:12], err)
+	}
+	_, err = g.sidecarClient.WriteFile(ctx, podIP, upload.Path, bytes.NewReader(content), upload.SHA256)
+	return err
 }
 
 // Restore restores a session to a previous snapshot by allocating a new pod and replaying steps.
@@ -122,6 +183,13 @@ func (g *Gateway) Restore(ctx context.Context, sessionID string, snapshotID stri
 
 	for _, record := range records {
 		if record.Name == uploadFileStepName {
+			if err := g.replayUpload(ctx, newAllocation.PodIP, record); err != nil {
+				log.Printf("Warning: restore upload step %d failed: %v", record.Index, err)
+				if err := g.releaseRestoreAllocation(*newAllocation); err != nil {
+					log.Printf("Warning: failed to release runtime %s after restore failure: %v", newAllocation.PodName, err)
+				}
+				return fmt.Errorf("replay upload step %d failed: %w", record.Index, err)
+			}
 			continue
 		}
 

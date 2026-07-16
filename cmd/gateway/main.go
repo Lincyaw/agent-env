@@ -103,6 +103,7 @@ func main() {
 			Addr:     cfg.RedisAddr,
 			Password: cfg.RedisPassword,
 			DB:       cfg.RedisDB,
+			TTL:      cfg.RedisSessionTTL,
 		}
 		const maxRetries = 5
 		for i := range maxRetries {

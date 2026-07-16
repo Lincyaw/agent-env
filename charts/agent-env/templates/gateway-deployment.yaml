@@ -178,6 +178,10 @@ spec:
               value: {{ include "agent-env.redisAddr" . | quote }}
             - name: REDIS_DB
               value: "{{ .Values.redis.db }}"
+            {{- if .Values.redis.sessionTTL }}
+            - name: REDIS_SESSION_TTL
+              value: "{{ .Values.redis.sessionTTL }}"
+            {{- end }}
             {{- if .Values.redis.password }}
             - name: REDIS_PASSWORD
               valueFrom:

@@ -1,18 +1,20 @@
 package gateway
 
 import (
+	"bytes"
 	"context"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"path"
 	"strings"
+	"time"
 
 	"github.com/Lincyaw/agent-env/pkg/interfaces"
 )
 
-// uploadFileStepName is kept only to skip legacy file-transfer records when
-// replaying histories created by older gateway builds.
 const uploadFileStepName = "upload_file"
 
 func (g *Gateway) UploadFile(ctx context.Context, sessionID string, filePath string, content io.Reader, expectedSHA256 string) (*UploadFileResponse, error) {
@@ -25,16 +27,29 @@ func (g *Gateway) UploadFile(ctx context.Context, sessionID string, filePath str
 		return nil, err
 	}
 
-	_, podIP, releaseSession, err := g.acquireSessionPodIP(ctx, sessionID)
+	s, podIP, releaseSession, err := g.acquireSessionPodIP(ctx, sessionID)
 	if err != nil {
 		return nil, err
 	}
 	defer releaseSession()
 
-	result, err := g.sidecarClient.WriteFile(ctx, podIP, relPath, content, expectedSHA256)
+	var buf bytes.Buffer
+	tee := io.TeeReader(content, &buf)
+
+	result, err := g.sidecarClient.WriteFile(ctx, podIP, relPath, tee, expectedSHA256)
 	if err != nil {
 		return nil, err
 	}
+
+	g.storeUploadBlob(ctx, result.SHA256, buf.Bytes())
+
+	inputJSON, _ := json.Marshal(uploadRecord{Path: relPath, SHA256: result.SHA256, Size: int(result.BytesWritten)})
+	s.History.Add(StepRecord{
+		Name:      uploadFileStepName,
+		Input:     inputJSON,
+		Timestamp: time.Now(),
+	})
+	g.store.SyncHistory(sessionID)
 
 	g.touchLastTaskTime(sessionID)
 	return &UploadFileResponse{
@@ -42,6 +57,25 @@ func (g *Gateway) UploadFile(ctx context.Context, sessionID string, filePath str
 		BytesWritten: int(result.BytesWritten),
 		SHA256:       result.SHA256,
 	}, nil
+}
+
+type uploadRecord struct {
+	Path   string `json:"path"`
+	SHA256 string `json:"sha256"`
+	Size   int    `json:"size"`
+}
+
+func (g *Gateway) storeUploadBlob(ctx context.Context, sha256 string, content []byte) {
+	if g.trajectoryWriter == nil || sha256 == "" {
+		return
+	}
+	go func() {
+		bgCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		if err := g.trajectoryWriter.StoreBlob(bgCtx, sha256, content); err != nil {
+			log.Printf("Warning: failed to store file blob %s: %v", sha256[:12], err)
+		}
+	}()
 }
 
 func (g *Gateway) DownloadFile(ctx context.Context, sessionID string, filePath string, dst io.Writer) (*interfaces.FileReadResult, error) {

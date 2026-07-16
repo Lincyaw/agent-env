@@ -71,10 +71,11 @@ type Config struct {
 	DevboxIdleTimeout time.Duration
 
 	// Redis session store configuration
-	RedisEnabled  bool
-	RedisAddr     string
-	RedisPassword string
-	RedisDB       int
+	RedisEnabled    bool
+	RedisAddr       string
+	RedisPassword   string
+	RedisDB         int
+	RedisSessionTTL time.Duration
 
 	// Authentication configuration
 	AuthEnabled    bool
@@ -160,10 +161,11 @@ func DefaultConfig() *Config {
 
 		DevboxIdleTimeout: 4 * time.Hour,
 
-		RedisEnabled:  false,
-		RedisAddr:     "localhost:6379",
-		RedisPassword: "",
-		RedisDB:       0,
+		RedisEnabled:    false,
+		RedisAddr:       "localhost:6379",
+		RedisPassword:   "",
+		RedisDB:         0,
+		RedisSessionTTL: 72 * time.Hour,
 
 		AuthEnabled:    true,
 		AuthAPIKeys:    "",
@@ -359,6 +361,12 @@ func LoadFromEnv() *Config {
 	if v := os.Getenv("REDIS_DB"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
 			cfg.RedisDB = n
+		}
+	}
+
+	if v := os.Getenv("REDIS_SESSION_TTL"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil && d > 0 {
+			cfg.RedisSessionTTL = d
 		}
 	}
 
