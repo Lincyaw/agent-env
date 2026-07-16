@@ -11,6 +11,7 @@ type MetricsCollector interface {
 	RecordImagePullDuration(image string, duration time.Duration)
 	SetActiveSessions(count int64)
 	IncrementSessionDeletion(reason string)
+	IncrementSessionDrop(reason, terminationReason string)
 	IncrementExecuteOperationResult(result string)
 	RecordGatewayStepDuration(stepType string, duration time.Duration)
 	IncrementGatewayStepResult(stepType, result string)
@@ -37,6 +38,7 @@ func (n *NoOpMetricsCollector) RecordSandboxReadyDuration(poolName string, durat
 func (n *NoOpMetricsCollector) RecordImagePullDuration(image string, duration time.Duration)       {}
 func (n *NoOpMetricsCollector) SetActiveSessions(count int64)                                      {}
 func (n *NoOpMetricsCollector) IncrementSessionDeletion(reason string)                             {}
+func (n *NoOpMetricsCollector) IncrementSessionDrop(reason, terminationReason string)              {}
 func (n *NoOpMetricsCollector) IncrementExecuteOperationResult(result string)                      {}
 func (n *NoOpMetricsCollector) RecordGatewayStepDuration(stepType string, duration time.Duration) {
 }

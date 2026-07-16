@@ -19,6 +19,7 @@ type PrometheusCollector struct {
 
 	activeSessions      prometheus.Gauge
 	sessionDeletion     *prometheus.CounterVec
+	sessionDrop         *prometheus.CounterVec
 	executeOperation    *prometheus.CounterVec
 	gatewayStepDuration *prometheus.HistogramVec
 	gatewayStepResult   *prometheus.CounterVec
@@ -91,6 +92,13 @@ func NewPrometheusCollector() interfaces.MetricsCollector {
 				Help: "Session deletions by reason.",
 			},
 			[]string{"reason"},
+		),
+		sessionDrop: prometheus.NewCounterVec(
+			prometheus.CounterOpts{
+				Name: "arl_gateway_session_drop_total",
+				Help: "Sessions dropped due to runtime loss, by deletion reason and container termination reason.",
+			},
+			[]string{"reason", "termination_reason"},
 		),
 		executeOperation: prometheus.NewCounterVec(
 			prometheus.CounterOpts{
@@ -205,6 +213,7 @@ func NewPrometheusCollector() interfaces.MetricsCollector {
 		c.imagePullDuration,
 		c.activeSessions,
 		c.sessionDeletion,
+		c.sessionDrop,
 		c.executeOperation,
 		c.gatewayStepDuration,
 		c.gatewayStepResult,
@@ -251,6 +260,13 @@ func (c *PrometheusCollector) SetActiveSessions(count int64) {
 
 func (c *PrometheusCollector) IncrementSessionDeletion(reason string) {
 	c.sessionDeletion.WithLabelValues(reason).Inc()
+}
+
+func (c *PrometheusCollector) IncrementSessionDrop(reason, terminationReason string) {
+	if terminationReason == "" {
+		terminationReason = "unknown"
+	}
+	c.sessionDrop.WithLabelValues(reason, terminationReason).Inc()
 }
 
 func (c *PrometheusCollector) IncrementExecuteOperationResult(result string) {

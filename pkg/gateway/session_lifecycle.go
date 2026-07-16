@@ -415,8 +415,16 @@ func (g *Gateway) deleteSession(ctx context.Context, sessionID string, reason st
 	experimentID := s.experimentID
 	s.mu.Unlock()
 
-	log.Printf("Deleting session %s (reason=%s, experiment=%s, pool=%s, pod=%s)",
-		sessionID, reason, experimentID, allocation.PoolRef, podName)
+	s.mu.RLock()
+	stepCount := 0
+	if s.History != nil {
+		stepCount = s.History.Len()
+	}
+	duration := int64(time.Since(s.createdAt).Seconds())
+	s.mu.RUnlock()
+
+	log.Printf("Deleting session %s (reason=%s, experiment=%s, pool=%s, pod=%s, steps=%d, duration=%ds)",
+		sessionID, reason, experimentID, allocation.PoolRef, podName, stepCount, duration)
 
 	if g.runtimeAllocator != nil {
 		if err := g.runtimeAllocator.Release(ctx, allocation); err != nil && !errors.IsNotFound(err) {
@@ -475,7 +483,17 @@ func (g *Gateway) dropSession(sessionID string, s *session) {
 	allocation := s.runtimeAllocation()
 	s.mu.Unlock()
 
-	log.Printf("Dropping session %s: runtime lost (pool=%s, pod=%s)", sessionID, allocation.PoolRef, allocation.PodName)
+	diagCtx, diagCancel := context.WithTimeout(context.Background(), 3*time.Second)
+	diag := g.diagnoseSessionEnd(diagCtx, s, sessionID)
+	diagCancel()
+
+	if diag.TerminationReason != "" {
+		log.Printf("Dropping session %s: runtime lost (pool=%s, pod=%s, reason=%s, exit_code=%d, steps=%d, duration=%ds, image=%s, experiment=%s)",
+			sessionID, allocation.PoolRef, allocation.PodName, diag.TerminationReason, diag.ExitCode, diag.StepCount, diag.DurationSeconds, diag.Image, diag.ExperimentID)
+	} else {
+		log.Printf("Dropping session %s: runtime lost (pool=%s, pod=%s, steps=%d, duration=%ds, image=%s, experiment=%s)",
+			sessionID, allocation.PoolRef, allocation.PodName, diag.StepCount, diag.DurationSeconds, diag.Image, diag.ExperimentID)
+	}
 
 	if info.PodIP != "" {
 		if g.sidecarClient != nil {
@@ -496,6 +514,7 @@ func (g *Gateway) dropSession(sessionID string, s *session) {
 	if g.metrics != nil {
 		g.metrics.SetActiveSessions(activeSessions)
 		g.metrics.IncrementSessionDeletion("runtime_lost")
+		g.metrics.IncrementSessionDrop("runtime_lost", diag.TerminationReason)
 	}
 
 	cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), 10*time.Second)
