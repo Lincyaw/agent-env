@@ -57,6 +57,7 @@ type GatewayConfig struct {
 	DefaultEphemeralStorageLimit    string
 	DefaultEphemeralStorageRequest  string
 	SandboxNetworkPolicyManagement  string
+	SandboxEgressAllowCIDRs         string
 	SandboxRuntimeClassName         string
 	SandboxSeccompProfileType       string
 	SandboxSeccompLocalhostProfile  string

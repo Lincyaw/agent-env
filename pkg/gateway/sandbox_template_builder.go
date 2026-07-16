@@ -81,11 +81,30 @@ func (g *Gateway) sandboxNetworkPolicyManagement() extensionsv1beta1.NetworkPoli
 	}
 }
 
-// denyInternetEgressPolicy returns a NetworkPolicySpec that blocks outbound
-// internet while allowing cluster-internal DNS and RFC-1918 service traffic.
-func denyInternetEgressPolicy() *extensionsv1beta1.NetworkPolicySpec {
+func (g *Gateway) egressAllowCIDRs() []string {
+	raw := strings.TrimSpace(g.gwConfig.SandboxEgressAllowCIDRs)
+	if raw == "" {
+		return []string{"10.0.0.0/8", "172.16.0.0/12"}
+	}
+	parts := strings.Split(raw, ",")
+	cidrs := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if c := strings.TrimSpace(p); c != "" {
+			cidrs = append(cidrs, c)
+		}
+	}
+	return cidrs
+}
+
+func denyInternetEgressPolicy(allowCIDRs []string) *extensionsv1beta1.NetworkPolicySpec {
 	udp := corev1.ProtocolUDP
 	tcp := corev1.ProtocolTCP
+	peers := make([]networkingv1.NetworkPolicyPeer, 0, len(allowCIDRs))
+	for _, cidr := range allowCIDRs {
+		peers = append(peers, networkingv1.NetworkPolicyPeer{
+			IPBlock: &networkingv1.IPBlock{CIDR: cidr},
+		})
+	}
 	return &extensionsv1beta1.NetworkPolicySpec{
 		Egress: []networkingv1.NetworkPolicyEgressRule{
 			{
@@ -95,10 +114,7 @@ func denyInternetEgressPolicy() *extensionsv1beta1.NetworkPolicySpec {
 				},
 			},
 			{
-				To: []networkingv1.NetworkPolicyPeer{
-					{IPBlock: &networkingv1.IPBlock{CIDR: "10.0.0.0/8"}},
-					{IPBlock: &networkingv1.IPBlock{CIDR: "172.16.0.0/12"}},
-				},
+				To: peers,
 			},
 		},
 	}

@@ -121,6 +121,7 @@ type Config struct {
 
 	// Sandbox security policy applied to generated SandboxTemplates.
 	SandboxNetworkPolicyManagement  string
+	SandboxEgressAllowCIDRs         string
 	SandboxRuntimeClassName         string
 	SandboxSeccompProfileType       string
 	SandboxSeccompLocalhostProfile  string
@@ -191,6 +192,7 @@ func DefaultConfig() *Config {
 		DefaultEphemeralStorageLimit:    "10Gi",
 		DefaultEphemeralStorageRequest:  "100Mi",
 		SandboxNetworkPolicyManagement:  "Unmanaged",
+		SandboxEgressAllowCIDRs:         "10.0.0.0/8,172.16.0.0/12",
 		SandboxRuntimeClassName:         "",
 		SandboxSeccompProfileType:       "RuntimeDefault",
 		SandboxSeccompLocalhostProfile:  "",
@@ -488,6 +490,9 @@ func LoadFromEnv() *Config {
 	}
 	if v := os.Getenv("SANDBOX_NETWORK_POLICY_MANAGEMENT"); v != "" {
 		cfg.SandboxNetworkPolicyManagement = v
+	}
+	if v := os.Getenv("SANDBOX_EGRESS_ALLOW_CIDRS"); v != "" {
+		cfg.SandboxEgressAllowCIDRs = v
 	}
 	if v := os.Getenv("SANDBOX_RUNTIME_CLASS_NAME"); v != "" {
 		cfg.SandboxRuntimeClassName = v

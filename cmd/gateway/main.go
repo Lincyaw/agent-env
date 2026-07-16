@@ -161,6 +161,7 @@ func main() {
 		DefaultEphemeralStorageLimit:    cfg.DefaultEphemeralStorageLimit,
 		DefaultEphemeralStorageRequest:  cfg.DefaultEphemeralStorageRequest,
 		SandboxNetworkPolicyManagement:  cfg.SandboxNetworkPolicyManagement,
+		SandboxEgressAllowCIDRs:         cfg.SandboxEgressAllowCIDRs,
 		SandboxRuntimeClassName:         cfg.SandboxRuntimeClassName,
 		SandboxSeccompProfileType:       cfg.SandboxSeccompProfileType,
 		SandboxSeccompLocalhostProfile:  cfg.SandboxSeccompLocalhostProfile,

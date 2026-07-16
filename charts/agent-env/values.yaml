@@ -163,6 +163,8 @@ gateway:
   sandboxSecurity:
     # Supported values: Managed, Unmanaged.
     networkPolicyManagement: "Unmanaged"
+    # Comma-separated CIDRs allowed when allowInternet=false (DNS is always permitted).
+    egressAllowCIDRs: "10.0.0.0/8,172.16.0.0/12"
     runtimeClassName: ""
     seccompProfile:
       # Supported values: RuntimeDefault, Unconfined, Localhost.

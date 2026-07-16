@@ -128,7 +128,7 @@ func (g *Gateway) CreatePool(ctx context.Context, req CreatePoolRequest) error {
 	}
 	if req.AllowInternet != nil && !*req.AllowInternet {
 		template.Spec.NetworkPolicyManagement = extensionsv1beta1.NetworkPolicyManagementManaged
-		template.Spec.NetworkPolicy = denyInternetEgressPolicy()
+		template.Spec.NetworkPolicy = denyInternetEgressPolicy(g.egressAllowCIDRs())
 	}
 	createdTemplate := false
 	if err := g.k8sClient.Create(ctx, template); err != nil {
