@@ -132,7 +132,7 @@ func TestCreatePoolCreatesSandboxWarmPoolAndExecutableTemplate(t *testing.T) {
 	assertResourceQuantity(t, executor.Resources.Requests[corev1.ResourceCPU], "500m")
 	assertResourceQuantity(t, executor.Resources.Requests[corev1.ResourceMemory], "512Mi")
 	assertResourceQuantity(t, executor.Resources.Limits[corev1.ResourceCPU], "8")
-	assertResourceQuantity(t, executor.Resources.Limits[corev1.ResourceMemory], "16Gi")
+	assertResourceQuantity(t, executor.Resources.Limits[corev1.ResourceMemory], "32Gi")
 	sidecar := findContainer(podSpec.Containers, "sidecar")
 	if got := sidecar.Command; len(got) != 1 || got[0] != "/sidecar" {
 		t.Fatalf("sidecar command = %#v, want /sidecar", got)
@@ -292,7 +292,7 @@ func TestCreatePoolUsesConfiguredDefaultSandboxResources(t *testing.T) {
 			DefaultSandboxRequestCPU:       "250m",
 			DefaultSandboxRequestMemory:    "256Mi",
 			DefaultSandboxLimitCPU:         "8",
-			DefaultSandboxLimitMemory:      "16Gi",
+			DefaultSandboxLimitMemory:      "32Gi",
 			DefaultEphemeralStorageLimit:   "10Gi",
 			DefaultEphemeralStorageRequest: "100Mi",
 		},
@@ -315,7 +315,7 @@ func TestCreatePoolUsesConfiguredDefaultSandboxResources(t *testing.T) {
 	assertResourceQuantity(t, executor.Resources.Requests[corev1.ResourceCPU], "250m")
 	assertResourceQuantity(t, executor.Resources.Requests[corev1.ResourceMemory], "256Mi")
 	assertResourceQuantity(t, executor.Resources.Limits[corev1.ResourceCPU], "8")
-	assertResourceQuantity(t, executor.Resources.Limits[corev1.ResourceMemory], "16Gi")
+	assertResourceQuantity(t, executor.Resources.Limits[corev1.ResourceMemory], "32Gi")
 }
 
 func TestCreatePoolCleansTemplateWhenWarmPoolCreateFails(t *testing.T) {

@@ -157,7 +157,7 @@ gateway:
       ephemeralStorage: 100Mi
     limits:
       cpu: "8"
-      memory: 16Gi
+      memory: 32Gi
       ephemeralStorage: 50Gi
   # Security policy applied to generated sandbox templates.
   sandboxSecurity:

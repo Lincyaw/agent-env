@@ -25,7 +25,7 @@ const (
 	defaultSandboxRequestCPU    = "500m"
 	defaultSandboxRequestMemory = "512Mi"
 	defaultSandboxLimitCPU      = "8"
-	defaultSandboxLimitMemory   = "16Gi"
+	defaultSandboxLimitMemory   = "32Gi"
 )
 
 // CreatePool creates an agent-sandbox SandboxTemplate and SandboxWarmPool.
