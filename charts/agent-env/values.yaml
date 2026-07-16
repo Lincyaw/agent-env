@@ -207,6 +207,7 @@ redis:
   addr: "redis:6379"       # Only used when deploy=false (external Redis)
   password: ""             # Redis password (stored in Secret)
   db: 0                    # Redis database number
+  sessionTTL: "72h"        # TTL for session keys in Redis
   # Keep Redis below the container limit so large write bursts return Redis
   # memory errors instead of triggering cgroup OOM kills.
   maxmemory: "7gb"

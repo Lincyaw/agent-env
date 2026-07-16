@@ -26,7 +26,7 @@ func TestNormalizeSHA256RejectsInvalidValue(t *testing.T) {
 	}
 }
 
-func TestUploadFileStreamsContentAndDoesNotRecordHistory(t *testing.T) {
+func TestUploadFileStreamsContentAndRecordsHistory(t *testing.T) {
 	store := NewMemoryStore()
 	store.Set("sess-1", &session{
 		Info: SessionInfo{
@@ -103,8 +103,12 @@ func TestUploadFileStreamsContentAndDoesNotRecordHistory(t *testing.T) {
 	if !ok {
 		t.Fatal("session missing after UploadFile")
 	}
-	if got := sess.History.Len(); got != 0 {
-		t.Fatalf("history length = %d, want 0", got)
+	if got := sess.History.Len(); got != 1 {
+		t.Fatalf("history length = %d, want 1", got)
+	}
+	records := sess.History.GetAll()
+	if records[0].Name != "upload_file" {
+		t.Fatalf("history record name = %q, want %q", records[0].Name, "upload_file")
 	}
 }
 
