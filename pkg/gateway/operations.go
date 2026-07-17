@@ -40,10 +40,13 @@ type operation struct {
 	err         error
 }
 
-func executeRequestHash(req ExecuteRequest) string {
-	cp := req
-	cp.OperationID = ""
-	raw, _ := json.Marshal(cp)
+func operationRequestHash(req any) string {
+	raw, _ := json.Marshal(req)
+	var m map[string]json.RawMessage
+	if json.Unmarshal(raw, &m) == nil {
+		delete(m, "operationID")
+		raw, _ = json.Marshal(m)
+	}
 	sum := sha256.Sum256(raw)
 	return hex.EncodeToString(sum[:])
 }
@@ -93,13 +96,26 @@ func (op *operation) info() *ExecuteOperationInfo {
 	}
 }
 
+func awaitOperation[T any](ctx context.Context, op *operation) (*T, error) {
+	select {
+	case <-op.done:
+	case <-ctx.Done():
+		return nil, &OperationPending{OperationID: op.id, SessionID: op.sessionID}
+	}
+	if op.err != nil {
+		return nil, op.err
+	}
+	result, _ := op.result.(*T)
+	return result, nil
+}
+
 func (g *Gateway) executeStepsWithOperation(ctx context.Context, sessionID string, req ExecuteRequest) (*ExecuteResponse, error) {
 	if req.OperationID == "" {
 		return g.executeStepsNow(ctx, sessionID, req)
 	}
 
-	hash := executeRequestHash(req)
-	op, started, err := g.getOrStartOperation(sessionID, req.OperationID, hash, func(bgCtx context.Context) (any, error) {
+	hash := operationRequestHash(req)
+	op, _, err := g.getOrStartOperation(sessionID, req.OperationID, hash, func(bgCtx context.Context) (any, error) {
 		resp, err := g.executeStepsNow(bgCtx, sessionID, req)
 		if resp != nil {
 			resp.OperationID = req.OperationID
@@ -109,24 +125,7 @@ func (g *Gateway) executeStepsWithOperation(ctx context.Context, sessionID strin
 	if err != nil {
 		return nil, err
 	}
-
-	select {
-	case <-op.done:
-	case <-ctx.Done():
-		if g.metrics != nil {
-			g.metrics.IncrementExecuteOperationResult("client_disconnected")
-		}
-		return nil, &OperationPending{OperationID: req.OperationID, SessionID: sessionID}
-	}
-
-	if !started && g.metrics != nil {
-		g.metrics.IncrementExecuteOperationResult("reused")
-	}
-	if op.err != nil {
-		return nil, op.err
-	}
-	resp, _ := op.result.(*ExecuteResponse)
-	return resp, nil
+	return awaitOperation[ExecuteResponse](ctx, op)
 }
 
 func (g *Gateway) getOrStartOperation(sessionID, operationID, requestHash string, workFn func(context.Context) (any, error)) (*operation, bool, error) {

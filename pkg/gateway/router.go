@@ -385,14 +385,7 @@ func handleExecute(gw *Gateway) http.HandlerFunc {
 
 		resp, err := gw.ExecuteSteps(r.Context(), id, req)
 		if err != nil {
-			if pending, ok := err.(*OperationPending); ok {
-				writeJSON(w, http.StatusAccepted, map[string]string{
-					"operationID": pending.OperationID,
-					"status":      "running",
-				})
-				return
-			}
-			writeError(w, http.StatusInternalServerError, err.Error())
+			writeGatewayError(w, err)
 			return
 		}
 
@@ -723,14 +716,7 @@ func handleReplay(gw *Gateway) http.HandlerFunc {
 
 		resp, err := gw.ReplayFrom(r.Context(), id, req)
 		if err != nil {
-			if pending, ok := err.(*OperationPending); ok {
-				writeJSON(w, http.StatusAccepted, map[string]string{
-					"operationID": pending.OperationID,
-					"status":      "running",
-				})
-				return
-			}
-			writeError(w, http.StatusInternalServerError, err.Error())
+			writeGatewayError(w, err)
 			return
 		}
 		writeJSON(w, http.StatusOK, resp)
@@ -757,14 +743,7 @@ func handleRestore(gw *Gateway) http.HandlerFunc {
 
 		resp, err := gw.Restore(r.Context(), id, req)
 		if err != nil {
-			if pending, ok := err.(*OperationPending); ok {
-				writeJSON(w, http.StatusAccepted, map[string]string{
-					"operationID": pending.OperationID,
-					"status":      "running",
-				})
-				return
-			}
-			writeError(w, http.StatusInternalServerError, err.Error())
+			writeGatewayError(w, err)
 			return
 		}
 
@@ -929,6 +908,13 @@ func writeError(w http.ResponseWriter, status int, msg string) {
 }
 
 func writeGatewayError(w http.ResponseWriter, err error) {
+	if pending, ok := err.(*OperationPending); ok {
+		writeJSON(w, http.StatusAccepted, map[string]string{
+			"operationID": pending.OperationID,
+			"status":      "running",
+		})
+		return
+	}
 	writeError(w, httpStatusForError(err), err.Error())
 }
 
