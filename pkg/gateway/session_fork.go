@@ -49,8 +49,10 @@ func (g *Gateway) ForkSession(ctx context.Context, sourceID string, req ForkSess
 	if sidecarHTTPPort == 0 {
 		sidecarHTTPPort = 8080
 	}
+	// Execute returns 0-based step indices; checkpoint dirs are 1-based (step-1, step-2, ...).
+	checkpointStep := req.Step + 1
 	checkpointURL := fmt.Sprintf("http://%s:%d/v1/checkpoints/combined?through=%d",
-		sourcePodIP, sidecarHTTPPort, req.Step)
+		sourcePodIP, sidecarHTTPPort, checkpointStep)
 
 	httpClient := &http.Client{Timeout: 5 * time.Minute}
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, checkpointURL, nil)

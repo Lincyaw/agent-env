@@ -332,8 +332,8 @@ func handleForkSession(gw *Gateway) http.HandlerFunc {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
-		if req.Step <= 0 {
-			writeError(w, http.StatusBadRequest, "step must be > 0")
+		if req.Step < 0 {
+			writeError(w, http.StatusBadRequest, "step must be >= 0")
 			return
 		}
 		resp, err := gw.ForkSession(r.Context(), id, req)

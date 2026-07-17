@@ -235,8 +235,9 @@ class GatewayClient:
         """Fork a session from a historical checkpoint step.
 
         Creates a new session with the filesystem state of the source
-        session at the given step. Requires checkpoint to be enabled
-        on the gateway (SANDBOX_CHECKPOINT_ENABLED=true).
+        session at the given step. ``step`` is the 0-based index returned
+        in ``StepResult.index`` from :meth:`execute`. Requires checkpoint
+        to be enabled on the gateway (SANDBOX_CHECKPOINT_ENABLED=true).
         """
         resp = self._client.post(
             f"/v1/sessions/{session_id}/fork", json={"step": step}
