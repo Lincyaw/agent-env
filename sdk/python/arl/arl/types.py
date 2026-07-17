@@ -155,6 +155,16 @@ class SessionInfo(BaseModel):
     deletion_reason: str = Field("", alias="deletionReason")
     connection_info: ConnectionInfo | None = Field(None, alias="connectionInfo")
     iroh_addr: str = Field("", alias="irohAddr")
+    parent_session_id: str = Field("", alias="parentSessionId")
+    fork_step: int = Field(0, alias="forkStep")
+
+    model_config = {"populate_by_name": True}
+
+
+class ForkSessionResponse(BaseModel):
+    session: SessionInfo
+    parent_id: str = Field(alias="parentId")
+    fork_step: int = Field(alias="forkStep")
 
     model_config = {"populate_by_name": True}
 

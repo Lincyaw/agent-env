@@ -25,6 +25,7 @@ from arl.types import (
     ExecuteOperationInfo,
     ExecuteResponse,
     ExperimentSummary,
+    ForkSessionResponse,
     GatewaySummary,
     ListDirResult,
     LogEntry,
@@ -229,6 +230,19 @@ class GatewayClient:
     def delete_session(self, session_id: str) -> None:
         resp = self._client.delete(f"/v1/sessions/{session_id}")
         self._handle_error(resp)
+
+    def fork_session(self, session_id: str, step: int) -> ForkSessionResponse:
+        """Fork a session from a historical checkpoint step.
+
+        Creates a new session with the filesystem state of the source
+        session at the given step. Requires checkpoint to be enabled
+        on the gateway (SANDBOX_CHECKPOINT_ENABLED=true).
+        """
+        resp = self._client.post(
+            f"/v1/sessions/{session_id}/fork", json={"step": step}
+        )
+        self._handle_error(resp)
+        return ForkSessionResponse.model_validate(resp.json())
 
     def suspend_session(self, session_id: str) -> None:
         resp = self._client.post(f"/v1/sessions/{session_id}/suspend")
