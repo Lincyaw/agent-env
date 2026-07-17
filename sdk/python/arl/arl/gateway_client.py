@@ -288,6 +288,8 @@ class GatewayClient:
                     op_id, "execute operation is still pending"
                 ) from exc
             raise
+        if resp.status_code == 202:
+            return self._poll_execute_operation(session_id, op_id, deadline=deadline)
         self._handle_error(resp)
         result = ExecuteResponse.model_validate(resp.json())
         if not result.operation_id:
@@ -620,6 +622,9 @@ class GatewayClient:
                     op_id, "replay operation is still pending"
                 ) from exc
             raise
+        if resp.status_code == 202:
+            raw = self._poll_operation(session_id, op_id, deadline=deadline)
+            return ReplayResponse.model_validate(raw)
         self._handle_error(resp)
         return ReplayResponse.model_validate(resp.json())
 
@@ -649,6 +654,9 @@ class GatewayClient:
                     op_id, "restore operation is still pending"
                 ) from exc
             raise
+        if resp.status_code == 202:
+            raw = self._poll_operation(session_id, op_id, deadline=deadline)
+            return RestoreResponse.model_validate(raw)
         self._handle_error(resp)
         return RestoreResponse.model_validate(resp.json())
 

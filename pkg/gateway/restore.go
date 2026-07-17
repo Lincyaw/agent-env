@@ -36,7 +36,7 @@ func (g *Gateway) replayWithOperation(ctx context.Context, targetSessionID strin
 	select {
 	case <-op.done:
 	case <-ctx.Done():
-		return nil, fmt.Errorf("operation %s still running after client context closed: %w", req.OperationID, ctx.Err())
+		return nil, &OperationPending{OperationID: req.OperationID, SessionID: targetSessionID}
 	}
 
 	if op.err != nil {
@@ -196,7 +196,7 @@ func (g *Gateway) restoreWithOperation(ctx context.Context, sessionID string, re
 	select {
 	case <-op.done:
 	case <-ctx.Done():
-		return nil, fmt.Errorf("operation %s still running after client context closed: %w", req.OperationID, ctx.Err())
+		return nil, &OperationPending{OperationID: req.OperationID, SessionID: sessionID}
 	}
 
 	if op.err != nil {

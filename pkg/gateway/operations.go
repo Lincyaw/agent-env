@@ -15,6 +15,18 @@ const (
 	executeOperationError   = "error"
 )
 
+// OperationPending is returned when an async operation has been accepted
+// but the HTTP client context expired before it finished. The handler
+// should respond with 202 Accepted + the operationID.
+type OperationPending struct {
+	OperationID string
+	SessionID   string
+}
+
+func (e *OperationPending) Error() string {
+	return fmt.Sprintf("operation %s pending", e.OperationID)
+}
+
 type operation struct {
 	id          string
 	sessionID   string
@@ -107,7 +119,7 @@ func (g *Gateway) executeStepsWithOperation(ctx context.Context, sessionID strin
 		if g.metrics != nil {
 			g.metrics.IncrementExecuteOperationResult("client_disconnected")
 		}
-		return nil, fmt.Errorf("operation %s still running after client context closed: %w", req.OperationID, ctx.Err())
+		return nil, &OperationPending{OperationID: req.OperationID, SessionID: sessionID}
 	}
 
 	if !started && g.metrics != nil {
