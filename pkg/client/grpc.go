@@ -127,7 +127,12 @@ func (c *GRPCSidecarClient) Execute(ctx context.Context, podIP string, req inter
 
 	client := pb.NewAgentServiceClient(conn)
 
-	ctx, cancel := context.WithTimeout(ctx, c.callTimeout(req.GetTimeout()))
+	var cancel context.CancelFunc
+	if timeout := c.callTimeout(ctx, req.GetTimeout()); timeout > 0 {
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+	} else {
+		ctx, cancel = context.WithCancel(ctx)
+	}
 	defer cancel()
 
 	pbReq := &pb.ExecRequest{
@@ -185,7 +190,12 @@ func (c *GRPCSidecarClient) ExecuteStream(ctx context.Context, podIP string, req
 	}
 
 	client := pb.NewAgentServiceClient(conn)
-	ctx, cancel := context.WithTimeout(ctx, c.callTimeout(req.GetTimeout()))
+	var cancel context.CancelFunc
+	if timeout := c.callTimeout(ctx, req.GetTimeout()); timeout > 0 {
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+	} else {
+		ctx, cancel = context.WithCancel(ctx)
+	}
 
 	pbReq := &pb.ExecRequest{
 		Command:        req.GetCommand(),
@@ -238,15 +248,25 @@ func (c *GRPCSidecarClient) ExecuteStream(ctx context.Context, podIP string, req
 	return resultChan, nil
 }
 
-func (c *GRPCSidecarClient) callTimeout(requested int32) time.Duration {
-	timeout := c.timeout
+// callTimeout returns the gRPC per-call timeout. When the step declares its
+// own timeout, that wins (plus 10s buffer). When no step timeout is set and
+// the caller already provided a context with a deadline (e.g. the HTTP
+// request context), we fall back to c.timeout. When no step timeout is set
+// and the context has NO deadline (e.g. background replay), we return 0 to
+// skip adding a gRPC deadline — the step runs until it finishes or the
+// sidecar kills it.
+func (c *GRPCSidecarClient) callTimeout(ctx context.Context, requested int32) time.Duration {
 	if requested > 0 {
 		stepTimeout := time.Duration(requested)*time.Second + 10*time.Second
-		if stepTimeout > timeout {
-			timeout = stepTimeout
+		if stepTimeout > c.timeout {
+			return stepTimeout
 		}
+		return c.timeout
 	}
-	return timeout
+	if _, ok := ctx.Deadline(); ok {
+		return c.timeout
+	}
+	return 0
 }
 
 // GetIrohAddr fetches the iroh endpoint address from the sidecar via gRPC.

@@ -89,15 +89,11 @@ func (g *Gateway) replayNow(ctx context.Context, targetSessionID string, req Rep
 			errors++
 			continue
 		}
-		stepTimeout := resolveStepTimeoutSeconds(step)
-		if stepTimeout < 600 {
-			stepTimeout = 600
-		}
 		execReq := &sidecar.ExecRequest{
 			Command:        step.Command,
 			Env:            step.Env,
 			WorkingDir:     step.WorkDir,
-			TimeoutSeconds: stepTimeout,
+			TimeoutSeconds: resolveStepTimeoutSeconds(step),
 		}
 		if _, err := g.sidecarClient.Execute(ctx, podIP, execReq); err != nil {
 			log.Printf("Warning: replay exec step %d failed on %s: %v", record.Index, podIP, err)
