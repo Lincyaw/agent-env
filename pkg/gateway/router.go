@@ -43,6 +43,9 @@ func SetupRoutes(mux *http.ServeMux, gw *Gateway, authCfg *AuthConfig) {
 	route("POST /v1/sessions/{id}/suspend", user(handleSuspendSession(gw)))
 	route("POST /v1/sessions/{id}/resume", user(handleResumeSession(gw)))
 
+	// Fork session (user role)
+	route("POST /v1/sessions/{id}/fork", user(handleForkSession(gw)))
+
 	// Iroh direct-connect address (user role)
 	route("GET /v1/sessions/{id}/iroh-addr", user(handleGetIrohAddr(gw)))
 
@@ -315,6 +318,30 @@ func handleResumeSession(gw *Gateway) http.HandlerFunc {
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]string{"status": "active"})
+	}
+}
+
+func handleForkSession(gw *Gateway) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		if checkOwnership(gw, w, r, id) == nil {
+			return
+		}
+		var req ForkSessionRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if req.Step <= 0 {
+			writeError(w, http.StatusBadRequest, "step must be > 0")
+			return
+		}
+		resp, err := gw.ForkSession(r.Context(), id, req)
+		if err != nil {
+			writeGatewayError(w, err)
+			return
+		}
+		writeJSON(w, http.StatusCreated, resp)
 	}
 }
 

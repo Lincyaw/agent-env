@@ -41,8 +41,8 @@ type Config struct {
 	GRPCAuthSecretName string
 
 	// Executor agent configuration
-	ExecutorAgentImage string
-	ExecutorProtocol   string
+	ExecutorAgentImage   string
+	ExecutorProtocol     string
 	IrohRelayURL         string
 	IrohRelayExternalURL string
 
@@ -130,8 +130,9 @@ type Config struct {
 
 	// SandboxCheckpointEnabled enables overlayfs-based filesystem
 	// checkpointing in the executor-agent. When true, the executor
-	// container receives CAP_SYS_ADMIN and a scratch volume for
-	// overlay upper/work dirs. Env: SANDBOX_CHECKPOINT_ENABLED.
+	// container receives CAP_SYS_ADMIN and a checkpoint-scratch emptyDir
+	// is mounted in both executor and sidecar containers.
+	// Env: SANDBOX_CHECKPOINT_ENABLED.
 	SandboxCheckpointEnabled bool
 }
 

@@ -40,7 +40,8 @@ func main() {
 		}
 	}()
 
-	httpServer := sidecar.NewServer(httpPort)
+	checkpointDir := os.Getenv("ARL_CHECKPOINT_DIR")
+	httpServer := sidecar.NewServer(httpPort, checkpointDir)
 
 	// Token is mandatory; refuse to start an unauthenticated sidecar.
 	token := os.Getenv("GRPC_AUTH_TOKEN")

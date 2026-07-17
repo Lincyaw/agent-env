@@ -130,6 +130,18 @@ type CreateManagedSessionRequest struct {
 	AllowInternet            *bool                        `json:"allowInternet,omitempty"`
 }
 
+// ForkSessionRequest is the body for POST /v1/sessions/{id}/fork
+type ForkSessionRequest struct {
+	Step int `json:"step"`
+}
+
+// ForkSessionResponse is the response for POST /v1/sessions/{id}/fork
+type ForkSessionResponse struct {
+	Session  *SessionInfo `json:"session"`
+	ParentID string       `json:"parentId"`
+	ForkStep int          `json:"forkStep"`
+}
+
 // ExecuteRequest is the body for POST /v1/sessions/{id}/execute
 type ExecuteRequest struct {
 	Steps       []StepRequest `json:"steps"`
@@ -232,21 +244,23 @@ type ScalePoolRequest struct {
 
 // SessionInfo describes a session
 type SessionInfo struct {
-	ID             string          `json:"id"`
-	SandboxName    string          `json:"sandboxName"`
-	Namespace      string          `json:"namespace"`
-	Image          string          `json:"image,omitempty"`
-	Profile        string          `json:"profile,omitempty"`
-	Mode           string          `json:"mode,omitempty"`
-	PoolRef        string          `json:"-"`
-	PodIP          string          `json:"podIP"`
-	PodName        string          `json:"podName"`
-	CreatedAt      time.Time       `json:"createdAt"`
-	Status         string          `json:"status,omitempty"`
-	DeletedAt      *time.Time      `json:"deletedAt,omitempty"`
-	DeletionReason string          `json:"deletionReason,omitempty"`
-	ConnectionInfo *ConnectionInfo `json:"connectionInfo,omitempty"`
-	IrohAddr       string          `json:"irohAddr,omitempty"`
+	ID              string          `json:"id"`
+	SandboxName     string          `json:"sandboxName"`
+	Namespace       string          `json:"namespace"`
+	Image           string          `json:"image,omitempty"`
+	Profile         string          `json:"profile,omitempty"`
+	Mode            string          `json:"mode,omitempty"`
+	PoolRef         string          `json:"-"`
+	PodIP           string          `json:"podIP"`
+	PodName         string          `json:"podName"`
+	CreatedAt       time.Time       `json:"createdAt"`
+	Status          string          `json:"status,omitempty"`
+	DeletedAt       *time.Time      `json:"deletedAt,omitempty"`
+	DeletionReason  string          `json:"deletionReason,omitempty"`
+	ConnectionInfo  *ConnectionInfo `json:"connectionInfo,omitempty"`
+	IrohAddr        string          `json:"irohAddr,omitempty"`
+	ParentSessionID string          `json:"parentSessionId,omitempty"`
+	ForkStep        int             `json:"forkStep,omitempty"`
 }
 
 // ExecuteResponse is the response for POST /v1/sessions/{id}/execute

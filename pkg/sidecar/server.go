@@ -10,30 +10,43 @@ import (
 	"time"
 )
 
-// Server provides HTTP API for health checks only
+// Server provides HTTP API for health checks and checkpoint data export.
 type Server struct {
-	port       int
-	httpServer *http.Server
-	ready      atomic.Bool
+	port          int
+	httpServer    *http.Server
+	ready         atomic.Bool
+	checkpointDir string
 }
 
-// NewServer creates a new HTTP server for health checks
-func NewServer(port int) *Server {
+// NewServer creates a new HTTP server for health checks and optional
+// checkpoint data export. When checkpointDir is non-empty the server
+// registers /v1/checkpoints endpoints.
+func NewServer(port int, checkpointDir ...string) *Server {
 	mux := http.NewServeMux()
 	srv := &Server{
 		port: port,
+	}
+	if len(checkpointDir) > 0 {
+		srv.checkpointDir = checkpointDir[0]
 	}
 
 	mux.HandleFunc("/health", srv.handleHealth)
 	mux.HandleFunc("/healthz", srv.handleHealthz)
 	mux.HandleFunc("/readyz", srv.handleReadyz)
 
+	if srv.checkpointDir != "" {
+		mux.HandleFunc("/v1/checkpoints/combined", srv.handleCombinedCheckpoint)
+		mux.HandleFunc("/v1/checkpoints/", srv.handleGetCheckpoint)
+		mux.HandleFunc("/v1/checkpoints", srv.handleListCheckpoints)
+		log.Printf("Checkpoint endpoints enabled (dir=%s)", srv.checkpointDir)
+	}
+
 	srv.httpServer = &http.Server{
 		Addr:              fmt.Sprintf(":%d", port),
 		Handler:           mux,
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
-		WriteTimeout:      30 * time.Second,
+		WriteTimeout:      5 * time.Minute,
 		IdleTimeout:       60 * time.Second,
 	}
 

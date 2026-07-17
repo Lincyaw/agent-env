@@ -249,7 +249,8 @@ func (g *Gateway) sandboxPodSpec(
 			VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
 		})
 		for i := range pod.Containers {
-			if pod.Containers[i].Name == "executor" {
+			switch pod.Containers[i].Name {
+			case "executor":
 				pod.Containers[i].VolumeMounts = append(pod.Containers[i].VolumeMounts, corev1.VolumeMount{
 					Name:      "checkpoint-scratch",
 					MountPath: "/mnt/arl-checkpoint",
@@ -257,6 +258,15 @@ func (g *Gateway) sandboxPodSpec(
 				pod.Containers[i].Env = append(pod.Containers[i].Env, corev1.EnvVar{
 					Name:  "ARL_CHECKPOINT_ENABLED",
 					Value: "1",
+				})
+			case "sidecar":
+				pod.Containers[i].VolumeMounts = append(pod.Containers[i].VolumeMounts, corev1.VolumeMount{
+					Name:      "checkpoint-scratch",
+					MountPath: "/mnt/arl-checkpoint",
+				})
+				pod.Containers[i].Env = append(pod.Containers[i].Env, corev1.EnvVar{
+					Name:  "ARL_CHECKPOINT_DIR",
+					Value: "/mnt/arl-checkpoint",
 				})
 			}
 		}
