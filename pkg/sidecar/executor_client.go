@@ -11,11 +11,45 @@ import (
 	"sync"
 	"time"
 
-	"github.com/Lincyaw/agent-env/pkg/execagent"
 	"github.com/Lincyaw/agent-env/pkg/interfaces"
 	pb "github.com/Lincyaw/agent-env/pkg/pb/executorv2"
 	"google.golang.org/protobuf/proto"
 )
+
+// executorRequest is the V1 JSON-over-socket protocol request from sidecar to
+// executor agent. Kept for backward compatibility with legacy Go executors.
+type executorRequest struct {
+	ID             string            `json:"id"`
+	Type           string            `json:"type"`
+	Cmd            []string          `json:"cmd,omitempty"`
+	Env            map[string]string `json:"env,omitempty"`
+	WorkDir        string            `json:"workdir,omitempty"`
+	Timeout        int               `json:"timeout,omitempty"`
+	PID            int               `json:"pid,omitempty"`
+	Signal         string            `json:"signal,omitempty"`
+	Data           string            `json:"data,omitempty"`
+	Rows           int32             `json:"rows,omitempty"`
+	Cols           int32             `json:"cols,omitempty"`
+	Path           string            `json:"path,omitempty"`
+	Content        []byte            `json:"content,omitempty"`
+	ExpectedSHA256 string            `json:"expected_sha256,omitempty"`
+}
+
+// executorResponse is the V1 JSON-over-socket protocol response from executor
+// agent to sidecar.
+type executorResponse struct {
+	ID           string `json:"id"`
+	Stdout       string `json:"stdout,omitempty"`
+	Stderr       string `json:"stderr,omitempty"`
+	ExitCode     *int   `json:"exit_code,omitempty"`
+	BytesWritten *int64 `json:"bytes_written,omitempty"`
+	SizeBytes    *int64 `json:"size_bytes,omitempty"`
+	Offset       int64  `json:"offset,omitempty"`
+	SHA256       string `json:"sha256,omitempty"`
+	Content      []byte `json:"content,omitempty"`
+	Done         bool   `json:"done,omitempty"`
+	Error        string `json:"error,omitempty"`
+}
 
 const fileTransferChunkSize = interfaces.FileTransferChunkSize
 
@@ -225,12 +259,12 @@ func (c *ExecutorClient) pingV1() error {
 	encoder := json.NewEncoder(conn)
 	decoder := json.NewDecoder(conn)
 
-	req := execagent.Request{ID: "ping-0", Type: "ping"}
+	req := executorRequest{ID: "ping-0", Type: "ping"}
 	if err := encoder.Encode(req); err != nil {
 		return fmt.Errorf("send ping: %w", err)
 	}
 
-	var resp execagent.Response
+	var resp executorResponse
 	if err := decoder.Decode(&resp); err != nil {
 		return fmt.Errorf("decode ping response: %w", err)
 	}
@@ -268,14 +302,14 @@ func (c *ExecutorClient) pingV2() error {
 // Execute
 // ---------------------------------------------------------------------------
 
-func (c *ExecutorClient) Execute(ctx context.Context, req execagent.Request) (<-chan execagent.Response, error) {
+func (c *ExecutorClient) Execute(ctx context.Context, req executorRequest) (<-chan executorResponse, error) {
 	if c.protocol == protocolV2Protobuf {
 		return c.executeV2(ctx, req)
 	}
 	return c.executeV1(ctx, req)
 }
 
-func (c *ExecutorClient) executeV1(ctx context.Context, req execagent.Request) (<-chan execagent.Response, error) {
+func (c *ExecutorClient) executeV1(ctx context.Context, req executorRequest) (<-chan executorResponse, error) {
 	conn, err := c.dial()
 	if err != nil {
 		return nil, err
@@ -287,7 +321,7 @@ func (c *ExecutorClient) executeV1(ctx context.Context, req execagent.Request) (
 		return nil, fmt.Errorf("send exec request: %w", err)
 	}
 
-	ch := make(chan execagent.Response, 100)
+	ch := make(chan executorResponse, 100)
 
 	go func() {
 		defer close(ch)
@@ -296,9 +330,9 @@ func (c *ExecutorClient) executeV1(ctx context.Context, req execagent.Request) (
 		decoder := json.NewDecoder(conn)
 
 		for {
-			var resp execagent.Response
+			var resp executorResponse
 			if err := decoder.Decode(&resp); err != nil {
-				ch <- execagent.Response{ID: req.ID, Error: fmt.Sprintf("decode: %v", err), Done: true}
+				ch <- executorResponse{ID: req.ID, Error: fmt.Sprintf("decode: %v", err), Done: true}
 				return
 			}
 
@@ -317,7 +351,7 @@ func (c *ExecutorClient) executeV1(ctx context.Context, req execagent.Request) (
 	return ch, nil
 }
 
-func (c *ExecutorClient) executeV2(ctx context.Context, req execagent.Request) (<-chan execagent.Response, error) {
+func (c *ExecutorClient) executeV2(ctx context.Context, req executorRequest) (<-chan executorResponse, error) {
 	conn, err := c.dial()
 	if err != nil {
 		return nil, err
@@ -340,7 +374,7 @@ func (c *ExecutorClient) executeV2(ctx context.Context, req execagent.Request) (
 		return nil, fmt.Errorf("send spawn request: %w", err)
 	}
 
-	ch := make(chan execagent.Response, 100)
+	ch := make(chan executorResponse, 100)
 
 	go func() {
 		defer close(ch)
@@ -349,11 +383,11 @@ func (c *ExecutorClient) executeV2(ctx context.Context, req execagent.Request) (
 		for {
 			msg, err := readServerMessage(conn)
 			if err != nil {
-				ch <- execagent.Response{ID: req.ID, Error: fmt.Sprintf("read: %v", err), Done: true}
+				ch <- executorResponse{ID: req.ID, Error: fmt.Sprintf("read: %v", err), Done: true}
 				return
 			}
 
-			var resp execagent.Response
+			var resp executorResponse
 			resp.ID = req.ID
 
 			if msg.Response != nil {
@@ -425,12 +459,12 @@ func (c *ExecutorClient) signalV1(pid int, signal string) error {
 	encoder := json.NewEncoder(conn)
 	decoder := json.NewDecoder(conn)
 
-	req := execagent.Request{ID: "sig-0", Type: "signal", PID: pid, Signal: signal}
+	req := executorRequest{ID: "sig-0", Type: "signal", PID: pid, Signal: signal}
 	if err := encoder.Encode(req); err != nil {
 		return fmt.Errorf("send signal request: %w", err)
 	}
 
-	var resp execagent.Response
+	var resp executorResponse
 	if err := decoder.Decode(&resp); err != nil {
 		return fmt.Errorf("decode signal response: %w", err)
 	}
@@ -489,7 +523,7 @@ func (c *ExecutorClient) writeFileV1(ctx context.Context, path string, content i
 	encoder := json.NewEncoder(conn)
 	decoder := json.NewDecoder(conn)
 
-	req := execagent.Request{
+	req := executorRequest{
 		ID:             fmt.Sprintf("write-%d", time.Now().UnixNano()),
 		Type:           "write_file_stream",
 		Path:           path,
@@ -503,7 +537,7 @@ func (c *ExecutorClient) writeFileV1(ctx context.Context, path string, content i
 	for {
 		n, readErr := content.Read(buf)
 		if n > 0 {
-			if err := encoder.Encode(execagent.Request{
+			if err := encoder.Encode(executorRequest{
 				ID:      req.ID,
 				Type:    "write_file_chunk",
 				Content: append([]byte(nil), buf[:n]...),
@@ -524,12 +558,12 @@ func (c *ExecutorClient) writeFileV1(ctx context.Context, path string, content i
 		}
 	}
 
-	if err := encoder.Encode(execagent.Request{ID: req.ID, Type: "write_file_finish"}); err != nil {
+	if err := encoder.Encode(executorRequest{ID: req.ID, Type: "write_file_finish"}); err != nil {
 		return nil, fmt.Errorf("send write_file finish: %w", err)
 	}
 
 	for {
-		var resp execagent.Response
+		var resp executorResponse
 		if err := decoder.Decode(&resp); err != nil {
 			return nil, fmt.Errorf("read write_file response: %w", err)
 		}
@@ -616,7 +650,7 @@ func (c *ExecutorClient) readFileV1(ctx context.Context, path string, dst io.Wri
 	encoder := json.NewEncoder(conn)
 	decoder := json.NewDecoder(conn)
 
-	req := execagent.Request{
+	req := executorRequest{
 		ID:   fmt.Sprintf("read-%d", time.Now().UnixNano()),
 		Type: "read_file_stream",
 		Path: path,
@@ -626,7 +660,7 @@ func (c *ExecutorClient) readFileV1(ctx context.Context, path string, dst io.Wri
 	}
 
 	for {
-		var resp execagent.Response
+		var resp executorResponse
 		if err := decoder.Decode(&resp); err != nil {
 			return nil, fmt.Errorf("read read_file response: %w", err)
 		}
@@ -738,7 +772,7 @@ type ShellSession struct {
 	processTag uint32
 
 	id     string
-	Output chan execagent.Response
+	Output chan executorResponse
 }
 
 // StartShell opens a connection to the executor agent and starts an interactive shell.
@@ -758,7 +792,7 @@ func (c *ExecutorClient) startShellV1(ctx context.Context, workDir string, env m
 	id := fmt.Sprintf("shell-%d", time.Now().UnixNano())
 	encoder := json.NewEncoder(conn)
 
-	req := execagent.Request{
+	req := executorRequest{
 		ID:      id,
 		Type:    "shell",
 		WorkDir: workDir,
@@ -774,7 +808,7 @@ func (c *ExecutorClient) startShellV1(ctx context.Context, workDir string, env m
 		protocol: protocolV1JSON,
 		encoder:  encoder,
 		id:       id,
-		Output:   make(chan execagent.Response, 100),
+		Output:   make(chan executorResponse, 100),
 	}
 
 	go func() {
@@ -783,9 +817,9 @@ func (c *ExecutorClient) startShellV1(ctx context.Context, workDir string, env m
 		decoder := json.NewDecoder(conn)
 
 		for {
-			var resp execagent.Response
+			var resp executorResponse
 			if err := decoder.Decode(&resp); err != nil {
-				session.Output <- execagent.Response{ID: id, Error: fmt.Sprintf("decode: %v", err), Done: true}
+				session.Output <- executorResponse{ID: id, Error: fmt.Sprintf("decode: %v", err), Done: true}
 				return
 			}
 
@@ -852,7 +886,7 @@ func (c *ExecutorClient) startShellV2(ctx context.Context, workDir string, env m
 		protocol:   protocolV2Protobuf,
 		processTag: spawnResp.GetProcessTag(),
 		id:         id,
-		Output:     make(chan execagent.Response, 100),
+		Output:     make(chan executorResponse, 100),
 	}
 
 	go func() {
@@ -861,11 +895,11 @@ func (c *ExecutorClient) startShellV2(ctx context.Context, workDir string, env m
 		for {
 			msg, err := readServerMessage(conn)
 			if err != nil {
-				session.Output <- execagent.Response{ID: id, Error: fmt.Sprintf("read: %v", err), Done: true}
+				session.Output <- executorResponse{ID: id, Error: fmt.Sprintf("read: %v", err), Done: true}
 				return
 			}
 
-			var out execagent.Response
+			var out executorResponse
 			out.ID = id
 
 			if msg.Event != nil {
@@ -923,7 +957,7 @@ func (s *ShellSession) SendInput(data string) error {
 		})
 	}
 
-	return s.encoder.Encode(execagent.Request{
+	return s.encoder.Encode(executorRequest{
 		ID:   s.id,
 		Type: "stdin",
 		Data: data,
@@ -945,7 +979,7 @@ func (s *ShellSession) SendSignal(signal string) error {
 		})
 	}
 
-	return s.encoder.Encode(execagent.Request{
+	return s.encoder.Encode(executorRequest{
 		ID:     s.id,
 		Type:   "signal",
 		Signal: signal,
@@ -968,7 +1002,7 @@ func (s *ShellSession) Resize(rows, cols int32) error {
 		})
 	}
 
-	return s.encoder.Encode(execagent.Request{
+	return s.encoder.Encode(executorRequest{
 		ID:   s.id,
 		Type: "resize",
 		Rows: rows,

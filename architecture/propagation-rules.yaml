@@ -54,16 +54,14 @@ rules:
   - name: executor-agent-change
     trigger:
       patterns:
-        - pkg/execagent/*.go
-        - cmd/executor-agent/*.go
+        - rust/executor-agent/**
     impacts:
-      - Dockerfile.executor-agent
+      - Dockerfile.executor-agent-rs
     actions:
       - description: Rebuild executor-agent image
-        command: docker build -f Dockerfile.executor-agent -t arl-executor-agent:dev .
+        command: docker build -f Dockerfile.executor-agent-rs -t arl-executor-agent:dev .
     validation:
-      - go test ./...
-      - go build ./cmd/executor-agent/
+      - cd executor-agent-rs && cargo test
 
   - name: sdk-python-change
     trigger:

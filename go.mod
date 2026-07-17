@@ -5,7 +5,6 @@ go 1.26.0
 toolchain go1.26.4
 
 require (
-	github.com/creack/pty v1.1.18
 	github.com/google/uuid v1.6.0
 	github.com/gorilla/websocket v1.5.4-0.20250319132907-e064f32e3674
 	github.com/prometheus/client_golang v1.23.2

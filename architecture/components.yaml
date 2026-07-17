@@ -64,12 +64,12 @@ components:
   - name: executor-agent
     type: agent
     paths:
-      - cmd/executor-agent/main.go
-      - pkg/execagent/
+      - rust/executor-agent/
+      - Dockerfile.executor-agent-rs
     responsibilities:
-      - Run inside the executor container
-      - Execute commands requested by the sidecar
-      - Stream stdout, stderr, and exit status through the Unix socket protocol
+      - Run inside the executor container (Rust binary)
+      - Execute commands requested by the sidecar via the V2 protobuf Unix socket protocol
+      - Stream stdout, stderr, and exit status back to the sidecar
 
   - name: agent-proto
     type: proto
