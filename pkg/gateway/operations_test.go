@@ -2,6 +2,7 @@ package gateway
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"sync/atomic"
 	"testing"
@@ -35,7 +36,7 @@ func TestExecuteStepsOperationIsIdempotent(t *testing.T) {
 		History:      NewStepHistory(),
 		lastTaskTime: time.Now(),
 		createdAt:    time.Now(),
-		operations:   make(map[string]*executeOperation),
+		operations:   make(map[string]*operation),
 	})
 	store.IncrCount(1)
 
@@ -70,9 +71,9 @@ func TestExecuteStepsOperationIsIdempotent(t *testing.T) {
 		t.Fatalf("second operation did not reuse first result: first=%#v second=%#v", first, second)
 	}
 
-	info, err := gw.ExecuteOperationStatus(sessionID, "op-1")
+	info, err := gw.OperationStatus(sessionID, "op-1")
 	if err != nil {
-		t.Fatalf("ExecuteOperationStatus returned error: %v", err)
+		t.Fatalf("OperationStatus returned error: %v", err)
 	}
 	if info.Status != executeOperationDone || info.Result == nil {
 		t.Fatalf("operation info = %#v, want done with result", info)
@@ -102,7 +103,7 @@ func TestExecuteStepsOperationReturnsFullOutput(t *testing.T) {
 		History:      NewStepHistory(),
 		lastTaskTime: time.Now(),
 		createdAt:    time.Now(),
-		operations:   make(map[string]*executeOperation),
+		operations:   make(map[string]*operation),
 	})
 	store.IncrCount(1)
 
@@ -130,14 +131,21 @@ func TestExecuteStepsOperationReturnsFullOutput(t *testing.T) {
 		t.Fatalf("operation response stderr = %q, want full output", got)
 	}
 
-	info, err := gw.ExecuteOperationStatus(sessionID, "op-full")
+	info, err := gw.OperationStatus(sessionID, "op-full")
 	if err != nil {
-		t.Fatalf("ExecuteOperationStatus returned error: %v", err)
+		t.Fatalf("OperationStatus returned error: %v", err)
 	}
-	if info.Result == nil || len(info.Result.Results) != 1 {
-		t.Fatalf("operation info result = %#v, want one result", info.Result)
+	if info.Result == nil {
+		t.Fatalf("operation info result is nil, want result")
 	}
-	if got := info.Result.Results[0].Output.Stdout; got != "abcdef" {
+	var polledResult ExecuteResponse
+	if err := json.Unmarshal(info.Result, &polledResult); err != nil {
+		t.Fatalf("failed to unmarshal operation result: %v", err)
+	}
+	if len(polledResult.Results) != 1 {
+		t.Fatalf("operation info result count = %d, want 1", len(polledResult.Results))
+	}
+	if got := polledResult.Results[0].Output.Stdout; got != "abcdef" {
 		t.Fatalf("polled operation stdout = %q, want full output", got)
 	}
 
@@ -180,7 +188,7 @@ func TestExecuteStepsStoresObservationPreviewByDefault(t *testing.T) {
 		History:      NewStepHistory(),
 		lastTaskTime: time.Now(),
 		createdAt:    time.Now(),
-		operations:   make(map[string]*executeOperation),
+		operations:   make(map[string]*operation),
 	})
 	store.IncrCount(1)
 

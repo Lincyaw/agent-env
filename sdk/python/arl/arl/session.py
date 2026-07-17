@@ -20,6 +20,7 @@ from arl.types import (
     PrivateContainerSpec,
     ReplayResponse,
     ResourceRequirements,
+    RestoreResponse,
     SessionInfo,
     StepOutput,
     StepResult,
@@ -314,31 +315,69 @@ class SandboxSession:
             raise RuntimeError("No session created. Call create_sandbox() first.")
         return self._client.execute_container(self._session_id, container, steps)
 
-    def restore(self, snapshot_id: str) -> None:
+    def restore(
+        self,
+        snapshot_id: str,
+        operation_id: str | None = None,
+        recover: bool = True,
+        recover_timeout: float | None = None,
+    ) -> RestoreResponse:
         """Restore workspace to a previous step's snapshot.
 
         Each step execution automatically creates a snapshot. Use the
         snapshot_id from a StepResult to restore to that step's state.
 
+        Non-streaming restore survives dropped connections: the SDK attaches
+        an idempotent operationID. Set ``recover=False`` to opt out.
+
         Args:
             snapshot_id: Snapshot ID (step index string) from a step result.
+            operation_id: Optional idempotent operation ID. Generated if omitted.
+            recover: Poll the operation after a dropped connection (default True).
+            recover_timeout: Max seconds to wait during recovery.
+
+        Returns:
+            RestoreResponse with snapshot ID and steps replayed count.
         """
         if self._session_id is None:
             raise RuntimeError("No session created. Call create_sandbox() first.")
-        self._client.restore(self._session_id, snapshot_id)
+        return self._client.restore(
+            self._session_id,
+            snapshot_id,
+            operation_id=operation_id,
+            recover=recover,
+            recover_timeout=recover_timeout,
+        )
 
     def replay_from(
         self,
         source_session_id: str,
         up_to_step: int | None = None,
+        operation_id: str | None = None,
+        recover: bool = True,
+        recover_timeout: float | None = None,
     ) -> ReplayResponse:
-        """Replay another session's history into this session."""
+        """Replay another session's history into this session.
+
+        Survives dropped connections via idempotent operationID tracking,
+        the same pattern used by :meth:`execute`.
+
+        Args:
+            source_session_id: Session to replay from.
+            up_to_step: Replay up to this step index (inclusive).
+            operation_id: Optional idempotent operation ID. Generated if omitted.
+            recover: Poll the operation after a dropped connection (default True).
+            recover_timeout: Max seconds to wait during recovery.
+        """
         if self._session_id is None:
             raise RuntimeError("No session created. Call create_sandbox() first.")
         return self._client.replay_from(
             self._session_id,
             source_session_id=source_session_id,
             up_to_step=up_to_step,
+            operation_id=operation_id,
+            recover=recover,
+            recover_timeout=recover_timeout,
         )
 
     def upload_file(

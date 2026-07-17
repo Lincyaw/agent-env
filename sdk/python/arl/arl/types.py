@@ -195,13 +195,22 @@ class ContainerExecuteResponse(BaseModel):
     model_config = {"populate_by_name": True}
 
 
+class RestoreResponse(BaseModel):
+    """Response from restoring a session to a previous snapshot."""
+
+    snapshot_id: str = Field("", alias="snapshotID")
+    steps_replayed: Annotated[int, Field(ge=0)] = Field(0, alias="stepsReplayed")
+
+    model_config = {"populate_by_name": True}
+
+
 class ExecuteOperationInfo(BaseModel):
-    """Status for an idempotent execute operation."""
+    """Status for an idempotent async operation (execute, restore, replay)."""
 
     operation_id: str = Field(alias="operationID")
     session_id: str = Field(alias="sessionID")
     status: str
-    result: ExecuteResponse | None = None
+    result: dict[str, object] | None = None
     error: str = ""
     created_at: datetime | None = Field(None, alias="createdAt")
     started_at: datetime | None = Field(None, alias="startedAt")

@@ -49,6 +49,7 @@ from arl.types import (
     PrivateContainerSpec,
     ReplayResponse,
     ResourceRequirements,
+    RestoreResponse,
     SessionInfo,
     SessionListItem,
     StatResult,
@@ -219,15 +220,17 @@ class AsyncGatewayClient:
         self._handle_error(resp)
         return ExecuteOperationInfo.model_validate(resp.json())
 
-    async def _poll_execute_operation(
+    async def _poll_operation(
         self,
         session_id: str,
         operation_id: str,
         *,
         deadline: float | None,
+        resubmit_url: str | None = None,
         resubmit_body: dict[str, Any] | None = None,
-    ) -> ExecuteResponse:
-        """Async mirror of GatewayClient._poll_execute_operation."""
+    ) -> dict[str, object]:
+        """Poll an operation to completion, tolerating transient transport errors."""
+        url = resubmit_url or f"/v1/sessions/{session_id}/execute"
         while True:
             op: ExecuteOperationInfo | None = None
             try:
@@ -239,16 +242,12 @@ class AsyncGatewayClient:
                     raise
                 if resubmit_body is not None:
                     try:
-                        resp = await self._client.post(
-                            f"/v1/sessions/{session_id}/execute", json=resubmit_body
-                        )
+                        resp = await self._client.post(url, json=resubmit_body)
                     except httpx.TransportError:
                         pass
                     else:
                         self._handle_error(resp)
-                        result = ExecuteResponse.model_validate(resp.json())
-                        if not result.operation_id:
-                            result.operation_id = operation_id
+                        result: dict[str, object] = resp.json()
                         return result
                 else:
                     raise
@@ -256,25 +255,44 @@ class AsyncGatewayClient:
                 status = op.status.lower()
                 if status == _OPERATION_STATUS_ERROR:
                     raise GatewayError(
-                        500, op.error or f"execute operation {operation_id} failed"
+                        500, op.error or f"operation {operation_id} failed"
                     )
                 if op.result is not None:
-                    if not op.result.operation_id:
-                        op.result.operation_id = operation_id
                     return op.result
                 if status == _OPERATION_STATUS_DONE:
                     raise GatewayError(
-                        500, f"execute operation {operation_id} finished without result"
+                        500, f"operation {operation_id} finished without result"
                     )
             sleep_for = _OPERATION_POLL_INTERVAL_SECONDS
             if deadline is not None:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
                     raise GatewayOperationTimeout(
-                        operation_id, "execute operation is still pending"
+                        operation_id, "operation is still pending"
                     )
                 sleep_for = min(sleep_for, remaining)
             await asyncio.sleep(sleep_for)
+
+    async def _poll_execute_operation(
+        self,
+        session_id: str,
+        operation_id: str,
+        *,
+        deadline: float | None,
+        resubmit_body: dict[str, Any] | None = None,
+    ) -> ExecuteResponse:
+        """Poll an execute operation to completion. Returns ExecuteResponse."""
+        raw = await self._poll_operation(
+            session_id,
+            operation_id,
+            deadline=deadline,
+            resubmit_url=f"/v1/sessions/{session_id}/execute",
+            resubmit_body=resubmit_body,
+        )
+        result = ExecuteResponse.model_validate(raw)
+        if not result.operation_id:
+            result.operation_id = operation_id
+        return result
 
     async def execute_container(
         self,
@@ -464,20 +482,61 @@ class AsyncGatewayClient:
         session_id: str,
         source_session_id: str,
         up_to_step: int | None = None,
+        operation_id: str | None = None,
+        recover: bool = True,
+        recover_timeout: float | None = None,
     ) -> ReplayResponse:
         body: dict[str, Any] = {"sourceSessionID": source_session_id}
         if up_to_step is not None:
             body["upToStep"] = up_to_step
-        resp = await self._client.post(f"/v1/sessions/{session_id}/replay", json=body)
+        op_id = operation_id or str(uuid.uuid4())
+        body["operationID"] = op_id
+        deadline = time.monotonic() + recover_timeout if recover_timeout is not None else None
+        url = f"/v1/sessions/{session_id}/replay"
+        try:
+            resp = await self._client.post(url, json=body)
+        except httpx.TransportError as exc:
+            if recover:
+                raw = await self._poll_operation(
+                    session_id, op_id, deadline=deadline, resubmit_url=url, resubmit_body=body
+                )
+                return ReplayResponse.model_validate(raw)
+            if isinstance(exc, httpx.TimeoutException):
+                raise GatewayOperationTimeout(
+                    op_id, "replay operation is still pending"
+                ) from exc
+            raise
         self._handle_error(resp)
         return ReplayResponse.model_validate(resp.json())
 
-    async def restore(self, session_id: str, snapshot_id: str) -> None:
-        resp = await self._client.post(
-            f"/v1/sessions/{session_id}/restore",
-            json={"snapshotID": snapshot_id},
-        )
+    async def restore(
+        self,
+        session_id: str,
+        snapshot_id: str,
+        operation_id: str | None = None,
+        recover: bool = True,
+        recover_timeout: float | None = None,
+    ) -> RestoreResponse:
+        body: dict[str, Any] = {"snapshotID": snapshot_id}
+        op_id = operation_id or str(uuid.uuid4())
+        body["operationID"] = op_id
+        deadline = time.monotonic() + recover_timeout if recover_timeout is not None else None
+        url = f"/v1/sessions/{session_id}/restore"
+        try:
+            resp = await self._client.post(url, json=body)
+        except httpx.TransportError as exc:
+            if recover:
+                raw = await self._poll_operation(
+                    session_id, op_id, deadline=deadline, resubmit_url=url, resubmit_body=body
+                )
+                return RestoreResponse.model_validate(raw)
+            if isinstance(exc, httpx.TimeoutException):
+                raise GatewayOperationTimeout(
+                    op_id, "restore operation is still pending"
+                ) from exc
+            raise
         self._handle_error(resp)
+        return RestoreResponse.model_validate(resp.json())
 
     async def get_history(self, session_id: str) -> list[StepResult]:
         resp = await self._client.get(f"/v1/sessions/{session_id}/history")

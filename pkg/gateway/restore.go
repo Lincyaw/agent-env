@@ -3,6 +3,8 @@ package gateway
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -14,8 +16,46 @@ import (
 	"github.com/Lincyaw/agent-env/pkg/sidecar"
 )
 
-// ReplayFrom replays steps from a source session into the target session's sandbox.
+// ReplayFrom replays steps from a source session, optionally as an async operation.
 func (g *Gateway) ReplayFrom(ctx context.Context, targetSessionID string, req ReplayRequest) (*ReplayResponse, error) {
+	if req.OperationID == "" {
+		return g.replayNow(ctx, targetSessionID, req)
+	}
+	return g.replayWithOperation(ctx, targetSessionID, req)
+}
+
+func (g *Gateway) replayWithOperation(ctx context.Context, targetSessionID string, req ReplayRequest) (*ReplayResponse, error) {
+	hash := replayRequestHash(req)
+	op, _, err := g.getOrStartOperation(targetSessionID, req.OperationID, hash, func(bgCtx context.Context) (any, error) {
+		return g.replayNow(bgCtx, targetSessionID, req)
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	select {
+	case <-op.done:
+	case <-ctx.Done():
+		return nil, fmt.Errorf("operation %s still running after client context closed: %w", req.OperationID, ctx.Err())
+	}
+
+	if op.err != nil {
+		return nil, op.err
+	}
+	resp, _ := op.result.(*ReplayResponse)
+	return resp, nil
+}
+
+func replayRequestHash(req ReplayRequest) string {
+	cp := req
+	cp.OperationID = ""
+	raw, _ := json.Marshal(cp)
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:])
+}
+
+// replayNow replays steps synchronously.
+func (g *Gateway) replayNow(ctx context.Context, targetSessionID string, req ReplayRequest) (*ReplayResponse, error) {
 	records, err := g.replayRecords(ctx, req.SourceSessionID, req.UpToStep)
 	if err != nil {
 		return nil, err
@@ -125,8 +165,46 @@ func (g *Gateway) replayUpload(ctx context.Context, podIP string, record StepRec
 	return err
 }
 
-// Restore restores a session to a previous snapshot by allocating a new pod and replaying steps.
-func (g *Gateway) Restore(ctx context.Context, sessionID string, snapshotID string) (retErr error) {
+// Restore restores a session to a previous snapshot, optionally as an async operation.
+func (g *Gateway) Restore(ctx context.Context, sessionID string, req RestoreRequest) (*RestoreResponse, error) {
+	if req.OperationID == "" {
+		return g.restoreNow(ctx, sessionID, req.SnapshotID)
+	}
+	return g.restoreWithOperation(ctx, sessionID, req)
+}
+
+func (g *Gateway) restoreWithOperation(ctx context.Context, sessionID string, req RestoreRequest) (*RestoreResponse, error) {
+	hash := restoreRequestHash(req)
+	op, _, err := g.getOrStartOperation(sessionID, req.OperationID, hash, func(bgCtx context.Context) (any, error) {
+		return g.restoreNow(bgCtx, sessionID, req.SnapshotID)
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	select {
+	case <-op.done:
+	case <-ctx.Done():
+		return nil, fmt.Errorf("operation %s still running after client context closed: %w", req.OperationID, ctx.Err())
+	}
+
+	if op.err != nil {
+		return nil, op.err
+	}
+	resp, _ := op.result.(*RestoreResponse)
+	return resp, nil
+}
+
+func restoreRequestHash(req RestoreRequest) string {
+	cp := req
+	cp.OperationID = ""
+	raw, _ := json.Marshal(cp)
+	sum := sha256.Sum256(raw)
+	return hex.EncodeToString(sum[:])
+}
+
+// restoreNow restores a session synchronously, returning a RestoreResponse.
+func (g *Gateway) restoreNow(ctx context.Context, sessionID string, snapshotID string) (resp *RestoreResponse, retErr error) {
 	restoreStart := time.Now()
 	defer func() {
 		if g.metrics != nil {
@@ -141,12 +219,12 @@ func (g *Gateway) Restore(ctx context.Context, sessionID string, snapshotID stri
 
 	targetIdx, err := strconv.Atoi(snapshotID)
 	if err != nil {
-		return fmt.Errorf("invalid snapshot_id %q: must be a step index", snapshotID)
+		return nil, fmt.Errorf("invalid snapshot_id %q: must be a step index", snapshotID)
 	}
 
 	s, ok := g.store.Get(sessionID)
 	if !ok {
-		return fmt.Errorf("session %s not found", sessionID)
+		return nil, fmt.Errorf("session %s not found", sessionID)
 	}
 
 	atomic.AddInt32(&s.activeExecs, 1)
@@ -155,7 +233,7 @@ func (g *Gateway) Restore(ctx context.Context, sessionID string, snapshotID stri
 	records := s.History.GetUpTo(targetIdx)
 	if len(records) == 0 && targetIdx >= 0 {
 		if targetIdx > 0 {
-			return fmt.Errorf("no history records up to index %d", targetIdx)
+			return nil, fmt.Errorf("no history records up to index %d", targetIdx)
 		}
 	}
 
@@ -178,9 +256,10 @@ func (g *Gateway) Restore(ctx context.Context, sessionID string, snapshotID stri
 	})
 	if err != nil {
 		diag := g.diagnosePoolHealth(ctx, oldAllocation.PoolRef, oldAllocation.Namespace)
-		return fmt.Errorf("allocate new runtime for restore: %w (%s)", err, diag)
+		return nil, fmt.Errorf("allocate new runtime for restore: %w (%s)", err, diag)
 	}
 
+	stepsReplayed := 0
 	for _, record := range records {
 		if record.Name == uploadFileStepName {
 			if err := g.replayUpload(ctx, newAllocation.PodIP, record); err != nil {
@@ -188,8 +267,9 @@ func (g *Gateway) Restore(ctx context.Context, sessionID string, snapshotID stri
 				if err := g.releaseRestoreAllocation(*newAllocation); err != nil {
 					log.Printf("Warning: failed to release runtime %s after restore failure: %v", newAllocation.PodName, err)
 				}
-				return fmt.Errorf("replay upload step %d failed: %w", record.Index, err)
+				return nil, fmt.Errorf("replay upload step %d failed: %w", record.Index, err)
 			}
+			stepsReplayed++
 			continue
 		}
 
@@ -209,8 +289,9 @@ func (g *Gateway) Restore(ctx context.Context, sessionID string, snapshotID stri
 			if err := g.releaseRestoreAllocation(*newAllocation); err != nil {
 				log.Printf("Warning: failed to release runtime %s after restore failure: %v", newAllocation.PodName, err)
 			}
-			return fmt.Errorf("replay step %d failed: %w", record.Index, err)
+			return nil, fmt.Errorf("replay step %d failed: %w", record.Index, err)
 		}
+		stepsReplayed++
 	}
 
 	s.mu.Lock()
@@ -237,7 +318,10 @@ func (g *Gateway) Restore(ctx context.Context, sessionID string, snapshotID stri
 		}
 	}()
 
-	return nil
+	return &RestoreResponse{
+		SnapshotID:    snapshotID,
+		StepsReplayed: stepsReplayed,
+	}, nil
 }
 
 func (g *Gateway) releaseRestoreAllocation(allocation RuntimeAllocation) error {
