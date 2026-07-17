@@ -1,7 +1,6 @@
 package gateway
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -148,14 +147,15 @@ func (g *Gateway) applyCheckpointToSession(ctx context.Context, sessionID, tarPa
 		return fmt.Errorf("sidecar client not configured")
 	}
 
-	tarData, err := os.ReadFile(tarPath)
+	tarFile, err := os.Open(tarPath)
 	if err != nil {
-		return fmt.Errorf("read checkpoint tar: %w", err)
+		return fmt.Errorf("open checkpoint tar: %w", err)
 	}
+	defer tarFile.Close()
 
-	// Upload tar via sidecar WriteFile RPC
+	// Upload tar via sidecar WriteFile RPC (streams, no full-file memory alloc)
 	const restorePath = "/tmp/arl-restore.tar"
-	if _, err := g.sidecarClient.WriteFile(ctx, podIP, restorePath, bytes.NewReader(tarData), ""); err != nil {
+	if _, err := g.sidecarClient.WriteFile(ctx, podIP, restorePath, tarFile, ""); err != nil {
 		return fmt.Errorf("upload checkpoint tar: %w", err)
 	}
 

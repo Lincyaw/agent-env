@@ -36,6 +36,7 @@ type operation struct {
 	finishedAt  *time.Time
 	done        chan struct{}
 	result      any
+	resultJSON  json.RawMessage // cached marshal of result, set once on completion
 	err         error
 }
 
@@ -80,15 +81,11 @@ func (op *operation) info() *ExecuteOperationInfo {
 		status = executeOperationError
 		errText = op.err.Error()
 	}
-	var resultRaw json.RawMessage
-	if op.result != nil {
-		resultRaw, _ = json.Marshal(op.result)
-	}
 	return &ExecuteOperationInfo{
 		OperationID: op.id,
 		SessionID:   op.sessionID,
 		Status:      status,
-		Result:      resultRaw,
+		Result:      op.resultJSON,
 		Error:       errText,
 		CreatedAt:   op.createdAt,
 		StartedAt:   op.startedAt,
@@ -167,6 +164,9 @@ func (g *Gateway) getOrStartOperation(sessionID, operationID, requestHash string
 		result, err := workFn(bgCtx)
 		finished := time.Now()
 		op.result = result
+		if result != nil {
+			op.resultJSON, _ = json.Marshal(result)
+		}
 		op.err = err
 		op.finishedAt = &finished
 		if g.metrics != nil {
