@@ -512,7 +512,10 @@ class GatewayClient:
         session_id: str,
         path: str,
     ) -> bytes:
-        resp = self._client.get(f"/v1/sessions/{session_id}/files/{_quote_file_path(path)}")
+        resp = self._client.post(
+            f"/v1/sessions/{session_id}/read-file",
+            json={"path": path},
+        )
         self._handle_error(resp)
         return resp.content
 
@@ -523,8 +526,9 @@ class GatewayClient:
         chunk_size: int = 1024 * 1024,
     ) -> Iterator[bytes]:
         with self._client.stream(
-            "GET",
-            f"/v1/sessions/{session_id}/files/{_quote_file_path(path)}",
+            "POST",
+            f"/v1/sessions/{session_id}/read-file",
+            json={"path": path},
         ) as resp:
             self._handle_error(resp)
             for chunk in resp.iter_bytes(chunk_size=chunk_size):
@@ -555,8 +559,10 @@ class GatewayClient:
 
     def stat_file(self, session_id: str, path: str) -> StatResult:
         """Get file metadata without downloading."""
-        encoded = quote(path.lstrip("/"), safe="")
-        resp = self._client.get(f"/v1/sessions/{session_id}/stat/{encoded}")
+        resp = self._client.post(
+            f"/v1/sessions/{session_id}/stat-file",
+            json={"path": path},
+        )
         self._handle_error(resp)
         return StatResult.model_validate(resp.json())
 
@@ -567,11 +573,12 @@ class GatewayClient:
         recursive: bool = False,
     ) -> ListDirResult:
         """List directory contents."""
-        encoded = quote(path.lstrip("/"), safe="")
-        params = {"recursive": "true"} if recursive else {}
-        resp = self._client.get(
-            f"/v1/sessions/{session_id}/ls/{encoded}",
-            params=params,
+        body: dict[str, Any] = {"path": path}
+        if recursive:
+            body["recursive"] = True
+        resp = self._client.post(
+            f"/v1/sessions/{session_id}/list-dir",
+            json=body,
         )
         self._handle_error(resp)
         return ListDirResult.model_validate(resp.json())

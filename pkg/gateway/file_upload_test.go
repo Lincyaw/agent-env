@@ -12,10 +12,20 @@ import (
 	"github.com/Lincyaw/agent-env/pkg/interfaces"
 )
 
-func TestSanitizeUploadPathRejectsEscape(t *testing.T) {
-	_, err := sanitizeUploadPath("../secret.txt")
+func TestSanitizeFilePathRejectsTraversal(t *testing.T) {
+	_, err := sanitizeFilePath("../secret.txt")
 	if err == nil {
-		t.Fatal("sanitizeUploadPath accepted parent traversal")
+		t.Fatal("sanitizeFilePath accepted parent traversal")
+	}
+}
+
+func TestSanitizeFilePathAcceptsAbsolute(t *testing.T) {
+	got, err := sanitizeFilePath("repo/posthog/file.py")
+	if err != nil {
+		t.Fatalf("sanitizeFilePath rejected absolute path: %v", err)
+	}
+	if got != "/repo/posthog/file.py" {
+		t.Fatalf("got %q, want /repo/posthog/file.py", got)
 	}
 }
 
@@ -83,14 +93,14 @@ func TestUploadFileStreamsContentAndRecordsHistory(t *testing.T) {
 	if resp.BytesWritten != 5 {
 		t.Fatalf("BytesWritten = %d, want %d", resp.BytesWritten, 5)
 	}
-	if resp.Path != "nested/demo.txt" {
-		t.Fatalf("Path = %q, want %q", resp.Path, "nested/demo.txt")
+	if resp.Path != "/nested/demo.txt" {
+		t.Fatalf("Path = %q, want %q", resp.Path, "/nested/demo.txt")
 	}
 	if gotPodIP != "10.0.0.1" {
 		t.Fatalf("podIP = %q, want %q", gotPodIP, "10.0.0.1")
 	}
-	if gotPath != "nested/demo.txt" {
-		t.Fatalf("path = %q, want %q", gotPath, "nested/demo.txt")
+	if gotPath != "/nested/demo.txt" {
+		t.Fatalf("path = %q, want %q", gotPath, "/nested/demo.txt")
 	}
 	if gotContent.String() != "hello" {
 		t.Fatalf("content = %q, want %q", gotContent.String(), "hello")
@@ -139,8 +149,8 @@ func TestDownloadFileStreamsToWriter(t *testing.T) {
 				if podIP != "10.0.0.1" {
 					t.Fatalf("podIP = %q, want 10.0.0.1", podIP)
 				}
-				if path != "nested/demo.txt" {
-					t.Fatalf("path = %q, want nested/demo.txt", path)
+				if path != "/nested/demo.txt" {
+					t.Fatalf("path = %q, want /nested/demo.txt", path)
 				}
 				if _, err := io.WriteString(dst, "hello"); err != nil {
 					return nil, err

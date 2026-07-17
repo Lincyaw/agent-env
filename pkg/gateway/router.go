@@ -54,6 +54,11 @@ func SetupRoutes(mux *http.ServeMux, gw *Gateway, authCfg *AuthConfig) {
 	route("GET /v1/sessions/{id}/files/{path...}", user(handleDownloadFile(gw)))
 	route("GET /v1/sessions/{id}/stat/{path...}", user(handleStat(gw)))
 	route("GET /v1/sessions/{id}/ls/{path...}", user(handleListDir(gw)))
+
+	// v2 file ops: path in JSON body, no URL encoding issues.
+	route("POST /v1/sessions/{id}/read-file", user(handleReadFile(gw)))
+	route("POST /v1/sessions/{id}/stat-file", user(handleStatFile(gw)))
+	route("POST /v1/sessions/{id}/list-dir", user(handleListDirV2(gw)))
 	route("POST /v1/sessions/{id}/stdin", user(handleWriteStdin(gw)))
 	route("POST /v1/sessions/{id}/restore", user(handleRestore(gw)))
 	route("POST /v1/sessions/{id}/replay", user(handleReplay(gw)))
@@ -423,7 +428,7 @@ func handleUploadFile(gw *Gateway) http.HandlerFunc {
 			writeError(w, http.StatusBadRequest, "path is required")
 			return
 		}
-		if _, err := sanitizeUploadPath(filePath); err != nil {
+		if _, err := sanitizeFilePath(filePath); err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
@@ -450,7 +455,7 @@ func handleDownloadFile(gw *Gateway) http.HandlerFunc {
 			writeError(w, http.StatusBadRequest, "path is required")
 			return
 		}
-		if _, err := sanitizeUploadPath(filePath); err != nil {
+		if _, err := sanitizeFilePath(filePath); err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
@@ -545,6 +550,95 @@ func handleListDir(gw *Gateway) http.HandlerFunc {
 			return
 		}
 
+		writeJSON(w, http.StatusOK, resp)
+	}
+}
+
+// --- v2 file handlers: path in JSON body -----------------------------------
+
+type filePathRequest struct {
+	Path string `json:"path"`
+}
+
+func handleReadFile(gw *Gateway) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		if checkOwnership(gw, w, r, id) == nil {
+			return
+		}
+		var req filePathRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid JSON body")
+			return
+		}
+		if req.Path == "" {
+			writeError(w, http.StatusBadRequest, "path is required")
+			return
+		}
+
+		streamWriter := &downloadResponseWriter{w: w, filePath: req.Path}
+		result, err := gw.DownloadFile(r.Context(), id, req.Path, streamWriter)
+		if err != nil {
+			if !streamWriter.started {
+				writeError(w, http.StatusInternalServerError, err.Error())
+			}
+			return
+		}
+		streamWriter.ensureStarted()
+		w.Header().Set("X-ARL-Size-Bytes", strconv.FormatInt(result.SizeBytes, 10))
+		w.Header().Set("X-ARL-SHA256", result.SHA256)
+	}
+}
+
+func handleStatFile(gw *Gateway) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		if checkOwnership(gw, w, r, id) == nil {
+			return
+		}
+		var req filePathRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid JSON body")
+			return
+		}
+		if req.Path == "" {
+			writeError(w, http.StatusBadRequest, "path is required")
+			return
+		}
+
+		resp, err := gw.StatFile(r.Context(), id, req.Path)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, resp)
+	}
+}
+
+func handleListDirV2(gw *Gateway) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		if checkOwnership(gw, w, r, id) == nil {
+			return
+		}
+		var req struct {
+			Path      string `json:"path"`
+			Recursive bool   `json:"recursive,omitempty"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid JSON body")
+			return
+		}
+		if req.Path == "" {
+			writeError(w, http.StatusBadRequest, "path is required")
+			return
+		}
+
+		resp, err := gw.ListDir(r.Context(), id, req.Path, req.Recursive)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
 		writeJSON(w, http.StatusOK, resp)
 	}
 }
