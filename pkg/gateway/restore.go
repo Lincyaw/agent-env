@@ -3,8 +3,6 @@ package gateway
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -25,33 +23,14 @@ func (g *Gateway) ReplayFrom(ctx context.Context, targetSessionID string, req Re
 }
 
 func (g *Gateway) replayWithOperation(ctx context.Context, targetSessionID string, req ReplayRequest) (*ReplayResponse, error) {
-	hash := replayRequestHash(req)
+	hash := operationRequestHash(req)
 	op, _, err := g.getOrStartOperation(targetSessionID, req.OperationID, hash, func(bgCtx context.Context) (any, error) {
 		return g.replayNow(bgCtx, targetSessionID, req)
 	})
 	if err != nil {
 		return nil, err
 	}
-
-	select {
-	case <-op.done:
-	case <-ctx.Done():
-		return nil, &OperationPending{OperationID: req.OperationID, SessionID: targetSessionID}
-	}
-
-	if op.err != nil {
-		return nil, op.err
-	}
-	resp, _ := op.result.(*ReplayResponse)
-	return resp, nil
-}
-
-func replayRequestHash(req ReplayRequest) string {
-	cp := req
-	cp.OperationID = ""
-	raw, _ := json.Marshal(cp)
-	sum := sha256.Sum256(raw)
-	return hex.EncodeToString(sum[:])
+	return awaitOperation[ReplayResponse](ctx, op)
 }
 
 // replayNow replays steps synchronously.
@@ -185,33 +164,14 @@ func (g *Gateway) Restore(ctx context.Context, sessionID string, req RestoreRequ
 }
 
 func (g *Gateway) restoreWithOperation(ctx context.Context, sessionID string, req RestoreRequest) (*RestoreResponse, error) {
-	hash := restoreRequestHash(req)
+	hash := operationRequestHash(req)
 	op, _, err := g.getOrStartOperation(sessionID, req.OperationID, hash, func(bgCtx context.Context) (any, error) {
 		return g.restoreNow(bgCtx, sessionID, req.SnapshotID)
 	})
 	if err != nil {
 		return nil, err
 	}
-
-	select {
-	case <-op.done:
-	case <-ctx.Done():
-		return nil, &OperationPending{OperationID: req.OperationID, SessionID: sessionID}
-	}
-
-	if op.err != nil {
-		return nil, op.err
-	}
-	resp, _ := op.result.(*RestoreResponse)
-	return resp, nil
-}
-
-func restoreRequestHash(req RestoreRequest) string {
-	cp := req
-	cp.OperationID = ""
-	raw, _ := json.Marshal(cp)
-	sum := sha256.Sum256(raw)
-	return hex.EncodeToString(sum[:])
+	return awaitOperation[RestoreResponse](ctx, op)
 }
 
 // restoreNow restores a session synchronously, returning a RestoreResponse.

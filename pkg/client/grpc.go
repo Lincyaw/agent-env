@@ -14,28 +14,12 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials/insecure"
-	"google.golang.org/grpc/metadata"
 
+	"github.com/Lincyaw/agent-env/pkg/grpcauth"
 	"github.com/Lincyaw/agent-env/pkg/interfaces"
 	"github.com/Lincyaw/agent-env/pkg/pb"
 	"github.com/Lincyaw/agent-env/pkg/sidecar"
 )
-
-const tokenMetadataKey = "x-arl-token"
-
-func tokenUnaryInterceptor(token string) grpc.UnaryClientInterceptor {
-	return func(ctx context.Context, method string, req, reply any, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
-		ctx = metadata.AppendToOutgoingContext(ctx, tokenMetadataKey, token)
-		return invoker(ctx, method, req, reply, cc, opts...)
-	}
-}
-
-func tokenStreamInterceptor(token string) grpc.StreamClientInterceptor {
-	return func(ctx context.Context, desc *grpc.StreamDesc, cc *grpc.ClientConn, method string, streamer grpc.Streamer, opts ...grpc.CallOption) (grpc.ClientStream, error) {
-		ctx = metadata.AppendToOutgoingContext(ctx, tokenMetadataKey, token)
-		return streamer(ctx, desc, cc, method, opts...)
-	}
-}
 
 const fileChunkSize = interfaces.FileTransferChunkSize
 
@@ -105,8 +89,8 @@ func (c *GRPCSidecarClient) getOrCreateConn(podIP string) (*grpc.ClientConn, err
 	}
 	if c.grpcToken != "" {
 		opts = append(opts,
-			grpc.WithChainUnaryInterceptor(tokenUnaryInterceptor(c.grpcToken)),
-			grpc.WithChainStreamInterceptor(tokenStreamInterceptor(c.grpcToken)),
+			grpc.WithChainUnaryInterceptor(grpcauth.UnaryClientInterceptor(c.grpcToken)),
+			grpc.WithChainStreamInterceptor(grpcauth.StreamClientInterceptor(c.grpcToken)),
 		)
 	}
 	conn, err := grpc.NewClient(addr, opts...)

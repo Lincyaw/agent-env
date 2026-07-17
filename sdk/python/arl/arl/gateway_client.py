@@ -607,6 +607,37 @@ class GatewayClient:
         )
         self._handle_error(resp)
 
+    def _submit_operation(
+        self,
+        session_id: str,
+        url: str,
+        body: dict[str, Any],
+        operation_id: str,
+        response_model: type[_ModelT],
+        recover: bool = True,
+        recover_timeout: float | None = None,
+    ) -> _ModelT:
+        deadline = time.monotonic() + recover_timeout if recover_timeout is not None else None
+        try:
+            resp = self._client.post(url, json=body)
+        except httpx.TransportError as exc:
+            if recover:
+                raw = self._poll_operation(
+                    session_id, operation_id, deadline=deadline,
+                    resubmit_url=url, resubmit_body=body,
+                )
+                return response_model.model_validate(raw)
+            if isinstance(exc, httpx.TimeoutException):
+                raise GatewayOperationTimeout(
+                    operation_id, "operation is still pending"
+                ) from exc
+            raise
+        if resp.status_code == 202:
+            raw = self._poll_operation(session_id, operation_id, deadline=deadline)
+            return response_model.model_validate(raw)
+        self._handle_error(resp)
+        return response_model.model_validate(resp.json())
+
     def replay_from(
         self,
         session_id: str,
@@ -621,26 +652,10 @@ class GatewayClient:
             body["upToStep"] = up_to_step
         op_id = operation_id or str(uuid.uuid4())
         body["operationID"] = op_id
-        deadline = time.monotonic() + recover_timeout if recover_timeout is not None else None
-        url = f"/v1/sessions/{session_id}/replay"
-        try:
-            resp = self._client.post(url, json=body)
-        except httpx.TransportError as exc:
-            if recover:
-                raw = self._poll_operation(
-                    session_id, op_id, deadline=deadline, resubmit_url=url, resubmit_body=body
-                )
-                return ReplayResponse.model_validate(raw)
-            if isinstance(exc, httpx.TimeoutException):
-                raise GatewayOperationTimeout(
-                    op_id, "replay operation is still pending"
-                ) from exc
-            raise
-        if resp.status_code == 202:
-            raw = self._poll_operation(session_id, op_id, deadline=deadline)
-            return ReplayResponse.model_validate(raw)
-        self._handle_error(resp)
-        return ReplayResponse.model_validate(resp.json())
+        return self._submit_operation(
+            session_id, f"/v1/sessions/{session_id}/replay", body, op_id,
+            ReplayResponse, recover, recover_timeout,
+        )
 
     def restore(
         self,
@@ -653,26 +668,10 @@ class GatewayClient:
         body: dict[str, Any] = {"snapshotID": snapshot_id}
         op_id = operation_id or str(uuid.uuid4())
         body["operationID"] = op_id
-        deadline = time.monotonic() + recover_timeout if recover_timeout is not None else None
-        url = f"/v1/sessions/{session_id}/restore"
-        try:
-            resp = self._client.post(url, json=body)
-        except httpx.TransportError as exc:
-            if recover:
-                raw = self._poll_operation(
-                    session_id, op_id, deadline=deadline, resubmit_url=url, resubmit_body=body
-                )
-                return RestoreResponse.model_validate(raw)
-            if isinstance(exc, httpx.TimeoutException):
-                raise GatewayOperationTimeout(
-                    op_id, "restore operation is still pending"
-                ) from exc
-            raise
-        if resp.status_code == 202:
-            raw = self._poll_operation(session_id, op_id, deadline=deadline)
-            return RestoreResponse.model_validate(raw)
-        self._handle_error(resp)
-        return RestoreResponse.model_validate(resp.json())
+        return self._submit_operation(
+            session_id, f"/v1/sessions/{session_id}/restore", body, op_id,
+            RestoreResponse, recover, recover_timeout,
+        )
 
     def get_history(self, session_id: str) -> list[StepResult]:
         resp = self._client.get(f"/v1/sessions/{session_id}/history")
