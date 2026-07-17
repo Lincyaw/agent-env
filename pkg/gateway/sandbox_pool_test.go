@@ -716,17 +716,6 @@ func TestDeletePoolDrainsActiveSessionsForPool(t *testing.T) {
 	if _, ok := store.Get("session-bound"); ok {
 		t.Fatal("bound session is still active after pool delete")
 	}
-	historical, ok := store.GetHistorical("session-bound")
-	if !ok {
-		t.Fatal("bound session tombstone not found")
-	}
-	historical.mu.RLock()
-	status := historical.Info.Status
-	reason := historical.Info.DeletionReason
-	historical.mu.RUnlock()
-	if status != "deleted" || reason != "pool_deleted" {
-		t.Fatalf("bound session status/reason = %q/%q, want deleted/pool_deleted", status, reason)
-	}
 	if _, ok := store.Get("session-other"); !ok {
 		t.Fatal("unrelated session was deleted")
 	}

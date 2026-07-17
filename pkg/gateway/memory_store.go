@@ -9,7 +9,6 @@ import (
 // This is the default store for single-replica deployments and testing.
 type MemoryStore struct {
 	sessions     sync.Map
-	tombstones   sync.Map
 	sessionCount atomic.Int64
 	indexMu      sync.RWMutex
 	experiments  map[string]map[string]struct{}
@@ -44,9 +43,7 @@ func (ms *MemoryStore) Set(sessionID string, s *session) {
 
 func (ms *MemoryStore) Delete(sessionID string) {
 	if val, ok := ms.sessions.Load(sessionID); ok {
-		s := val.(*session)
-		ms.tombstones.Store(sessionID, s)
-		ms.removeFromIndexes(sessionID, s)
+		ms.removeFromIndexes(sessionID, val.(*session))
 	}
 	ms.sessions.Delete(sessionID)
 }
@@ -98,15 +95,10 @@ func (ms *MemoryStore) Close() error {
 	return nil
 }
 
-// GetHistorical retrieves a session snapshot even after Delete tombstoned it.
+// GetHistorical returns an active session if it exists. Deleted sessions
+// are no longer retained in memory — callers fall through to ClickHouse.
 func (ms *MemoryStore) GetHistorical(sessionID string) (*session, bool) {
-	if val, ok := ms.sessions.Load(sessionID); ok {
-		return val.(*session), true
-	}
-	if val, ok := ms.tombstones.Load(sessionID); ok {
-		return val.(*session), true
-	}
-	return nil, false
+	return ms.Get(sessionID)
 }
 
 func (ms *MemoryStore) addToIndexes(sessionID string, s *session) {
