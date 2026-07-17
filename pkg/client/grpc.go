@@ -15,11 +15,24 @@ import (
 	"google.golang.org/grpc/connectivity"
 	"google.golang.org/grpc/credentials/insecure"
 
-	"github.com/Lincyaw/agent-env/pkg/grpcauth"
 	"github.com/Lincyaw/agent-env/pkg/interfaces"
 	"github.com/Lincyaw/agent-env/pkg/pb"
 	"github.com/Lincyaw/agent-env/pkg/sidecar"
 )
+
+// tokenCredentials implements grpc.PerRPCCredentials to attach the auth token
+// on every RPC call rather than caching it at connection level.
+type tokenCredentials struct {
+	token string
+}
+
+func (t *tokenCredentials) GetRequestMetadata(ctx context.Context, uri ...string) (map[string]string, error) {
+	return map[string]string{"x-arl-token": t.token}, nil
+}
+
+func (t *tokenCredentials) RequireTransportSecurity() bool {
+	return false
+}
 
 const fileChunkSize = interfaces.FileTransferChunkSize
 
@@ -56,7 +69,13 @@ func (c *GRPCSidecarClient) getOrCreateConn(podIP string) (*grpc.ClientConn, err
 	c.mu.RUnlock()
 
 	if ok && conn != nil {
-		return conn, nil
+		state := conn.GetState()
+		if state == connectivity.Shutdown || state == connectivity.TransientFailure {
+			_ = c.CloseConnection(podIP)
+			// Fall through to create a new connection.
+		} else {
+			return conn, nil
+		}
 	}
 
 	c.mu.Lock()
@@ -64,7 +83,12 @@ func (c *GRPCSidecarClient) getOrCreateConn(podIP string) (*grpc.ClientConn, err
 
 	// Double-check after acquiring write lock
 	if conn, ok := c.conns[podIP]; ok && conn != nil {
-		return conn, nil
+		state := conn.GetState()
+		if state != connectivity.Shutdown && state != connectivity.TransientFailure {
+			return conn, nil
+		}
+		conn.Close()
+		delete(c.conns, podIP)
 	}
 
 	addr := fmt.Sprintf("%s:%d", podIP, c.port)
@@ -77,10 +101,7 @@ func (c *GRPCSidecarClient) getOrCreateConn(podIP string) (*grpc.ClientConn, err
 		),
 	}
 	if c.grpcToken != "" {
-		opts = append(opts,
-			grpc.WithUnaryInterceptor(grpcauth.UnaryClientInterceptor(c.grpcToken)),
-			grpc.WithStreamInterceptor(grpcauth.StreamClientInterceptor(c.grpcToken)),
-		)
+		opts = append(opts, grpc.WithPerRPCCredentials(&tokenCredentials{token: c.grpcToken}))
 	}
 	conn, err := grpc.NewClient(addr, opts...)
 	if err != nil {
