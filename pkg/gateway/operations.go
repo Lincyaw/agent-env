@@ -15,7 +15,7 @@ const (
 	executeOperationError   = "error"
 )
 
-type executeOperation struct {
+type operation struct {
 	id          string
 	sessionID   string
 	requestHash string
@@ -23,7 +23,7 @@ type executeOperation struct {
 	startedAt   time.Time
 	finishedAt  *time.Time
 	done        chan struct{}
-	resp        *ExecuteResponse
+	result      any
 	err         error
 }
 
@@ -35,7 +35,7 @@ func executeRequestHash(req ExecuteRequest) string {
 	return hex.EncodeToString(sum[:])
 }
 
-func (g *Gateway) ExecuteOperationStatus(sessionID, operationID string) (*ExecuteOperationInfo, error) {
+func (g *Gateway) OperationStatus(sessionID, operationID string) (*ExecuteOperationInfo, error) {
 	s, ok := g.store.Get(sessionID)
 	if !ok {
 		return nil, fmt.Errorf("session %s not found", sessionID)
@@ -49,7 +49,7 @@ func (g *Gateway) ExecuteOperationStatus(sessionID, operationID string) (*Execut
 	return op.info(), nil
 }
 
-func (op *executeOperation) info() *ExecuteOperationInfo {
+func (op *operation) info() *ExecuteOperationInfo {
 	select {
 	case <-op.done:
 	default:
@@ -68,11 +68,15 @@ func (op *executeOperation) info() *ExecuteOperationInfo {
 		status = executeOperationError
 		errText = op.err.Error()
 	}
+	var resultRaw json.RawMessage
+	if op.result != nil {
+		resultRaw, _ = json.Marshal(op.result)
+	}
 	return &ExecuteOperationInfo{
 		OperationID: op.id,
 		SessionID:   op.sessionID,
 		Status:      status,
-		Result:      op.resp,
+		Result:      resultRaw,
 		Error:       errText,
 		CreatedAt:   op.createdAt,
 		StartedAt:   op.startedAt,
@@ -85,7 +89,14 @@ func (g *Gateway) executeStepsWithOperation(ctx context.Context, sessionID strin
 		return g.executeStepsNow(ctx, sessionID, req)
 	}
 
-	op, started, err := g.getOrStartExecuteOperation(sessionID, req)
+	hash := executeRequestHash(req)
+	op, started, err := g.getOrStartOperation(sessionID, req.OperationID, hash, func(bgCtx context.Context) (any, error) {
+		resp, err := g.executeStepsNow(bgCtx, sessionID, req)
+		if resp != nil {
+			resp.OperationID = req.OperationID
+		}
+		return resp, err
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -105,59 +116,55 @@ func (g *Gateway) executeStepsWithOperation(ctx context.Context, sessionID strin
 	if op.err != nil {
 		return nil, op.err
 	}
-	return op.resp, nil
+	resp, _ := op.result.(*ExecuteResponse)
+	return resp, nil
 }
 
-func (g *Gateway) getOrStartExecuteOperation(sessionID string, req ExecuteRequest) (*executeOperation, bool, error) {
+func (g *Gateway) getOrStartOperation(sessionID, operationID, requestHash string, workFn func(context.Context) (any, error)) (*operation, bool, error) {
 	s, ok := g.store.Get(sessionID)
 	if !ok {
 		return nil, false, fmt.Errorf("session %s not found", sessionID)
 	}
-	hash := executeRequestHash(req)
 	now := time.Now()
 
 	s.mu.Lock()
 	if s.operations == nil {
-		s.operations = make(map[string]*executeOperation)
+		s.operations = make(map[string]*operation)
 	}
-	if op := s.operations[req.OperationID]; op != nil {
+	if op := s.operations[operationID]; op != nil {
 		s.mu.Unlock()
-		if op.requestHash != hash {
-			return nil, false, fmt.Errorf("operation %s already exists with different execute request", req.OperationID)
+		if op.requestHash != requestHash {
+			return nil, false, fmt.Errorf("operation %s already exists with different request", operationID)
 		}
 		return op, false, nil
 	}
-	op := &executeOperation{
-		id:          req.OperationID,
+	op := &operation{
+		id:          operationID,
 		sessionID:   sessionID,
-		requestHash: hash,
+		requestHash: requestHash,
 		createdAt:   now,
 		startedAt:   now,
 		done:        make(chan struct{}),
 	}
-	s.operations[req.OperationID] = op
+	s.operations[operationID] = op
 	s.mu.Unlock()
 
 	go func() {
 		defer close(op.done)
 		bgCtx := context.Background()
-		resp, err := g.executeStepsNow(bgCtx, sessionID, req)
+		result, err := workFn(bgCtx)
 		finished := time.Now()
-		if resp != nil {
-			resp.OperationID = req.OperationID
-		}
-		op.resp = resp
+		op.result = result
 		op.err = err
 		op.finishedAt = &finished
 		if g.metrics != nil {
-			result := "success"
+			mResult := "success"
 			if err != nil {
-				result = "error"
+				mResult = "error"
 			}
-			g.metrics.IncrementExecuteOperationResult(result)
+			g.metrics.IncrementExecuteOperationResult(mResult)
 		}
 
-		operationID := req.OperationID
 		time.AfterFunc(10*time.Minute, func() {
 			s, ok := g.store.Get(sessionID)
 			if !ok {

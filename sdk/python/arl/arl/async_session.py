@@ -21,6 +21,7 @@ from arl.types import (
     PrivateContainerSpec,
     ReplayResponse,
     ResourceRequirements,
+    RestoreResponse,
     SessionInfo,
     StepOutput,
     StepResult,
@@ -269,16 +270,31 @@ class AsyncSandboxSession:
             raise RuntimeError("No session created. Call create_sandbox() first.")
         return await self._client.execute_container(self._session_id, container, steps)
 
-    async def restore(self, snapshot_id: str) -> None:
+    async def restore(
+        self,
+        snapshot_id: str,
+        operation_id: str | None = None,
+        recover: bool = True,
+        recover_timeout: float | None = None,
+    ) -> RestoreResponse:
         """Restore workspace to a previous step's snapshot."""
         if self._session_id is None:
             raise RuntimeError("No session created. Call create_sandbox() first.")
-        await self._client.restore(self._session_id, snapshot_id)
+        return await self._client.restore(
+            self._session_id,
+            snapshot_id,
+            operation_id=operation_id,
+            recover=recover,
+            recover_timeout=recover_timeout,
+        )
 
     async def replay_from(
         self,
         source_session_id: str,
         up_to_step: int | None = None,
+        operation_id: str | None = None,
+        recover: bool = True,
+        recover_timeout: float | None = None,
     ) -> ReplayResponse:
         """Replay another session's history into this session."""
         if self._session_id is None:
@@ -287,6 +303,9 @@ class AsyncSandboxSession:
             self._session_id,
             source_session_id=source_session_id,
             up_to_step=up_to_step,
+            operation_id=operation_id,
+            recover=recover,
+            recover_timeout=recover_timeout,
         )
 
     async def upload_file(

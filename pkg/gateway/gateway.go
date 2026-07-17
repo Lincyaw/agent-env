@@ -85,7 +85,7 @@ type session struct {
 	idleTimeout         time.Duration
 	createdAt           time.Time
 	activeExecs         int32
-	operations          map[string]*executeOperation
+	operations          map[string]*operation
 	privateContainers   map[string]PrivateContainerSpec
 }
 

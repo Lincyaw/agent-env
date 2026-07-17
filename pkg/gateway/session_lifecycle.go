@@ -206,7 +206,7 @@ func (g *Gateway) CreateSession(ctx context.Context, req CreateSessionRequest) (
 		lastAnnotationPatch: createdAt,
 		createdAt:           createdAt,
 		idleTimeout:         idleTimeout,
-		operations:          make(map[string]*executeOperation),
+		operations:          make(map[string]*operation),
 		privateContainers:   privateContainerMap(req.PrivateContainers),
 	})
 

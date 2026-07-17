@@ -176,13 +176,21 @@ type UploadFileResponse struct {
 
 // RestoreRequest is the body for POST /v1/sessions/{id}/restore
 type RestoreRequest struct {
-	SnapshotID string `json:"snapshotID"`
+	SnapshotID  string `json:"snapshotID"`
+	OperationID string `json:"operationID,omitempty"`
+}
+
+// RestoreResponse is the response for POST /v1/sessions/{id}/restore
+type RestoreResponse struct {
+	SnapshotID    string `json:"snapshotID"`
+	StepsReplayed int    `json:"stepsReplayed"`
 }
 
 // ReplayRequest is the body for POST /v1/sessions/{id}/replay
 type ReplayRequest struct {
 	SourceSessionID string `json:"sourceSessionID"`
 	UpToStep        *int   `json:"upToStep,omitempty"`
+	OperationID     string `json:"operationID,omitempty"`
 }
 
 // ReplayResponse is the response for POST /v1/sessions/{id}/replay
@@ -257,16 +265,16 @@ type ContainerExecuteResponse struct {
 	TotalDurationMs int64        `json:"totalDurationMs"`
 }
 
-// ExecuteOperationInfo describes an idempotent execute operation.
+// ExecuteOperationInfo describes an idempotent async operation (execute, restore, replay).
 type ExecuteOperationInfo struct {
-	OperationID string           `json:"operationID"`
-	SessionID   string           `json:"sessionID"`
-	Status      string           `json:"status"`
-	Result      *ExecuteResponse `json:"result,omitempty"`
-	Error       string           `json:"error,omitempty"`
-	CreatedAt   time.Time        `json:"createdAt"`
-	StartedAt   time.Time        `json:"startedAt,omitempty"`
-	FinishedAt  *time.Time       `json:"finishedAt,omitempty"`
+	OperationID string          `json:"operationID"`
+	SessionID   string          `json:"sessionID"`
+	Status      string          `json:"status"`
+	Result      json.RawMessage `json:"result,omitempty"`
+	Error       string          `json:"error,omitempty"`
+	CreatedAt   time.Time       `json:"createdAt"`
+	StartedAt   time.Time       `json:"startedAt,omitempty"`
+	FinishedAt  *time.Time      `json:"finishedAt,omitempty"`
 }
 
 // StepOutput is the output of an execution step

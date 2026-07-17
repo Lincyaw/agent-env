@@ -372,7 +372,7 @@ func handleGetExecuteOperation(gw *Gateway) http.HandlerFunc {
 			writeError(w, http.StatusBadRequest, "operationID is required")
 			return
 		}
-		info, err := gw.ExecuteOperationStatus(id, operationID)
+		info, err := gw.OperationStatus(id, operationID)
 		if err != nil {
 			writeError(w, http.StatusNotFound, err.Error())
 			return
@@ -620,12 +620,13 @@ func handleRestore(gw *Gateway) http.HandlerFunc {
 			return
 		}
 
-		if err := gw.Restore(r.Context(), id, req.SnapshotID); err != nil {
+		resp, err := gw.Restore(r.Context(), id, req)
+		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
 
-		writeJSON(w, http.StatusOK, map[string]string{"status": "restored"})
+		writeJSON(w, http.StatusOK, resp)
 	}
 }
 

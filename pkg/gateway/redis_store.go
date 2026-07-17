@@ -134,7 +134,7 @@ func redisDataToSession(data redisSessionData, actions redisSessionActionsData) 
 		lastAnnotationPatch: data.LastAnnotationPatch,
 		idleTimeout:         data.IdleTimeout,
 		createdAt:           data.CreatedAt,
-		operations:          make(map[string]*executeOperation),
+		operations:          make(map[string]*operation),
 		privateContainers:   privateContainerMap(data.PrivateContainers),
 	}
 }

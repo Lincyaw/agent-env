@@ -220,7 +220,7 @@ func (g *Gateway) newRecoveredSessionFromClaim(ctx context.Context, sessionID st
 		lastTaskTime: lastTask,
 		createdAt:    info.CreatedAt,
 		idleTimeout:  idleTimeout,
-		operations:   make(map[string]*executeOperation),
+		operations:   make(map[string]*operation),
 	}
 }
 
@@ -251,7 +251,7 @@ func (g *Gateway) applyRecoveredRuntime(ctx context.Context, s *session, session
 		s.History = NewStepHistory()
 	}
 	if s.operations == nil {
-		s.operations = make(map[string]*executeOperation)
+		s.operations = make(map[string]*operation)
 	}
 	if s.createdAt.IsZero() {
 		s.createdAt = s.Info.CreatedAt
