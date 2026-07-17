@@ -101,8 +101,8 @@ func (x *ExecRequest) GetTimeoutSeconds() int32 {
 // ExecLog streams output from command execution
 type ExecLog struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Stdout        string                 `protobuf:"bytes,1,opt,name=stdout,proto3" json:"stdout,omitempty"`
-	Stderr        string                 `protobuf:"bytes,2,opt,name=stderr,proto3" json:"stderr,omitempty"`
+	Stdout        []byte                 `protobuf:"bytes,1,opt,name=stdout,proto3" json:"stdout,omitempty"`
+	Stderr        []byte                 `protobuf:"bytes,2,opt,name=stderr,proto3" json:"stderr,omitempty"`
 	ExitCode      int32                  `protobuf:"varint,3,opt,name=exit_code,json=exitCode,proto3" json:"exit_code,omitempty"`
 	Done          bool                   `protobuf:"varint,4,opt,name=done,proto3" json:"done,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -139,18 +139,18 @@ func (*ExecLog) Descriptor() ([]byte, []int) {
 	return file_proto_agent_proto_rawDescGZIP(), []int{1}
 }
 
-func (x *ExecLog) GetStdout() string {
+func (x *ExecLog) GetStdout() []byte {
 	if x != nil {
 		return x.Stdout
 	}
-	return ""
+	return nil
 }
 
-func (x *ExecLog) GetStderr() string {
+func (x *ExecLog) GetStderr() []byte {
 	if x != nil {
 		return x.Stderr
 	}
-	return ""
+	return nil
 }
 
 func (x *ExecLog) GetExitCode() int32 {
@@ -531,7 +531,7 @@ func (*ShellInput_Signal) isShellInput_Input() {}
 // ShellOutput represents output from an interactive shell session
 type ShellOutput struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Data          string                 `protobuf:"bytes,1,opt,name=data,proto3" json:"data,omitempty"`                          // Stdout/stderr data from the shell
+	Data          []byte                 `protobuf:"bytes,1,opt,name=data,proto3" json:"data,omitempty"`                          // Stdout/stderr data from the shell
 	ExitCode      int32                  `protobuf:"varint,2,opt,name=exit_code,json=exitCode,proto3" json:"exit_code,omitempty"` // Exit code (set when shell exits)
 	Closed        bool                   `protobuf:"varint,3,opt,name=closed,proto3" json:"closed,omitempty"`                     // True when shell session has ended
 	unknownFields protoimpl.UnknownFields
@@ -568,11 +568,11 @@ func (*ShellOutput) Descriptor() ([]byte, []int) {
 	return file_proto_agent_proto_rawDescGZIP(), []int{7}
 }
 
-func (x *ShellOutput) GetData() string {
+func (x *ShellOutput) GetData() []byte {
 	if x != nil {
 		return x.Data
 	}
-	return ""
+	return nil
 }
 
 func (x *ShellOutput) GetExitCode() int32 {
@@ -1182,8 +1182,8 @@ const file_proto_agent_proto_rawDesc = "" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"j\n" +
 	"\aExecLog\x12\x16\n" +
-	"\x06stdout\x18\x01 \x01(\tR\x06stdout\x12\x16\n" +
-	"\x06stderr\x18\x02 \x01(\tR\x06stderr\x12\x1b\n" +
+	"\x06stdout\x18\x01 \x01(\fR\x06stdout\x12\x16\n" +
+	"\x06stderr\x18\x02 \x01(\fR\x06stderr\x12\x1b\n" +
 	"\texit_code\x18\x03 \x01(\x05R\bexitCode\x12\x12\n" +
 	"\x04done\x18\x04 \x01(\bR\x04done\"a\n" +
 	"\x0eWriteFileChunk\x12\x12\n" +
@@ -1213,7 +1213,7 @@ const file_proto_agent_proto_rawDesc = "" +
 	"\x04cols\x18\x05 \x01(\x05R\x04colsB\a\n" +
 	"\x05input\"V\n" +
 	"\vShellOutput\x12\x12\n" +
-	"\x04data\x18\x01 \x01(\tR\x04data\x12\x1b\n" +
+	"\x04data\x18\x01 \x01(\fR\x04data\x12\x1b\n" +
 	"\texit_code\x18\x02 \x01(\x05R\bexitCode\x12\x16\n" +
 	"\x06closed\x18\x03 \x01(\bR\x06closed\"D\n" +
 	"\vLogsRequest\x12\x16\n" +

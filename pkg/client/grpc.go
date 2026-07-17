@@ -157,11 +157,11 @@ func (c *GRPCSidecarClient) Execute(ctx context.Context, podIP string, req inter
 			return nil, fmt.Errorf("gRPC stream receive failed: %w", err)
 		}
 
-		if log.GetStdout() != "" {
-			stdout.WriteString(log.GetStdout())
+		if len(log.GetStdout()) > 0 {
+			stdout.Write(log.GetStdout())
 		}
-		if log.GetStderr() != "" {
-			stderr.WriteString(log.GetStderr())
+		if len(log.GetStderr()) > 0 {
+			stderr.Write(log.GetStderr())
 		}
 		if log.GetDone() {
 			exitCode = log.GetExitCode()
@@ -224,8 +224,8 @@ func (c *GRPCSidecarClient) ExecuteStream(ctx context.Context, podIP string, req
 
 			select {
 			case resultChan <- &sidecar.ExecLog{
-				Stdout:   log.GetStdout(),
-				Stderr:   log.GetStderr(),
+				Stdout:   string(log.GetStdout()),
+				Stderr:   string(log.GetStderr()),
 				ExitCode: log.GetExitCode(),
 				Done:     log.GetDone(),
 			}:
@@ -361,7 +361,7 @@ func (s *grpcShellStream) Recv() (interfaces.ShellOutput, error) {
 		return interfaces.ShellOutput{}, err
 	}
 	return interfaces.ShellOutput{
-		Data:     out.GetData(),
+		Data:     string(out.GetData()),
 		ExitCode: out.GetExitCode(),
 		Closed:   out.GetClosed(),
 	}, nil

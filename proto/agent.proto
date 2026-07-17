@@ -46,8 +46,8 @@ message ExecRequest {
 
 // ExecLog streams output from command execution
 message ExecLog {
-  string stdout = 1;
-  string stderr = 2;
+  bytes stdout = 1;
+  bytes stderr = 2;
   int32 exit_code = 3;
   bool done = 4;
 }
@@ -96,7 +96,7 @@ message ShellInput {
 
 // ShellOutput represents output from an interactive shell session
 message ShellOutput {
-  string data = 1;        // Stdout/stderr data from the shell
+  bytes data = 1;         // Stdout/stderr data from the shell
   int32 exit_code = 2;    // Exit code (set when shell exits)
   bool closed = 3;        // True when shell session has ended
 }

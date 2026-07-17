@@ -106,8 +106,8 @@ func (s *GRPCServer) Execute(req *pb.ExecRequest, stream grpc.ServerStreamingSer
 
 	for execLog := range logChan {
 		pbLog := &pb.ExecLog{
-			Stdout:   execLog.Stdout,
-			Stderr:   execLog.Stderr,
+			Stdout:   []byte(execLog.Stdout),
+			Stderr:   []byte(execLog.Stderr),
 			ExitCode: execLog.ExitCode,
 			Done:     execLog.Done,
 		}
@@ -351,9 +351,9 @@ func (s *GRPCServer) InteractiveShell(stream grpc.BidiStreamingServer[pb.ShellIn
 		for resp := range session.Output {
 			out := &pb.ShellOutput{}
 			if resp.Stdout != "" {
-				out.Data = resp.Stdout
+				out.Data = []byte(resp.Stdout)
 			} else if resp.Stderr != "" {
-				out.Data = resp.Stderr
+				out.Data = []byte(resp.Stderr)
 			}
 			if resp.Done {
 				exitCode := int32(0)
@@ -363,7 +363,7 @@ func (s *GRPCServer) InteractiveShell(stream grpc.BidiStreamingServer[pb.ShellIn
 				out.ExitCode = exitCode
 				out.Closed = true
 			}
-			if out.Data != "" || out.Closed {
+			if len(out.Data) > 0 || out.Closed {
 				if sendErr := stream.Send(out); sendErr != nil {
 					done <- sendErr
 					return
