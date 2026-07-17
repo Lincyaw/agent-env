@@ -56,37 +56,28 @@ impl Checkpointer {
                     return Err(io::Error::last_os_error());
                 }
 
-                // Mount overlay on the merged dir (not /), with lowerdir=/
-                let opts = format!("lowerdir=/,upperdir={upper},workdir={work}");
-                let c_overlay = std::ffi::CString::new("overlay").unwrap();
-                let c_merged = std::ffi::CString::new(merged.as_str()).unwrap();
-                let c_opts = std::ffi::CString::new(opts).unwrap();
-                if libc::mount(
-                    c_overlay.as_ptr(),
-                    c_merged.as_ptr(),
-                    c_overlay.as_ptr(),
-                    0,
-                    c_opts.as_ptr() as *const libc::c_void,
-                ) != 0
-                {
-                    return Err(io::Error::last_os_error());
+                // Use /bin/mount binary instead of mount() syscall.
+                // AppArmor cri-containerd.apparmor.d blocks direct mount()
+                // syscalls but allows the setuid /bin/mount binary.
+                let mount_cmd = format!(
+                    "/bin/mount -t overlay overlay -o lowerdir=/,upperdir={upper},workdir={work} {merged}"
+                );
+                let c_cmd = std::ffi::CString::new(mount_cmd).unwrap();
+                if libc::system(c_cmd.as_ptr()) != 0 {
+                    return Err(io::Error::new(io::ErrorKind::PermissionDenied, "overlay mount failed"));
                 }
 
                 // Bind-mount essential filesystems into the merged view
-                let binds: &[&str] = &["/proc", "/dev", "/sys"];
-                for src in binds {
-                    let dst = format!("{merged}{src}");
-                    let c_src = std::ffi::CString::new(*src).unwrap();
-                    let c_dst = std::ffi::CString::new(dst.as_str()).unwrap();
-                    let ms_bind = 0x1000u64; // MS_BIND
-                    libc::mount(c_src.as_ptr(), c_dst.as_ptr(), std::ptr::null(), ms_bind as libc::c_ulong, std::ptr::null());
+                for src in &["/proc", "/dev", "/sys"] {
+                    let bind_cmd = format!("/bin/mount --bind {src} {merged}{src}");
+                    let c_bind = std::ffi::CString::new(bind_cmd).unwrap();
+                    libc::system(c_bind.as_ptr());
                 }
 
-                // Bind-mount checkpoint scratch dir so upper is accessible
-                let ckpt_dst = format!("{merged}{base_dir}");
-                let c_base = std::ffi::CString::new(base_dir.as_str()).unwrap();
-                let c_ckpt_dst = std::ffi::CString::new(ckpt_dst.as_str()).unwrap();
-                let _ = libc::mount(c_base.as_ptr(), c_ckpt_dst.as_ptr(), std::ptr::null(), 0x1000, std::ptr::null());
+                // Bind-mount checkpoint scratch dir so upper is accessible after chroot
+                let bind_ckpt = format!("/bin/mount --bind {base_dir} {merged}{base_dir}");
+                let c_bind_ckpt = std::ffi::CString::new(bind_ckpt).unwrap();
+                libc::system(c_bind_ckpt.as_ptr());
 
                 // chroot into the overlay merged view
                 let c_merged2 = std::ffi::CString::new(merged.as_str()).unwrap();
