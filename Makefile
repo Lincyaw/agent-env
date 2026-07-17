@@ -78,8 +78,6 @@ push-images: ## Build and push all deployable images
 	docker push $(REGISTRY)/arl-sidecar:$(SIDECAR_TAG)
 	docker build --platform $(PLATFORM) -t $(REGISTRY)/arl-gateway:$(GATEWAY_TAG) -f Dockerfile.gateway .
 	docker push $(REGISTRY)/arl-gateway:$(GATEWAY_TAG)
-	docker build --platform $(PLATFORM) -t $(REGISTRY)/arl-executor-agent:$(EXECUTOR_AGENT_TAG) -f Dockerfile.executor-agent .
-	docker push $(REGISTRY)/arl-executor-agent:$(EXECUTOR_AGENT_TAG)
 	docker build --platform $(PLATFORM) -t $(REGISTRY)/arl-image-locality-scheduler:$(IMAGE_LOCALITY_SCHEDULER_TAG) -f Dockerfile.image-locality-scheduler .
 	docker push $(REGISTRY)/arl-image-locality-scheduler:$(IMAGE_LOCALITY_SCHEDULER_TAG)
 
@@ -148,10 +146,6 @@ build: ## Build all Go binaries
 .PHONY: build-gateway
 build-gateway: ## Build gateway binary
 	CGO_ENABLED=0 go build -o bin/gateway cmd/gateway/main.go
-
-.PHONY: build-executor-agent
-build-executor-agent: ## Build executor agent binary
-	CGO_ENABLED=0 go build -ldflags="-s -w" -o bin/executor-agent cmd/executor-agent/main.go
 
 .PHONY: build-sidecar
 build-sidecar: ## Build sidecar binary

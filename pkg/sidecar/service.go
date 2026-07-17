@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/Lincyaw/agent-env/pkg/execagent"
 	"github.com/Lincyaw/agent-env/pkg/interfaces"
 	"github.com/google/uuid"
 )
@@ -148,7 +147,7 @@ func (s *AgentService) Execute(ctx context.Context, req *ExecRequest, stream cha
 
 // executeViaAgent forwards execution to the executor agent in the main container.
 func (s *AgentService) executeViaAgent(ctx context.Context, req *ExecRequest, stream chan<- *ExecLog) error {
-	agentReq := execagent.Request{
+	agentReq := executorRequest{
 		ID:      uuid.New().String(),
 		Type:    "exec",
 		Cmd:     req.Command,
