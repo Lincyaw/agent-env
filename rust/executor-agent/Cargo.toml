@@ -22,6 +22,7 @@ inotify = "0.11"
 url = "2"
 prost = "0.13"
 bytes = "1"
+walkdir = "2"
 
 [build-dependencies]
 prost-build = "0.13"
