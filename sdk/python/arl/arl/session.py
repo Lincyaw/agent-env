@@ -2,11 +2,7 @@
 
 from __future__ import annotations
 
-import base64
-import json
-import re
 from collections.abc import Callable, Iterable, Iterator
-from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, BinaryIO
 
@@ -23,17 +19,12 @@ from arl.types import (
     SessionInfo,
     StepOutput,
     StepResult,
-    ToolResult,
-    ToolsRegistry,
     ToolsSpec,
     UploadFileResponse,
 )
 
 if TYPE_CHECKING:
     from arl.iroh_transport import SyncIrohBridge
-
-_SAFE_TOOL_NAME = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]*$")
-
 
 class SandboxSession:
     """High-level sandbox session manager via the Gateway API.
@@ -456,84 +447,6 @@ class SandboxSession:
         if self._session_id is None:
             raise RuntimeError("No session created. Call create_sandbox() first.")
         return self._client.list_session_logs(self._session_id, tail=tail)
-
-    def list_tools(self) -> ToolsRegistry:
-        """List all available tools in the sandbox.
-
-        Reads /opt/arl/tools/registry.json from the executor container.
-
-        Returns:
-            ToolsRegistry with all tool manifests.
-
-        Raises:
-            RuntimeError: If no session created or registry file not found.
-        """
-        if self._session_id is None:
-            raise RuntimeError("No session created. Call create_sandbox() first.")
-        result = self._client.execute(
-            self._session_id,
-            [
-                {"name": "_list_tools", "command": ["cat", "/opt/arl/tools/registry.json"]},
-            ],
-        )
-        step = result.results[0]
-        if step.output.exit_code != 0:
-            raise RuntimeError(f"Failed to read tool registry: {step.output.stderr}")
-        return ToolsRegistry.model_validate_json(step.output.stdout)
-
-    def call_tool(
-        self,
-        tool_name: str,
-        params: dict[str, object] | None = None,
-    ) -> ToolResult:
-        """Call a tool by name with JSON parameters.
-
-        Pipes JSON params to the tool's entrypoint script via stdin.
-        Uses base64 encoding to safely pass parameters without shell injection.
-
-        Args:
-            tool_name: Name of the tool (must exist in registry).
-            params: Parameters dict (passed as JSON stdin to the tool).
-
-        Returns:
-            ToolResult with parsed JSON output, exit code, and stderr.
-
-        Raises:
-            ValueError: If tool_name contains unsafe characters.
-            RuntimeError: If no session created.
-        """
-        if self._session_id is None:
-            raise RuntimeError("No session created. Call create_sandbox() first.")
-        if not _SAFE_TOOL_NAME.match(tool_name):
-            raise ValueError(f"Invalid tool name: {tool_name!r}")
-
-        params_json = json.dumps(params or {})
-        params_b64 = base64.b64encode(params_json.encode()).decode()
-        tool_dir = f"/opt/arl/tools/{tool_name}"
-        # Use base64 to safely pass JSON without shell injection risk.
-        # Read entrypoint from manifest via sed (busybox-compatible).
-        cmd = (
-            f"ENTRYPOINT=$(cat {tool_dir}/manifest.json"
-            ' | sed -n \'s/.*"entrypoint":"\\([^"]*\\)".*/\\1/p\')'
-            f" && printf '%s' '{params_b64}' | base64 -d | {tool_dir}/$ENTRYPOINT"
-        )
-
-        result = self._client.execute(
-            self._session_id,
-            [
-                {"name": f"_call_{tool_name}", "command": ["sh", "-c", cmd]},
-            ],
-        )
-        step = result.results[0]
-        parsed: dict[str, object] = {}
-        with suppress(json.JSONDecodeError, ValueError):
-            parsed = json.loads(step.output.stdout)
-        return ToolResult(
-            raw_output=step.output.stdout,
-            parsed=parsed,
-            exit_code=step.output.exit_code,
-            stderr=step.output.stderr,
-        )
 
     def suspend(self) -> None:
         """Suspend the devbox session (keeps storage, terminates pod)."""

@@ -331,8 +331,6 @@ class TestAsyncSandboxSession:
             "export_trajectory",
             "iter_logs",
             "get_logs",
-            "list_tools",
-            "call_tool",
             "delete_sandbox",
             "aclose",
         ]

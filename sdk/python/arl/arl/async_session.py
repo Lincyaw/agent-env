@@ -7,11 +7,7 @@ Mirrors :class:`SandboxSession` and :class:`ManagedSession` with native
 
 from __future__ import annotations
 
-import base64
-import json
-import re
 from collections.abc import AsyncIterator, Callable, Iterable
-from contextlib import suppress
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, BinaryIO
 
@@ -28,17 +24,12 @@ from arl.types import (
     SessionInfo,
     StepOutput,
     StepResult,
-    ToolResult,
-    ToolsRegistry,
     ToolsSpec,
     UploadFileResponse,
 )
 
 if TYPE_CHECKING:
     from arl.iroh_transport import IrohTransport
-
-_SAFE_TOOL_NAME = re.compile(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]*$")
-
 
 class AsyncSandboxSession:
     """Async high-level sandbox session manager via the Gateway API.
@@ -403,54 +394,6 @@ class AsyncSandboxSession:
         if self._session_id is None:
             raise RuntimeError("No session created. Call create_sandbox() first.")
         return await self._client.list_session_logs(self._session_id, tail=tail)
-
-    async def list_tools(self) -> ToolsRegistry:
-        """List all available tools in the sandbox."""
-        if self._session_id is None:
-            raise RuntimeError("No session created. Call create_sandbox() first.")
-        result = await self._client.execute(
-            self._session_id,
-            [{"name": "_list_tools", "command": ["cat", "/opt/arl/tools/registry.json"]}],
-        )
-        step = result.results[0]
-        if step.output.exit_code != 0:
-            raise RuntimeError(f"Failed to read tool registry: {step.output.stderr}")
-        return ToolsRegistry.model_validate_json(step.output.stdout)
-
-    async def call_tool(
-        self,
-        tool_name: str,
-        params: dict[str, object] | None = None,
-    ) -> ToolResult:
-        """Call a tool by name with JSON parameters."""
-        if self._session_id is None:
-            raise RuntimeError("No session created. Call create_sandbox() first.")
-        if not _SAFE_TOOL_NAME.match(tool_name):
-            raise ValueError(f"Invalid tool name: {tool_name!r}")
-
-        params_json = json.dumps(params or {})
-        params_b64 = base64.b64encode(params_json.encode()).decode()
-        tool_dir = f"/opt/arl/tools/{tool_name}"
-        cmd = (
-            f"ENTRYPOINT=$(cat {tool_dir}/manifest.json"
-            ' | sed -n \'s/.*"entrypoint":"\\([^"]*\\)".*/\\1/p\')'
-            f" && printf '%s' '{params_b64}' | base64 -d | {tool_dir}/$ENTRYPOINT"
-        )
-
-        result = await self._client.execute(
-            self._session_id,
-            [{"name": f"_call_{tool_name}", "command": ["sh", "-c", cmd]}],
-        )
-        step = result.results[0]
-        parsed: dict[str, object] = {}
-        with suppress(json.JSONDecodeError, ValueError):
-            parsed = json.loads(step.output.stdout)
-        return ToolResult(
-            raw_output=step.output.stdout,
-            parsed=parsed,
-            exit_code=step.output.exit_code,
-            stderr=step.output.stderr,
-        )
 
     async def suspend(self) -> None:
         """Suspend the devbox session (keeps storage, terminates pod)."""

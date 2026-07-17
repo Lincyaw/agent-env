@@ -322,44 +322,6 @@ class ErrorResponse(BaseModel):
     detail: str = ""
 
 
-# --- Tool types ---
-
-
-class ToolManifest(BaseModel):
-    """A single tool manifest from registry.json.
-
-    Attributes:
-        name: Tool name (alphanumeric with _.-)
-        description: Human-readable tool description
-        parameters: JSON Schema defining tool input parameters
-        entrypoint: Entry script filename (e.g. "run.sh", "main.py")
-        runtime: Tool runtime environment
-        timeout: Execution timeout (e.g. "30s", "1m")
-    """
-
-    name: str
-    description: str = ""
-    parameters: dict[str, object] = {}  # JSON Schema format
-    entrypoint: str
-    runtime: Literal["bash", "python", "binary"]
-    timeout: str = ""  # Go duration format
-
-
-class ToolsRegistry(BaseModel):
-    """Registry of all available tools in a sandbox."""
-
-    tools: list[ToolManifest] = []
-
-
-class ToolResult(BaseModel):
-    """Result of a tool call (parsed JSON stdout)."""
-
-    raw_output: str = ""
-    parsed: dict[str, object] = {}
-    exit_code: int = 0
-    stderr: str = ""
-
-
 class InlineToolSpec(BaseModel):
     """Inline tool definition for WarmPool creation.
 
