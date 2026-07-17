@@ -30,18 +30,31 @@ type Agent struct {
 	socketPath   string
 	workspaceDir string
 	listener     net.Listener
+	checkpointer *Checkpointer
 
 	mu        sync.Mutex
 	processes map[int]*exec.Cmd
 }
 
+// Option configures an Agent.
+type Option func(*Agent)
+
+// WithCheckpointer attaches an overlay-based filesystem checkpointer.
+func WithCheckpointer(c *Checkpointer) Option {
+	return func(a *Agent) { a.checkpointer = c }
+}
+
 // New creates a new executor agent.
-func New(socketPath, workspaceDir string) *Agent {
-	return &Agent{
+func New(socketPath, workspaceDir string, opts ...Option) *Agent {
+	a := &Agent{
 		socketPath:   socketPath,
 		workspaceDir: workspaceDir,
 		processes:    make(map[int]*exec.Cmd),
 	}
+	for _, o := range opts {
+		o(a)
+	}
+	return a
 }
 
 // Run starts the agent, listening on the Unix socket until ctx is cancelled.
@@ -160,6 +173,16 @@ func (a *Agent) handleExec(ctx context.Context, req Request, encoder *json.Encod
 		cmd.Env = append(cmd.Env, fmt.Sprintf("%s=%s", k, v))
 	}
 
+	var step int
+	if a.checkpointer != nil {
+		var wrapErr error
+		cmd, step, wrapErr = a.checkpointer.WrapExec(execCtx, cmd)
+		if wrapErr != nil {
+			log.Printf("[checkpoint] wrap failed: %v, running without overlay", wrapErr)
+			step = 0
+		}
+	}
+
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		encoder.Encode(Response{ID: req.ID, Error: fmt.Sprintf("stdout pipe: %v", err), Done: true})
@@ -238,6 +261,14 @@ func (a *Agent) handleExec(ctx context.Context, req Request, encoder *json.Encod
 	a.mu.Lock()
 	delete(a.processes, cmd.Process.Pid)
 	a.mu.Unlock()
+
+	if a.checkpointer != nil && step > 0 {
+		if applyErr := a.checkpointer.ApplyStep(step); applyErr != nil {
+			log.Printf("[checkpoint] apply step %d failed: %v", step, applyErr)
+		} else {
+			log.Printf("[checkpoint] step=%d applied", step)
+		}
+	}
 
 	log.Printf("[exec] id=%s exit_code=%d cmd=%v", req.ID, exitCode, req.Cmd)
 	send(Response{ID: req.ID, ExitCode: &exitCode, Done: true})
