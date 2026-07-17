@@ -62,6 +62,7 @@ type GatewayConfig struct {
 	SandboxSeccompProfileType       string
 	SandboxSeccompLocalhostProfile  string
 	SandboxAllowPrivilegeEscalation bool
+	SandboxCheckpointEnabled        bool
 	FullObservationEnabled          bool
 	ObservationPreviewBytes         int
 	K8sRESTConfig                   *rest.Config

@@ -127,6 +127,12 @@ type Config struct {
 	SandboxSeccompProfileType       string
 	SandboxSeccompLocalhostProfile  string
 	SandboxAllowPrivilegeEscalation bool
+
+	// SandboxCheckpointEnabled enables overlayfs-based filesystem
+	// checkpointing in the executor-agent. When true, the executor
+	// container receives CAP_SYS_ADMIN and a scratch volume for
+	// overlay upper/work dirs. Env: SANDBOX_CHECKPOINT_ENABLED.
+	SandboxCheckpointEnabled bool
 }
 
 // DefaultConfig returns the default configuration
@@ -199,6 +205,7 @@ func DefaultConfig() *Config {
 		SandboxSeccompProfileType:       "RuntimeDefault",
 		SandboxSeccompLocalhostProfile:  "",
 		SandboxAllowPrivilegeEscalation: false,
+		SandboxCheckpointEnabled:        false,
 	}
 }
 
@@ -514,6 +521,11 @@ func LoadFromEnv() *Config {
 	if v := os.Getenv("SANDBOX_ALLOW_PRIVILEGE_ESCALATION"); v != "" {
 		if b, err := strconv.ParseBool(v); err == nil {
 			cfg.SandboxAllowPrivilegeEscalation = b
+		}
+	}
+	if v := os.Getenv("SANDBOX_CHECKPOINT_ENABLED"); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			cfg.SandboxCheckpointEnabled = b
 		}
 	}
 

@@ -243,6 +243,24 @@ func (g *Gateway) sandboxPodSpec(
 			{Name: "arl-socket", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
 		},
 	}
+	if g.gwConfig.SandboxCheckpointEnabled {
+		pod.Volumes = append(pod.Volumes, corev1.Volume{
+			Name:         "checkpoint-scratch",
+			VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
+		})
+		for i := range pod.Containers {
+			if pod.Containers[i].Name == "executor" {
+				pod.Containers[i].VolumeMounts = append(pod.Containers[i].VolumeMounts, corev1.VolumeMount{
+					Name:      "checkpoint-scratch",
+					MountPath: "/mnt/arl-checkpoint",
+				})
+				pod.Containers[i].Env = append(pod.Containers[i].Env, corev1.EnvVar{
+					Name:  "ARL_CHECKPOINT_ENABLED",
+					Value: "1",
+				})
+			}
+		}
+	}
 	if schedulerName := strings.TrimSpace(g.gwConfig.SchedulerName); schedulerName != "" {
 		pod.SchedulerName = schedulerName
 	}
@@ -355,6 +373,13 @@ func (g *Gateway) applyContainerSecurityPolicy(pod *corev1.PodSpec) {
 	}
 	for i := range pod.Containers {
 		apply(&pod.Containers[i])
+		if g.gwConfig.SandboxCheckpointEnabled && pod.Containers[i].Name == "executor" {
+			sc := pod.Containers[i].SecurityContext
+			if sc.Capabilities == nil {
+				sc.Capabilities = &corev1.Capabilities{}
+			}
+			sc.Capabilities.Add = append(sc.Capabilities.Add, "SYS_ADMIN")
+		}
 	}
 }
 
