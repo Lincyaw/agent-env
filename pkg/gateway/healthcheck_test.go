@@ -87,10 +87,10 @@ func (m *recordingMetricsCollector) RecordImagePullDuration(image string, durati
 	}
 	m.imagePullDurations[image] = duration
 }
-func (m *recordingMetricsCollector) SetActiveSessions(count int64)                 {}
-func (m *recordingMetricsCollector) IncrementSessionDeletion(reason string)                    {}
-func (m *recordingMetricsCollector) IncrementSessionDrop(reason, terminationReason string)     {}
-func (m *recordingMetricsCollector) IncrementExecuteOperationResult(result string)             {}
+func (m *recordingMetricsCollector) SetActiveSessions(count int64)                         {}
+func (m *recordingMetricsCollector) IncrementSessionDeletion(reason string)                {}
+func (m *recordingMetricsCollector) IncrementSessionDrop(reason, terminationReason string) {}
+func (m *recordingMetricsCollector) IncrementExecuteOperationResult(result string)         {}
 func (m *recordingMetricsCollector) RecordGatewayStepDuration(stepType string, duration time.Duration) {
 }
 func (m *recordingMetricsCollector) IncrementGatewayStepResult(stepType, result string) {}

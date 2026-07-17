@@ -901,7 +901,6 @@ def test_iroh_tunnel(args: argparse.Namespace) -> None:
 
         ALPN = b"arl/executor/v2"
         MSG_REQUEST = 0x01
-        MSG_RESPONSE = 0x02
         MSG_EVENT = 0x03
 
         async def send_typed(send: object, msg_type: int, data: bytes) -> None:
