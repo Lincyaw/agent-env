@@ -61,6 +61,8 @@ func (g *Gateway) replayNow(ctx context.Context, targetSessionID string, req Rep
 		return nil, err
 	}
 
+	log.Printf("Replay %s → %s: %d steps to replay", req.SourceSessionID, targetSessionID, len(records))
+
 	_, podIP, releaseSession, err := g.acquireSessionPodIP(ctx, targetSessionID)
 	if err != nil {
 		return nil, err
@@ -83,6 +85,7 @@ func (g *Gateway) replayNow(ctx context.Context, targetSessionID string, req Rep
 
 		var step StepRequest
 		if err := json.Unmarshal(record.Input, &step); err != nil {
+			log.Printf("Warning: replay exec step %d unmarshal failed: %v", record.Index, err)
 			errors++
 			continue
 		}
@@ -93,12 +96,17 @@ func (g *Gateway) replayNow(ctx context.Context, targetSessionID string, req Rep
 			TimeoutSeconds: resolveStepTimeoutSeconds(step),
 		}
 		if _, err := g.sidecarClient.Execute(ctx, podIP, execReq); err != nil {
+			log.Printf("Warning: replay exec step %d failed on %s: %v", record.Index, podIP, err)
 			errors++
 			continue
 		}
 		replayed++
+		if replayed%10 == 0 {
+			log.Printf("Replay %s: %d/%d steps done (%d errors)", targetSessionID, replayed, len(records), errors)
+		}
 	}
 
+	log.Printf("Replay %s → %s complete: %d replayed, %d errors", req.SourceSessionID, targetSessionID, replayed, errors)
 	g.touchLastTaskTime(targetSessionID)
 	return &ReplayResponse{StepsReplayed: replayed, Errors: errors}, nil
 }
@@ -245,6 +253,8 @@ func (g *Gateway) restoreNow(ctx context.Context, sessionID string, snapshotID s
 	lifecycle := g.sessionRuntimeLifecycleLocked(s, time.Now())
 	s.mu.RUnlock()
 
+	log.Printf("Restore %s to snapshot %s: %d steps to replay", sessionID, snapshotID, len(records))
+
 	newSandboxName := fmt.Sprintf("%s-r%d", sessionID, time.Now().UnixMilli())
 
 	allocCtx, allocCancel := context.WithTimeout(ctx, 5*time.Minute)
@@ -261,6 +271,8 @@ func (g *Gateway) restoreNow(ctx context.Context, sessionID string, snapshotID s
 		diag := g.diagnosePoolHealth(ctx, oldAllocation.PoolRef, oldAllocation.Namespace)
 		return nil, fmt.Errorf("allocate new runtime for restore: %w (%s)", err, diag)
 	}
+
+	log.Printf("Restore %s: new pod %s (%s) allocated", sessionID, newAllocation.PodName, newAllocation.PodIP)
 
 	stepsReplayed := 0
 	for _, record := range records {
@@ -295,7 +307,12 @@ func (g *Gateway) restoreNow(ctx context.Context, sessionID string, snapshotID s
 			return nil, fmt.Errorf("replay step %d failed: %w", record.Index, err)
 		}
 		stepsReplayed++
+		if stepsReplayed%10 == 0 {
+			log.Printf("Restore %s: %d/%d steps done", sessionID, stepsReplayed, len(records))
+		}
 	}
+
+	log.Printf("Restore %s complete: %d steps replayed on %s", sessionID, stepsReplayed, newAllocation.PodName)
 
 	s.mu.Lock()
 	s.Info.PodIP = newAllocation.PodIP
