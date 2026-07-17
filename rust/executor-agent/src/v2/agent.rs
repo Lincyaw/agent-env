@@ -1,3 +1,4 @@
+use crate::checkpoint::Checkpointer;
 use crate::path_security::resolve_workspace_path;
 use crate::pty_util;
 use super::proto;
@@ -47,13 +48,15 @@ struct WatchState {
 pub struct AgentV2 {
     socket_path: String,
     workspace_dir: String,
+    checkpointer: Option<Arc<Checkpointer>>,
 }
 
 impl AgentV2 {
-    pub fn new(socket_path: String, workspace_dir: String) -> Self {
+    pub fn new(socket_path: String, workspace_dir: String, checkpointer: Option<Arc<Checkpointer>>) -> Self {
         Self {
             socket_path,
             workspace_dir,
+            checkpointer,
         }
     }
 
@@ -66,6 +69,7 @@ impl AgentV2 {
         listener.set_nonblocking(true)?;
 
         let workspace = self.workspace_dir.clone();
+        let checkpointer = self.checkpointer.clone();
         loop {
             if *shutdown.borrow() {
                 break;
@@ -74,8 +78,9 @@ impl AgentV2 {
                 Ok((stream, _)) => {
                     let ws = workspace.clone();
                     let sd = shutdown.clone();
+                    let ckpt = checkpointer.clone();
                     thread::spawn(move || {
-                        if let Err(e) = handle_conn(stream, &ws, sd) {
+                        if let Err(e) = handle_conn(stream, &ws, sd, ckpt) {
                             log::error!("connection error: {e}");
                         }
                     });
@@ -183,10 +188,11 @@ fn handle_conn(
     stream: std::os::unix::net::UnixStream,
     workspace: &str,
     _shutdown: watch::Receiver<bool>,
+    checkpointer: Option<Arc<Checkpointer>>,
 ) -> io::Result<()> {
     let reader = stream.try_clone()?;
     let writer: SharedWriter = Arc::new(Mutex::new(Box::new(stream)));
-    handle_v2_session(reader, writer, workspace, None)
+    handle_v2_session(reader, writer, workspace, None, checkpointer)
 }
 
 /// Transport-agnostic V2 session handler. Called from both Unix socket and iroh QUIC paths.
@@ -197,6 +203,7 @@ pub fn handle_v2_session(
     writer: SharedWriter,
     workspace: &str,
     tunnel_registry: Option<TunnelRegistry>,
+    checkpointer: Option<Arc<Checkpointer>>,
 ) -> io::Result<()> {
     let processes: Arc<Mutex<HashMap<u32, ProcessHandle>>> =
         Arc::new(Mutex::new(HashMap::new()));
@@ -213,6 +220,7 @@ pub fn handle_v2_session(
         &watches,
         &watch_counter,
         &tunnels,
+        &checkpointer,
     );
 
     // Cleanup on disconnect — kill by pid since wait_and_exit takes the Child.
@@ -250,6 +258,7 @@ fn handle_messages(
     watches: &Arc<Mutex<HashMap<u32, WatchState>>>,
     watch_counter: &Arc<AtomicU32>,
     tunnels: &TunnelRegistry,
+    checkpointer: &Option<Arc<Checkpointer>>,
 ) -> io::Result<()> {
     loop {
         let request = match read_request(&mut reader)? {
@@ -273,7 +282,7 @@ fn handle_messages(
             }
             proto::request::Kind::Spawn(params) => {
                 log::info!("[v2:spawn] tag={tag} cmd={:?}", params.command);
-                handle_spawn(tag, params, workspace, &writer, processes);
+                handle_spawn(tag, params, workspace, &writer, processes, checkpointer);
             }
             proto::request::Kind::WriteIn(params) => {
                 handle_write_in(tag, params, &writer, processes);
@@ -334,6 +343,7 @@ fn handle_spawn(
     workspace: &str,
     writer: &SharedWriter,
     processes: &Arc<Mutex<HashMap<u32, ProcessHandle>>>,
+    checkpointer: &Option<Arc<Checkpointer>>,
 ) {
     if params.command.is_empty() {
         let _ = send_error(writer, tag, 2, "empty command".into());
@@ -350,9 +360,9 @@ fn handle_spawn(
     let process_tag = tag;
 
     if params.pty {
-        handle_spawn_pty(tag, process_tag, params, &workdir, writer, processes);
+        handle_spawn_pty(tag, process_tag, params, &workdir, writer, processes, checkpointer);
     } else {
-        handle_spawn_pipe(tag, process_tag, params, &workdir, writer, processes);
+        handle_spawn_pipe(tag, process_tag, params, &workdir, writer, processes, checkpointer);
     }
 }
 
@@ -363,6 +373,7 @@ fn handle_spawn_pipe(
     workdir: &str,
     writer: &SharedWriter,
     processes: &Arc<Mutex<HashMap<u32, ProcessHandle>>>,
+    checkpointer: &Option<Arc<Checkpointer>>,
 ) {
     let mut cmd = Command::new(&params.command[0]);
     cmd.args(&params.command[1..]);
@@ -379,6 +390,21 @@ fn handle_spawn_pipe(
     for (k, v) in &params.env {
         cmd.env(k, v);
     }
+
+    let step = if let Some(ckpt) = checkpointer {
+        match ckpt.wrap_command(&mut cmd) {
+            Ok(s) => {
+                log::info!("[checkpoint] step={s} wrapping pipe command");
+                Some((s, ckpt.clone()))
+            }
+            Err(e) => {
+                log::warn!("[checkpoint] wrap failed: {e}, running without overlay");
+                None
+            }
+        }
+    } else {
+        None
+    };
 
     let mut child = match cmd.spawn() {
         Ok(c) => c,
@@ -467,6 +493,13 @@ fn handle_spawn_pipe(
     };
     thread::spawn(move || {
         wait_and_exit(pt3, &w3, &procs, timeout);
+        if let Some((step_num, ckpt)) = step {
+            if let Err(e) = ckpt.apply_step(step_num) {
+                log::error!("[checkpoint] apply step {step_num} failed: {e}");
+            } else {
+                log::info!("[checkpoint] step={step_num} applied");
+            }
+        }
     });
 }
 
@@ -477,6 +510,7 @@ fn handle_spawn_pty(
     workdir: &str,
     writer: &SharedWriter,
     processes: &Arc<Mutex<HashMap<u32, ProcessHandle>>>,
+    checkpointer: &Option<Arc<Checkpointer>>,
 ) {
     let rows = if params.rows == 0 { 24 } else { params.rows as u16 };
     let cols = if params.cols == 0 { 80 } else { params.cols as u16 };
@@ -505,6 +539,23 @@ fn handle_spawn_pty(
     if !has_term && std::env::var("TERM").is_err() {
         cmd.env("TERM", "xterm-256color");
     }
+
+    // Wrap with overlay checkpoint if enabled. Must happen before the
+    // PTY pre_exec hook because pre_exec closures chain (both run).
+    let step = if let Some(ckpt) = checkpointer {
+        match ckpt.wrap_command(&mut cmd) {
+            Ok(s) => {
+                log::info!("[checkpoint] step={s} wrapping pty command");
+                Some((s, ckpt.clone()))
+            }
+            Err(e) => {
+                log::warn!("[checkpoint] wrap failed: {e}, running without overlay");
+                None
+            }
+        }
+    } else {
+        None
+    };
 
     use std::os::unix::process::CommandExt;
     let slave_fd = slave.as_raw_fd();
@@ -609,6 +660,13 @@ fn handle_spawn_pty(
     };
     thread::spawn(move || {
         wait_and_exit(pt2, &w2, &procs, timeout);
+        if let Some((step_num, ckpt)) = step {
+            if let Err(e) = ckpt.apply_step(step_num) {
+                log::error!("[checkpoint] apply step {step_num} failed: {e}");
+            } else {
+                log::info!("[checkpoint] step={step_num} applied");
+            }
+        }
     });
 }
 
@@ -1449,7 +1507,7 @@ mod tests {
         let ws = workspace.to_string();
         let sp = sock_path.clone();
         thread::spawn(move || {
-            let agent = AgentV2::new(sp, ws);
+            let agent = AgentV2::new(sp, ws, None);
             agent.run(rx).ok();
         });
 

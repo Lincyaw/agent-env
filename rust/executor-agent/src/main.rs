@@ -1,3 +1,4 @@
+mod checkpoint;
 mod path_security;
 mod pty_util;
 mod v1;
@@ -5,6 +6,7 @@ mod v2;
 
 use clap::Parser;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 #[derive(Parser)]
 #[command(name = "executor-agent")]
@@ -24,6 +26,10 @@ struct Cli {
     /// iroh endpoint address file (V2 only)
     #[arg(long = "iroh-addr-file", default_value = "/var/run/arl/iroh-addr")]
     iroh_addr_file: PathBuf,
+
+    /// Overlay checkpoint scratch directory (empty = disabled)
+    #[arg(long = "checkpoint-dir", default_value = "")]
+    checkpoint_dir: String,
 }
 
 #[tokio::main]
@@ -49,6 +55,23 @@ async fn main() {
         log::error!("Failed to create workspace directory: {}", e);
         std::process::exit(1);
     }
+
+    let checkpoint_dir = if cli.checkpoint_dir.is_empty() {
+        if std::env::var("ARL_CHECKPOINT_ENABLED").as_deref() == Ok("1") {
+            "/mnt/arl-checkpoint".to_string()
+        } else {
+            String::new()
+        }
+    } else {
+        cli.checkpoint_dir.clone()
+    };
+
+    let checkpointer = if checkpoint_dir.is_empty() {
+        None
+    } else {
+        log::info!("checkpoint enabled, base_dir={checkpoint_dir}");
+        Some(Arc::new(checkpoint::Checkpointer::new(PathBuf::from(&checkpoint_dir))))
+    };
 
     match cli.protocol.as_str() {
         "v1" => {
@@ -81,7 +104,7 @@ async fn main() {
             });
 
             // Start Unix socket listener (blocking)
-            let agent = v2::agent::AgentV2::new(socket, workspace);
+            let agent = v2::agent::AgentV2::new(socket, workspace, checkpointer.clone());
             let (_tx, rx) = tokio::sync::watch::channel(false);
             let unix_handle = tokio::task::spawn_blocking(move || agent.run(rx));
 
