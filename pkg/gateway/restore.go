@@ -89,11 +89,15 @@ func (g *Gateway) replayNow(ctx context.Context, targetSessionID string, req Rep
 			errors++
 			continue
 		}
+		stepTimeout := resolveStepTimeoutSeconds(step)
+		if stepTimeout < 600 {
+			stepTimeout = 600
+		}
 		execReq := &sidecar.ExecRequest{
 			Command:        step.Command,
 			Env:            step.Env,
 			WorkingDir:     step.WorkDir,
-			TimeoutSeconds: resolveStepTimeoutSeconds(step),
+			TimeoutSeconds: stepTimeout,
 		}
 		if _, err := g.sidecarClient.Execute(ctx, podIP, execReq); err != nil {
 			log.Printf("Warning: replay exec step %d failed on %s: %v", record.Index, podIP, err)
@@ -294,11 +298,15 @@ func (g *Gateway) restoreNow(ctx context.Context, sessionID string, snapshotID s
 			continue
 		}
 
+		restoreTimeout := resolveStepTimeoutSeconds(step)
+		if restoreTimeout < 600 {
+			restoreTimeout = 600
+		}
 		execReq := &sidecar.ExecRequest{
 			Command:        step.Command,
 			Env:            step.Env,
 			WorkingDir:     step.WorkDir,
-			TimeoutSeconds: resolveStepTimeoutSeconds(step),
+			TimeoutSeconds: restoreTimeout,
 		}
 		if _, err := g.sidecarClient.Execute(ctx, newAllocation.PodIP, execReq); err != nil {
 			if err := g.releaseRestoreAllocation(*newAllocation); err != nil {
