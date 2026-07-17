@@ -1,6 +1,6 @@
 use std::fs;
 use std::io;
-use std::os::unix::fs::{FileTypeExt, MetadataExt};
+use std::os::unix::fs::{FileTypeExt, MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::atomic::{AtomicU32, Ordering};
@@ -105,7 +105,9 @@ impl Checkpointer {
             return Ok(());
         }
 
-        apply_upper_dir(&upper)
+        apply_upper_dir(&upper)?;
+        make_world_readable(&upper);
+        Ok(())
     }
 
     /// Returns the upper dir path for a given step.
@@ -149,6 +151,25 @@ fn apply_upper_dir(upper: &Path) -> io::Result<()> {
         }
     }
     Ok(())
+}
+
+/// Make the upper dir world-readable so the sidecar (nonroot) can serve it.
+fn make_world_readable(upper: &Path) {
+    for entry in walkdir::WalkDir::new(upper) {
+        if let Ok(e) = entry {
+            let path = e.path();
+            let meta = match e.metadata() {
+                Ok(m) => m,
+                Err(_) => continue,
+            };
+            let mode = meta.permissions().mode();
+            if meta.is_dir() {
+                let _ = fs::set_permissions(path, fs::Permissions::from_mode(mode | 0o555));
+            } else {
+                let _ = fs::set_permissions(path, fs::Permissions::from_mode(mode | 0o444));
+            }
+        }
+    }
 }
 
 /// Drop CAP_SYS_ADMIN from the bounding set and effective/permitted sets.
