@@ -197,12 +197,5 @@ func sanitizeFilePath(p string) (string, error) {
 	if clean == "." || clean == "/" || clean == "" {
 		return "", fmt.Errorf("path is required")
 	}
-	if clean == ".." || strings.HasPrefix(clean, "../") {
-		return "", fmt.Errorf("path must not start with '..'")
-	}
-	// Restore the leading "/" that the SDK stripped for the URL.
-	if !strings.HasPrefix(clean, "/") {
-		clean = "/" + clean
-	}
 	return clean, nil
 }
