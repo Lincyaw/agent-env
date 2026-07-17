@@ -162,7 +162,10 @@ func (g *Gateway) replayUpload(ctx context.Context, podIP string, record StepRec
 		return fmt.Errorf("retrieve blob %s: %w", upload.SHA256[:12], err)
 	}
 	_, err = g.sidecarClient.WriteFile(ctx, podIP, upload.Path, bytes.NewReader(content), upload.SHA256)
-	return err
+	if err != nil {
+		return fmt.Errorf("write to %s path %s: %w", podIP, upload.Path, err)
+	}
+	return nil
 }
 
 // Restore restores a session to a previous snapshot, optionally as an async operation.
