@@ -20,6 +20,8 @@ import (
 	extensionsv1beta1 "sigs.k8s.io/agent-sandbox/extensions/api/v1beta1"
 	ctrl "sigs.k8s.io/controller-runtime"
 	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
+	ctrllog "sigs.k8s.io/controller-runtime/pkg/log"
+	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 
 	"github.com/Lincyaw/agent-env/pkg/audit"
 	"github.com/Lincyaw/agent-env/pkg/client"
@@ -32,6 +34,7 @@ import (
 var scheme = runtime.NewScheme()
 
 func init() {
+	ctrllog.SetLogger(zap.New(zap.UseDevMode(false)))
 	utilruntime.Must(clientgoscheme.AddToScheme(scheme))
 	utilruntime.Must(sandboxv1beta1.AddToScheme(scheme))
 	utilruntime.Must(extensionsv1beta1.AddToScheme(scheme))
