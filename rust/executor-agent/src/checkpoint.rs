@@ -8,14 +8,14 @@ use std::sync::atomic::{AtomicU32, Ordering};
 /// Captures per-step filesystem diffs using overlayfs.
 ///
 /// Each spawned command runs inside a new mount namespace with an overlay
-/// mounted on `/`. After the command exits, the overlay upper directory
+/// (lowerdir=/) mounted on a workspace subdirectory, then chroots into
+/// the merged view. After the command exits, the overlay upper directory
 /// contains exactly the files that were changed, which are then applied
 /// back to the real filesystem.
 ///
-/// Unlike the Go implementation which uses a re-exec pattern, Rust's
-/// `Command::pre_exec` runs in the forked child before exec, so we can
-/// do `unshare(CLONE_NEWNS)` + `mount overlay` + `drop CAP_SYS_ADMIN`
-/// all in one `pre_exec` hook.
+/// AppArmor blocks overlay mounts directly on `/`, so we mount the
+/// overlay on a subdirectory under the checkpoint scratch volume and
+/// use chroot to make it the command's root.
 pub struct Checkpointer {
     base_dir: PathBuf,
     step: AtomicU32,
@@ -38,30 +38,32 @@ impl Checkpointer {
         let step_dir = self.base_dir.join(format!("step-{step}"));
         let upper_dir = step_dir.join("upper");
         let work_dir = step_dir.join("work");
+        let merged_dir = step_dir.join("merged");
 
         fs::create_dir_all(&upper_dir)?;
         fs::create_dir_all(&work_dir)?;
+        fs::create_dir_all(&merged_dir)?;
 
         let upper = upper_dir.to_string_lossy().into_owned();
         let work = work_dir.to_string_lossy().into_owned();
+        let merged = merged_dir.to_string_lossy().into_owned();
+        let base_dir = self.base_dir.to_string_lossy().into_owned();
 
         use std::os::unix::process::CommandExt;
         unsafe {
             cmd.pre_exec(move || {
-                // Create a new mount namespace so the overlay is invisible
-                // to other processes.
                 if libc::unshare(libc::CLONE_NEWNS) != 0 {
                     return Err(io::Error::last_os_error());
                 }
 
-                // Mount overlay on /
+                // Mount overlay on the merged dir (not /), with lowerdir=/
                 let opts = format!("lowerdir=/,upperdir={upper},workdir={work}");
                 let c_overlay = std::ffi::CString::new("overlay").unwrap();
-                let c_root = std::ffi::CString::new("/").unwrap();
+                let c_merged = std::ffi::CString::new(merged.as_str()).unwrap();
                 let c_opts = std::ffi::CString::new(opts).unwrap();
                 if libc::mount(
                     c_overlay.as_ptr(),
-                    c_root.as_ptr(),
+                    c_merged.as_ptr(),
                     c_overlay.as_ptr(),
                     0,
                     c_opts.as_ptr() as *const libc::c_void,
@@ -70,8 +72,31 @@ impl Checkpointer {
                     return Err(io::Error::last_os_error());
                 }
 
-                // Security: drop CAP_SYS_ADMIN so the spawned command
-                // cannot remount or escape.
+                // Bind-mount essential filesystems into the merged view
+                let binds: &[&str] = &["/proc", "/dev", "/sys"];
+                for src in binds {
+                    let dst = format!("{merged}{src}");
+                    let c_src = std::ffi::CString::new(*src).unwrap();
+                    let c_dst = std::ffi::CString::new(dst.as_str()).unwrap();
+                    let ms_bind = 0x1000u64; // MS_BIND
+                    libc::mount(c_src.as_ptr(), c_dst.as_ptr(), std::ptr::null(), ms_bind as libc::c_ulong, std::ptr::null());
+                }
+
+                // Bind-mount checkpoint scratch dir so upper is accessible
+                let ckpt_dst = format!("{merged}{base_dir}");
+                let c_base = std::ffi::CString::new(base_dir.as_str()).unwrap();
+                let c_ckpt_dst = std::ffi::CString::new(ckpt_dst.as_str()).unwrap();
+                let _ = libc::mount(c_base.as_ptr(), c_ckpt_dst.as_ptr(), std::ptr::null(), 0x1000, std::ptr::null());
+
+                // chroot into the overlay merged view
+                let c_merged2 = std::ffi::CString::new(merged.as_str()).unwrap();
+                if libc::chroot(c_merged2.as_ptr()) != 0 {
+                    return Err(io::Error::last_os_error());
+                }
+                if libc::chdir(b"/\0".as_ptr() as *const libc::c_char) != 0 {
+                    return Err(io::Error::last_os_error());
+                }
+
                 drop_sys_admin();
 
                 Ok(())
