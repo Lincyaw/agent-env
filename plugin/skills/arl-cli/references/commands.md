@@ -29,7 +29,7 @@
 ```bash
 arl exp create <experiment-id> --image python:3.12 --sessions 1
 arl exp create <experiment-id> --image python:3.12 --profile gpu --sessions 4 \
-  --workspace-dir /workspace --idle-timeout 1800
+  --idle-timeout 1800
 arl exp create <experiment-id> --image python:3.12 --wait-timeout 10m
 arl exp list
 arl exp sessions <experiment-id>
@@ -49,7 +49,7 @@ arl pool list --format wide
 arl pool list --all
 arl pool get <name>
 arl pool create <name> --image python:3.12 --profile <profile> --replicas 2
-arl pool create <name> --image python:3.12 --workspace-dir /workspace
+arl pool create <name> --image python:3.12 --replicas 1
 arl pool create <name> --image python:3.12 --replicas 3 --wait --min-ready 2 --timeout 5m
 arl pool scale <name> --replicas 5
 arl pool scale <name> --replicas 10 --wait --timeout 10m
@@ -116,10 +116,13 @@ arl session logs <id>
 arl session logs <id> --tail 50 -f
 ```
 
-File paths are workspace-relative. Upload with `--verify` when the local input
-is a file and you want the CLI to compute SHA256 and ask the gateway to verify
-the write. When uploading from stdin, pass `--sha256` yourself if verification
-is required.
+All file paths are absolute (the workspace concept has been removed). Upload
+uses `POST /v1/sessions/{id}/upload-file` with the `X-ARL-Path` header for
+the remote path and raw bytes in the request body. Download uses
+`POST /v1/sessions/{id}/download-file` with a JSON body `{"path": "/abs/path"}`.
+Upload with `--verify` when the local input is a file and you want the CLI to
+compute SHA256 and ask the gateway to verify the write. When uploading from
+stdin, pass `--sha256` yourself if verification is required.
 
 `restore` uses snapshot IDs returned by `session exec` results. `replay` copies
 recorded steps from a source session into an existing target session; use
@@ -158,6 +161,24 @@ arl exp create exp-1 --image python:3.12 --sessions 2 \
 Private container spec fields: `name`, `image` (required), `mountWorkspace`,
 `workspaceMountPath`, `workspaceAccess`, `command`, `args`, `env`,
 `resources`, `imagePullPolicy`.
+
+## Build API
+
+`POST /v1/build` (admin role). Builds a container image via Kaniko. Requires
+`build.enabled=true` in Helm values and a checkpoint PVC for context staging.
+
+Request: multipart form with fields `image` (target ref), `context`
+(tar.gz build context), optional `build_args` (JSON), `timeout` (seconds),
+`cache` (true/false). Response: JSON with `image`, `digest`, `status`, `log`.
+
+## Network Policy
+
+`PATCH /v1/sessions/{id}/network-policy` (session owner). Updates the
+network policy for a running session.
+
+Request: JSON body with policy fields (e.g. `{"denyInternet": true}` or
+`{"egressAllowCIDRs": ["10.0.0.0/8"]}`). Applies immediately to the
+session's sandbox pod.
 
 ## Diagnostics
 

@@ -106,12 +106,56 @@ Use `--private-container` for inline JSON specs (repeatable) or
 `--private-containers-file` to load from a JSON file. Use
 `arl session exec-container` to run commands in a specific sidecar.
 
+## Harbor Integration
+
+ARL provides a Harbor `BaseEnvironment` adapter at `sdk/python/arl/arl/harbor.py`.
+It maps Harbor's exec/upload/download operations to ARL sandbox sessions.
+
+```bash
+# Run a Harbor benchmark using ARL sandboxes:
+harbor run -d snorkel-ai/senior-swe-bench-v2026.06 \
+  --environment-import-path arl.harbor:ArlEnvironment \
+  -a mini-swe-agent -m anthropic/claude-sonnet-4-6 -n 5 \
+  --ek gateway_url=http://150.5.144.30:8080
+```
+
+The adapter auto-builds images from Dockerfiles when the task image is not
+pre-built, using the `POST /v1/build` endpoint. It supports
+`dynamic_network_policy` via `PATCH /v1/sessions/{id}/network-policy`.
+
+## Image Build
+
+Build container images via the gateway's Kaniko build API (requires
+`build.enabled=true` in Helm values).
+
+```python
+from arl import GatewayClient
+import tarfile, io
+
+client = GatewayClient("http://localhost:8080")
+
+# Create a tar.gz build context
+buf = io.BytesIO()
+with tarfile.open(fileobj=buf, mode="w:gz") as tar:
+    tar.add("Dockerfile")
+    tar.add("src/")
+buf.seek(0)
+
+result = client.build_image(
+    image="registry.example.com/org/my-image:v1",
+    context=buf,
+    build_args={"BASE_IMAGE": "python:3.12"},
+    timeout=600,
+)
+print(result.digest, result.status)
+```
+
 ## Best Practices
 
 - Prefer `arl exp create` for benchmark or training runs that need grouping and cleanup; prefer `arl session create` for ad hoc debugging.
 - Use `--format json` for scripts, but keep binary downloads on raw stdout.
 - Capture `snapshot_id` values from exec results if a run may need rollback or replay.
-- Pass workspace-relative file paths to upload/download; avoid absolute paths unless the gateway-side behavior is intentional.
+- All file paths are absolute (the workspace concept has been removed).
 - Use `--verify` or `--sha256` for file uploads where corruption would invalidate an experiment.
 - Clean up debug sessions and stop test pools with `arl session delete`, `arl exp delete --force`, and `arl pool delete --force`.
 - Use `arl pool destroy --force` only when the WarmPool object and owned template should be physically removed.

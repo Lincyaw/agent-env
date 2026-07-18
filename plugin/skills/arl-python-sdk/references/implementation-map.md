@@ -9,9 +9,10 @@
 | `WarmPoolManager` | Explicit warm pool create/list/wait/scale/drain/destroy/logs | `sdk/python/arl/arl/warmpool.py`, `sdk/python/arl/arl/gateway_client.py`, `pkg/gateway/gateway.go` |
 | `GatewayClient` | Low-level typed HTTP client used by the higher-level classes | `sdk/python/arl/arl/gateway_client.py`, `pkg/gateway/router.go` |
 | `InteractiveShellClient` | WebSocket shell / PTY access to a session | `sdk/python/arl/arl/interactive_shell_client.py`, `pkg/gateway/ws_shell.go` |
-| Pydantic types | SDK response/request models and validation | `sdk/python/arl/arl/types.py` |
+| Pydantic types | SDK response/request models and validation (includes `BuildResponse`, `ForkSessionResponse`, `UploadFileResponse`) | `sdk/python/arl/arl/types.py` |
 | Auth helpers | API key auth and SSO/OIDC auth plumbing | `sdk/python/arl/arl/auth.py`, `pkg/gateway/auth.go` |
 | Config/tools models | Structured config env, secret/configmap injection, tool specs | `sdk/python/arl/arl/configenv.py`, `sdk/python/arl/arl/types.py` |
+| Harbor adapter | Harbor `BaseEnvironment` backed by ARL sandbox sessions; auto-build from Dockerfile, dynamic network policy | `sdk/python/arl/arl/harbor.py` |
 | Package exports | What `from arl import ...` exposes | `sdk/python/arl/arl/__init__.py` |
 
 ## Feature Map
@@ -23,13 +24,16 @@
 | Managed experiments | Group sessions by `experiment_id`; gateway ensures a stable image/profile pool and records experiment metadata | `sdk/python/arl/arl/session.py`, `pkg/gateway/managed_pool.go`, `pkg/gateway/gateway.go` |
 | Command execution | Execute one or more steps in the sidecar; non-streaming calls use operation IDs for timeout recovery | `sdk/python/arl/arl/session.py`, `sdk/python/arl/arl/gateway_client.py`, `pkg/gateway/gateway.go`, `pkg/gateway/operations.go` |
 | Streaming output | SDK switches to SSE when an output callback is provided | `sdk/python/arl/arl/gateway_client.py`, `pkg/gateway/router.go`, `pkg/gateway/gateway.go` |
-| File transfer | Upload/download workspace files, including streaming download and SHA256 verification | `sdk/python/arl/arl/session.py`, `sdk/python/arl/arl/gateway_client.py`, `pkg/gateway/file_upload.go` |
+| File transfer | Upload/download files using absolute paths. Upload streams raw bytes via `POST /v1/sessions/{id}/upload-file` with `X-ARL-Path` header; download uses `POST /v1/sessions/{id}/download-file` with JSON body. Supports streaming download and SHA256 verification | `sdk/python/arl/arl/session.py`, `sdk/python/arl/arl/gateway_client.py`, `pkg/gateway/file_upload.go` |
 | History and snapshots | Each executed step is recorded with snapshot metadata for restore/replay/trajectory | `pkg/gateway/history.go`, `pkg/gateway/gateway.go`, `sdk/python/arl/arl/session.py` |
 | Restore and replay | Restore rebuilds a session from recorded steps; replay copies source-session steps into a target session | `pkg/gateway/gateway.go`, `pkg/gateway/history.go`, `sdk/python/arl/arl/session.py` |
 | Trajectory export | Export step history as JSONL for RL/SFT-style consumers; gateway can also persist trajectories to ClickHouse | `pkg/gateway/history.go`, `pkg/gateway/gateway.go`, `pkg/audit`, `sdk/python/arl/arl/session.py` |
 | Logs | Session logs stream from one sidecar; pool logs fan out across pool pods | `sdk/python/arl/arl/gateway_client.py`, `sdk/python/arl/arl/warmpool.py`, `pkg/gateway/gateway.go`, `pkg/gateway/router.go` |
 | Interactive shell | WebSocket PTY protocol for terminal input/output, resize, and signals | `sdk/python/arl/arl/interactive_shell_client.py`, `pkg/gateway/ws_shell.go` |
 | Tools | SDK exposes tool registry and tool invocation helpers for images that include an ARL tool registry | `sdk/python/arl/arl/session.py`, `sdk/python/arl/arl/types.py` |
+| Image build | Build container images via Kaniko; `GatewayClient.build_image()` sends tar.gz context to `POST /v1/build` and returns `BuildResponse` with image ref, digest, status, and build log | `sdk/python/arl/arl/gateway_client.py`, `sdk/python/arl/arl/types.py`, `pkg/gateway/router.go` |
+| Checkpoint (post-exec diff) | After each execution step, the gateway fetches an incremental filesystem diff tar from the sidecar and persists it to a shared PVC. Fork (`POST /v1/sessions/{id}/fork`) combines checkpoint tars to recreate filesystem state at any step | `pkg/gateway/execution.go`, `pkg/gateway/checkpoint_store.go`, `pkg/gateway/session_fork.go`, `sdk/python/arl/arl/gateway_client.py` |
+| Network policy update | `PATCH /v1/sessions/{id}/network-policy` updates a session's network policy at runtime (e.g. deny internet, allow specific CIDRs) | `pkg/gateway/router.go`, `sdk/python/arl/arl/harbor.py` |
 | Fault tolerance | Client timeout recovery, gateway session recovery, runtime-lost tombstones, and pool-claim cleanup live mostly server-side | `sdk/python/arl/arl/gateway_client.py`, `pkg/gateway/operations.go`, `pkg/gateway/session_store.go`, `pkg/gateway/redis_store.go`, `pkg/gateway/memory_store.go`, `pkg/gateway/gateway.go` |
 
 ## Runtime Model
