@@ -217,9 +217,6 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.SidecarGRPCPort != 9090 {
 		t.Errorf("SidecarGRPCPort = %d, want 9090", cfg.SidecarGRPCPort)
 	}
-	if cfg.WorkspaceDir != "/workspace" {
-		t.Errorf("WorkspaceDir = %q, want /workspace", cfg.WorkspaceDir)
-	}
 	if cfg.HTTPClientTimeout != 5*time.Minute {
 		t.Errorf("HTTPClientTimeout = %v, want 5m", cfg.HTTPClientTimeout)
 	}

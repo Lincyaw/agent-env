@@ -28,7 +28,6 @@ type GatewayConfig struct {
 	SidecarImage                    string
 	SidecarHTTPPort                 int
 	SidecarGRPCPort                 int
-	WorkspaceDir                    string
 	ExecutorAgentImage              string
 	ExecutorProtocol                string
 	IrohRelayURL                    string

@@ -136,7 +136,6 @@ func main() {
 		SidecarImage:                    cfg.SidecarImage,
 		SidecarHTTPPort:                 cfg.SidecarHTTPPort,
 		SidecarGRPCPort:                 cfg.SidecarGRPCPort,
-		WorkspaceDir:                    cfg.WorkspaceDir,
 		ExecutorAgentImage:              cfg.ExecutorAgentImage,
 		ExecutorProtocol:                cfg.ExecutorProtocol,
 		IrohRelayURL:                    cfg.IrohRelayURL,

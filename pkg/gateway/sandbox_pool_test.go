@@ -91,7 +91,6 @@ func TestCreatePoolCreatesSandboxWarmPoolAndExecutableTemplate(t *testing.T) {
 			ImagePullPolicy:                 string(corev1.PullIfNotPresent),
 			SidecarHTTPPort:                 8080,
 			SidecarGRPCPort:                 9090,
-			WorkspaceDir:                    "/workspace",
 			GRPCAuthToken:                   "test-token",
 			SandboxNetworkPolicyManagement:  string(extensionsv1beta1.NetworkPolicyManagementManaged),
 			SandboxRuntimeClassName:         "kata",

@@ -17,7 +17,6 @@ type Config struct {
 	SidecarImage      string
 	SidecarHTTPPort   int
 	SidecarGRPCPort   int
-	WorkspaceDir      string
 	HTTPClientTimeout time.Duration
 
 	// ClickHouse configuration
@@ -163,7 +162,6 @@ func DefaultConfig() *Config {
 		SidecarImage:            "arl-sidecar:latest",
 		SidecarHTTPPort:         8080,
 		SidecarGRPCPort:         9090,
-		WorkspaceDir:            "/workspace",
 		HTTPClientTimeout:       5 * time.Minute,
 		ClickHouseEnabled:       false,
 		ClickHouseAddr:          "localhost:9000",
@@ -252,10 +250,6 @@ func LoadFromEnv() *Config {
 		if p, err := strconv.Atoi(port); err == nil {
 			cfg.SidecarGRPCPort = p
 		}
-	}
-
-	if dir := os.Getenv("WORKSPACE_DIR"); dir != "" {
-		cfg.WorkspaceDir = dir
 	}
 
 	if timeout := os.Getenv("HTTP_CLIENT_TIMEOUT"); timeout != "" {

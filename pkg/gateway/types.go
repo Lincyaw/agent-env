@@ -123,7 +123,6 @@ type CreateManagedSessionRequest struct {
 	ConfigEnv                json.RawMessage              `json:"configEnv,omitempty"`
 	Resources                *corev1.ResourceRequirements `json:"resources,omitempty"`
 	Tools                    json.RawMessage              `json:"tools,omitempty"`
-	WorkspaceDir             string                       `json:"workspaceDir,omitempty"`
 	IdleTimeoutSeconds       int                          `json:"idleTimeoutSeconds,omitempty"`
 	AllocationTimeoutSeconds *int                         `json:"allocationTimeoutSeconds,omitempty"`
 	PrivateContainers        []PrivateContainerSpec       `json:"privateContainers,omitempty"`
@@ -221,7 +220,6 @@ type CreatePoolRequest struct {
 	ConfigEnv         json.RawMessage              `json:"configEnv,omitempty"`
 	Tools             json.RawMessage              `json:"tools,omitempty"`
 	Resources         *corev1.ResourceRequirements `json:"resources,omitempty"`
-	WorkspaceDir      string                       `json:"workspaceDir,omitempty"`
 	ImageLocality     json.RawMessage              `json:"imageLocality,omitempty"`
 	PrivateContainers []PrivateContainerSpec       `json:"privateContainers,omitempty"`
 	AllowInternet     *bool                        `json:"allowInternet,omitempty"`

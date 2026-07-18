@@ -21,8 +21,7 @@ import (
 )
 
 const (
-	defaultGRPCAuthSecretName  = "agent-env-grpc-token"
-	defaultSandboxWorkspaceDir = "/workspace"
+	defaultGRPCAuthSecretName = "agent-env-grpc-token"
 )
 
 func sandboxTemplateName(poolName string) string {
@@ -131,13 +130,9 @@ func primarySandboxTemplateImage(template *extensionsv1beta1.SandboxTemplate) st
 
 func (g *Gateway) sandboxPodSpec(
 	image string,
-	workspaceDir string,
 	resources corev1.ResourceRequirements,
 	privateContainers []PrivateContainerSpec,
 ) corev1.PodSpec {
-	if workspaceDir == "" {
-		workspaceDir = defaultSandboxWorkspaceDir
-	}
 	sidecarHTTPPort := g.gwConfig.SidecarHTTPPort
 	if sidecarHTTPPort == 0 {
 		sidecarHTTPPort = 8080
@@ -156,7 +151,7 @@ func (g *Gateway) sandboxPodSpec(
 	}
 
 	automount := false
-	executorCommand := "exec /arl-bin/executor-agent --socket=/var/run/arl/exec.sock --workspace=" + shellQuote(workspaceDir)
+	executorCommand := "exec /arl-bin/executor-agent --socket=/var/run/arl/exec.sock --workspace=/"
 	pod := corev1.PodSpec{
 		AutomountServiceAccountToken: &automount,
 		InitContainers: []corev1.Container{
@@ -189,7 +184,7 @@ func (g *Gateway) sandboxPodSpec(
 				ImagePullPolicy: g.injectedPullPolicy(),
 				Command:         []string{"/sidecar"},
 				Args: []string{
-					"--workspace=" + workspaceDir,
+					"--workspace=/",
 					fmt.Sprintf("--http-port=%d", sidecarHTTPPort),
 					fmt.Sprintf("--grpc-port=%d", sidecarGRPCPort),
 				},
@@ -263,7 +258,7 @@ func (g *Gateway) sandboxPodSpec(
 	for _, privateContainer := range privateContainers {
 		pod.Containers = append(
 			pod.Containers,
-			g.sandboxPrivateContainer(privateContainer, workspaceDir),
+			g.sandboxPrivateContainer(privateContainer),
 		)
 	}
 	if runtimeClassName := strings.TrimSpace(g.gwConfig.SandboxRuntimeClassName); runtimeClassName != "" {
@@ -277,7 +272,7 @@ func (g *Gateway) sandboxPodSpec(
 	return pod
 }
 
-func (g *Gateway) sandboxPrivateContainer(spec PrivateContainerSpec, workspaceDir string) corev1.Container {
+func (g *Gateway) sandboxPrivateContainer(spec PrivateContainerSpec) corev1.Container {
 	container := corev1.Container{
 		Name:            spec.Name,
 		Image:           spec.Image,
@@ -295,7 +290,7 @@ func (g *Gateway) sandboxPrivateContainer(spec PrivateContainerSpec, workspaceDi
 	if spec.MountWorkspace {
 		mountPath := strings.TrimSpace(spec.WorkspaceMountPath)
 		if mountPath == "" {
-			mountPath = workspaceDir
+			mountPath = "/workspace"
 		}
 		container.VolumeMounts = append(container.VolumeMounts, corev1.VolumeMount{
 			Name:      "workspace",

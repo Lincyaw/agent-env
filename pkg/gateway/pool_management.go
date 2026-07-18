@@ -49,11 +49,6 @@ func (g *Gateway) CreatePool(ctx context.Context, req CreatePoolRequest) error {
 		resources = &defaultResources
 	}
 
-	workspaceDir := req.WorkspaceDir
-	if workspaceDir == "" {
-		workspaceDir = "/workspace"
-	}
-
 	if hasJSONPayload(req.ConfigEnv) {
 		return fmt.Errorf("pool configEnv is not supported by SandboxWarmPool-backed pools; pass configEnv when creating a session")
 	}
@@ -122,7 +117,7 @@ func (g *Gateway) CreatePool(ctx context.Context, req CreatePoolRequest) error {
 			Service:                    boolPtr(false),
 			PodTemplate: sandboxv1beta1.PodTemplate{
 				ObjectMeta: podMetadata,
-				Spec:       g.sandboxPodSpec(req.Image, workspaceDir, *resources, req.PrivateContainers),
+				Spec:       g.sandboxPodSpec(req.Image, *resources, req.PrivateContainers),
 			},
 		},
 	}
