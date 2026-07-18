@@ -844,8 +844,7 @@ class AsyncGatewayClient:
         if timeout is not None:
             data["timeout"] = str(timeout)
 
-        context_bytes = context if isinstance(context, bytes) else context.read()
-        files = {"context": ("context.tar.gz", context_bytes, "application/gzip")}
+        files = {"context": ("context.tar.gz", context, "application/gzip")}
 
         # Use a long HTTP timeout for builds (up to 30 minutes).
         build_timeout = httpx.Timeout(

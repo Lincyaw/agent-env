@@ -980,8 +980,7 @@ class GatewayClient:
         if timeout is not None:
             data["timeout"] = str(timeout)
 
-        context_bytes = context if isinstance(context, bytes) else context.read()
-        files = {"context": ("context.tar.gz", context_bytes, "application/gzip")}
+        files = {"context": ("context.tar.gz", context, "application/gzip")}
 
         build_timeout = httpx.Timeout(
             connect=30.0,

@@ -14,7 +14,6 @@ download operations to ARL gRPC calls, and tears the session down on stop.
 
 from __future__ import annotations
 
-import hashlib
 import io
 import logging
 import os
@@ -31,6 +30,7 @@ from harbor.environments.capabilities import (
 from harbor.environments.definition import (
     DOCKERFILE_NAME,
     effective_exec_cwd,
+    environment_content_hash,
     parse_dockerfile_workdir,
     require_agent_environment_definition,
 )
@@ -177,14 +177,12 @@ class ArlEnvironment(BaseEnvironment):
 
     async def _resolve_image_or_build(self, force_build: bool) -> str:
         """Return the container image, building from Dockerfile if needed."""
-        if not force_build:
-            pre_built = self._resolve_image()
-            if pre_built is not None:
-                return pre_built
+        pre_built = self._resolve_image()
+        if not force_build and pre_built is not None:
+            return pre_built
 
         dockerfile_path = self.environment_dir / DOCKERFILE_NAME
         if not dockerfile_path.exists():
-            pre_built = self._resolve_image()
             if pre_built is not None:
                 return pre_built
             raise ValueError(
@@ -193,28 +191,22 @@ class ArlEnvironment(BaseEnvironment):
                 "in the environment directory."
             )
 
-        registry = self._build_registry or self._image_registry
-        if not registry:
-            raise ValueError(
-                "Cannot build image: no build_registry or image_registry configured. "
-                "Set --ek build_registry=<registry>/<org> or ARL_BUILD_REGISTRY."
-            )
-
-        # Tag derived from content hash of environment_dir for deterministic
-        # cache hits on identical Dockerfiles and build contexts.
-        content_hash = self._environment_content_hash()
+        # Single pass: tar the context and hash its contents for the image tag.
+        context_buf, content_hash = self._package_build_context()
         image_name = self.environment_name.replace("/", "-").replace(":", "-")
-        target_image = f"{registry}/{image_name}:{content_hash}"
+
+        registry = self._build_registry or self._image_registry
+        if registry:
+            target_image = f"{registry}/{image_name}:{content_hash}"
+        else:
+            target_image = f"{image_name}:{content_hash}"
 
         self.logger.info("Building image %s from %s", target_image, self.environment_dir)
-        context_bytes = self._package_build_context()
         client = self._get_client()
 
-        # Always call build; Kaniko layer caching makes rebuilds fast for
-        # unchanged Dockerfiles, so an explicit existence check is unnecessary.
         result = await client.build_image(
             target_image,
-            context_bytes,
+            context_buf,
             timeout=self._build_timeout,
             cache=True,
         )
@@ -225,28 +217,19 @@ class ArlEnvironment(BaseEnvironment):
         )
         return result.image
 
-    def _package_build_context(self) -> bytes:
-        """Package environment_dir as a tar.gz for the build API."""
+    def _package_build_context(self) -> tuple[io.BytesIO, str]:
+        """Package environment_dir as tar.gz and compute content hash.
+
+        Returns (tar_buffer, content_hash). Uses the upstream
+        environment_content_hash for collision-safe hashing with proper
+        .git/__pycache__ filtering.
+        """
+        content_hash = environment_content_hash(self.environment_dir, truncate=12)
         buf = io.BytesIO()
         with tarfile.open(fileobj=buf, mode="w:gz") as tar:
             tar.add(str(self.environment_dir), arcname=".")
         buf.seek(0)
-        return buf.read()
-
-    def _environment_content_hash(self) -> str:
-        """Compute a short content hash of the environment directory.
-
-        Hashes file relative paths and contents to produce a deterministic
-        tag.  Only regular files are included (symlinks are followed).
-        """
-        h = hashlib.sha256()
-        for file_path in sorted(self.environment_dir.rglob("*")):
-            if not file_path.is_file():
-                continue
-            rel = file_path.relative_to(self.environment_dir).as_posix()
-            h.update(rel.encode())
-            h.update(file_path.read_bytes())
-        return h.hexdigest()[:12]
+        return buf, content_hash
 
     def _build_resources(self) -> ResourceRequirements | None:
         """Build Kubernetes ResourceRequirements from task_env_config."""
