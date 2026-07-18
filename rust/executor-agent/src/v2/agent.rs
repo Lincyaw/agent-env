@@ -1,5 +1,5 @@
 use crate::checkpoint::Checkpointer;
-use crate::path_security::resolve_workspace_path;
+use crate::path_security::sanitize_path;
 use crate::pty_util;
 use super::proto;
 
@@ -295,19 +295,19 @@ fn handle_messages(
             }
             proto::request::Kind::Read(params) => {
                 log::info!("[v2:read] tag={tag} path={}", params.path);
-                handle_read(tag, params, workspace, &writer);
+                handle_read(tag, params, &writer);
             }
             proto::request::Kind::Write(params) => {
                 log::info!("[v2:write] tag={tag} path={}", params.path);
-                handle_write(tag, params, workspace, &writer, &mut reader, checkpointer);
+                handle_write(tag, params, &writer, &mut reader, checkpointer);
             }
             proto::request::Kind::Stat(params) => {
                 log::info!("[v2:stat] tag={tag} path={}", params.path);
-                handle_stat(tag, params, workspace, &writer);
+                handle_stat(tag, params, &writer);
             }
             proto::request::Kind::List(params) => {
                 log::info!("[v2:list] tag={tag} path={}", params.path);
-                handle_list(tag, params, workspace, &writer);
+                handle_list(tag, params, &writer);
             }
             proto::request::Kind::Tunnel(params) => {
                 log::info!("[v2:tunnel] tag={tag} host={} port={}", params.host, params.port);
@@ -902,10 +902,9 @@ fn handle_resize(
 fn handle_read(
     tag: u32,
     params: proto::ReadRequest,
-    workspace: &str,
     writer: &SharedWriter,
 ) {
-    if let Err(e) = handle_read_inner(tag, params, workspace, writer) {
+    if let Err(e) = handle_read_inner(tag, params, writer) {
         log::error!("[v2:read] tag={tag} error: {e}");
     }
 }
@@ -913,10 +912,9 @@ fn handle_read(
 fn handle_read_inner(
     tag: u32,
     params: proto::ReadRequest,
-    workspace: &str,
     writer: &SharedWriter,
 ) -> io::Result<()> {
-    let target = match resolve_workspace_path(std::path::Path::new(workspace), &params.path) {
+    let target = match sanitize_path(&params.path) {
         Ok(p) => p,
         Err(e) => {
             let _ = send_error(writer, tag, 7, e);
@@ -969,12 +967,11 @@ fn handle_read_inner(
 fn handle_write(
     tag: u32,
     params: proto::WriteRequest,
-    workspace: &str,
     writer: &SharedWriter,
     reader: &mut impl io::Read,
     checkpointer: &Option<Arc<Checkpointer>>,
 ) {
-    let target = match resolve_workspace_path(std::path::Path::new(workspace), &params.path) {
+    let target = match sanitize_path(&params.path) {
         Ok(p) => p,
         Err(e) => {
             let _ = send_error(writer, tag, 7, e);
@@ -1096,10 +1093,9 @@ fn record_write_checkpoint(ckpt: &Checkpointer, target: &std::path::Path) -> io:
 fn handle_stat(
     tag: u32,
     params: proto::StatRequest,
-    workspace: &str,
     writer: &SharedWriter,
 ) {
-    let target = match resolve_workspace_path(std::path::Path::new(workspace), &params.path) {
+    let target = match sanitize_path(&params.path) {
         Ok(p) => p,
         Err(e) => {
             let _ = send_error(writer, tag, 7, e);
@@ -1145,10 +1141,9 @@ fn handle_stat(
 fn handle_list(
     tag: u32,
     params: proto::ListRequest,
-    workspace: &str,
     writer: &SharedWriter,
 ) {
-    let target = match resolve_workspace_path(std::path::Path::new(workspace), &params.path) {
+    let target = match sanitize_path(&params.path) {
         Ok(p) => p,
         Err(e) => {
             let _ = send_error(writer, tag, 7, e);
@@ -1746,13 +1741,14 @@ mod tests {
     #[test]
     fn test_stat_existing_file() {
         let ws = tempfile::tempdir().unwrap();
-        fs::write(ws.path().join("hello.txt"), "content").unwrap();
+        let file_path = ws.path().join("hello.txt");
+        fs::write(&file_path, "content").unwrap();
         let (sock, _tx) = start_test_agent(ws.path().to_str().unwrap());
 
         let mut stream = UnixStream::connect(&sock).unwrap();
 
         send_request_pb(&mut stream, 30, proto::request::Kind::Stat(proto::StatRequest {
-            path: "hello.txt".into(),
+            path: file_path.to_str().unwrap().into(),
         }));
 
         let resp = read_response(&mut stream);
@@ -1773,8 +1769,9 @@ mod tests {
 
         let mut stream = UnixStream::connect(&sock).unwrap();
 
+        let abs_path = ws.path().join("nope.txt");
         send_request_pb(&mut stream, 31, proto::request::Kind::Stat(proto::StatRequest {
-            path: "nope.txt".into(),
+            path: abs_path.to_str().unwrap().into(),
         }));
 
         let resp = read_response(&mut stream);
@@ -1799,7 +1796,7 @@ mod tests {
         let mut stream = UnixStream::connect(&sock).unwrap();
 
         send_request_pb(&mut stream, 40, proto::request::Kind::List(proto::ListRequest {
-            path: "mydir".into(),
+            path: sub.to_str().unwrap().into(),
             recursive: false,
         }));
 
@@ -1818,14 +1815,15 @@ mod tests {
     fn test_read_file() {
         let ws = tempfile::tempdir().unwrap();
         let content = "hello file read";
-        fs::write(ws.path().join("data.txt"), content).unwrap();
+        let file_path = ws.path().join("data.txt");
+        fs::write(&file_path, content).unwrap();
 
         let (sock, _tx) = start_test_agent(ws.path().to_str().unwrap());
 
         let mut stream = UnixStream::connect(&sock).unwrap();
 
         send_request_pb(&mut stream, 50, proto::request::Kind::Read(proto::ReadRequest {
-            path: "data.txt".into(),
+            path: file_path.to_str().unwrap().into(),
         }));
 
         // Read ReadResponse
@@ -1917,10 +1915,11 @@ mod tests {
 
         let content = b"hello write v2!";
         let expected_sha = hex::encode(sha2::Sha256::digest(content));
+        let file_path = ws.path().join("test_output.txt");
 
         // Send WriteRequest
         send_request_pb(&mut stream, 70, proto::request::Kind::Write(proto::WriteRequest {
-            path: "test_output.txt".into(),
+            path: file_path.to_str().unwrap().into(),
             expected_sha256: expected_sha.clone(),
             size_hint: content.len() as i64,
         }));
@@ -1943,7 +1942,7 @@ mod tests {
             _ => panic!("expected write response, got {:?}", resp.kind),
         }
 
-        let written = std::fs::read(ws.path().join("test_output.txt")).unwrap();
+        let written = std::fs::read(&file_path).unwrap();
         assert_eq!(written, content);
     }
 
@@ -1954,8 +1953,9 @@ mod tests {
 
         let mut stream = UnixStream::connect(&sock).unwrap();
 
+        let bad_path = ws.path().join("bad.txt");
         send_request_pb(&mut stream, 71, proto::request::Kind::Write(proto::WriteRequest {
-            path: "bad.txt".into(),
+            path: bad_path.to_str().unwrap().into(),
             expected_sha256: "0000000000000000000000000000000000000000000000000000000000000000".into(),
             size_hint: 0,
         }));
@@ -1975,7 +1975,7 @@ mod tests {
             }
             _ => panic!("expected error response"),
         }
-        assert!(!ws.path().join("bad.txt").exists());
+        assert!(!bad_path.exists());
     }
 
     #[test]
@@ -1991,10 +1991,11 @@ mod tests {
             full_hasher.update(&chunk_data);
         }
         let expected_sha = hex::encode(full_hasher.finalize());
+        let large_path = ws.path().join("large.bin");
 
         // Write
         send_request_pb(&mut stream, 72, proto::request::Kind::Write(proto::WriteRequest {
-            path: "large.bin".into(),
+            path: large_path.to_str().unwrap().into(),
             expected_sha256: String::new(),
             size_hint: 0,
         }));
@@ -2018,7 +2019,7 @@ mod tests {
 
         // Read it back
         send_request_pb(&mut stream, 73, proto::request::Kind::Read(proto::ReadRequest {
-            path: "large.bin".into(),
+            path: large_path.to_str().unwrap().into(),
         }));
 
         let resp = read_response(&mut stream);
@@ -2061,7 +2062,7 @@ mod tests {
             .unwrap();
 
         send_request_pb(&mut stream, 80, proto::request::Kind::Watch(proto::WatchRequest {
-            path: "output".into(),
+            path: output_dir.to_str().unwrap().into(),
             recursive: false,
             event_types: vec![],
         }));
@@ -2110,7 +2111,7 @@ mod tests {
             .unwrap();
 
         send_request_pb(&mut stream, 90, proto::request::Kind::Watch(proto::WatchRequest {
-            path: "watched".into(),
+            path: output_dir.to_str().unwrap().into(),
             recursive: false,
             event_types: vec![],
         }));

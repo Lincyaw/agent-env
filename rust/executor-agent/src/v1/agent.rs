@@ -383,7 +383,7 @@ impl AgentInner {
         }
 
         let target_path =
-            match path_security::resolve_workspace_path(&self.workspace_dir, &req.path) {
+            match path_security::sanitize_path(&req.path) {
                 Ok(p) => p,
                 Err(e) => {
                     let _ = encoder.send(&Response::error(&req.id, e)).await;
@@ -606,7 +606,7 @@ impl AgentInner {
         }
 
         let target_path =
-            match path_security::resolve_workspace_path(&self.workspace_dir, &req.path) {
+            match path_security::sanitize_path(&req.path) {
                 Ok(p) => p,
                 Err(e) => {
                     let _ = encoder.send(&Response::error(&req.id, e)).await;
