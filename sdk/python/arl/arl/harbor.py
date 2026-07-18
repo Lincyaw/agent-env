@@ -123,8 +123,7 @@ class ArlEnvironment(BaseEnvironment):
             network_allowlist_ipv6_addresses=True,
             network_allowlist_ipv4_cidrs=True,
             network_allowlist_ipv6_cidrs=True,
-            # No gateway endpoint for runtime network policy updates yet
-            dynamic_network_policy=False,
+            dynamic_network_policy=True,
         )
 
     @staticmethod
