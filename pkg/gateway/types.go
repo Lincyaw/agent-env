@@ -413,6 +413,23 @@ type WriteStdinRequest struct {
 	Data   string `json:"data"`
 }
 
+// BuildRequest is the body for POST /v1/build (multipart form fields).
+type BuildRequest struct {
+	Image          string            `json:"image"`
+	Dockerfile     string            `json:"dockerfile,omitempty"`
+	BuildArgs      map[string]string `json:"buildArgs,omitempty"`
+	TimeoutSeconds int               `json:"timeoutSeconds,omitempty"`
+	Cache          bool              `json:"cache,omitempty"`
+}
+
+// BuildResponse is the response for POST /v1/build.
+type BuildResponse struct {
+	Image  string `json:"image"`
+	Digest string `json:"digest,omitempty"`
+	Status string `json:"status"`
+	Log    string `json:"log,omitempty"`
+}
+
 // ErrorResponse is a generic error response
 type ErrorResponse struct {
 	Error  string `json:"error"`

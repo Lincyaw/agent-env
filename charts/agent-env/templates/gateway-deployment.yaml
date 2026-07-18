@@ -207,6 +207,24 @@ spec:
             - name: CHECKPOINT_STORE_PVC
               value: {{ .Values.checkpoint.storePVC | quote }}
             {{- end }}
+            {{- if .Values.build.enabled }}
+            - name: BUILD_ENABLED
+              value: "true"
+            - name: BUILD_KANIKO_IMAGE
+              value: "{{ .Values.build.kaniko.image.repository }}:{{ .Values.build.kaniko.image.tag }}"
+            {{- if .Values.build.registrySecret }}
+            - name: BUILD_REGISTRY_SECRET
+              value: {{ .Values.build.registrySecret | quote }}
+            {{- end }}
+            - name: BUILD_DEFAULT_TIMEOUT
+              value: "{{ .Values.build.defaultTimeout }}s"
+            {{- if not .Values.checkpoint.enabled }}
+            - name: CHECKPOINT_STORE_PATH
+              value: {{ .Values.checkpoint.storePath | default "/mnt/checkpoint-store" | quote }}
+            - name: CHECKPOINT_STORE_PVC
+              value: {{ .Values.checkpoint.storePVC | default "checkpoint-store" | quote }}
+            {{- end }}
+            {{- end }}
             {{- include "agent-env.otelEnv" . | nindent 12 }}
           ports:
             - name: http
@@ -215,14 +233,14 @@ spec:
             - name: internal
               containerPort: {{ .Values.gateway.internalPort }}
               protocol: TCP
-          {{- if or .Values.auth.enabled .Values.checkpoint.enabled }}
+          {{- if or .Values.auth.enabled .Values.checkpoint.enabled .Values.build.enabled }}
           volumeMounts:
             {{- if .Values.auth.enabled }}
             - name: auth-keys
               mountPath: /etc/arl/keys
               readOnly: true
             {{- end }}
-            {{- if .Values.checkpoint.enabled }}
+            {{- if or .Values.checkpoint.enabled .Values.build.enabled }}
             - name: checkpoint-store
               mountPath: {{ .Values.checkpoint.storePath | default "/mnt/checkpoint-store" }}
             {{- end }}
@@ -251,14 +269,14 @@ spec:
             periodSeconds: 5
           resources:
             {{- toYaml .Values.gateway.resources | nindent 12 }}
-      {{- if or .Values.auth.enabled .Values.checkpoint.enabled }}
+      {{- if or .Values.auth.enabled .Values.checkpoint.enabled .Values.build.enabled }}
       volumes:
         {{- if .Values.auth.enabled }}
         - name: auth-keys
           secret:
             secretName: {{ include "agent-env.fullname" . }}-auth
         {{- end }}
-        {{- if .Values.checkpoint.enabled }}
+        {{- if or .Values.checkpoint.enabled .Values.build.enabled }}
         - name: checkpoint-store
           persistentVolumeClaim:
             claimName: {{ .Values.checkpoint.storePVC | default "checkpoint-store" }}
