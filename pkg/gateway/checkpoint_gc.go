@@ -102,4 +102,3 @@ func (g *Gateway) reconcileCheckpointGC() {
 		log.Printf("checkpoint GC: cleaned %d expired session checkpoint(s) (TTL %s)", cleaned, ttl)
 	}
 }
-

@@ -164,4 +164,3 @@ func normalizeSHA256(value string) (string, error) {
 	}
 	return value, nil
 }
-
