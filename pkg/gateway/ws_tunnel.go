@@ -10,6 +10,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/gorilla/websocket"
 )
 
@@ -22,26 +23,12 @@ func handleTunnel(gw *Gateway, authCfg *AuthConfig) http.HandlerFunc {
 	upgrader := newUpgrader(authCfg)
 
 	return func(w http.ResponseWriter, r *http.Request) {
-		id := r.PathValue("id")
-		portStr := r.PathValue("port")
+		id := chi.URLParam(r, "id")
+		portStr := chi.URLParam(r, "port")
 
 		port, err := strconv.Atoi(portStr)
 		if err != nil || port < 1 || port > tunnelMaxPort {
 			http.Error(w, "invalid port", http.StatusBadRequest)
-			return
-		}
-
-		s, ok := gw.store.Get(id)
-		if !ok {
-			http.Error(w, "session not found", http.StatusNotFound)
-			return
-		}
-		s.mu.RLock()
-		ownerHash := s.ownerKeyHash
-		s.mu.RUnlock()
-
-		if err := CheckSessionOwnership(r.Context(), ownerHash); err != nil {
-			http.Error(w, err.Error(), http.StatusForbidden)
 			return
 		}
 

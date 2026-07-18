@@ -12,24 +12,6 @@ import (
 	"github.com/Lincyaw/agent-env/pkg/interfaces"
 )
 
-func TestSanitizeFilePathPassesThrough(t *testing.T) {
-	cases := []struct{ in, want string }{
-		{"repo/posthog/file.py", "repo/posthog/file.py"},
-		{"/app/test.txt", "/app/test.txt"},
-		{".agentm_eval_uploads/abc", ".agentm_eval_uploads/abc"},
-		{"../parent/file.txt", "../parent/file.txt"},
-	}
-	for _, tc := range cases {
-		got, err := sanitizeFilePath(tc.in)
-		if err != nil {
-			t.Fatalf("sanitizeFilePath(%q) returned error: %v", tc.in, err)
-		}
-		if got != tc.want {
-			t.Fatalf("sanitizeFilePath(%q) = %q, want %q", tc.in, got, tc.want)
-		}
-	}
-}
-
 func TestNormalizeSHA256RejectsInvalidValue(t *testing.T) {
 	_, err := normalizeSHA256("not-a-sha")
 	if err == nil {

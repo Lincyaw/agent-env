@@ -14,7 +14,6 @@ import uuid
 from collections.abc import AsyncIterator, Callable, Iterable
 from pathlib import Path
 from typing import Any, BinaryIO, TypeVar
-from urllib.parse import quote
 
 import httpx
 from pydantic import BaseModel
@@ -28,7 +27,6 @@ from arl.gateway_client import (
     _OPERATION_STATUS_ERROR,
     GatewayError,
     GatewayOperationTimeout,
-    _quote_file_path,
     _serialize_config_env,
     _serialize_private_containers,
 )
@@ -41,7 +39,6 @@ from arl.types import (
     ExecuteResponse,
     ExperimentSummary,
     GatewaySummary,
-    ListDirResult,
     LogEntry,
     ManagedSessionInfo,
     PoolInfo,
@@ -52,7 +49,6 @@ from arl.types import (
     RestoreResponse,
     SessionInfo,
     SessionListItem,
-    StatResult,
     StepResult,
     ToolsSpec,
     UploadFileResponse,
@@ -391,11 +387,14 @@ class AsyncGatewayClient:
         content: str | bytes | Iterable[bytes] | BinaryIO,
         sha256: str | None = None,
     ) -> UploadFileResponse:
-        headers = {"Content-Type": "application/octet-stream"}
+        headers: dict[str, str] = {
+            "Content-Type": "application/octet-stream",
+            "X-ARL-Path": path,
+        }
         if sha256:
             headers["X-ARL-SHA256"] = sha256
-        resp = await self._client.put(
-            f"/v1/sessions/{session_id}/files/{_quote_file_path(path)}",
+        resp = await self._client.post(
+            f"/v1/sessions/{session_id}/upload-file",
             content=content,
             headers=headers,
         )
@@ -407,7 +406,10 @@ class AsyncGatewayClient:
         session_id: str,
         path: str,
     ) -> bytes:
-        resp = await self._client.get(f"/v1/sessions/{session_id}/files/{_quote_file_path(path)}")
+        resp = await self._client.post(
+            f"/v1/sessions/{session_id}/download-file",
+            json={"path": path},
+        )
         self._handle_error(resp)
         return resp.content
 
@@ -418,8 +420,9 @@ class AsyncGatewayClient:
         chunk_size: int = 1024 * 1024,
     ) -> AsyncIterator[bytes]:
         async with self._client.stream(
-            "GET",
-            f"/v1/sessions/{session_id}/files/{_quote_file_path(path)}",
+            "POST",
+            f"/v1/sessions/{session_id}/download-file",
+            json={"path": path},
         ) as resp:
             self._handle_error(resp)
             async for chunk in resp.aiter_bytes(chunk_size=chunk_size):
@@ -447,29 +450,6 @@ class AsyncGatewayClient:
         with target.open("wb") as file:
             async for chunk in self.iter_download_file(session_id, remote_path):
                 file.write(chunk)
-
-    async def stat_file(self, session_id: str, path: str) -> StatResult:
-        """Get file metadata without downloading."""
-        encoded = quote(path.lstrip("/"), safe="")
-        resp = await self._client.get(f"/v1/sessions/{session_id}/stat/{encoded}")
-        self._handle_error(resp)
-        return StatResult.model_validate(resp.json())
-
-    async def list_dir(
-        self,
-        session_id: str,
-        path: str,
-        recursive: bool = False,
-    ) -> ListDirResult:
-        """List directory contents."""
-        encoded = quote(path.lstrip("/"), safe="")
-        params = {"recursive": "true"} if recursive else {}
-        resp = await self._client.get(
-            f"/v1/sessions/{session_id}/ls/{encoded}",
-            params=params,
-        )
-        self._handle_error(resp)
-        return ListDirResult.model_validate(resp.json())
 
     async def send_stdin(self, session_id: str, handle: str, data: str) -> None:
         """Send stdin data to a running process."""

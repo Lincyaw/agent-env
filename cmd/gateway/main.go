@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	"k8s.io/apimachinery/pkg/runtime"
 	utilruntime "k8s.io/apimachinery/pkg/util/runtime"
@@ -265,17 +266,18 @@ func main() {
 	rateLimiter := gateway.NewRateLimiter(cfg.RateLimitRPS, cfg.RateLimitBurst)
 
 	// --- Public server (authenticated, rate-limited) ---
-	publicMux := http.NewServeMux()
-	gateway.SetupRoutes(publicMux, gw, authCfg)
-
-	publicHandler := rateLimiter.Middleware(gateway.GzipMiddleware(publicMux))
+	publicRouter := gateway.SetupRoutes(gw, authCfg)
+	publicHandler := rateLimiter.Middleware(gateway.GzipMiddleware(publicRouter))
 
 	server := &http.Server{
 		Addr: fmt.Sprintf(":%d", port),
 		Handler: otelhttp.NewHandler(publicHandler, "gateway",
 			otelhttp.WithSpanNameFormatter(func(_ string, r *http.Request) string {
-				if route := r.Pattern; route != "" {
-					return r.Method + " " + route
+				rctx := chi.RouteContext(r.Context())
+				if rctx != nil {
+					if pattern := rctx.RoutePattern(); pattern != "" {
+						return r.Method + " " + pattern
+					}
 				}
 				return r.Method + " " + r.URL.Path
 			}),
@@ -286,12 +288,11 @@ func main() {
 	}
 
 	// --- Internal server (metrics, debug, alertmanager — no auth) ---
-	internalMux := http.NewServeMux()
-	gateway.SetupInternalRoutes(internalMux, healthChecker)
+	internalRouter := gateway.SetupInternalRoutes(healthChecker)
 
 	internalServer := &http.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.InternalPort),
-		Handler:      internalMux,
+		Handler:      internalRouter,
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 30 * time.Second,
 		IdleTimeout:  60 * time.Second,

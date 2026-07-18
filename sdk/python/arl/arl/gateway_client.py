@@ -9,7 +9,6 @@ import uuid
 from collections.abc import Callable, Iterable, Iterator
 from pathlib import Path
 from typing import Any, BinaryIO, TypeVar
-from urllib.parse import quote
 
 import httpx
 from pydantic import BaseModel
@@ -27,7 +26,6 @@ from arl.types import (
     ExperimentSummary,
     ForkSessionResponse,
     GatewaySummary,
-    ListDirResult,
     LogEntry,
     ManagedSessionInfo,
     PoolCondition,
@@ -39,7 +37,6 @@ from arl.types import (
     RestoreResponse,
     SessionInfo,
     SessionListItem,
-    StatResult,
     StepResult,
     ToolsSpec,
     UploadFileResponse,
@@ -61,12 +58,6 @@ def _serialize_config_env(
         return config_env.to_request_payload()
     return config_env
 
-
-def _quote_file_path(path: str) -> str:
-    normalized = path.strip().replace("\\", "/").lstrip("/")
-    if not normalized:
-        raise ValueError("path is required")
-    return quote(normalized, safe="/")
 
 
 def _serialize_private_containers(
@@ -513,11 +504,14 @@ class GatewayClient:
         content: str | bytes | Iterable[bytes] | BinaryIO,
         sha256: str | None = None,
     ) -> UploadFileResponse:
-        headers = {"Content-Type": "application/octet-stream"}
+        headers: dict[str, str] = {
+            "Content-Type": "application/octet-stream",
+            "X-ARL-Path": path,
+        }
         if sha256:
             headers["X-ARL-SHA256"] = sha256
-        resp = self._client.put(
-            f"/v1/sessions/{session_id}/files/{_quote_file_path(path)}",
+        resp = self._client.post(
+            f"/v1/sessions/{session_id}/upload-file",
             content=content,
             headers=headers,
         )
@@ -530,7 +524,7 @@ class GatewayClient:
         path: str,
     ) -> bytes:
         resp = self._client.post(
-            f"/v1/sessions/{session_id}/read-file",
+            f"/v1/sessions/{session_id}/download-file",
             json={"path": path},
         )
         self._handle_error(resp)
@@ -544,7 +538,7 @@ class GatewayClient:
     ) -> Iterator[bytes]:
         with self._client.stream(
             "POST",
-            f"/v1/sessions/{session_id}/read-file",
+            f"/v1/sessions/{session_id}/download-file",
             json={"path": path},
         ) as resp:
             self._handle_error(resp)
@@ -573,32 +567,6 @@ class GatewayClient:
         with target.open("wb") as file:
             for chunk in self.iter_download_file(session_id, remote_path):
                 file.write(chunk)
-
-    def stat_file(self, session_id: str, path: str) -> StatResult:
-        """Get file metadata without downloading."""
-        resp = self._client.post(
-            f"/v1/sessions/{session_id}/stat-file",
-            json={"path": path},
-        )
-        self._handle_error(resp)
-        return StatResult.model_validate(resp.json())
-
-    def list_dir(
-        self,
-        session_id: str,
-        path: str,
-        recursive: bool = False,
-    ) -> ListDirResult:
-        """List directory contents."""
-        body: dict[str, Any] = {"path": path}
-        if recursive:
-            body["recursive"] = True
-        resp = self._client.post(
-            f"/v1/sessions/{session_id}/list-dir",
-            json=body,
-        )
-        self._handle_error(resp)
-        return ListDirResult.model_validate(resp.json())
 
     def send_stdin(self, session_id: str, handle: str, data: str) -> None:
         """Send stdin data to a running process."""

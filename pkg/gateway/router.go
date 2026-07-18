@@ -12,96 +12,145 @@ import (
 	"strings"
 	"time"
 
+	"github.com/go-chi/chi/v5"
+	chiMiddleware "github.com/go-chi/chi/v5/middleware"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	ctrlmetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 )
 
-// SetupRoutes registers all public gateway routes on mux.
-// When authCfg is non-nil and Enabled, every route requires a valid Bearer
-// token. Pool management endpoints require the admin role; session and
-// execution endpoints require at least the user role.
-func SetupRoutes(mux *http.ServeMux, gw *Gateway, authCfg *AuthConfig) {
-	user := func(h http.HandlerFunc) http.HandlerFunc { return h }
-	admin := func(h http.HandlerFunc) http.HandlerFunc { return h }
+// SetupRoutes builds the public chi.Router for the gateway. The returned
+// router implements http.Handler and can be wrapped with additional
+// middleware (rate-limiter, gzip, OTEL) by the caller.
+func SetupRoutes(gw *Gateway, authCfg *AuthConfig) chi.Router {
+	r := chi.NewRouter()
+	r.Use(chiMiddleware.Recoverer)
+	r.Use(instrumentMiddleware(gw))
 
+	authUser := noopMiddleware
+	authAdmin := noopMiddleware
 	if authCfg != nil && authCfg.Enabled {
-		user = func(h http.HandlerFunc) http.HandlerFunc {
-			return requireAuth(authCfg, RoleUser, h)
-		}
-		admin = func(h http.HandlerFunc) http.HandlerFunc {
-			return requireAuth(authCfg, RoleAdmin, h)
-		}
-	}
-	route := func(pattern string, h http.HandlerFunc) {
-		mux.HandleFunc(pattern, instrumentGatewayRoute(gw, pattern, h))
+		authUser = requireAuthMiddleware(authCfg, RoleUser)
+		authAdmin = requireAuthMiddleware(authCfg, RoleAdmin)
 	}
 
-	// Session management (user role)
-	route("POST /v1/sessions", user(handleCreateSession(gw)))
-	route("GET /v1/sessions/{id}", user(handleGetSession(gw)))
-	route("DELETE /v1/sessions/{id}", user(handleDeleteSession(gw)))
-	route("POST /v1/sessions/{id}/suspend", user(handleSuspendSession(gw)))
-	route("POST /v1/sessions/{id}/resume", user(handleResumeSession(gw)))
-
-	// Fork session (user role)
-	route("POST /v1/sessions/{id}/fork", user(handleForkSession(gw)))
-
-	// Iroh direct-connect address (user role)
-	route("GET /v1/sessions/{id}/iroh-addr", user(handleGetIrohAddr(gw)))
-
-	// Execution (user role)
-	route("POST /v1/sessions/{id}/execute", user(handleExecute(gw)))
-	route("POST /v1/sessions/{id}/containers/{container}/execute", user(handleExecuteContainer(gw)))
-	route("GET /v1/sessions/{id}/operations/{operationID}", user(handleGetExecuteOperation(gw)))
-	route("PUT /v1/sessions/{id}/files/{path...}", user(handleUploadFile(gw)))
-	route("GET /v1/sessions/{id}/files/{path...}", user(handleDownloadFile(gw)))
-	route("GET /v1/sessions/{id}/stat/{path...}", user(handleStat(gw)))
-	route("GET /v1/sessions/{id}/ls/{path...}", user(handleListDir(gw)))
-
-	// v2 file ops: path in JSON body, no URL encoding issues.
-	route("POST /v1/sessions/{id}/read-file", user(handleReadFile(gw)))
-	route("POST /v1/sessions/{id}/stat-file", user(handleStatFile(gw)))
-	route("POST /v1/sessions/{id}/list-dir", user(handleListDirV2(gw)))
-	route("POST /v1/sessions/{id}/stdin", user(handleWriteStdin(gw)))
-	route("POST /v1/sessions/{id}/restore", user(handleRestore(gw)))
-	route("POST /v1/sessions/{id}/replay", user(handleReplay(gw)))
-
-	// Interactive shell — WebSocket (user role; token may come via query param)
-	mux.HandleFunc("/v1/sessions/{id}/shell", user(handleShell(gw, authCfg)))
-
-	// TCP tunnel — WebSocket to pod:port relay (user role)
-	mux.HandleFunc("/v1/sessions/{id}/tunnel/{port}", user(handleTunnel(gw, authCfg)))
-
-	// History, trajectory, and logs (user role)
-	route("GET /v1/sessions/{id}/history", user(handleGetHistory(gw)))
-	route("GET /v1/sessions/{id}/trajectory", user(handleGetTrajectory(gw)))
-	route("GET /v1/sessions/{id}/logs", user(handleSessionLogs(gw)))
-
-	// List endpoints (admin role)
-	route("GET /v1/sessions", admin(handleListSessions(gw)))
-	route("GET /v1/summary", admin(handleSummary(gw)))
-	route("GET /v1/pools", admin(handleListPools(gw)))
-	route("GET /v1/managed/experiments", admin(handleListExperiments(gw)))
-
-	// Pool management (admin role)
-	route("POST /v1/pools", admin(handleCreatePool(gw)))
-	route("GET /v1/pools/{name}", admin(handleGetPool(gw)))
-	route("PATCH /v1/pools/{name}", admin(handleScalePool(gw)))
-	route("DELETE /v1/pools/{name}", admin(handleDeletePool(gw)))
-	route("POST /v1/pools/{name}/destroy", admin(handleDestroyPool(gw)))
-	route("POST /v1/pools/{name}/prefetch", admin(handlePrefetchPool(gw)))
-	route("GET /v1/pools/{name}/logs", admin(handlePoolLogs(gw)))
-
-	// Managed sessions (admin role — creates infrastructure)
-	route("POST /v1/managed/sessions", admin(handleCreateManagedSession(gw)))
-	route("GET /v1/managed/experiments/{id}/sessions", user(handleListExperimentSessions(gw)))
-	route("DELETE /v1/managed/experiments/{id}", admin(handleDeleteExperiment(gw)))
-
-	// Health probe (unauthenticated — needed by K8s liveness/readiness probes)
-	route("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
+	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("ok"))
 	})
+
+	r.Route("/v1", func(r chi.Router) {
+		// Session creation (user role, no ownership)
+		r.With(authUser).Post("/sessions", handleCreateSession(gw))
+
+		// Session-scoped endpoints
+		r.Route("/sessions/{id}", func(r chi.Router) {
+			r.Use(authUser)
+			// GET has custom ownership logic (historical sessions)
+			r.Get("/", handleGetSession(gw))
+
+			// All other operations require session ownership
+			r.Group(func(r chi.Router) {
+				r.Use(sessionOwnership(gw))
+				r.Delete("/", handleDeleteSession(gw))
+				r.Post("/suspend", handleSuspendSession(gw))
+				r.Post("/resume", handleResumeSession(gw))
+				r.Post("/fork", handleForkSession(gw))
+				r.Get("/iroh-addr", handleGetIrohAddr(gw))
+				r.Post("/execute", handleExecute(gw))
+				r.Post("/containers/{container}/execute", handleExecuteContainer(gw))
+				r.Get("/operations/{operationID}", handleGetExecuteOperation(gw))
+				r.Post("/upload-file", handleUploadFile(gw))
+				r.Post("/download-file", handleDownloadFile(gw))
+				r.Post("/stdin", handleWriteStdin(gw))
+				r.Post("/restore", handleRestore(gw))
+				r.Post("/replay", handleReplay(gw))
+				r.Get("/shell", handleShell(gw, authCfg))
+				r.Get("/tunnel/{port}", handleTunnel(gw, authCfg))
+				r.Get("/history", handleGetHistory(gw))
+				r.Get("/trajectory", handleGetTrajectory(gw))
+				r.Get("/logs", handleSessionLogs(gw))
+			})
+		})
+
+		// Admin endpoints
+		r.Group(func(r chi.Router) {
+			r.Use(authAdmin)
+			r.Get("/sessions", handleListSessions(gw))
+			r.Get("/summary", handleSummary(gw))
+			r.Get("/pools", handleListPools(gw))
+			r.Get("/managed/experiments", handleListExperiments(gw))
+			r.Post("/pools", handleCreatePool(gw))
+			r.Route("/pools/{name}", func(r chi.Router) {
+				r.Get("/", handleGetPool(gw))
+				r.Patch("/", handleScalePool(gw))
+				r.Delete("/", handleDeletePool(gw))
+				r.Post("/destroy", handleDestroyPool(gw))
+				r.Post("/prefetch", handlePrefetchPool(gw))
+				r.Get("/logs", handlePoolLogs(gw))
+			})
+			r.Post("/managed/sessions", handleCreateManagedSession(gw))
+			r.Delete("/managed/experiments/{id}", handleDeleteExperiment(gw))
+		})
+
+		// Experiment sessions listing (user role)
+		r.With(authUser).Get("/managed/experiments/{id}/sessions", handleListExperimentSessions(gw))
+	})
+
+	return r
+}
+
+func noopMiddleware(next http.Handler) http.Handler { return next }
+
+func requireAuthMiddleware(authCfg *AuthConfig, minRole Role) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return requireAuth(authCfg, minRole, next.ServeHTTP)
+	}
+}
+
+// sessionOwnership is a chi middleware that validates session existence and
+// caller ownership via the {id} URL parameter. Handlers behind this
+// middleware can skip checkOwnership entirely.
+func sessionOwnership(gw *Gateway) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			id := chi.URLParam(r, "id")
+			s, ok := gw.store.Get(id)
+			if !ok {
+				writeError(w, http.StatusNotFound, "session "+id+" not found")
+				return
+			}
+			s.mu.RLock()
+			ownerHash := s.ownerKeyHash
+			s.mu.RUnlock()
+			if err := CheckSessionOwnership(r.Context(), ownerHash); err != nil {
+				writeError(w, http.StatusForbidden, err.Error())
+				return
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
+// instrumentMiddleware records per-route HTTP request duration via Prometheus.
+func instrumentMiddleware(gw *Gateway) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if gw == nil || gw.metrics == nil {
+				next.ServeHTTP(w, r)
+				return
+			}
+			recorder := &metricResponseWriter{ResponseWriter: w, status: http.StatusOK}
+			start := time.Now()
+			defer func() {
+				pattern := chi.RouteContext(r.Context()).RoutePattern()
+				if pattern == "" {
+					pattern = r.URL.Path
+				}
+				gw.metrics.RecordHTTPRequestDuration(r.Method, pattern, strconv.Itoa(recorder.status), time.Since(start))
+			}()
+			next.ServeHTTP(recorder, r)
+		})
+	}
 }
 
 type metricResponseWriter struct {
@@ -135,59 +184,34 @@ func (w *metricResponseWriter) Flush() {
 	}
 }
 
-func instrumentGatewayRoute(gw *Gateway, route string, h http.HandlerFunc) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if gw == nil || gw.metrics == nil {
-			h(w, r)
-			return
-		}
-		recorder := &metricResponseWriter{ResponseWriter: w, status: http.StatusOK}
-		start := time.Now()
-		defer func() {
-			gw.metrics.RecordHTTPRequestDuration(r.Method, route, strconv.Itoa(recorder.status), time.Since(start))
-		}()
-		h(recorder, r)
-	}
+func (w *metricResponseWriter) Unwrap() http.ResponseWriter {
+	return w.ResponseWriter
 }
 
-// SetupInternalRoutes registers debug, metrics, and webhook routes on a
-// separate mux intended to be served on an internal-only port.
-func SetupInternalRoutes(mux *http.ServeMux, hc *HealthChecker) {
+// SetupInternalRoutes builds a chi.Router for the internal-only port
+// (metrics, debug, alertmanager webhook). No authentication.
+func SetupInternalRoutes(hc *HealthChecker) chi.Router {
+	r := chi.NewRouter()
+
 	if hc != nil {
-		mux.HandleFunc("GET /debug/health", hc.HandleDebugHealth())
-		mux.HandleFunc("POST /internal/alertmanager-webhook", hc.HandleAlertManagerWebhook())
+		r.Get("/debug/health", hc.HandleDebugHealth())
+		r.Post("/internal/alertmanager-webhook", hc.HandleAlertManagerWebhook())
 	}
 
-	mux.HandleFunc("GET /debug/pprof/", pprof.Index)
-	mux.HandleFunc("GET /debug/pprof/cmdline", pprof.Cmdline)
-	mux.HandleFunc("GET /debug/pprof/profile", pprof.Profile)
-	mux.HandleFunc("GET /debug/pprof/symbol", pprof.Symbol)
-	mux.HandleFunc("GET /debug/pprof/trace", pprof.Trace)
+	r.Get("/debug/pprof/", pprof.Index)
+	r.Get("/debug/pprof/cmdline", pprof.Cmdline)
+	r.Get("/debug/pprof/profile", pprof.Profile)
+	r.Get("/debug/pprof/symbol", pprof.Symbol)
+	r.Get("/debug/pprof/trace", pprof.Trace)
 
-	mux.Handle("GET /metrics", promhttp.HandlerFor(ctrlmetrics.Registry, promhttp.HandlerOpts{}))
+	r.Handle("/metrics", promhttp.HandlerFor(ctrlmetrics.Registry, promhttp.HandlerOpts{}))
 
-	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
+	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("ok"))
 	})
-}
 
-// checkOwnership is a helper that looks up the session and verifies ownership.
-// Returns the session on success, or writes an HTTP error and returns nil.
-func checkOwnership(gw *Gateway, w http.ResponseWriter, r *http.Request, sessionID string) *session {
-	s, ok := gw.store.Get(sessionID)
-	if !ok {
-		writeError(w, http.StatusNotFound, "session "+sessionID+" not found")
-		return nil
-	}
-	s.mu.RLock()
-	ownerHash := s.ownerKeyHash
-	s.mu.RUnlock()
-	if err := CheckSessionOwnership(r.Context(), ownerHash); err != nil {
-		writeError(w, http.StatusForbidden, err.Error())
-		return nil
-	}
-	return s
+	return r
 }
 
 func handleCreateSession(gw *Gateway) http.HandlerFunc {
@@ -219,7 +243,7 @@ func handleCreateSession(gw *Gateway) http.HandlerFunc {
 
 func handleGetSession(gw *Gateway) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		id := r.PathValue("id")
+		id := chi.URLParam(r, "id")
 		if s, ok := gw.store.Get(id); ok {
 			s.mu.RLock()
 			ownerHash := s.ownerKeyHash
@@ -281,10 +305,7 @@ func sessionDeletionDetail(reason string, deletedAt *time.Time) string {
 
 func handleDeleteSession(gw *Gateway) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		id := r.PathValue("id")
-		if checkOwnership(gw, w, r, id) == nil {
-			return
-		}
+		id := chi.URLParam(r, "id")
 		if err := gw.DeleteSession(r.Context(), id); err != nil {
 			writeError(w, httpStatusForError(err), err.Error())
 			return
@@ -295,10 +316,7 @@ func handleDeleteSession(gw *Gateway) http.HandlerFunc {
 
 func handleSuspendSession(gw *Gateway) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		id := r.PathValue("id")
-		if checkOwnership(gw, w, r, id) == nil {
-			return
-		}
+		id := chi.URLParam(r, "id")
 		if err := gw.SuspendSession(r.Context(), id); err != nil {
 			writeError(w, httpStatusForError(err), err.Error())
 			return
@@ -309,10 +327,7 @@ func handleSuspendSession(gw *Gateway) http.HandlerFunc {
 
 func handleResumeSession(gw *Gateway) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		id := r.PathValue("id")
-		if checkOwnership(gw, w, r, id) == nil {
-			return
-		}
+		id := chi.URLParam(r, "id")
 		if err := gw.ResumeSession(r.Context(), id); err != nil {
 			writeError(w, httpStatusForError(err), err.Error())
 			return
@@ -323,10 +338,7 @@ func handleResumeSession(gw *Gateway) http.HandlerFunc {
 
 func handleForkSession(gw *Gateway) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		id := r.PathValue("id")
-		if checkOwnership(gw, w, r, id) == nil {
-			return
-		}
+		id := chi.URLParam(r, "id")
 		var req ForkSessionRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
@@ -347,10 +359,7 @@ func handleForkSession(gw *Gateway) http.HandlerFunc {
 
 func handleGetIrohAddr(gw *Gateway) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		id := r.PathValue("id")
-		if checkOwnership(gw, w, r, id) == nil {
-			return
-		}
+		id := chi.URLParam(r, "id")
 		addr, err := gw.GetIrohAddr(r.Context(), id)
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, err.Error())
@@ -362,10 +371,7 @@ func handleGetIrohAddr(gw *Gateway) http.HandlerFunc {
 
 func handleExecute(gw *Gateway) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		id := r.PathValue("id")
-		if checkOwnership(gw, w, r, id) == nil {
-			return
-		}
+		id := chi.URLParam(r, "id")
 
 		var req ExecuteRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -395,11 +401,8 @@ func handleExecute(gw *Gateway) http.HandlerFunc {
 
 func handleGetExecuteOperation(gw *Gateway) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		id := r.PathValue("id")
-		if checkOwnership(gw, w, r, id) == nil {
-			return
-		}
-		operationID := r.PathValue("operationID")
+		id := chi.URLParam(r, "id")
+		operationID := chi.URLParam(r, "operationID")
 		if operationID == "" {
 			writeError(w, http.StatusBadRequest, "operationID is required")
 			return
@@ -415,11 +418,8 @@ func handleGetExecuteOperation(gw *Gateway) http.HandlerFunc {
 
 func handleExecuteContainer(gw *Gateway) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		id := r.PathValue("id")
-		if checkOwnership(gw, w, r, id) == nil {
-			return
-		}
-		container := r.PathValue("container")
+		id := chi.URLParam(r, "id")
+		container := chi.URLParam(r, "container")
 		if container == "" {
 			writeError(w, http.StatusBadRequest, "container is required")
 			return
@@ -445,18 +445,11 @@ func handleExecuteContainer(gw *Gateway) http.HandlerFunc {
 
 func handleUploadFile(gw *Gateway) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		id := r.PathValue("id")
-		if checkOwnership(gw, w, r, id) == nil {
-			return
-		}
+		id := chi.URLParam(r, "id")
 
-		filePath := r.PathValue("path")
+		filePath := r.Header.Get("X-ARL-Path")
 		if filePath == "" {
-			writeError(w, http.StatusBadRequest, "path is required")
-			return
-		}
-		if _, err := sanitizeFilePath(filePath); err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
+			writeError(w, http.StatusBadRequest, "X-ARL-Path header is required")
 			return
 		}
 
@@ -472,23 +465,22 @@ func handleUploadFile(gw *Gateway) http.HandlerFunc {
 
 func handleDownloadFile(gw *Gateway) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		id := r.PathValue("id")
-		if checkOwnership(gw, w, r, id) == nil {
-			return
-		}
+		id := chi.URLParam(r, "id")
 
-		filePath := r.PathValue("path")
-		if filePath == "" {
-			writeError(w, http.StatusBadRequest, "path is required")
-			return
+		var req struct {
+			Path string `json:"path"`
 		}
-		if _, err := sanitizeFilePath(filePath); err != nil {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 			writeError(w, http.StatusBadRequest, err.Error())
 			return
 		}
+		if req.Path == "" {
+			writeError(w, http.StatusBadRequest, "path is required")
+			return
+		}
 
-		streamWriter := &downloadResponseWriter{w: w, filePath: filePath}
-		result, err := gw.DownloadFile(r.Context(), id, filePath, streamWriter)
+		streamWriter := &downloadResponseWriter{w: w, filePath: req.Path}
+		result, err := gw.DownloadFile(r.Context(), id, req.Path, streamWriter)
 		if err != nil {
 			if !streamWriter.started {
 				writeError(w, http.StatusInternalServerError, err.Error())
@@ -533,149 +525,9 @@ func pathBaseForHeader(filePath string) string {
 	return strings.ReplaceAll(base, "\x00", "")
 }
 
-func handleStat(gw *Gateway) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		id := r.PathValue("id")
-		if checkOwnership(gw, w, r, id) == nil {
-			return
-		}
-
-		filePath := r.PathValue("path")
-		if filePath == "" {
-			writeError(w, http.StatusBadRequest, "path is required")
-			return
-		}
-
-		resp, err := gw.StatFile(r.Context(), id, filePath)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-
-		writeJSON(w, http.StatusOK, resp)
-	}
-}
-
-func handleListDir(gw *Gateway) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		id := r.PathValue("id")
-		if checkOwnership(gw, w, r, id) == nil {
-			return
-		}
-
-		filePath := r.PathValue("path")
-		if filePath == "" {
-			writeError(w, http.StatusBadRequest, "path is required")
-			return
-		}
-
-		recursive := r.URL.Query().Get("recursive") == "true"
-
-		resp, err := gw.ListDir(r.Context(), id, filePath, recursive)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-
-		writeJSON(w, http.StatusOK, resp)
-	}
-}
-
-// --- v2 file handlers: path in JSON body -----------------------------------
-
-type filePathRequest struct {
-	Path string `json:"path"`
-}
-
-func handleReadFile(gw *Gateway) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		id := r.PathValue("id")
-		if checkOwnership(gw, w, r, id) == nil {
-			return
-		}
-		var req filePathRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid JSON body")
-			return
-		}
-		if req.Path == "" {
-			writeError(w, http.StatusBadRequest, "path is required")
-			return
-		}
-
-		streamWriter := &downloadResponseWriter{w: w, filePath: req.Path}
-		result, err := gw.DownloadFile(r.Context(), id, req.Path, streamWriter)
-		if err != nil {
-			if !streamWriter.started {
-				writeError(w, http.StatusInternalServerError, err.Error())
-			}
-			return
-		}
-		streamWriter.ensureStarted()
-		w.Header().Set("X-ARL-Size-Bytes", strconv.FormatInt(result.SizeBytes, 10))
-		w.Header().Set("X-ARL-SHA256", result.SHA256)
-	}
-}
-
-func handleStatFile(gw *Gateway) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		id := r.PathValue("id")
-		if checkOwnership(gw, w, r, id) == nil {
-			return
-		}
-		var req filePathRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid JSON body")
-			return
-		}
-		if req.Path == "" {
-			writeError(w, http.StatusBadRequest, "path is required")
-			return
-		}
-
-		resp, err := gw.StatFile(r.Context(), id, req.Path)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		writeJSON(w, http.StatusOK, resp)
-	}
-}
-
-func handleListDirV2(gw *Gateway) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		id := r.PathValue("id")
-		if checkOwnership(gw, w, r, id) == nil {
-			return
-		}
-		var req struct {
-			Path      string `json:"path"`
-			Recursive bool   `json:"recursive,omitempty"`
-		}
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeError(w, http.StatusBadRequest, "invalid JSON body")
-			return
-		}
-		if req.Path == "" {
-			writeError(w, http.StatusBadRequest, "path is required")
-			return
-		}
-
-		resp, err := gw.ListDir(r.Context(), id, req.Path, req.Recursive)
-		if err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-		writeJSON(w, http.StatusOK, resp)
-	}
-}
-
 func handleWriteStdin(gw *Gateway) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		id := r.PathValue("id")
-		if checkOwnership(gw, w, r, id) == nil {
-			return
-		}
+		id := chi.URLParam(r, "id")
 
 		var req WriteStdinRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -699,10 +551,7 @@ func handleWriteStdin(gw *Gateway) http.HandlerFunc {
 
 func handleReplay(gw *Gateway) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		id := r.PathValue("id")
-		if checkOwnership(gw, w, r, id) == nil {
-			return
-		}
+		id := chi.URLParam(r, "id")
 
 		var req ReplayRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -725,10 +574,7 @@ func handleReplay(gw *Gateway) http.HandlerFunc {
 
 func handleRestore(gw *Gateway) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		id := r.PathValue("id")
-		if checkOwnership(gw, w, r, id) == nil {
-			return
-		}
+		id := chi.URLParam(r, "id")
 
 		var req RestoreRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -753,10 +599,7 @@ func handleRestore(gw *Gateway) http.HandlerFunc {
 
 func handleGetHistory(gw *Gateway) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		id := r.PathValue("id")
-		if checkOwnership(gw, w, r, id) == nil {
-			return
-		}
+		id := chi.URLParam(r, "id")
 		records, err := gw.GetHistory(id)
 		if err != nil {
 			writeError(w, http.StatusNotFound, err.Error())
@@ -768,10 +611,7 @@ func handleGetHistory(gw *Gateway) http.HandlerFunc {
 
 func handleGetTrajectory(gw *Gateway) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		id := r.PathValue("id")
-		if checkOwnership(gw, w, r, id) == nil {
-			return
-		}
+		id := chi.URLParam(r, "id")
 		data, err := gw.ExportTrajectory(id)
 		if err != nil {
 			writeError(w, http.StatusNotFound, err.Error())
@@ -807,7 +647,7 @@ func handleCreatePool(gw *Gateway) http.HandlerFunc {
 
 func handleGetPool(gw *Gateway) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		name := r.PathValue("name")
+		name := chi.URLParam(r, "name")
 		ns := r.URL.Query().Get("namespace")
 		info, err := gw.GetPool(r.Context(), name, ns)
 		if err != nil {
@@ -824,7 +664,7 @@ func handleGetPool(gw *Gateway) http.HandlerFunc {
 
 func handleScalePool(gw *Gateway) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		name := r.PathValue("name")
+		name := chi.URLParam(r, "name")
 
 		var req ScalePoolRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -849,7 +689,7 @@ func handleScalePool(gw *Gateway) http.HandlerFunc {
 
 func handleDeletePool(gw *Gateway) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		name := r.PathValue("name")
+		name := chi.URLParam(r, "name")
 		ns := r.URL.Query().Get("namespace")
 
 		if err := gw.DeletePool(r.Context(), name, ns); err != nil {
@@ -863,7 +703,7 @@ func handleDeletePool(gw *Gateway) http.HandlerFunc {
 
 func handleDestroyPool(gw *Gateway) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		name := r.PathValue("name")
+		name := chi.URLParam(r, "name")
 		ns := r.URL.Query().Get("namespace")
 
 		if err := gw.DestroyPool(r.Context(), name, ns); err != nil {
@@ -877,7 +717,7 @@ func handleDestroyPool(gw *Gateway) http.HandlerFunc {
 
 func handlePrefetchPool(gw *Gateway) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		name := r.PathValue("name")
+		name := chi.URLParam(r, "name")
 
 		var req PrefetchPoolRequest
 		if err := json.NewDecoder(r.Body).Decode(&req); err != nil && err != io.EOF {
@@ -931,10 +771,7 @@ func parseLogParams(r *http.Request) (bool, int32) {
 
 func handleSessionLogs(gw *Gateway) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		id := r.PathValue("id")
-		if checkOwnership(gw, w, r, id) == nil {
-			return
-		}
+		id := chi.URLParam(r, "id")
 		follow, tail := parseLogParams(r)
 
 		ch, err := gw.StreamSessionLogs(r.Context(), id, follow, tail)
@@ -973,7 +810,7 @@ type poolLogJSON struct {
 
 func handlePoolLogs(gw *Gateway) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		name := r.PathValue("name")
+		name := chi.URLParam(r, "name")
 		ns := r.URL.Query().Get("namespace")
 		follow, tail := parseLogParams(r)
 
@@ -1115,7 +952,7 @@ func handleCreateManagedSession(gw *Gateway) http.HandlerFunc {
 
 func handleListExperimentSessions(gw *Gateway) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		id := r.PathValue("id")
+		id := chi.URLParam(r, "id")
 		sessions := gw.ListExperimentSessions(id)
 		writeJSON(w, http.StatusOK, sessions)
 	}
@@ -1123,7 +960,7 @@ func handleListExperimentSessions(gw *Gateway) http.HandlerFunc {
 
 func handleDeleteExperiment(gw *Gateway) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		id := r.PathValue("id")
+		id := chi.URLParam(r, "id")
 		deleted, err := gw.DeleteExperiment(r.Context(), id)
 		resp := map[string]any{"deleted": deleted}
 		if err != nil {

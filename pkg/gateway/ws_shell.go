@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/gorilla/websocket"
 
 	"github.com/Lincyaw/agent-env/pkg/interfaces"
@@ -63,21 +64,8 @@ func handleShell(gw *Gateway, authCfg *AuthConfig) http.HandlerFunc {
 	upgrader := newUpgrader(authCfg)
 
 	return func(w http.ResponseWriter, r *http.Request) {
-		id := r.PathValue("id")
+		id := chi.URLParam(r, "id")
 
-		s, ok := gw.store.Get(id)
-		if !ok {
-			http.Error(w, "session not found", http.StatusNotFound)
-			return
-		}
-		s.mu.RLock()
-		ownerHash := s.ownerKeyHash
-		s.mu.RUnlock()
-
-		if err := CheckSessionOwnership(r.Context(), ownerHash); err != nil {
-			http.Error(w, err.Error(), http.StatusForbidden)
-			return
-		}
 		_, podIP, releaseSession, err := gw.acquireSessionPodIP(r.Context(), id)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusNotFound)
