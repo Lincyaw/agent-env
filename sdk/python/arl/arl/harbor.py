@@ -137,6 +137,9 @@ class ArlEnvironment(BaseEnvironment):
             memory_request=True,
         )
 
+    async def _apply_network_policy(self, network_policy: Any) -> None:
+        pass
+
     def _validate_definition(self) -> None:
         if self.task_env_config.docker_image:
             return
