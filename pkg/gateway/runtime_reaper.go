@@ -134,6 +134,19 @@ func (g *Gateway) reapRuntimeClaim(ctx context.Context, claim *extensionsv1beta1
 			if record.found && !record.deleted && record.session != nil {
 				log.Printf("Runtime reaper: re-hydrated session %s from durable store for claim %s/%s; skipping orphan release",
 					sessionID, claim.Namespace, claim.Name)
+				record.session.mu.Lock()
+				record.session.Runtime.ClaimName = claim.Name
+				record.session.Runtime.Namespace = claim.Namespace
+				record.session.Runtime.PoolRef = claim.Spec.WarmPoolRef.Name
+				record.session.Runtime.SandboxName = claim.Status.SandboxStatus.Name
+				record.session.Runtime.Backend = runtimeBackendSandboxClaim
+				if podIP := firstString(claim.Status.SandboxStatus.PodIPs); podIP != "" {
+					record.session.Runtime.PodIP = podIP
+					record.session.Info.PodIP = podIP
+				}
+				record.session.mu.Unlock()
+				g.store.Set(sessionID, record.session)
+				g.store.IncrCount(1)
 				s, hasSession = record.session, true
 			}
 		}

@@ -116,6 +116,9 @@ func sessionOwnership(gw *Gateway) func(http.Handler) http.Handler {
 			id := chi.URLParam(r, "id")
 			s, ok := gw.store.Get(id)
 			if !ok {
+				s, ok = gw.tryRecoverSession(r.Context(), id)
+			}
+			if !ok {
 				writeError(w, http.StatusNotFound, "session "+id+" not found")
 				return
 			}
@@ -244,7 +247,11 @@ func handleCreateSession(gw *Gateway) http.HandlerFunc {
 func handleGetSession(gw *Gateway) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := chi.URLParam(r, "id")
-		if s, ok := gw.store.Get(id); ok {
+		s, ok := gw.store.Get(id)
+		if !ok {
+			s, ok = gw.tryRecoverSession(r.Context(), id)
+		}
+		if ok {
 			s.mu.RLock()
 			ownerHash := s.ownerKeyHash
 			s.mu.RUnlock()

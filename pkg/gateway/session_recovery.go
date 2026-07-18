@@ -2,12 +2,13 @@ package gateway
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"strings"
 	"time"
 
-	"k8s.io/apimachinery/pkg/api/errors"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/types"
 	extensionsv1beta1 "sigs.k8s.io/agent-sandbox/extensions/api/v1beta1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
@@ -58,7 +59,7 @@ func (g *Gateway) recoverSessionsFromDurableStore(ctx context.Context) (int, err
 			resolved, err := g.runtimeAllocator.Resolve(ctx, allocation, sessionID)
 			if err != nil {
 				log.Printf("Warning: dropping recovered session %s: %v", sessionID, err)
-				if releaseErr := g.runtimeAllocator.Release(ctx, allocation); releaseErr != nil && !errors.IsNotFound(releaseErr) {
+				if releaseErr := g.runtimeAllocator.Release(ctx, allocation); releaseErr != nil && !apierrors.IsNotFound(releaseErr) {
 					log.Printf("Warning: failed to release runtime for unrecoverable session %s: %v", sessionID, releaseErr)
 				}
 				g.markSessionDeleted(s, "recovery_runtime_lost")
@@ -135,8 +136,13 @@ func (g *Gateway) recoverSessionsFromRuntimeBindings(ctx context.Context) (int, 
 		}
 		resolved, err := g.runtimeAllocator.Resolve(ctx, allocation, sessionID)
 		if err != nil {
-			log.Printf("Warning: cannot recover session %s from claim %s/%s: %v", sessionID, claim.Namespace, claim.Name, err)
-			continue
+			var notReady *RuntimeNotReadyError
+			if !errors.As(err, &notReady) {
+				log.Printf("Warning: cannot recover session %s from claim %s/%s: %v", sessionID, claim.Namespace, claim.Name, err)
+				continue
+			}
+			log.Printf("Recovering session %s from claim %s/%s with pending runtime: %v", sessionID, claim.Namespace, claim.Name, err)
+			resolved = &allocation
 		}
 
 		s, ok, err := g.recoverSessionFromLiveClaim(ctx, sessionID, *resolved, claim)
@@ -170,7 +176,7 @@ func (g *Gateway) recoverSessionFromLiveClaim(ctx context.Context, sessionID str
 		}
 		if record.deleted {
 			log.Printf("Warning: skipping live claim %s/%s for deleted session %s", claim.Namespace, claim.Name, sessionID)
-			if releaseErr := g.runtimeAllocator.Release(ctx, resolved); releaseErr != nil && !errors.IsNotFound(releaseErr) {
+			if releaseErr := g.runtimeAllocator.Release(ctx, resolved); releaseErr != nil && !apierrors.IsNotFound(releaseErr) {
 				log.Printf("Warning: failed to release live claim for deleted session %s: %v", sessionID, releaseErr)
 			}
 			return nil, false, nil
@@ -271,6 +277,44 @@ func recoveredLastActivity(claim *extensionsv1beta1.SandboxClaim, fallback time.
 		}
 	}
 	return fallback
+}
+
+// tryRecoverSession attempts on-demand recovery for a single session that is
+// missing from the in-memory cache. It checks the durable store (Redis) and
+// validates that a live SandboxClaim still exists for the session.
+// Returns the session and true if recovery succeeds.
+func (g *Gateway) tryRecoverSession(ctx context.Context, sessionID string) (*session, bool) {
+	targeted, ok := g.store.(targetedRecoverableSessionStore)
+	if !ok {
+		return nil, false
+	}
+	record, err := targeted.RecoverSession(ctx, sessionID)
+	if err != nil || !record.found || record.deleted || record.session == nil {
+		return nil, false
+	}
+	s := record.session
+
+	if g.runtimeAllocator != nil {
+		s.mu.RLock()
+		allocation := s.runtimeAllocation()
+		s.mu.RUnlock()
+
+		if allocation.ClaimName != "" && allocation.Namespace != "" {
+			if resolved, err := g.runtimeAllocator.Resolve(ctx, allocation, sessionID); err == nil {
+				s.mu.Lock()
+				s.Runtime = *resolved
+				s.Info.PodIP = resolved.PodIP
+				s.Info.PodName = resolved.PodName
+				s.Info.SandboxName = resolved.SandboxName
+				s.mu.Unlock()
+			}
+		}
+	}
+
+	g.store.Set(sessionID, s)
+	g.store.IncrCount(1)
+	log.Printf("On-demand recovery: restored session %s from durable store", sessionID)
+	return s, true
 }
 
 func (g *Gateway) recoveredSessionInfo(ctx context.Context, sessionID string, allocation RuntimeAllocation, claim *extensionsv1beta1.SandboxClaim) SessionInfo {

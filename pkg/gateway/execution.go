@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -29,6 +30,8 @@ func resolveStepTimeoutSeconds(step StepRequest) int32 {
 	return 0
 }
 
+const runtimeReadyPollInterval = 2 * time.Second
+
 func (g *Gateway) resolveSessionPodIP(ctx context.Context, sessionID string) (*session, string, error) {
 	s, ok := g.store.Get(sessionID)
 	if !ok {
@@ -45,9 +48,9 @@ func (g *Gateway) resolveSessionPodIP(ctx context.Context, sessionID string) (*s
 	if g.runtimeAllocator == nil {
 		return nil, "", fmt.Errorf("runtime allocator not configured")
 	}
-	resolved, err := g.runtimeAllocator.Resolve(ctx, s.runtimeAllocation(), sessionID)
+
+	resolved, err := g.resolveWithRetry(ctx, s, sessionID)
 	if err != nil {
-		g.dropSession(sessionID, s)
 		return nil, "", err
 	}
 
@@ -66,6 +69,28 @@ func (g *Gateway) resolveSessionPodIP(ctx context.Context, sessionID string) (*s
 	}
 
 	return s, resolved.PodIP, nil
+}
+
+// resolveWithRetry calls Resolve and polls when the runtime is temporarily
+// not ready (e.g. sandbox still binding after a gateway restart). The caller's
+// context controls the deadline so the HTTP request timeout is respected.
+func (g *Gateway) resolveWithRetry(ctx context.Context, s *session, sessionID string) (*RuntimeAllocation, error) {
+	for {
+		resolved, err := g.runtimeAllocator.Resolve(ctx, s.runtimeAllocation(), sessionID)
+		if err == nil {
+			return resolved, nil
+		}
+		var notReady *RuntimeNotReadyError
+		if !errors.As(err, &notReady) {
+			g.dropSession(sessionID, s)
+			return nil, err
+		}
+		select {
+		case <-ctx.Done():
+			return nil, fmt.Errorf("session %s runtime did not become ready: %w", sessionID, ctx.Err())
+		case <-time.After(runtimeReadyPollInterval):
+		}
+	}
 }
 
 func (g *Gateway) acquireSessionPodIP(ctx context.Context, sessionID string) (*session, string, func(), error) {

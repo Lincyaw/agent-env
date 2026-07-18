@@ -293,7 +293,7 @@ func (a *SandboxClaimRuntimeAllocator) Resolve(ctx context.Context, allocation R
 		return nil, err
 	}
 	if !ready {
-		return nil, fmt.Errorf("session %s sandbox claim %s/%s is not ready", sessionID, allocation.Namespace, allocation.ClaimName)
+		return nil, &RuntimeNotReadyError{SessionID: sessionID, ClaimName: allocation.ClaimName, Namespace: allocation.Namespace}
 	}
 	return resolved, nil
 }
