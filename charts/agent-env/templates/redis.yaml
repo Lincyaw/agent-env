@@ -38,7 +38,7 @@ spec:
       {{- end }}
       containers:
         - name: redis
-          image: "{{ .Values.redis.image.repository }}:{{ .Values.redis.image.tag }}"
+          image: "{{ include "agent-env.repo" (dict "repo" .Values.redis.image.repository "global" .Values.global) }}:{{ .Values.redis.image.tag }}"
           imagePullPolicy: {{ .Values.redis.image.pullPolicy | default "IfNotPresent" }}
           {{- if $redisArgs }}
           args:

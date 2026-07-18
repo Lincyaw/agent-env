@@ -49,6 +49,32 @@ app.kubernetes.io/instance: {{ .Release.Name }}
 {{- end }}
 
 {{/*
+Rewrite a repository path under global.imageRegistry.
+When global.imageRegistry is set, the first path segment is replaced if it
+looks like a registry (contains a dot), otherwise the global registry is
+prepended. Examples with global.imageRegistry=pair-cn.cr.volces.com:
+  docker.io/library/redis       → pair-cn.cr.volces.com/library/redis
+  docker.io/prom/prometheus     → pair-cn.cr.volces.com/prom/prometheus
+  n0computer/iroh-relay         → pair-cn.cr.volces.com/n0computer/iroh-relay
+  arl-gateway                   → pair-cn.cr.volces.com/arl-gateway
+*/}}
+{{- define "agent-env.repo" -}}
+{{- $repo := .repo -}}
+{{- $globalReg := "" -}}
+{{- if .global }}{{ $globalReg = .global.imageRegistry | default "" }}{{ end -}}
+{{- if $globalReg -}}
+  {{- $parts := splitList "/" $repo -}}
+  {{- if and (ge (len $parts) 2) (or (contains "." (index $parts 0)) (contains ":" (index $parts 0))) -}}
+    {{- printf "%s/%s" $globalReg (join "/" (rest $parts)) -}}
+  {{- else -}}
+    {{- printf "%s/%s" $globalReg $repo -}}
+  {{- end -}}
+{{- else -}}
+  {{- $repo -}}
+{{- end -}}
+{{- end }}
+
+{{/*
 ClickHouse host
 */}}
 {{- define "agent-env.clickhouseHost" -}}

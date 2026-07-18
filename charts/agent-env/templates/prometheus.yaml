@@ -168,7 +168,7 @@ spec:
         runAsNonRoot: true
       containers:
         - name: prometheus
-          image: {{ .Values.prometheus.image }}
+          image: "{{ include "agent-env.repo" (dict "repo" .Values.prometheus.image.repository "global" .Values.global) }}:{{ .Values.prometheus.image.tag }}"
           imagePullPolicy: IfNotPresent
           args:
             - --config.file=/etc/prometheus/prometheus.yml

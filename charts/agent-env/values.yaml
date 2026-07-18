@@ -1,6 +1,14 @@
 # Default values for the agent-env gateway stack.
 # This is a YAML-formatted file.
 
+global:
+  # Override the registry for ALL images (runtime + infra).
+  # When set, replaces the registry prefix of every image reference.
+  # Examples:
+  #   "pair-cn-guangzhou.cr.volces.com" — use the China mainland mirror
+  #   "" (default) — use each image's own registry (docker.io)
+  imageRegistry: ""
+
 agentSandbox:
   # Installs the upstream agent-sandbox chart as a dependency.
   # Leave this disabled when the cluster already has a shared controller.
@@ -14,7 +22,7 @@ agentSandbox:
     # Must be reachable from the target cluster. The upstream default is
     # registry.k8s.io/agent-sandbox/agent-sandbox-controller, but production
     # clusters should use the colocated registry to avoid external pulls.
-    repository: pair-diag-cn-guangzhou.cr.volces.com/pair/agent-sandbox-controller
+    repository: docker.io/opspai/agent-sandbox-controller
     # Required when agentSandbox.enabled=true. Use the same immutable tag as
     # the other deployment images, or a published upstream-compatible tag.
     tag: ""
@@ -211,7 +219,7 @@ redis:
   # Deploy a single-instance Redis in-cluster. Set to false to use an external Redis.
   deploy: true
   image:
-    repository: pair-diag-cn-guangzhou.cr.volces.com/pair/redis
+    repository: docker.io/library/redis
     tag: "8-alpine"
     pullPolicy: IfNotPresent
   addr: "redis:6379"       # Only used when deploy=false (external Redis)
@@ -264,7 +272,7 @@ clickhouse:
   enabled: false
   # Image (use private registry since nodes cannot access Docker Hub)
   image:
-    repository: pair-diag-cn-guangzhou.cr.volces.com/pair/clickhouse-server
+    repository: docker.io/clickhouse/clickhouse-server
     tag: "24.8"
     pullPolicy: IfNotPresent
   # Connection settings
@@ -303,7 +311,9 @@ apiPriority:
 # ─────────────────────────────────────────────────────────────────────────────
 alerting:
   enabled: true
-  image: pair-diag-cn-guangzhou.cr.volces.com/pair/alertmanager:v0.27.0
+  image:
+    repository: docker.io/prom/alertmanager
+    tag: v0.27.0
   feishu:
     webhookURL: ""  # 飞书自定义机器人 Webhook URL
   resources:
@@ -319,7 +329,9 @@ alerting:
 # ─────────────────────────────────────────────────────────────────────────────
 prometheus:
   enabled: true
-  image: pair-diag-cn-guangzhou.cr.volces.com/pair/prometheus:v3.10.0
+  image:
+    repository: docker.io/prom/prometheus
+    tag: v3.10.0
   retentionTime: "3d"
   service:
     type: ClusterIP
@@ -340,7 +352,9 @@ prometheus:
 # ─────────────────────────────────────────────────────────────────────────────
 grafana:
   enabled: true
-  image: pair-diag-cn-guangzhou.cr.volces.com/pair/grafana:12.3.1
+  image:
+    repository: docker.io/grafana/grafana
+    tag: "12.3.1"
   adminUser: admin
   # REQUIRED when grafana.enabled=true. Do not use a default password.
   adminPassword: ""

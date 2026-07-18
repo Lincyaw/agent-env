@@ -60,7 +60,7 @@ spec:
         runAsNonRoot: true
       containers:
         - name: alertmanager
-          image: {{ .Values.alerting.image }}
+          image: "{{ include "agent-env.repo" (dict "repo" .Values.alerting.image.repository "global" .Values.global) }}:{{ .Values.alerting.image.tag }}"
           imagePullPolicy: IfNotPresent
           args:
             - --config.file=/etc/alertmanager/alertmanager.yml

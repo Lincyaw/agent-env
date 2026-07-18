@@ -140,7 +140,7 @@ spec:
       serviceAccountName: {{ $serviceAccountName }}
       containers:
         - name: image-locality-scheduler
-          image: "{{ .Values.imageLocalityScheduler.image.repository }}:{{ .Values.imageLocalityScheduler.image.tag | default .Chart.AppVersion }}"
+          image: "{{ include "agent-env.repo" (dict "repo" .Values.imageLocalityScheduler.image.repository "global" .Values.global) }}:{{ .Values.imageLocalityScheduler.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.imageLocalityScheduler.image.pullPolicy }}
           args:
             - --config=/etc/agent-env/scheduler-config.yaml

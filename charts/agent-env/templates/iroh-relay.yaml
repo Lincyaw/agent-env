@@ -21,7 +21,7 @@ spec:
     spec:
       containers:
         - name: iroh-relay
-          image: "{{ .Values.irohRelay.image.repository }}:{{ .Values.irohRelay.image.tag }}"
+          image: "{{ include "agent-env.repo" (dict "repo" .Values.irohRelay.image.repository "global" .Values.global) }}:{{ .Values.irohRelay.image.tag }}"
           imagePullPolicy: {{ .Values.irohRelay.image.pullPolicy }}
           args: ["--dev"]
           ports:

@@ -13,6 +13,10 @@ metadata:
     app.kubernetes.io/component: gateway
 spec:
   replicas: {{ .Values.gateway.replicaCount }}
+  {{- if .Values.checkpoint.enabled }}
+  strategy:
+    type: Recreate
+  {{- end }}
   selector:
     matchLabels:
       {{- include "agent-env.selectorLabels" . | nindent 6 }}
@@ -23,6 +27,10 @@ spec:
         {{- include "agent-env.selectorLabels" . | nindent 8 }}
         app.kubernetes.io/component: gateway
     spec:
+      {{- if .Values.checkpoint.enabled }}
+      securityContext:
+        fsGroup: 65532
+      {{- end }}
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- toYaml . | nindent 8 }}
@@ -30,7 +38,7 @@ spec:
       serviceAccountName: {{ .Values.gateway.serviceAccount.name | default (printf "%s-gateway" (include "agent-env.fullname" .)) }}
       containers:
         - name: gateway
-          image: "{{ .Values.gateway.image.repository }}:{{ .Values.gateway.image.tag | default .Chart.AppVersion }}"
+          image: "{{ include "agent-env.repo" (dict "repo" .Values.gateway.image.repository "global" .Values.global) }}:{{ .Values.gateway.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.gateway.image.pullPolicy }}
           args:
             - --port={{ .Values.gateway.port }}
@@ -64,11 +72,11 @@ spec:
             - name: GRPC_AUTH_SECRET_NAME
               value: {{ include "agent-env.grpcTokenSecretName" . | quote }}
             - name: SIDECAR_IMAGE
-              value: "{{ .Values.sidecar.image.repository }}:{{ .Values.sidecar.image.tag | default .Chart.AppVersion }}"
+              value: "{{ include "agent-env.repo" (dict "repo" .Values.sidecar.image.repository "global" .Values.global) }}:{{ .Values.sidecar.image.tag | default .Chart.AppVersion }}"
             - name: SIDECAR_HTTP_PORT
               value: "{{ .Values.sidecar.httpPort }}"
             - name: EXECUTOR_AGENT_IMAGE
-              value: "{{ .Values.executorAgent.image.repository }}:{{ .Values.executorAgent.image.tag | default .Chart.AppVersion }}"
+              value: "{{ include "agent-env.repo" (dict "repo" .Values.executorAgent.image.repository "global" .Values.global) }}:{{ .Values.executorAgent.image.tag | default .Chart.AppVersion }}"
             {{- if .Values.executorAgent.protocol }}
             - name: EXECUTOR_PROTOCOL
               value: "{{ .Values.executorAgent.protocol }}"

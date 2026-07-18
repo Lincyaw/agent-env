@@ -62,7 +62,7 @@ spec:
         runAsNonRoot: true
       containers:
         - name: grafana
-          image: {{ .Values.grafana.image }}
+          image: "{{ include "agent-env.repo" (dict "repo" .Values.grafana.image.repository "global" .Values.global) }}:{{ .Values.grafana.image.tag }}"
           imagePullPolicy: IfNotPresent
           env:
             - name: GF_SECURITY_ADMIN_USER

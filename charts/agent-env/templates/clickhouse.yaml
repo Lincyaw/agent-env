@@ -26,7 +26,7 @@ spec:
       {{- end }}
       containers:
         - name: clickhouse
-          image: "{{ .Values.clickhouse.image.repository }}:{{ .Values.clickhouse.image.tag }}"
+          image: "{{ include "agent-env.repo" (dict "repo" .Values.clickhouse.image.repository "global" .Values.global) }}:{{ .Values.clickhouse.image.tag }}"
           imagePullPolicy: {{ .Values.clickhouse.image.pullPolicy | default "IfNotPresent" }}
           env:
             - name: CLICKHOUSE_DB
