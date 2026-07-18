@@ -169,18 +169,6 @@ func (g *Gateway) sandboxPodSpec(
 					{Name: "arl-bin", MountPath: "/arl-bin"},
 				},
 			},
-			{
-				Name:            "seed-workspace",
-				Image:           image,
-				ImagePullPolicy: corev1.PullIfNotPresent,
-				Command: []string{"sh", "-c", fmt.Sprintf(
-					"if [ -d %s ] && [ \"$(ls -A %s 2>/dev/null)\" ]; then cp -a %s/. /tmp/arl-workspace-seed/; fi",
-					shellQuote(workspaceDir), shellQuote(workspaceDir), shellQuote(workspaceDir),
-				)},
-				VolumeMounts: []corev1.VolumeMount{
-					{Name: "workspace", MountPath: "/tmp/arl-workspace-seed"},
-				},
-			},
 		},
 		Containers: []corev1.Container{
 			{
@@ -191,7 +179,6 @@ func (g *Gateway) sandboxPodSpec(
 				Env:             g.executorEnv(),
 				Resources:       g.ensureEphemeralStorage(resources),
 				VolumeMounts: []corev1.VolumeMount{
-					{Name: "workspace", MountPath: workspaceDir},
 					{Name: "arl-bin", MountPath: "/arl-bin"},
 					{Name: "arl-socket", MountPath: "/var/run/arl"},
 				},
@@ -238,7 +225,6 @@ func (g *Gateway) sandboxPodSpec(
 			},
 		},
 		Volumes: []corev1.Volume{
-			{Name: "workspace", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
 			{Name: "arl-bin", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
 			{Name: "arl-socket", VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}}},
 		},
@@ -389,6 +375,8 @@ func (g *Gateway) applyContainerSecurityPolicy(pod *corev1.PodSpec) {
 				sc.Capabilities = &corev1.Capabilities{}
 			}
 			sc.Capabilities.Add = append(sc.Capabilities.Add, "SYS_ADMIN")
+			unconfined := corev1.AppArmorProfileTypeUnconfined
+			sc.AppArmorProfile = &corev1.AppArmorProfile{Type: unconfined}
 		}
 	}
 }

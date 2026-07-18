@@ -332,11 +332,63 @@ func (g *Gateway) persistCheckpointSteps(sessionID, podIP string, stepIndices []
 	for _, idx := range stepIndices {
 		checkpointStep := idx + 1
 		if g.checkpointStore.HasStep(sessionID, checkpointStep) {
+			log.Printf("Checkpoint persist session %s step %d: already exists, skipping", sessionID, checkpointStep)
 			continue
 		}
 		if err := g.persistSingleCheckpointStep(sessionID, podIP, checkpointStep); err != nil {
 			log.Printf("Checkpoint persist session %s step %d: %v", sessionID, checkpointStep, err)
+		} else {
+			log.Printf("Checkpoint persist session %s step %d: saved to store", sessionID, checkpointStep)
 		}
+	}
+}
+
+func (g *Gateway) persistAllCheckpoints(sessionID, podIP string) {
+	sidecarHTTPPort := g.gwConfig.SidecarHTTPPort
+	if sidecarHTTPPort == 0 {
+		sidecarHTTPPort = 8080
+	}
+	listURL := fmt.Sprintf("http://%s:%d/v1/checkpoints", podIP, sidecarHTTPPort)
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, listURL, nil)
+	if err != nil {
+		log.Printf("Checkpoint persist-all %s: build list request: %v", sessionID, err)
+		return
+	}
+	resp, err := (&http.Client{Timeout: 30 * time.Second}).Do(req)
+	if err != nil {
+		log.Printf("Checkpoint persist-all %s: list: %v", sessionID, err)
+		return
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		log.Printf("Checkpoint persist-all %s: list HTTP %s", sessionID, resp.Status)
+		return
+	}
+
+	var listResp struct {
+		Steps []int `json:"steps"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&listResp); err != nil {
+		log.Printf("Checkpoint persist-all %s: decode: %v", sessionID, err)
+		return
+	}
+
+	persisted := 0
+	for _, step := range listResp.Steps {
+		if g.checkpointStore.HasStep(sessionID, step) {
+			continue
+		}
+		if err := g.persistSingleCheckpointStep(sessionID, podIP, step); err != nil {
+			log.Printf("Checkpoint persist-all %s step %d: %v", sessionID, step, err)
+		} else {
+			persisted++
+		}
+	}
+	if persisted > 0 {
+		log.Printf("Checkpoint persist-all %s: saved %d/%d steps", sessionID, persisted, len(listResp.Steps))
 	}
 }
 

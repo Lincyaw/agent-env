@@ -299,7 +299,7 @@ fn handle_messages(
             }
             proto::request::Kind::Write(params) => {
                 log::info!("[v2:write] tag={tag} path={}", params.path);
-                handle_write(tag, params, workspace, &writer, &mut reader);
+                handle_write(tag, params, workspace, &writer, &mut reader, checkpointer);
             }
             proto::request::Kind::Stat(params) => {
                 log::info!("[v2:stat] tag={tag} path={}", params.path);
@@ -965,6 +965,7 @@ fn handle_write(
     workspace: &str,
     writer: &SharedWriter,
     reader: &mut impl io::Read,
+    checkpointer: &Option<Arc<Checkpointer>>,
 ) {
     let target = match resolve_workspace_path(std::path::Path::new(workspace), &params.path) {
         Ok(p) => p,
@@ -1045,6 +1046,13 @@ fn handle_write(
         fs::rename(&tmp_path, &target)
             .map_err(|e| format!("rename: {e}"))?;
 
+        // Record in checkpoint: copy file into a new step upper dir
+        if let Some(ckpt) = checkpointer {
+            if let Err(e) = record_write_checkpoint(ckpt, &target) {
+                log::warn!("[checkpoint] record write failed: {e}");
+            }
+        }
+
         let _ = send_response(
             writer,
             tag,
@@ -1060,6 +1068,18 @@ fn handle_write(
         let _ = fs::remove_file(&tmp_path);
         let _ = send_error(writer, tag, 9, e);
     }
+}
+
+fn record_write_checkpoint(ckpt: &Checkpointer, target: &std::path::Path) -> io::Result<()> {
+    let step = ckpt.next_step();
+    let upper = ckpt.step_upper_dir(step);
+    let rel = target.strip_prefix("/").unwrap_or(target);
+    let dst = upper.join(rel);
+    if let Some(parent) = dst.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::copy(target, &dst)?;
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------

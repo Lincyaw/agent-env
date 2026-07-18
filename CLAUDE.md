@@ -13,11 +13,12 @@ make arch-check         # Validate architecture docs
 helm dependency build charts/agent-env
 helm lint charts/agent-env --set auth.enabled=false --set grafana.adminPassword=test-grafana-password
 
-# Build and render deployment manifests with an explicit registry/tag:
+# Build and push images to Docker Hub, then deploy via pair-cn mirror:
 TAG=$(git rev-parse --short HEAD)-$(date +%Y%m%d%H%M%S)
-REG=pair-diag-cn-guangzhou.cr.volces.com/pair
-skaffold build --default-repo "$REG" --platform linux/amd64 \
+skaffold build --default-repo docker.io/opspai --platform linux/amd64 \
   --tag "$TAG" --file-output /tmp/agent-env-builds.json
+# In-cluster images use the mirror prefix (auto-synced from docker.io):
+REG=pair-cn-guangzhou.cr.volces.com/opspai
 skaffold render --build-artifacts /tmp/agent-env-builds.json \
   --default-repo "$REG" --platform linux/amd64 --tag "$TAG" \
   --namespace arl \
@@ -79,7 +80,7 @@ After modifying components or interfaces:
 - **agent-sandbox extensions**: Keep `agentSandbox.controller.extensions=true`; the gateway uses the extension CRDs (`SandboxClaim`, `SandboxWarmPool`, `SandboxTemplate`).
 - **Registry path**: The runtime image set is `arl-gateway`, `arl-sidecar`, `arl-executor-agent`, `arl-image-locality-scheduler`, plus `agent-sandbox-controller` when bundling sandbox.
 - **Image tags**: Use one immutable tag for all images in a deployment. Avoid reusing a tag after a failed push; create a fresh tag to avoid registry-side partial state.
-- **Registry mirror**: `pair-cn-guangzhou.cr.volces.com` (and `pair-cn-shanghai.cr.volces.com`) are Docker Hub pull-through mirrors — replace the `docker.io` prefix and the image syncs automatically (`docker.io/opspai/arl-gateway:v0.19.9` → `pair-cn-guangzhou.cr.volces.com/opspai/arl-gateway:v0.19.9`). No manual `crane copy` for Docker Hub images. `pair-diag-cn-guangzhou.cr.volces.com/pair` is a separate private registry (ad-hoc skaffold builds) and still needs explicit pushes.
+- **Registry mirror**: `pair-cn-guangzhou.cr.volces.com` (and `pair-cn-shanghai.cr.volces.com`) are Docker Hub pull-through mirrors — replace the `docker.io` prefix and the image syncs automatically (`docker.io/opspai/arl-gateway:v0.19.9` → `pair-cn-guangzhou.cr.volces.com/opspai/arl-gateway:v0.19.9`). No manual `crane copy` for Docker Hub images. Always push to `docker.io/opspai` first, then reference via the mirror prefix in cluster manifests.
 - **Release flow**: Pushing a `v*` git tag triggers the Publish Images workflow, which builds all four runtime images to `docker.io/opspai`. In-cluster manifests then reference them through the mirror prefix.
 - **Sidecar image**: Keep the sidecar runtime minimal. The sidecar is a static Go server; shell, Python, and tools belong in the executor/user image, not the sidecar image.
 - **sing-box**: In-cluster proxy subchart (`charts/sing-box`). Sandbox pods get `HTTP_PROXY` injected automatically when `proxy.url` is set.

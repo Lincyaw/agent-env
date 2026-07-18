@@ -45,8 +45,9 @@ func SetupRoutes(gw *Gateway, authCfg *AuthConfig) chi.Router {
 		// Session-scoped endpoints
 		r.Route("/sessions/{id}", func(r chi.Router) {
 			r.Use(authUser)
-			// GET has custom ownership logic (historical sessions)
+			// GET/fork have custom ownership logic (historical/deleted sessions)
 			r.Get("/", handleGetSession(gw))
+			r.Post("/fork", handleForkSession(gw))
 
 			// All other operations require session ownership
 			r.Group(func(r chi.Router) {
@@ -54,7 +55,6 @@ func SetupRoutes(gw *Gateway, authCfg *AuthConfig) chi.Router {
 				r.Delete("/", handleDeleteSession(gw))
 				r.Post("/suspend", handleSuspendSession(gw))
 				r.Post("/resume", handleResumeSession(gw))
-				r.Post("/fork", handleForkSession(gw))
 				r.Get("/iroh-addr", handleGetIrohAddr(gw))
 				r.Post("/execute", handleExecute(gw))
 				r.Post("/containers/{container}/execute", handleExecuteContainer(gw))

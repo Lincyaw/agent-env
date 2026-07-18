@@ -1,0 +1,7 @@
+.claude/
+.venv/
+.git/
+rust/executor-agent/target/
+node_modules/
+*.tgz
+charts/agent-env/charts/

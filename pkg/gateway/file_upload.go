@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"io"
 	"log"
-	"path"
 	"strings"
 	"time"
 
@@ -18,11 +17,7 @@ import (
 const uploadFileStepName = "upload_file"
 
 func (g *Gateway) UploadFile(ctx context.Context, sessionID string, filePath string, content io.Reader, expectedSHA256 string) (*UploadFileResponse, error) {
-	absPath, err := sanitizeFilePath(filePath)
-	if err != nil {
-		return nil, err
-	}
-	expectedSHA256, err = normalizeSHA256(expectedSHA256)
+	expectedSHA256, err := normalizeSHA256(expectedSHA256)
 	if err != nil {
 		return nil, err
 	}
@@ -36,14 +31,14 @@ func (g *Gateway) UploadFile(ctx context.Context, sessionID string, filePath str
 	var buf bytes.Buffer
 	tee := io.TeeReader(content, &buf)
 
-	result, err := g.sidecarClient.WriteFile(ctx, podIP, absPath, tee, expectedSHA256)
+	result, err := g.sidecarClient.WriteFile(ctx, podIP, filePath, tee, expectedSHA256)
 	if err != nil {
 		return nil, err
 	}
 
 	g.storeUploadBlob(ctx, result.SHA256, buf.Bytes())
 
-	inputJSON, _ := json.Marshal(uploadRecord{Path: absPath, SHA256: result.SHA256, Size: int(result.BytesWritten)})
+	inputJSON, _ := json.Marshal(uploadRecord{Path: filePath, SHA256: result.SHA256, Size: int(result.BytesWritten)})
 	s.History.Add(StepRecord{
 		Name:      uploadFileStepName,
 		Input:     inputJSON,
@@ -79,18 +74,13 @@ func (g *Gateway) storeUploadBlob(ctx context.Context, sha256 string, content []
 }
 
 func (g *Gateway) DownloadFile(ctx context.Context, sessionID string, filePath string, dst io.Writer) (*interfaces.FileReadResult, error) {
-	absPath, err := sanitizeFilePath(filePath)
-	if err != nil {
-		return nil, err
-	}
-
 	_, podIP, releaseSession, err := g.acquireSessionPodIP(ctx, sessionID)
 	if err != nil {
 		return nil, err
 	}
 	defer releaseSession()
 
-	result, err := g.sidecarClient.ReadFile(ctx, podIP, absPath, dst)
+	result, err := g.sidecarClient.ReadFile(ctx, podIP, filePath, dst)
 	if err != nil {
 		return nil, fmt.Errorf("read file: %w", err)
 	}
@@ -100,18 +90,13 @@ func (g *Gateway) DownloadFile(ctx context.Context, sessionID string, filePath s
 }
 
 func (g *Gateway) StatFile(ctx context.Context, sessionID string, filePath string) (*StatResponse, error) {
-	absPath, err := sanitizeFilePath(filePath)
-	if err != nil {
-		return nil, err
-	}
-
 	_, podIP, releaseSession, err := g.acquireSessionPodIP(ctx, sessionID)
 	if err != nil {
 		return nil, err
 	}
 	defer releaseSession()
 
-	result, err := g.sidecarClient.Stat(ctx, podIP, absPath)
+	result, err := g.sidecarClient.Stat(ctx, podIP, filePath)
 	if err != nil {
 		return nil, err
 	}
@@ -127,18 +112,13 @@ func (g *Gateway) StatFile(ctx context.Context, sessionID string, filePath strin
 }
 
 func (g *Gateway) ListDir(ctx context.Context, sessionID string, filePath string, recursive bool) (*ListDirResponse, error) {
-	absPath, err := sanitizeFilePath(filePath)
-	if err != nil {
-		return nil, err
-	}
-
 	_, podIP, releaseSession, err := g.acquireSessionPodIP(ctx, sessionID)
 	if err != nil {
 		return nil, err
 	}
 	defer releaseSession()
 
-	result, err := g.sidecarClient.ListDir(ctx, podIP, absPath, recursive)
+	result, err := g.sidecarClient.ListDir(ctx, podIP, filePath, recursive)
 	if err != nil {
 		return nil, err
 	}
@@ -185,17 +165,3 @@ func normalizeSHA256(value string) (string, error) {
 	return value, nil
 }
 
-// sanitizeFilePath cleans a file path from the HTTP API and converts it to
-// an absolute container path.  The SDK strips the leading "/" before placing
-// the path in the URL, so we always prepend "/" to restore the absolute path.
-// Traversal beyond "/" is blocked (path.Clean already normalises "..").
-func sanitizeFilePath(p string) (string, error) {
-	if strings.ContainsRune(p, 0) {
-		return "", fmt.Errorf("path must not contain NUL bytes")
-	}
-	clean := path.Clean(strings.TrimSpace(strings.ReplaceAll(p, "\\", "/")))
-	if clean == "." || clean == "/" || clean == "" {
-		return "", fmt.Errorf("path is required")
-	}
-	return clean, nil
-}

@@ -30,6 +30,12 @@ impl Checkpointer {
         }
     }
 
+    /// Allocate the next step number without adding a pre_exec overlay.
+    /// Used by file write operations to record uploads in the checkpoint.
+    pub fn next_step(&self) -> u32 {
+        self.step.fetch_add(1, Ordering::Relaxed) + 1
+    }
+
     /// Modify a `Command` to run inside an overlay mount namespace.
     /// Returns the step number for later use with `apply_step()`.
     pub fn wrap_command(&self, cmd: &mut Command) -> io::Result<u32> {

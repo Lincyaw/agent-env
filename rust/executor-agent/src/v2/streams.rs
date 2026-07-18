@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 /// Data stream type tags for multi-stream QUIC.
 /// Each data stream starts with a 5-byte header: [1B type][4B tag].
 pub const STREAM_TYPE_STDOUT: u8 = 0x01;

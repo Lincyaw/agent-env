@@ -295,9 +295,9 @@ func (s *AgentService) ListDir(ctx context.Context, path string, recursive bool)
 		// find outputs: type(d/f) size relative-path
 		cmd = []string{"find", path, "-mindepth", "1", "-printf", "%y %s %P\n"}
 	} else {
-		// stat each entry: type size name
+		// stat each entry: type size basename
 		cmd = []string{"sh", "-c", fmt.Sprintf(
-			`for f in %q/*; do [ -e "$f" ] && stat -c '%%F %%s %%f' "$f"; done`,
+			`for f in %q/*; do [ -e "$f" ] && stat -c '%%F %%s %%n' "$f"; done`,
 			path,
 		)}
 	}

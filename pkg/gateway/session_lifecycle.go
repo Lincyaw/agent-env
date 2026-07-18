@@ -426,6 +426,10 @@ func (g *Gateway) deleteSession(ctx context.Context, sessionID string, reason st
 	log.Printf("Deleting session %s (reason=%s, experiment=%s, pool=%s, pod=%s, steps=%d, duration=%ds)",
 		sessionID, reason, experimentID, allocation.PoolRef, podName, stepCount, duration)
 
+	if g.checkpointStore != nil && g.gwConfig.SandboxCheckpointEnabled && podIP != "" {
+		g.persistAllCheckpoints(sessionID, podIP)
+	}
+
 	if g.runtimeAllocator != nil {
 		if err := g.runtimeAllocator.Release(ctx, allocation); err != nil && !errors.IsNotFound(err) {
 			log.Printf("Warning: failed to release runtime %s for session %s: %v", podName, sessionID, err)

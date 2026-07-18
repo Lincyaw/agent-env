@@ -4,6 +4,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"log"
 	"regexp"
 	"strings"
 	"sync"
@@ -160,6 +161,7 @@ func New(k8sClient client.Client, runtimeAllocator RuntimeAllocator, sidecarClie
 	var cpStore *CheckpointStore
 	if gwConfig.CheckpointStorePath != "" {
 		cpStore = NewCheckpointStore(gwConfig.CheckpointStorePath)
+		log.Printf("Checkpoint store enabled (path=%s)", gwConfig.CheckpointStorePath)
 	}
 	gw := &Gateway{
 		k8sClient:           k8sClient,
