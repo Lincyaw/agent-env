@@ -63,6 +63,7 @@ type GatewayConfig struct {
 	SandboxSeccompLocalhostProfile  string
 	SandboxAllowPrivilegeEscalation bool
 	SandboxCheckpointEnabled        bool
+	CheckpointStorePath             string
 	FullObservationEnabled          bool
 	ObservationPreviewBytes         int
 	K8sRESTConfig                   *rest.Config
@@ -142,6 +143,7 @@ type Gateway struct {
 	trajMu                sync.RWMutex
 	trajCh                chan audit.TrajectoryEntry
 	trajWg                sync.WaitGroup
+	checkpointStore       *CheckpointStore
 }
 
 // New creates a new gateway. metrics and trajectoryWriter may be nil.
@@ -149,6 +151,10 @@ type Gateway struct {
 func New(k8sClient client.Client, runtimeAllocator RuntimeAllocator, sidecarClient interfaces.SidecarClient, metrics interfaces.MetricsCollector, trajectoryWriter *audit.TrajectoryWriter, gwConfig GatewayConfig, store SessionStore) *Gateway {
 	if store == nil {
 		store = NewMemoryStore()
+	}
+	var cpStore *CheckpointStore
+	if gwConfig.CheckpointStorePath != "" {
+		cpStore = NewCheckpointStore(gwConfig.CheckpointStorePath)
 	}
 	gw := &Gateway{
 		k8sClient:           k8sClient,
@@ -166,6 +172,7 @@ func New(k8sClient client.Client, runtimeAllocator RuntimeAllocator, sidecarClie
 		managedPoolGCStopCh: make(chan struct{}),
 		admissionQueueDepth: make(map[types.NamespacedName]int32),
 		poolIndex:           newPoolIndex(),
+		checkpointStore:     cpStore,
 	}
 	gw.poolReadModel = gw.poolIndex
 	return gw
