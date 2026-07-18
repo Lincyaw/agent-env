@@ -211,7 +211,7 @@ spec:
             - name: BUILD_ENABLED
               value: "true"
             - name: BUILD_KANIKO_IMAGE
-              value: "{{ .Values.build.kaniko.image.repository }}:{{ .Values.build.kaniko.image.tag }}"
+              value: "{{ include "agent-env.repo" (dict "repo" .Values.build.kaniko.image.repository "global" .Values.global) }}:{{ .Values.build.kaniko.image.tag }}"
             {{- if .Values.build.registrySecret }}
             - name: BUILD_REGISTRY_SECRET
               value: {{ .Values.build.registrySecret | quote }}
