@@ -196,9 +196,11 @@ build:
 # In-cluster container registry (distribution/registry:2). When enabled,
 # Kaniko builds push images here instead of docker.io, and sandbox pods pull
 # locally. The registry is HTTP-only (no TLS) and cluster-internal.
-# NOTE: Nodes must trust the in-cluster registry as an insecure (HTTP) registry
-# in their container runtime config (e.g. containerd mirrors or
-# insecure_registries) to allow kubelet image pulls.
+# NOTE: kubelet on each node cannot resolve k8s service DNS, so the registry
+# Service must use a fixed clusterIP. Set registry.service.clusterIP to a free
+# IP in the cluster's Service CIDR. Nodes must also trust this IP:port as an
+# insecure (HTTP) registry in their container runtime config (containerd
+# certs.d/<IP>:<port>/hosts.toml).
 registry:
   enabled: false
   image:
@@ -206,6 +208,9 @@ registry:
     tag: "2"
   service:
     port: 5000
+    # Fixed ClusterIP so kubelet can pull images. Pick a free IP from the
+    # cluster's Service CIDR (kubectl cluster-info dump | grep service-cluster-ip-range).
+    clusterIP: ""
   persistence:
     enabled: false
     storageClass: ""

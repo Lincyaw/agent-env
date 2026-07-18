@@ -68,6 +68,9 @@ metadata:
     app.kubernetes.io/component: registry
 spec:
   type: ClusterIP
+  {{- if .Values.registry.service.clusterIP }}
+  clusterIP: {{ .Values.registry.service.clusterIP | quote }}
+  {{- end }}
   ports:
     - name: registry
       port: {{ .Values.registry.service.port }}
