@@ -80,8 +80,7 @@ impl Checkpointer {
                     if let Some(parent) = dst.parent() {
                         fs::create_dir_all(parent)?;
                     }
-                    if let Err(e) = fs::copy(path, &dst) {
-                        // File may have been removed between scan and copy
+                    if let Err(e) = copy_entry(path, &dst) {
                         log::warn!("[checkpoint] copy {} failed: {e}", path.display());
                         continue;
                     }
@@ -122,10 +121,27 @@ impl Checkpointer {
     }
 }
 
-/// Walk the filesystem from `root` and collect metadata for every regular file.
+/// Copy a file or symlink to the upper dir, preserving symlink targets.
+fn copy_entry(src: &Path, dst: &Path) -> io::Result<()> {
+    let meta = fs::symlink_metadata(src)?;
+    if meta.file_type().is_symlink() {
+        let target = fs::read_link(src)?;
+        // Remove existing entry at dst if any, then create symlink
+        let _ = fs::remove_file(dst);
+        std::os::unix::fs::symlink(&target, dst)?;
+    } else {
+        fs::copy(src, dst)?;
+    }
+    Ok(())
+}
+
+/// Walk the filesystem from `root` and collect metadata for every regular file
+/// and symlink. Symlinks are tracked by their own lstat metadata (not the
+/// target), so a changed or new symlink is captured correctly.
 fn scan_filesystem(root: &Path, base_dir: &Path) -> io::Result<HashMap<PathBuf, FileMeta>> {
     let mut state = HashMap::new();
     for entry in walkdir::WalkDir::new(root)
+        .follow_links(false)
         .into_iter()
         .filter_entry(|e| {
             let p = e.path();
@@ -139,10 +155,12 @@ fn scan_filesystem(root: &Path, base_dir: &Path) -> io::Result<HashMap<PathBuf, 
             Ok(e) => e,
             Err(_) => continue,
         };
-        if !entry.file_type().is_file() {
+        let ft = entry.file_type();
+        if !ft.is_file() && !ft.is_symlink() {
             continue;
         }
-        let meta = match entry.metadata() {
+        // Use lstat (symlink's own metadata, not target)
+        let meta = match fs::symlink_metadata(entry.path()) {
             Ok(m) => m,
             Err(_) => continue,
         };
