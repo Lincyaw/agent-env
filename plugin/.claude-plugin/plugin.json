@@ -1,6 +1,6 @@
 {
   "name": "arl",
-  "version": "0.18.4",
+  "version": "0.20.0",
   "description": "ARL (Agentic RL) runtime CLI, Python SDK & operations — manage experiments, warm pools, sessions, files, replay, trajectories, and logs from Claude Code",
   "author": {
     "name": "lincyaw",

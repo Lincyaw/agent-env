@@ -1,6 +1,6 @@
 {
   "name": "arl",
-  "version": "0.18.4",
+  "version": "0.20.0",
   "description": "ARL runtime CLI and operations for Codex: manage experiments, warm pools, sessions, logs, and metrics.",
   "author": {
     "name": "lincyaw",
