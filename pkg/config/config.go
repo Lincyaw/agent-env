@@ -146,6 +146,15 @@ type Config struct {
 	// the gateway pod and (optionally) on sidecar containers.
 	// Env: CHECKPOINT_STORE_PVC, default "checkpoint-store".
 	CheckpointStorePVC string
+
+	// CheckpointGCTTL is the duration after which checkpoint data for
+	// inactive sessions is eligible for garbage collection. Zero disables GC.
+	// Env: CHECKPOINT_GC_TTL, default "72h".
+	CheckpointGCTTL time.Duration
+
+	// CheckpointGCInterval controls how often the checkpoint GC runs.
+	// Env: CHECKPOINT_GC_INTERVAL, default "10m".
+	CheckpointGCInterval time.Duration
 }
 
 // DefaultConfig returns the default configuration
@@ -220,6 +229,8 @@ func DefaultConfig() *Config {
 		SandboxAllowPrivilegeEscalation: false,
 		SandboxCheckpointEnabled:        false,
 		CheckpointStorePVC:              "checkpoint-store",
+		CheckpointGCTTL:                 72 * time.Hour,
+		CheckpointGCInterval:            10 * time.Minute,
 	}
 }
 
@@ -547,6 +558,16 @@ func LoadFromEnv() *Config {
 	}
 	if v := os.Getenv("CHECKPOINT_STORE_PVC"); v != "" {
 		cfg.CheckpointStorePVC = v
+	}
+	if v := os.Getenv("CHECKPOINT_GC_TTL"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			cfg.CheckpointGCTTL = d
+		}
+	}
+	if v := os.Getenv("CHECKPOINT_GC_INTERVAL"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			cfg.CheckpointGCInterval = d
+		}
 	}
 
 	return cfg

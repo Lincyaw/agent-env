@@ -64,6 +64,8 @@ type GatewayConfig struct {
 	SandboxAllowPrivilegeEscalation bool
 	SandboxCheckpointEnabled        bool
 	CheckpointStorePath             string
+	CheckpointGCTTL                 time.Duration
+	CheckpointGCInterval            time.Duration
 	FullObservationEnabled          bool
 	ObservationPreviewBytes         int
 	K8sRESTConfig                   *rest.Config
@@ -134,6 +136,9 @@ type Gateway struct {
 	managedPoolGCStopCh   chan struct{}
 	managedPoolGCStopOnce sync.Once
 	managedPoolGCWg       sync.WaitGroup
+	checkpointGCStopCh    chan struct{}
+	checkpointGCStopOnce  sync.Once
+	checkpointGCWg        sync.WaitGroup
 	admissionQueueMu      sync.Mutex
 	admissionQueueDepth   map[types.NamespacedName]int32
 	poolStopMu            sync.Mutex
@@ -170,6 +175,7 @@ func New(k8sClient client.Client, runtimeAllocator RuntimeAllocator, sidecarClie
 		sweepStopCh:         make(chan struct{}),
 		autoscaleStopCh:     make(chan struct{}),
 		managedPoolGCStopCh: make(chan struct{}),
+		checkpointGCStopCh:  make(chan struct{}),
 		admissionQueueDepth: make(map[types.NamespacedName]int32),
 		poolIndex:           newPoolIndex(),
 		checkpointStore:     cpStore,

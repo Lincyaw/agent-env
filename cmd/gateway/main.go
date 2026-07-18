@@ -172,6 +172,8 @@ func main() {
 		SandboxAllowPrivilegeEscalation: cfg.SandboxAllowPrivilegeEscalation,
 		SandboxCheckpointEnabled:        cfg.SandboxCheckpointEnabled,
 		CheckpointStorePath:             cfg.CheckpointStorePath,
+		CheckpointGCTTL:                 cfg.CheckpointGCTTL,
+		CheckpointGCInterval:            cfg.CheckpointGCInterval,
 		FullObservationEnabled:          cfg.FullObservationEnabled,
 		ObservationPreviewBytes:         cfg.ObservationPreviewBytes,
 		K8sRESTConfig:                   k8sConfig,
@@ -204,6 +206,7 @@ func main() {
 	gw.StartSessionSweep()
 	gw.StartPoolAutoscaler()
 	gw.StartManagedPoolGC()
+	gw.StartCheckpointGC()
 	if trajectoryConfig != nil {
 		startTrajectoryConnector(ctx, gw, *trajectoryConfig)
 	}
@@ -324,6 +327,7 @@ func main() {
 		stopKeyWatcher()
 	}
 	healthChecker.Stop()
+	gw.StopCheckpointGC()
 	gw.StopManagedPoolGC()
 	gw.StopPoolAutoscaler()
 	gw.StopSessionSweep()
