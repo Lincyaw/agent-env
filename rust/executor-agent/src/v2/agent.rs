@@ -340,7 +340,7 @@ fn handle_messages(
 fn handle_spawn(
     tag: u32,
     params: proto::SpawnRequest,
-    workspace: &str,
+    _workspace: &str,
     writer: &SharedWriter,
     processes: &Arc<Mutex<HashMap<u32, ProcessHandle>>>,
     checkpointer: &Option<Arc<Checkpointer>>,
@@ -351,7 +351,7 @@ fn handle_spawn(
     }
 
     let workdir = if params.working_dir.is_empty() {
-        workspace.to_string()
+        "/".to_string()
     } else {
         params.working_dir.clone()
     };
@@ -377,7 +377,12 @@ fn handle_spawn_pipe(
 ) {
     let mut cmd = Command::new(&params.command[0]);
     cmd.args(&params.command[1..]);
-    cmd.current_dir(workdir);
+    // current_dir is set only when checkpoint is disabled; with checkpoint,
+    // the pre_exec chroot + chdir handles it (Command::current_dir runs
+    // before pre_exec in posix_spawn and would use the wrong root).
+    if checkpointer.is_none() {
+        cmd.current_dir(workdir);
+    }
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
 
@@ -392,7 +397,7 @@ fn handle_spawn_pipe(
     }
 
     let step = if let Some(ckpt) = checkpointer {
-        match ckpt.wrap_command(&mut cmd) {
+        match ckpt.wrap_command(&mut cmd, workdir) {
             Ok(s) => {
                 log::info!("[checkpoint] step={s} wrapping pipe command");
                 Some((s, ckpt.clone()))
@@ -527,7 +532,9 @@ fn handle_spawn_pty(
 
     let mut cmd = Command::new(&params.command[0]);
     cmd.args(&params.command[1..]);
-    cmd.current_dir(workdir);
+    if checkpointer.is_none() {
+        cmd.current_dir(workdir);
+    }
 
     let mut has_term = false;
     for (k, v) in &params.env {
@@ -543,7 +550,7 @@ fn handle_spawn_pty(
     // Wrap with overlay checkpoint if enabled. Must happen before the
     // PTY pre_exec hook because pre_exec closures chain (both run).
     let step = if let Some(ckpt) = checkpointer {
-        match ckpt.wrap_command(&mut cmd) {
+        match ckpt.wrap_command(&mut cmd, workdir) {
             Ok(s) => {
                 log::info!("[checkpoint] step={s} wrapping pty command");
                 Some((s, ckpt.clone()))

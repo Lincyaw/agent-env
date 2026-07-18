@@ -38,7 +38,8 @@ impl Checkpointer {
 
     /// Modify a `Command` to run inside an overlay mount namespace.
     /// Returns the step number for later use with `apply_step()`.
-    pub fn wrap_command(&self, cmd: &mut Command) -> io::Result<u32> {
+    /// `working_dir` is the absolute path to chdir into after chroot.
+    pub fn wrap_command(&self, cmd: &mut Command, working_dir: &str) -> io::Result<u32> {
         let step = self.step.fetch_add(1, Ordering::Relaxed) + 1;
 
         let step_dir = self.base_dir.join(format!("step-{step}"));
@@ -54,6 +55,7 @@ impl Checkpointer {
         let work = work_dir.to_string_lossy().into_owned();
         let merged = merged_dir.to_string_lossy().into_owned();
         let base_dir = self.base_dir.to_string_lossy().into_owned();
+        let cwd = working_dir.to_string();
 
         use std::os::unix::process::CommandExt;
         unsafe {
@@ -80,6 +82,13 @@ impl Checkpointer {
                     libc::system(c_bind.as_ptr());
                 }
 
+                // Bind-mount k8s-injected files and tmpfs hidden by the overlay
+                for src in &["/etc/resolv.conf", "/etc/hosts", "/etc/hostname", "/dev/shm"] {
+                    let bind_cmd = format!("/bin/mount --bind {src} {merged}{src}");
+                    let c_bind = std::ffi::CString::new(bind_cmd).unwrap();
+                    libc::system(c_bind.as_ptr());
+                }
+
                 // Bind-mount checkpoint scratch dir so upper is accessible after chroot
                 let bind_ckpt = format!("/bin/mount --bind {base_dir} {merged}{base_dir}");
                 let c_bind_ckpt = std::ffi::CString::new(bind_ckpt).unwrap();
@@ -90,8 +99,11 @@ impl Checkpointer {
                 if libc::chroot(c_merged2.as_ptr()) != 0 {
                     return Err(io::Error::last_os_error());
                 }
-                if libc::chdir(b"/\0".as_ptr() as *const libc::c_char) != 0 {
-                    return Err(io::Error::last_os_error());
+                let c_cwd = std::ffi::CString::new(cwd.as_str()).unwrap();
+                if libc::chdir(c_cwd.as_ptr()) != 0 {
+                    if libc::chdir(b"/\0".as_ptr() as *const libc::c_char) != 0 {
+                        return Err(io::Error::last_os_error());
+                    }
                 }
 
                 drop_sys_admin();
@@ -266,11 +278,11 @@ mod tests {
         let ckpt = Checkpointer::new(tmp.path().join("ckpt"));
 
         let mut cmd1 = Command::new("true");
-        let step1 = ckpt.wrap_command(&mut cmd1).unwrap();
+        let step1 = ckpt.wrap_command(&mut cmd1, "/").unwrap();
         assert_eq!(step1, 1);
 
         let mut cmd2 = Command::new("true");
-        let step2 = ckpt.wrap_command(&mut cmd2).unwrap();
+        let step2 = ckpt.wrap_command(&mut cmd2, "/").unwrap();
         assert_eq!(step2, 2);
     }
 
@@ -282,7 +294,7 @@ mod tests {
         let ckpt = Checkpointer::new(base.clone());
 
         let mut cmd = Command::new("true");
-        let step = ckpt.wrap_command(&mut cmd).unwrap();
+        let step = ckpt.wrap_command(&mut cmd, "/tmp").unwrap();
 
         assert!(base.join(format!("step-{step}")).join("upper").is_dir());
         assert!(base.join(format!("step-{step}")).join("work").is_dir());
