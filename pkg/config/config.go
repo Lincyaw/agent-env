@@ -134,6 +134,18 @@ type Config struct {
 	// is mounted in both executor and sidecar containers.
 	// Env: SANDBOX_CHECKPOINT_ENABLED.
 	SandboxCheckpointEnabled bool
+
+	// CheckpointStorePath is the local mount path for persistent checkpoint
+	// storage (NAS PVC). When set together with SandboxCheckpointEnabled,
+	// the gateway persists per-step checkpoint tars after each execute and
+	// reads them back during fork, so fork works even after the source
+	// sandbox is deleted. Env: CHECKPOINT_STORE_PATH.
+	CheckpointStorePath string
+
+	// CheckpointStorePVC is the PVC name mounted at CheckpointStorePath on
+	// the gateway pod and (optionally) on sidecar containers.
+	// Env: CHECKPOINT_STORE_PVC, default "checkpoint-store".
+	CheckpointStorePVC string
 }
 
 // DefaultConfig returns the default configuration
@@ -207,6 +219,7 @@ func DefaultConfig() *Config {
 		SandboxSeccompLocalhostProfile:  "",
 		SandboxAllowPrivilegeEscalation: false,
 		SandboxCheckpointEnabled:        false,
+		CheckpointStorePVC:              "checkpoint-store",
 	}
 }
 
@@ -528,6 +541,12 @@ func LoadFromEnv() *Config {
 		if b, err := strconv.ParseBool(v); err == nil {
 			cfg.SandboxCheckpointEnabled = b
 		}
+	}
+	if v := os.Getenv("CHECKPOINT_STORE_PATH"); v != "" {
+		cfg.CheckpointStorePath = v
+	}
+	if v := os.Getenv("CHECKPOINT_STORE_PVC"); v != "" {
+		cfg.CheckpointStorePVC = v
 	}
 
 	return cfg

@@ -14,10 +14,11 @@ import (
 
 // ForkSession creates a new session from the filesystem state of a source
 // session at a given checkpoint step. The flow:
-//  1. Download combined checkpoint tar from source sidecar HTTP endpoint
-//  2. Create a new session with the same image/profile/namespace
-//  3. Upload the tar to the new session and extract it
-//  4. Return the new session info with fork metadata
+//  1. Try to load checkpoint from persistent store (works after source deletion)
+//  2. Fall back to downloading from the source sidecar HTTP endpoint
+//  3. Create a new session with the same image/profile/namespace
+//  4. Upload the tar to the new session and extract it
+//  5. Return the new session info with fork metadata
 func (g *Gateway) ForkSession(ctx context.Context, sourceID string, req ForkSessionRequest) (*ForkSessionResponse, error) {
 	if !g.gwConfig.SandboxCheckpointEnabled {
 		return nil, fmt.Errorf("checkpoint not enabled")
@@ -25,7 +26,11 @@ func (g *Gateway) ForkSession(ctx context.Context, sourceID string, req ForkSess
 
 	source, ok := g.store.Get(sourceID)
 	if !ok {
-		return nil, fmt.Errorf("source session %s not found", sourceID)
+		// Source session may be deleted; check persistent store
+		if g.checkpointStore == nil {
+			return nil, fmt.Errorf("source session %s not found", sourceID)
+		}
+		return g.forkFromStore(ctx, sourceID, req)
 	}
 
 	source.mu.RLock()
@@ -38,8 +43,25 @@ func (g *Gateway) ForkSession(ctx context.Context, sourceID string, req ForkSess
 	source.mu.RUnlock()
 
 	if sourceClosed {
+		if g.checkpointStore != nil {
+			return g.forkFromStoreWithMeta(ctx, sourceID, req, sourceImage, sourceProfile, sourceNS, sourceMode)
+		}
 		return nil, fmt.Errorf("source session %s not found", sourceID)
 	}
+
+	// Execute returns 0-based step indices; checkpoint dirs are 1-based.
+	checkpointStep := req.Step + 1
+
+	// Try persistent store first (avoids hitting the sidecar)
+	if g.checkpointStore != nil {
+		tmpPath, err := g.checkpointStore.LoadCombined(sourceID, checkpointStep)
+		if err == nil {
+			defer os.Remove(tmpPath)
+			return g.completeFork(ctx, sourceID, req, tmpPath, sourceImage, sourceProfile, sourceNS, sourceMode)
+		}
+		log.Printf("Fork: persistent store miss for %s step %d, falling back to sidecar: %v", sourceID, checkpointStep, err)
+	}
+
 	if sourcePodIP == "" {
 		return nil, fmt.Errorf("source session %s has no pod IP", sourceID)
 	}
@@ -49,8 +71,6 @@ func (g *Gateway) ForkSession(ctx context.Context, sourceID string, req ForkSess
 	if sidecarHTTPPort == 0 {
 		sidecarHTTPPort = 8080
 	}
-	// Execute returns 0-based step indices; checkpoint dirs are 1-based (step-1, step-2, ...).
-	checkpointStep := req.Step + 1
 	checkpointURL := fmt.Sprintf("http://%s:%d/v1/checkpoints/combined?through=%d",
 		sourcePodIP, sidecarHTTPPort, checkpointStep)
 
@@ -70,7 +90,6 @@ func (g *Gateway) ForkSession(ctx context.Context, sourceID string, req ForkSess
 		return nil, fmt.Errorf("checkpoint download failed (%s): %s", httpResp.Status, string(body))
 	}
 
-	// Save to temp file to avoid holding the full tar in memory
 	tmpFile, err := os.CreateTemp("", "arl-fork-checkpoint-*.tar")
 	if err != nil {
 		return nil, fmt.Errorf("create temp file: %w", err)
@@ -84,12 +103,45 @@ func (g *Gateway) ForkSession(ctx context.Context, sourceID string, req ForkSess
 	}
 	tmpFile.Close()
 
-	// Create new session with same config
+	return g.completeFork(ctx, sourceID, req, tmpPath, sourceImage, sourceProfile, sourceNS, sourceMode)
+}
+
+// forkFromStore handles fork when the source session has been deleted from the
+// store entirely. Session metadata must come from the historical record or the
+// request will fail.
+func (g *Gateway) forkFromStore(ctx context.Context, sourceID string, req ForkSessionRequest) (*ForkSessionResponse, error) {
+	historical, ok := g.GetHistoricalSession(sourceID)
+	if !ok {
+		return nil, fmt.Errorf("source session %s not found (no historical record)", sourceID)
+	}
+	historical.mu.RLock()
+	image := historical.Info.Image
+	profile := historical.Info.Profile
+	ns := historical.Info.Namespace
+	mode := historical.Info.Mode
+	historical.mu.RUnlock()
+
+	return g.forkFromStoreWithMeta(ctx, sourceID, req, image, profile, ns, mode)
+}
+
+func (g *Gateway) forkFromStoreWithMeta(ctx context.Context, sourceID string, req ForkSessionRequest, image, profile, ns, mode string) (*ForkSessionResponse, error) {
+	checkpointStep := req.Step + 1
+	tmpPath, err := g.checkpointStore.LoadCombined(sourceID, checkpointStep)
+	if err != nil {
+		return nil, fmt.Errorf("load checkpoint from store for session %s step %d: %w", sourceID, checkpointStep, err)
+	}
+	defer os.Remove(tmpPath)
+
+	return g.completeFork(ctx, sourceID, req, tmpPath, image, profile, ns, mode)
+}
+
+// completeFork creates a new session and applies the checkpoint tar.
+func (g *Gateway) completeFork(ctx context.Context, sourceID string, req ForkSessionRequest, tarPath, image, profile, ns, mode string) (*ForkSessionResponse, error) {
 	newReq := CreateSessionRequest{
-		Image:     sourceImage,
-		Profile:   sourceProfile,
-		Namespace: sourceNS,
-		Mode:      sourceMode,
+		Image:     image,
+		Profile:   profile,
+		Namespace: ns,
+		Mode:      mode,
 	}
 
 	newInfo, err := g.CreateSession(ctx, newReq)
@@ -97,8 +149,7 @@ func (g *Gateway) ForkSession(ctx context.Context, sourceID string, req ForkSess
 		return nil, fmt.Errorf("create fork session: %w", err)
 	}
 
-	// Apply checkpoint to new session
-	if err := g.applyCheckpointToSession(ctx, newInfo.ID, tmpPath); err != nil {
+	if err := g.applyCheckpointToSession(ctx, newInfo.ID, tarPath); err != nil {
 		log.Printf("Fork checkpoint apply failed for %s (from %s step %d): %v", newInfo.ID, sourceID, req.Step, err)
 		cleanupCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
@@ -108,7 +159,6 @@ func (g *Gateway) ForkSession(ctx context.Context, sourceID string, req ForkSess
 		return nil, fmt.Errorf("apply checkpoint to fork session: %w", err)
 	}
 
-	// Update fork metadata on the new session
 	newSession, ok := g.store.Get(newInfo.ID)
 	if ok {
 		newSession.mu.Lock()

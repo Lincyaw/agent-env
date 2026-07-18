@@ -191,6 +191,14 @@ spec:
                   optional: false
             {{- end }}
             {{- end }}
+            {{- if .Values.checkpoint.enabled }}
+            - name: SANDBOX_CHECKPOINT_ENABLED
+              value: "true"
+            - name: CHECKPOINT_STORE_PATH
+              value: {{ .Values.checkpoint.storePath | quote }}
+            - name: CHECKPOINT_STORE_PVC
+              value: {{ .Values.checkpoint.storePVC | quote }}
+            {{- end }}
             {{- include "agent-env.otelEnv" . | nindent 12 }}
           ports:
             - name: http
@@ -199,11 +207,17 @@ spec:
             - name: internal
               containerPort: {{ .Values.gateway.internalPort }}
               protocol: TCP
-          {{- if .Values.auth.enabled }}
+          {{- if or .Values.auth.enabled .Values.checkpoint.enabled }}
           volumeMounts:
+            {{- if .Values.auth.enabled }}
             - name: auth-keys
               mountPath: /etc/arl/keys
               readOnly: true
+            {{- end }}
+            {{- if .Values.checkpoint.enabled }}
+            - name: checkpoint-store
+              mountPath: {{ .Values.checkpoint.storePath | default "/mnt/checkpoint-store" }}
+            {{- end }}
           {{- end }}
           {{- if .Values.gateway.startupProbe.enabled }}
           startupProbe:
@@ -229,11 +243,18 @@ spec:
             periodSeconds: 5
           resources:
             {{- toYaml .Values.gateway.resources | nindent 12 }}
-      {{- if .Values.auth.enabled }}
+      {{- if or .Values.auth.enabled .Values.checkpoint.enabled }}
       volumes:
+        {{- if .Values.auth.enabled }}
         - name: auth-keys
           secret:
             secretName: {{ include "agent-env.fullname" . }}-auth
+        {{- end }}
+        {{- if .Values.checkpoint.enabled }}
+        - name: checkpoint-store
+          persistentVolumeClaim:
+            claimName: {{ .Values.checkpoint.storePVC | default "checkpoint-store" }}
+        {{- end }}
       {{- end }}
 ---
 apiVersion: v1

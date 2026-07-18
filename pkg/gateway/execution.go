@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"strings"
@@ -210,6 +211,14 @@ func (g *Gateway) executeStepsNow(ctx context.Context, sessionID string, req Exe
 	g.touchLastTaskTime(sessionID)
 	g.store.SyncHistory(sessionID)
 
+	if g.checkpointStore != nil && g.gwConfig.SandboxCheckpointEnabled && len(resp.Results) > 0 {
+		steps := make([]int, len(resp.Results))
+		for i, r := range resp.Results {
+			steps[i] = r.Index
+		}
+		go g.persistCheckpointSteps(sessionID, podIP, steps)
+	}
+
 	return resp, nil
 }
 
@@ -249,6 +258,7 @@ func (g *Gateway) ExecuteStepsSSE(w http.ResponseWriter, ctx context.Context, se
 	w.WriteHeader(http.StatusOK)
 	flusher.Flush()
 
+	var persistSteps []int
 	for _, step := range req.Steps {
 		start := time.Now()
 		inputJSON, _ := json.Marshal(step)
@@ -300,6 +310,7 @@ func (g *Gateway) ExecuteStepsSSE(w http.ResponseWriter, ctx context.Context, se
 		}
 
 		g.recordStepResult(s, sessionID, &result, start)
+		persistSteps = append(persistSteps, result.Index)
 
 		resultData, _ := json.Marshal(result)
 		fmt.Fprintf(w, "event: result\ndata: %s\n\n", resultData)
@@ -308,4 +319,53 @@ func (g *Gateway) ExecuteStepsSSE(w http.ResponseWriter, ctx context.Context, se
 
 	g.touchLastTaskTime(sessionID)
 	g.store.SyncHistory(sessionID)
+
+	if g.checkpointStore != nil && g.gwConfig.SandboxCheckpointEnabled && len(persistSteps) > 0 {
+		go g.persistCheckpointSteps(sessionID, podIP, persistSteps)
+	}
+}
+
+// persistCheckpointSteps downloads per-step incremental tars from the sidecar
+// and saves them to the checkpoint store. Runs in a background goroutine;
+// failures are logged and do not affect the execute response.
+func (g *Gateway) persistCheckpointSteps(sessionID, podIP string, stepIndices []int) {
+	for _, idx := range stepIndices {
+		checkpointStep := idx + 1
+		if g.checkpointStore.HasStep(sessionID, checkpointStep) {
+			continue
+		}
+		if err := g.persistSingleCheckpointStep(sessionID, podIP, checkpointStep); err != nil {
+			log.Printf("Checkpoint persist session %s step %d: %v", sessionID, checkpointStep, err)
+		}
+	}
+}
+
+func (g *Gateway) persistSingleCheckpointStep(sessionID, podIP string, checkpointStep int) error {
+	sidecarHTTPPort := g.gwConfig.SidecarHTTPPort
+	if sidecarHTTPPort == 0 {
+		sidecarHTTPPort = 8080
+	}
+	checkpointURL := fmt.Sprintf("http://%s:%d/v1/checkpoints/%d",
+		podIP, sidecarHTTPPort, checkpointStep)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, checkpointURL, nil)
+	if err != nil {
+		return fmt.Errorf("build request: %w", err)
+	}
+	client := &http.Client{Timeout: 5 * time.Minute}
+	resp, err := client.Do(req)
+	if err != nil {
+		return fmt.Errorf("download: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
+		return fmt.Errorf("HTTP %s: %s", resp.Status, string(body))
+	}
+
+	return g.checkpointStore.Save(sessionID, checkpointStep, resp.Body)
 }

@@ -171,6 +171,7 @@ func main() {
 		SandboxSeccompLocalhostProfile:  cfg.SandboxSeccompLocalhostProfile,
 		SandboxAllowPrivilegeEscalation: cfg.SandboxAllowPrivilegeEscalation,
 		SandboxCheckpointEnabled:        cfg.SandboxCheckpointEnabled,
+		CheckpointStorePath:             cfg.CheckpointStorePath,
 		FullObservationEnabled:          cfg.FullObservationEnabled,
 		ObservationPreviewBytes:         cfg.ObservationPreviewBytes,
 		K8sRESTConfig:                   k8sConfig,

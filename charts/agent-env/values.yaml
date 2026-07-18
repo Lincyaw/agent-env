@@ -172,6 +172,14 @@ gateway:
       localhostProfile: ""
     allowPrivilegeEscalation: false
 
+# Checkpoint persistent storage. When enabled, the gateway persists per-step
+# checkpoint tars to a shared NAS PVC so fork works after source deletion.
+# Requires a pre-provisioned ReadWriteMany PVC.
+checkpoint:
+  enabled: false
+  storePath: /mnt/checkpoint-store
+  storePVC: checkpoint-store
+
 # Authentication & security
 auth:
   # Authentication is enabled by default (fail-closed). When enabled, apiKeys
