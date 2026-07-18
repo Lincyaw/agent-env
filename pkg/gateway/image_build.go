@@ -16,7 +16,6 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/client-go/kubernetes"
 	ctrlclient "sigs.k8s.io/controller-runtime/pkg/client"
 )
 
@@ -85,12 +84,16 @@ func (g *Gateway) BuildImage(ctx context.Context, req BuildRequest, contextReade
 	return resp, nil
 }
 
-func writeContextFile(path string, r io.Reader) error {
+func writeContextFile(path string, r io.Reader) (retErr error) {
 	f, err := os.Create(path)
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() {
+		if retErr != nil {
+			f.Close()
+		}
+	}()
 
 	lr := &io.LimitedReader{R: r, N: buildMaxContextBytes + 1}
 	n, err := io.Copy(f, lr)
@@ -233,10 +236,6 @@ func (g *Gateway) waitForBuildJob(ctx context.Context, jobName, ns, buildID stri
 
 // readBuildLogs fetches logs from the first pod owned by the build Job.
 func (g *Gateway) readBuildLogs(ctx context.Context, jobName, ns string) string {
-	if g.k8sRESTConfig == nil {
-		return ""
-	}
-
 	var podList corev1.PodList
 	if err := g.k8sClient.List(ctx, &podList,
 		ctrlclient.InNamespace(ns),
@@ -251,17 +250,12 @@ func (g *Gateway) readBuildLogs(ctx context.Context, jobName, ns string) string 
 
 // readPodLogs reads logs from a specific container in a pod via the REST client.
 func (g *Gateway) readPodLogs(ctx context.Context, podName, ns, container string) string {
-	if g.k8sRESTConfig == nil {
-		return ""
-	}
-
-	clientset, err := kubernetes.NewForConfig(g.k8sRESTConfig)
-	if err != nil {
+	if g.k8sClientset == nil {
 		return ""
 	}
 
 	tailLines := int64(200)
-	req := clientset.CoreV1().Pods(ns).GetLogs(podName, &corev1.PodLogOptions{
+	req := g.k8sClientset.CoreV1().Pods(ns).GetLogs(podName, &corev1.PodLogOptions{
 		Container: container,
 		TailLines: &tailLines,
 	})
@@ -312,7 +306,7 @@ func parseBuildDigest(logOutput string) string {
 //   - cache (string, optional) - "true" to enable layer caching
 func handleBuild(gw *Gateway) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		if err := r.ParseMultipartForm(buildMaxContextBytes); err != nil {
+		if err := r.ParseMultipartForm(8 << 20); err != nil {
 			writeError(w, http.StatusBadRequest, "invalid multipart form: "+err.Error())
 			return
 		}

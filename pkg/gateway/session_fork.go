@@ -12,6 +12,8 @@ import (
 	"github.com/Lincyaw/agent-env/pkg/sidecar"
 )
 
+var forkHTTPClient = &http.Client{Timeout: 5 * time.Minute}
+
 // ForkSession creates a new session from the filesystem state of a source
 // session at a given checkpoint step. The flow:
 //  1. Try to load checkpoint from persistent store (works after source deletion)
@@ -74,12 +76,11 @@ func (g *Gateway) ForkSession(ctx context.Context, sourceID string, req ForkSess
 	checkpointURL := fmt.Sprintf("http://%s:%d/v1/checkpoints/combined?through=%d",
 		sourcePodIP, sidecarHTTPPort, checkpointStep)
 
-	httpClient := &http.Client{Timeout: 5 * time.Minute}
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, checkpointURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("build checkpoint request: %w", err)
 	}
-	httpResp, err := httpClient.Do(httpReq)
+	httpResp, err := forkHTTPClient.Do(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("download checkpoint from source: %w", err)
 	}

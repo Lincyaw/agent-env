@@ -202,6 +202,8 @@ spec:
             {{- if .Values.checkpoint.enabled }}
             - name: SANDBOX_CHECKPOINT_ENABLED
               value: "true"
+            {{- end }}
+            {{- if or .Values.checkpoint.enabled .Values.build.enabled }}
             - name: CHECKPOINT_STORE_PATH
               value: {{ .Values.checkpoint.storePath | quote }}
             - name: CHECKPOINT_STORE_PVC
@@ -218,12 +220,6 @@ spec:
             {{- end }}
             - name: BUILD_DEFAULT_TIMEOUT
               value: "{{ .Values.build.defaultTimeout }}s"
-            {{- if not .Values.checkpoint.enabled }}
-            - name: CHECKPOINT_STORE_PATH
-              value: {{ .Values.checkpoint.storePath | default "/mnt/checkpoint-store" | quote }}
-            - name: CHECKPOINT_STORE_PVC
-              value: {{ .Values.checkpoint.storePVC | default "checkpoint-store" | quote }}
-            {{- end }}
             {{- end }}
             {{- include "agent-env.otelEnv" . | nindent 12 }}
           ports:

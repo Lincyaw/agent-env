@@ -5,12 +5,10 @@ import (
 	"fmt"
 	"log"
 
-	corev1 "k8s.io/api/core/v1"
 	networkingv1 "k8s.io/api/networking/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/intstr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
 	extensionsv1beta1 "sigs.k8s.io/agent-sandbox/extensions/api/v1beta1"
@@ -149,23 +147,5 @@ func allowAllEgressRules() []networkingv1.NetworkPolicyEgressRule {
 }
 
 func denyInternetEgressRules(allowCIDRs []string) []networkingv1.NetworkPolicyEgressRule {
-	udp := corev1.ProtocolUDP
-	tcp := corev1.ProtocolTCP
-	peers := make([]networkingv1.NetworkPolicyPeer, 0, len(allowCIDRs))
-	for _, cidr := range allowCIDRs {
-		peers = append(peers, networkingv1.NetworkPolicyPeer{
-			IPBlock: &networkingv1.IPBlock{CIDR: cidr},
-		})
-	}
-	return []networkingv1.NetworkPolicyEgressRule{
-		{
-			Ports: []networkingv1.NetworkPolicyPort{
-				{Port: &intstr.IntOrString{Type: intstr.Int, IntVal: 53}, Protocol: &udp},
-				{Port: &intstr.IntOrString{Type: intstr.Int, IntVal: 53}, Protocol: &tcp},
-			},
-		},
-		{
-			To: peers,
-		},
-	}
+	return denyInternetEgressPolicy(allowCIDRs).Egress
 }

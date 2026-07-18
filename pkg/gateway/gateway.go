@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 
@@ -154,6 +155,7 @@ type Gateway struct {
 	trajCh                chan audit.TrajectoryEntry
 	trajWg                sync.WaitGroup
 	checkpointStore       *CheckpointStore
+	k8sClientset          kubernetes.Interface
 }
 
 // New creates a new gateway. metrics and trajectoryWriter may be nil.
@@ -167,9 +169,17 @@ func New(k8sClient client.Client, runtimeAllocator RuntimeAllocator, sidecarClie
 		cpStore = NewCheckpointStore(gwConfig.CheckpointStorePath)
 		log.Printf("Checkpoint store enabled (path=%s)", gwConfig.CheckpointStorePath)
 	}
+	var clientset kubernetes.Interface
+	if gwConfig.K8sRESTConfig != nil {
+		cs, err := kubernetes.NewForConfig(gwConfig.K8sRESTConfig)
+		if err == nil {
+			clientset = cs
+		}
+	}
 	gw := &Gateway{
 		k8sClient:           k8sClient,
 		k8sRESTConfig:       copyRESTConfig(gwConfig.K8sRESTConfig),
+		k8sClientset:        clientset,
 		runtimeAllocator:    runtimeAllocator,
 		poolSelector:        DefaultPoolSelector{},
 		admissionController: NewDefaultAdmissionController(),

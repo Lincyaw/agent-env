@@ -349,10 +349,10 @@ class ArlEnvironment(BaseEnvironment):
         if not self._arl_session_id:
             raise RuntimeError("ARL session not started.")
         client = self._get_client()
-        content = Path(source_path).read_bytes()
         if not target_path.startswith("/"):
             target_path = f"/app/{target_path}"
-        await client.upload_file(self._arl_session_id, target_path, content)
+        with open(source_path, "rb") as fh:
+            await client.upload_file(self._arl_session_id, target_path, fh)
 
     async def upload_dir(self, source_dir: Path | str, target_dir: str) -> None:
         if not self._arl_session_id:
@@ -366,9 +366,8 @@ class ArlEnvironment(BaseEnvironment):
             remote = str(PurePosixPath(target_dir) / rel)
             if not remote.startswith("/"):
                 remote = f"/{remote}"
-            await client.upload_file(
-                self._arl_session_id, remote, file_path.read_bytes()
-            )
+            with open(file_path, "rb") as fh:
+                await client.upload_file(self._arl_session_id, remote, fh)
 
     async def download_file(self, source_path: str, target_path: Path | str) -> None:
         if not self._arl_session_id:

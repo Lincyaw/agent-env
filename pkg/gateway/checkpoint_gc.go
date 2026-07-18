@@ -7,8 +7,6 @@ import (
 	"time"
 )
 
-const defaultCheckpointGCInterval = 10 * time.Minute
-
 func (g *Gateway) StartCheckpointGC() {
 	if g.checkpointStore == nil || g.gwConfig.CheckpointGCTTL <= 0 {
 		return
@@ -32,11 +30,7 @@ func (g *Gateway) checkpointGCLoop() {
 
 	g.reconcileCheckpointGC()
 
-	interval := g.gwConfig.CheckpointGCInterval
-	if interval <= 0 {
-		interval = defaultCheckpointGCInterval
-	}
-	ticker := time.NewTicker(interval)
+	ticker := time.NewTicker(g.gwConfig.CheckpointGCInterval)
 	defer ticker.Stop()
 
 	for {
