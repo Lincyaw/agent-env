@@ -22,6 +22,7 @@ from arl.interactive_shell_client import InteractiveShellClient, create_websocke
 from arl.iroh_transport import IrohTransport, SyncIrohBridge
 from arl.session import DevboxSession, ManagedSession, SandboxSession
 from arl.types import (
+    BuildResponse,
     ConnectionInfo,
     ContainerExecuteResponse,
     DeleteExperimentResponse,
@@ -68,6 +69,7 @@ __all__ = [
     "AsyncGatewayClient",
     "AsyncManagedSession",
     "AsyncSandboxSession",
+    "BuildResponse",
     "ConfigEnvSpec",
     "ConfigMapTemplate",
     "ConnectionInfo",

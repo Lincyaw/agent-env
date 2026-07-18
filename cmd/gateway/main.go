@@ -181,6 +181,7 @@ func main() {
 		BuildRegistrySecret:             cfg.BuildRegistrySecret,
 		BuildDefaultTimeout:             cfg.BuildDefaultTimeout,
 		BuildCheckpointPVC:              cfg.CheckpointStorePVC,
+		BuildRegistry:                   cfg.BuildRegistry,
 		K8sRESTConfig:                   k8sConfig,
 	}, sessionStore)
 

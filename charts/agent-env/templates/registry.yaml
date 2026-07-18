@@ -1,0 +1,99 @@
+{{- if .Values.registry.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "agent-env.fullname" . }}-registry
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "agent-env.labels" . | nindent 4 }}
+    app.kubernetes.io/component: registry
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      {{- include "agent-env.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: registry
+  template:
+    metadata:
+      labels:
+        {{- include "agent-env.selectorLabels" . | nindent 8 }}
+        app.kubernetes.io/component: registry
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: registry
+          image: "{{ include "agent-env.repo" (dict "repo" .Values.registry.image.repository "global" .Values.global) }}:{{ .Values.registry.image.tag }}"
+          imagePullPolicy: IfNotPresent
+          ports:
+            - name: registry
+              containerPort: 5000
+              protocol: TCP
+          env:
+            - name: REGISTRY_STORAGE_DELETE_ENABLED
+              value: "true"
+          {{- if .Values.registry.persistence.enabled }}
+          volumeMounts:
+            - name: registry-data
+              mountPath: /var/lib/registry
+          {{- end }}
+          livenessProbe:
+            httpGet:
+              path: /v2/
+              port: registry
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /v2/
+              port: registry
+            initialDelaySeconds: 3
+            periodSeconds: 5
+      {{- if .Values.registry.persistence.enabled }}
+      volumes:
+        - name: registry-data
+          persistentVolumeClaim:
+            claimName: {{ include "agent-env.fullname" . }}-registry
+      {{- end }}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "agent-env.fullname" . }}-registry
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "agent-env.labels" . | nindent 4 }}
+    app.kubernetes.io/component: registry
+spec:
+  type: ClusterIP
+  ports:
+    - name: registry
+      port: {{ .Values.registry.service.port }}
+      targetPort: registry
+      protocol: TCP
+  selector:
+    {{- include "agent-env.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: registry
+{{- if .Values.registry.persistence.enabled }}
+---
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "agent-env.fullname" . }}-registry
+  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "agent-env.labels" . | nindent 4 }}
+    app.kubernetes.io/component: registry
+spec:
+  accessModes:
+    - ReadWriteOnce
+  {{- if .Values.registry.persistence.storageClass }}
+  storageClassName: {{ .Values.registry.persistence.storageClass | quote }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.registry.persistence.size }}
+{{- end }}
+{{- end }}

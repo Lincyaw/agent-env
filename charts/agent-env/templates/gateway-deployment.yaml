@@ -220,6 +220,10 @@ spec:
             {{- end }}
             - name: BUILD_DEFAULT_TIMEOUT
               value: "{{ .Values.build.defaultTimeout }}s"
+            {{- if .Values.registry.enabled }}
+            - name: BUILD_REGISTRY
+              value: "{{ include "agent-env.fullname" . }}-registry:{{ .Values.registry.service.port }}"
+            {{- end }}
             {{- end }}
             {{- include "agent-env.otelEnv" . | nindent 12 }}
           ports:

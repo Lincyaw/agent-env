@@ -171,6 +171,13 @@ type Config struct {
 	// BuildDefaultTimeout is the default build timeout.
 	// Env: BUILD_DEFAULT_TIMEOUT, default "600s".
 	BuildDefaultTimeout time.Duration
+
+	// BuildRegistry is the in-cluster registry address (host:port) used as
+	// the default push/pull destination for Kaniko builds. When set, images
+	// without an explicit registry prefix are pushed to this registry and
+	// Kaniko is configured with --insecure-registry for HTTP access.
+	// Env: BUILD_REGISTRY.
+	BuildRegistry string
 }
 
 // DefaultConfig returns the default configuration
@@ -599,6 +606,9 @@ func LoadFromEnv() *Config {
 		if d, err := time.ParseDuration(v); err == nil {
 			cfg.BuildDefaultTimeout = d
 		}
+	}
+	if v := os.Getenv("BUILD_REGISTRY"); v != "" {
+		cfg.BuildRegistry = v
 	}
 
 	return cfg

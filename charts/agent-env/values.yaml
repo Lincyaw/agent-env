@@ -193,6 +193,24 @@ build:
   registrySecret: ""  # K8s Secret name (type kubernetes.io/dockerconfigjson) for pushing images
   defaultTimeout: 600
 
+# In-cluster container registry (distribution/registry:2). When enabled,
+# Kaniko builds push images here instead of docker.io, and sandbox pods pull
+# locally. The registry is HTTP-only (no TLS) and cluster-internal.
+# NOTE: Nodes must trust the in-cluster registry as an insecure (HTTP) registry
+# in their container runtime config (e.g. containerd mirrors or
+# insecure_registries) to allow kubelet image pulls.
+registry:
+  enabled: false
+  image:
+    repository: docker.io/library/registry
+    tag: "2"
+  service:
+    port: 5000
+  persistence:
+    enabled: false
+    storageClass: ""
+    size: 20Gi
+
 # Checkpoint persistent storage. When enabled, the gateway persists per-step
 # checkpoint tars to a shared NAS PVC so fork works after source deletion.
 # Requires a pre-provisioned ReadWriteMany PVC.

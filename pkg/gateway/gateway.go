@@ -74,6 +74,7 @@ type GatewayConfig struct {
 	BuildRegistrySecret             string
 	BuildDefaultTimeout             time.Duration
 	BuildCheckpointPVC              string
+	BuildRegistry                   string
 	K8sRESTConfig                   *rest.Config
 }
 

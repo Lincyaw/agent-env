@@ -14,9 +14,12 @@ download operations to ARL gRPC calls, and tears the session down on stop.
 
 from __future__ import annotations
 
+import hashlib
+import io
 import logging
 import os
 import shlex
+import tarfile
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -50,6 +53,9 @@ class ArlEnvironment(BaseEnvironment):
     * ``allocation_timeout_seconds`` -- pod allocation timeout (default 600).
     * ``experiment_id`` -- optional ARL experiment grouping tag.
     * ``profile`` -- ARL session profile (default ``"default"``).
+    * ``build_registry`` -- registry to push images built from Dockerfile
+      (default: ``$ARL_BUILD_REGISTRY``).  Falls back to ``image_registry``.
+    * ``build_timeout`` -- timeout in seconds for image builds (default 900).
     """
 
     def __init__(
@@ -68,27 +74,23 @@ class ArlEnvironment(BaseEnvironment):
         image_registry: str = "",
         image_prefix: str = "",
         image_tag: str = "v1",
+        build_registry: str = "",
+        build_timeout: int = 900,
         logger: logging.Logger | None = None,
         **kwargs: Any,
     ) -> None:
         self._gateway_url = (
-            gateway_url
-            or os.environ.get("ARL_GATEWAY_URL", "")
-            or "http://localhost:8080"
+            gateway_url or os.environ.get("ARL_GATEWAY_URL", "") or "http://localhost:8080"
         )
         self._idle_timeout = idle_timeout_seconds
         self._allocation_timeout = allocation_timeout_seconds
         self._experiment_id = experiment_id
         self._profile = profile
-        self._image_registry = (
-            image_registry
-            or os.environ.get("ARL_IMAGE_REGISTRY", "")
-        )
-        self._image_prefix = (
-            image_prefix
-            or os.environ.get("ARL_IMAGE_PREFIX", "")
-        )
+        self._image_registry = image_registry or os.environ.get("ARL_IMAGE_REGISTRY", "")
+        self._image_prefix = image_prefix or os.environ.get("ARL_IMAGE_PREFIX", "")
         self._image_tag = image_tag
+        self._build_registry = build_registry or os.environ.get("ARL_BUILD_REGISTRY", "")
+        self._build_timeout = build_timeout
 
         self._client: AsyncGatewayClient | None = None
         self._arl_session_id: str | None = None
@@ -149,8 +151,7 @@ class ArlEnvironment(BaseEnvironment):
             import arl as _arl  # noqa: F401
         except ImportError as exc:
             raise SystemExit(
-                "ARL environment requires the 'arl-env' package. "
-                "Install with: pip install arl-env"
+                "ARL environment requires the 'arl-env' package. Install with: pip install arl-env"
             ) from exc
 
     def _get_client(self) -> AsyncGatewayClient:
@@ -160,7 +161,8 @@ class ArlEnvironment(BaseEnvironment):
             )
         return self._client
 
-    def _resolve_image(self) -> str:
+    def _resolve_image(self) -> str | None:
+        """Resolve a pre-built image reference, or None if unavailable."""
         if self.task_env_config.docker_image:
             return self.task_env_config.docker_image
         if self._image_registry:
@@ -171,10 +173,80 @@ class ArlEnvironment(BaseEnvironment):
             else:
                 image_name = name
             return f"{self._image_registry}/{image_name}:{self._image_tag}"
-        raise ValueError(
-            "ARL environment requires either docker_image in task.toml or "
-            "--ek image_registry=<registry>/<org> to resolve pre-built images."
+        return None
+
+    async def _resolve_image_or_build(self, force_build: bool) -> str:
+        """Return the container image, building from Dockerfile if needed."""
+        if not force_build:
+            pre_built = self._resolve_image()
+            if pre_built is not None:
+                return pre_built
+
+        dockerfile_path = self.environment_dir / DOCKERFILE_NAME
+        if not dockerfile_path.exists():
+            pre_built = self._resolve_image()
+            if pre_built is not None:
+                return pre_built
+            raise ValueError(
+                "ARL environment requires docker_image in task.toml, "
+                "--ek image_registry=<registry>/<org>, or a Dockerfile "
+                "in the environment directory."
+            )
+
+        registry = self._build_registry or self._image_registry
+        if not registry:
+            raise ValueError(
+                "Cannot build image: no build_registry or image_registry configured. "
+                "Set --ek build_registry=<registry>/<org> or ARL_BUILD_REGISTRY."
+            )
+
+        # Tag derived from content hash of environment_dir for deterministic
+        # cache hits on identical Dockerfiles and build contexts.
+        content_hash = self._environment_content_hash()
+        image_name = self.environment_name.replace("/", "-").replace(":", "-")
+        target_image = f"{registry}/{image_name}:{content_hash}"
+
+        self.logger.info("Building image %s from %s", target_image, self.environment_dir)
+        context_bytes = self._package_build_context()
+        client = self._get_client()
+
+        # Always call build; Kaniko layer caching makes rebuilds fast for
+        # unchanged Dockerfiles, so an explicit existence check is unnecessary.
+        result = await client.build_image(
+            target_image,
+            context_bytes,
+            timeout=self._build_timeout,
+            cache=True,
         )
+        self.logger.info(
+            "Image built: %s (digest=%s)",
+            result.image,
+            result.digest,
+        )
+        return result.image
+
+    def _package_build_context(self) -> bytes:
+        """Package environment_dir as a tar.gz for the build API."""
+        buf = io.BytesIO()
+        with tarfile.open(fileobj=buf, mode="w:gz") as tar:
+            tar.add(str(self.environment_dir), arcname=".")
+        buf.seek(0)
+        return buf.read()
+
+    def _environment_content_hash(self) -> str:
+        """Compute a short content hash of the environment directory.
+
+        Hashes file relative paths and contents to produce a deterministic
+        tag.  Only regular files are included (symlinks are followed).
+        """
+        h = hashlib.sha256()
+        for file_path in sorted(self.environment_dir.rglob("*")):
+            if not file_path.is_file():
+                continue
+            rel = file_path.relative_to(self.environment_dir).as_posix()
+            h.update(rel.encode())
+            h.update(file_path.read_bytes())
+        return h.hexdigest()[:12]
 
     def _build_resources(self) -> ResourceRequirements | None:
         """Build Kubernetes ResourceRequirements from task_env_config."""
@@ -225,14 +297,8 @@ class ArlEnvironment(BaseEnvironment):
         return False
 
     async def start(self, force_build: bool) -> None:
-        if force_build and (self.environment_dir / DOCKERFILE_NAME).exists():
-            self.logger.warning(
-                "force_build requested but remote build is not yet supported; "
-                "using pre-built image"
-            )
-
         client = self._get_client()
-        image = self._resolve_image()
+        image = await self._resolve_image_or_build(force_build)
 
         # Collect startup env vars for injection into the container
         startup_env = self._startup_env()
@@ -268,9 +334,7 @@ class ArlEnvironment(BaseEnvironment):
             if delete:
                 try:
                     await client.delete_session(self._arl_session_id)
-                    self.logger.info(
-                        "ARL session %s deleted", self._arl_session_id
-                    )
+                    self.logger.info("ARL session %s deleted", self._arl_session_id)
                 except Exception as exc:
                     self.logger.warning(
                         "Failed to delete ARL session %s: %s",
@@ -282,9 +346,7 @@ class ArlEnvironment(BaseEnvironment):
                 # reducing resource consumption
                 try:
                     await client.suspend_session(self._arl_session_id)
-                    self.logger.info(
-                        "ARL session %s suspended", self._arl_session_id
-                    )
+                    self.logger.info("ARL session %s suspended", self._arl_session_id)
                 except Exception as exc:
                     self.logger.warning(
                         "Failed to suspend ARL session %s: %s",
@@ -309,9 +371,7 @@ class ArlEnvironment(BaseEnvironment):
         client = self._get_client()
 
         merged_env = self._merge_env(env)
-        work_dir = effective_exec_cwd(
-            cwd, self.task_env_config.workdir, self._dockerfile_workdir
-        )
+        work_dir = effective_exec_cwd(cwd, self.task_env_config.workdir, self._dockerfile_workdir)
 
         shell_cmd = command
         user = self._resolve_user(user)

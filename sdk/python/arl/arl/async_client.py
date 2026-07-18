@@ -31,6 +31,7 @@ from arl.gateway_client import (
     _serialize_private_containers,
 )
 from arl.types import (
+    BuildResponse,
     ContainerExecuteResponse,
     DeleteExperimentResponse,
     DevboxConfig,
@@ -200,9 +201,7 @@ class AsyncGatewayClient:
                     session_id, op_id, deadline=deadline, resubmit_body=body
                 )
             if isinstance(exc, httpx.TimeoutException):
-                raise GatewayOperationTimeout(
-                    op_id, "execute operation is still pending"
-                ) from exc
+                raise GatewayOperationTimeout(op_id, "execute operation is still pending") from exc
             raise
         if resp.status_code == 202:
             return await self._poll_execute_operation(session_id, op_id, deadline=deadline)
@@ -255,22 +254,16 @@ class AsyncGatewayClient:
             if op is not None:
                 status = op.status.lower()
                 if status == _OPERATION_STATUS_ERROR:
-                    raise GatewayError(
-                        500, op.error or f"operation {operation_id} failed"
-                    )
+                    raise GatewayError(500, op.error or f"operation {operation_id} failed")
                 if op.result is not None:
                     return op.result
                 if status == _OPERATION_STATUS_DONE:
-                    raise GatewayError(
-                        500, f"operation {operation_id} finished without result"
-                    )
+                    raise GatewayError(500, f"operation {operation_id} finished without result")
             sleep_for = _OPERATION_POLL_INTERVAL_SECONDS
             if deadline is not None:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
-                    raise GatewayOperationTimeout(
-                        operation_id, "operation is still pending"
-                    )
+                    raise GatewayOperationTimeout(operation_id, "operation is still pending")
                 sleep_for = min(sleep_for, remaining)
             await asyncio.sleep(sleep_for)
 
@@ -478,14 +471,15 @@ class AsyncGatewayClient:
         except httpx.TransportError as exc:
             if recover:
                 raw = await self._poll_operation(
-                    session_id, operation_id, deadline=deadline,
-                    resubmit_url=url, resubmit_body=body,
+                    session_id,
+                    operation_id,
+                    deadline=deadline,
+                    resubmit_url=url,
+                    resubmit_body=body,
                 )
                 return response_model.model_validate(raw)
             if isinstance(exc, httpx.TimeoutException):
-                raise GatewayOperationTimeout(
-                    operation_id, "operation is still pending"
-                ) from exc
+                raise GatewayOperationTimeout(operation_id, "operation is still pending") from exc
             raise
         if resp.status_code == 202:
             raw = await self._poll_operation(session_id, operation_id, deadline=deadline)
@@ -508,8 +502,13 @@ class AsyncGatewayClient:
         op_id = operation_id or str(uuid.uuid4())
         body["operationID"] = op_id
         return await self._submit_operation(
-            session_id, f"/v1/sessions/{session_id}/replay", body, op_id,
-            ReplayResponse, recover, recover_timeout,
+            session_id,
+            f"/v1/sessions/{session_id}/replay",
+            body,
+            op_id,
+            ReplayResponse,
+            recover,
+            recover_timeout,
         )
 
     async def restore(
@@ -524,8 +523,13 @@ class AsyncGatewayClient:
         op_id = operation_id or str(uuid.uuid4())
         body["operationID"] = op_id
         return await self._submit_operation(
-            session_id, f"/v1/sessions/{session_id}/restore", body, op_id,
-            RestoreResponse, recover, recover_timeout,
+            session_id,
+            f"/v1/sessions/{session_id}/restore",
+            body,
+            op_id,
+            RestoreResponse,
+            recover,
+            recover_timeout,
         )
 
     async def get_history(self, session_id: str) -> list[StepResult]:
@@ -807,6 +811,60 @@ class AsyncGatewayClient:
         data = resp.json()
         addr: str = data.get("addr", "")
         return addr
+
+    # --- Build API ---
+
+    async def build_image(
+        self,
+        image: str,
+        context: BinaryIO | bytes,
+        *,
+        build_args: dict[str, str] | None = None,
+        timeout: int | None = None,
+        cache: bool = True,
+    ) -> BuildResponse:
+        """Build a container image via the gateway's Kaniko build API.
+
+        Args:
+            image: Target image reference (e.g. "registry/org/name:tag").
+            context: Build context as a tar.gz file object or bytes.
+            build_args: Optional Docker build arguments.
+            timeout: Build timeout in seconds.
+            cache: Enable Kaniko layer caching (default True).
+
+        Returns:
+            BuildResponse with image ref, digest, status, and build log.
+
+        Raises:
+            GatewayError: On HTTP error or build failure.
+        """
+        data: dict[str, str] = {"image": image, "cache": str(cache).lower()}
+        if build_args is not None:
+            data["build_args"] = json.dumps(build_args)
+        if timeout is not None:
+            data["timeout"] = str(timeout)
+
+        context_bytes = context if isinstance(context, bytes) else context.read()
+        files = {"context": ("context.tar.gz", context_bytes, "application/gzip")}
+
+        # Use a long HTTP timeout for builds (up to 30 minutes).
+        build_timeout = httpx.Timeout(
+            connect=30.0,
+            read=float(timeout or 1800),
+            write=300.0,
+            pool=float(timeout or 1800),
+        )
+        resp = await self._client.post(
+            "/v1/build",
+            data=data,
+            files=files,
+            timeout=build_timeout,
+        )
+        self._handle_error(resp)
+        result = BuildResponse.model_validate(resp.json())
+        if result.status == "failed":
+            raise GatewayError(422, f"image build failed: {result.log}")
+        return result
 
     # --- Health ---
 

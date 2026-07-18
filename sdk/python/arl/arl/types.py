@@ -334,6 +334,15 @@ class TrajectoryEntry(BaseModel):
     timestamp: datetime | None = None
 
 
+class BuildResponse(BaseModel):
+    """Response from the image build API."""
+
+    image: str
+    digest: str = ""
+    status: str
+    log: str = ""
+
+
 class ErrorResponse(BaseModel):
     """Error response from the gateway."""
 

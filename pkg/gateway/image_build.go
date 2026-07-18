@@ -36,6 +36,13 @@ func (g *Gateway) BuildImage(ctx context.Context, req BuildRequest, contextReade
 	if req.Image == "" {
 		return nil, fmt.Errorf("image is required")
 	}
+
+	// When an in-cluster registry is configured and the image ref does not
+	// already contain a registry (no dot in the first path segment), prepend
+	// the in-cluster registry so Kaniko pushes locally.
+	if g.gwConfig.BuildRegistry != "" && !imageHasRegistry(req.Image) {
+		req.Image = g.gwConfig.BuildRegistry + "/" + req.Image
+	}
 	if g.gwConfig.CheckpointStorePath == "" {
 		return nil, fmt.Errorf("checkpoint store path is required for builds (shared PVC)")
 	}
@@ -116,6 +123,9 @@ func (g *Gateway) buildKanikoJob(buildID, ns string, req BuildRequest) *batchv1.
 	}
 	if req.Dockerfile != "" {
 		args = append(args, "--dockerfile="+req.Dockerfile)
+	}
+	if g.gwConfig.BuildRegistry != "" {
+		args = append(args, "--insecure-registry="+g.gwConfig.BuildRegistry)
 	}
 	for k, v := range req.BuildArgs {
 		args = append(args, fmt.Sprintf("--build-arg=%s=%s", k, v))
@@ -294,6 +304,18 @@ func parseBuildDigest(logOutput string) string {
 		}
 	}
 	return ""
+}
+
+// imageHasRegistry returns true when the image reference already includes a
+// registry prefix (the first path segment contains a dot or a colon, e.g.
+// "docker.io/library/nginx" or "myregistry:5000/app").
+func imageHasRegistry(image string) bool {
+	slash := strings.IndexByte(image, '/')
+	if slash < 0 {
+		return false
+	}
+	first := image[:slash]
+	return strings.ContainsAny(first, ".:")
 }
 
 // handleBuild returns an HTTP handler for POST /v1/build.
