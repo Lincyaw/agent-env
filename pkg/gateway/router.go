@@ -53,6 +53,7 @@ func SetupRoutes(gw *Gateway, authCfg *AuthConfig) chi.Router {
 			r.Group(func(r chi.Router) {
 				r.Use(sessionOwnership(gw))
 				r.Delete("/", handleDeleteSession(gw))
+				r.Patch("/network-policy", handleUpdateNetworkPolicy(gw))
 				r.Post("/suspend", handleSuspendSession(gw))
 				r.Post("/resume", handleResumeSession(gw))
 				r.Get("/iroh-addr", handleGetIrohAddr(gw))
@@ -340,6 +341,29 @@ func handleResumeSession(gw *Gateway) http.HandlerFunc {
 			return
 		}
 		writeJSON(w, http.StatusOK, map[string]string{"status": "active"})
+	}
+}
+
+func handleUpdateNetworkPolicy(gw *Gateway) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		id := chi.URLParam(r, "id")
+		var req UpdateNetworkPolicyRequest
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		if req.AllowInternet == nil {
+			writeError(w, http.StatusBadRequest, "allowInternet is required")
+			return
+		}
+		if err := gw.UpdateSessionNetworkPolicy(r.Context(), id, req); err != nil {
+			writeError(w, httpStatusForError(err), err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{
+			"sessionID":     id,
+			"allowInternet": *req.AllowInternet,
+		})
 	}
 }
 

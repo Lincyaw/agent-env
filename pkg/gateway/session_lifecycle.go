@@ -436,6 +436,8 @@ func (g *Gateway) deleteSession(ctx context.Context, sessionID string, reason st
 		}
 	}
 
+	g.DeleteSessionNetworkPolicy(ctx, sessionID, allocation.Namespace)
+
 	if podIP != "" && g.sidecarClient != nil {
 		if err := g.sidecarClient.CloseConnection(podIP); err != nil {
 			log.Printf("Warning: failed to close sidecar connection for pod %s: %v", podName, err)

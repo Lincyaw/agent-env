@@ -401,6 +401,12 @@ type ListDirResponse struct {
 	Entries []ListDirEntryResponse `json:"entries"`
 }
 
+// UpdateNetworkPolicyRequest is the body for PATCH /v1/sessions/{id}/network-policy
+type UpdateNetworkPolicyRequest struct {
+	AllowInternet *bool    `json:"allowInternet,omitempty"`
+	EgressCIDRs   []string `json:"egressCIDRs,omitempty"`
+}
+
 // WriteStdinRequest is the body for POST /v1/sessions/{id}/stdin
 type WriteStdinRequest struct {
 	Handle string `json:"handle"`
