@@ -364,12 +364,17 @@ class ArlEnvironment(BaseEnvironment):
         if user is not None and str(user) != "root":
             shell_cmd = f"su -s /bin/bash {shlex.quote(str(user))} -c {shlex.quote(shell_cmd)}"
 
+        if merged_env is None:
+            merged_env = {}
+        if "LD_LIBRARY_PATH" not in merged_env:
+            merged_env["LD_LIBRARY_PATH"] = "/usr/local/lib:/usr/lib/x86_64-linux-gnu:/lib/x86_64-linux-gnu"
+
         step: dict[str, object] = {
             "name": "exec",
             "command": ["bash", "-lc", shell_cmd],
         }
         if work_dir:
-            step["work_dir"] = work_dir
+            step["workDir"] = work_dir
         if timeout_sec:
             step["timeoutSeconds"] = timeout_sec
         if merged_env:
