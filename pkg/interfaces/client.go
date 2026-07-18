@@ -54,16 +54,16 @@ type SidecarClient interface {
 	// ExecuteStream sends command execution request and streams output via channel
 	ExecuteStream(ctx context.Context, podIP string, req ExecRequest) (<-chan ExecResponse, error)
 
-	// WriteFile streams one file into the session workspace.
+	// WriteFile streams one file into the container filesystem.
 	WriteFile(ctx context.Context, podIP string, path string, content io.Reader, expectedSHA256 string) (*FileWriteResult, error)
 
-	// ReadFile streams one file from the session workspace.
+	// ReadFile streams one file from the container filesystem.
 	ReadFile(ctx context.Context, podIP string, path string, dst io.Writer) (*FileReadResult, error)
 
-	// Stat returns file metadata for a path in the session workspace.
+	// Stat returns file metadata for a path in the container filesystem.
 	Stat(ctx context.Context, podIP string, path string) (*StatResult, error)
 
-	// ListDir lists directory contents in the session workspace.
+	// ListDir lists directory contents in the container filesystem.
 	ListDir(ctx context.Context, podIP string, path string, recursive bool) ([]DirEntry, error)
 
 	// WriteStdin sends data to the stdin of a running process.

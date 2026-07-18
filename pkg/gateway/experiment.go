@@ -72,7 +72,6 @@ func (g *Gateway) CreateManagedSession(ctx context.Context, req CreateManagedSes
 		Replicas:          1,
 		Namespace:         ns,
 		Resources:         req.Resources,
-		WorkspaceDir:      req.WorkspaceDir,
 		PrivateContainers: req.PrivateContainers,
 		AllowInternet:     req.AllowInternet,
 		Managed:           true,

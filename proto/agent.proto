@@ -9,16 +9,16 @@ service AgentService {
   // Execute runs a command (Job mode) or starts a background service (Service mode)
   rpc Execute(ExecRequest) returns (stream ExecLog);
 
-  // WriteFile streams one file into the executor workspace.
+  // WriteFile streams one file into the container filesystem.
   rpc WriteFile(stream WriteFileChunk) returns (WriteFileResponse);
 
-  // ReadFile streams one file from the executor workspace.
+  // ReadFile streams one file from the container filesystem.
   rpc ReadFile(ReadFileRequest) returns (stream FileChunk);
 
-  // Stat returns file metadata for a path in the workspace.
+  // Stat returns file metadata for a path in the container filesystem.
   rpc Stat(StatRequest) returns (StatResponse);
 
-  // ListDir lists directory contents in the workspace.
+  // ListDir lists directory contents in the container filesystem.
   rpc ListDir(ListDirRequest) returns (ListDirResponse);
 
   // WriteStdin sends data to the stdin of a running process.
@@ -52,7 +52,7 @@ message ExecLog {
   bool done = 4;
 }
 
-// WriteFileChunk streams raw bytes to a relative path inside the workspace.
+// WriteFileChunk streams raw bytes to a path in the container filesystem.
 // The first chunk must set path. expected_sha256 is optional.
 message WriteFileChunk {
   string path = 1;
@@ -67,7 +67,7 @@ message WriteFileResponse {
   string sha256 = 3;
 }
 
-// ReadFileRequest reads raw bytes from a relative path inside the workspace.
+// ReadFileRequest reads raw bytes from a path in the container filesystem.
 message ReadFileRequest {
   string path = 1;
 }
