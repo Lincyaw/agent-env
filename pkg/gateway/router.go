@@ -75,6 +75,7 @@ func SetupRoutes(gw *Gateway, authCfg *AuthConfig) chi.Router {
 		// Admin endpoints
 		r.Group(func(r chi.Router) {
 			r.Use(authAdmin)
+			r.Post("/build", handleBuild(gw))
 			r.Get("/sessions", handleListSessions(gw))
 			r.Get("/summary", handleSummary(gw))
 			r.Get("/pools", handleListPools(gw))

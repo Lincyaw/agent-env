@@ -172,6 +172,19 @@ gateway:
       localhostProfile: ""
     allowPrivilegeEscalation: false
 
+# Image build API backed by Kaniko Jobs. When enabled, the gateway exposes
+# POST /v1/build which accepts a build context tarball and creates a Kaniko Job
+# to build and push a container image. Requires the checkpoint PVC for context
+# staging.
+build:
+  enabled: false
+  kaniko:
+    image:
+      repository: gcr.io/kaniko-project/executor
+      tag: latest
+  registrySecret: ""  # K8s Secret name (type kubernetes.io/dockerconfigjson) for pushing images
+  defaultTimeout: 600
+
 # Checkpoint persistent storage. When enabled, the gateway persists per-step
 # checkpoint tars to a shared NAS PVC so fork works after source deletion.
 # Requires a pre-provisioned ReadWriteMany PVC.

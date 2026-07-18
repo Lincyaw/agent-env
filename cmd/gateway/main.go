@@ -176,6 +176,11 @@ func main() {
 		CheckpointGCInterval:            cfg.CheckpointGCInterval,
 		FullObservationEnabled:          cfg.FullObservationEnabled,
 		ObservationPreviewBytes:         cfg.ObservationPreviewBytes,
+		BuildEnabled:                    cfg.BuildEnabled,
+		BuildKanikoImage:                cfg.BuildKanikoImage,
+		BuildRegistrySecret:             cfg.BuildRegistrySecret,
+		BuildDefaultTimeout:             cfg.BuildDefaultTimeout,
+		BuildCheckpointPVC:              cfg.CheckpointStorePVC,
 		K8sRESTConfig:                   k8sConfig,
 	}, sessionStore)
 

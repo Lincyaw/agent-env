@@ -68,6 +68,11 @@ type GatewayConfig struct {
 	CheckpointGCInterval            time.Duration
 	FullObservationEnabled          bool
 	ObservationPreviewBytes         int
+	BuildEnabled                    bool
+	BuildKanikoImage                string
+	BuildRegistrySecret             string
+	BuildDefaultTimeout             time.Duration
+	BuildCheckpointPVC              string
 	K8sRESTConfig                   *rest.Config
 }
 

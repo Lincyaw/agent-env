@@ -154,6 +154,23 @@ type Config struct {
 	// CheckpointGCInterval controls how often the checkpoint GC runs.
 	// Env: CHECKPOINT_GC_INTERVAL, default "10m".
 	CheckpointGCInterval time.Duration
+
+	// BuildEnabled enables the POST /v1/build image build API.
+	// Env: BUILD_ENABLED, default false.
+	BuildEnabled bool
+
+	// BuildKanikoImage is the Kaniko executor image used for builds.
+	// Env: BUILD_KANIKO_IMAGE, default "gcr.io/kaniko-project/executor:latest".
+	BuildKanikoImage string
+
+	// BuildRegistrySecret is the name of a K8s Secret (type
+	// kubernetes.io/dockerconfigjson) used by Kaniko to push images.
+	// Env: BUILD_REGISTRY_SECRET.
+	BuildRegistrySecret string
+
+	// BuildDefaultTimeout is the default build timeout.
+	// Env: BUILD_DEFAULT_TIMEOUT, default "600s".
+	BuildDefaultTimeout time.Duration
 }
 
 // DefaultConfig returns the default configuration
@@ -229,6 +246,9 @@ func DefaultConfig() *Config {
 		CheckpointStorePVC:              "checkpoint-store",
 		CheckpointGCTTL:                 72 * time.Hour,
 		CheckpointGCInterval:            10 * time.Minute,
+		BuildEnabled:                    false,
+		BuildKanikoImage:                "gcr.io/kaniko-project/executor:latest",
+		BuildDefaultTimeout:             600 * time.Second,
 	}
 }
 
@@ -561,6 +581,23 @@ func LoadFromEnv() *Config {
 	if v := os.Getenv("CHECKPOINT_GC_INTERVAL"); v != "" {
 		if d, err := time.ParseDuration(v); err == nil {
 			cfg.CheckpointGCInterval = d
+		}
+	}
+
+	if v := os.Getenv("BUILD_ENABLED"); v != "" {
+		if b, err := strconv.ParseBool(v); err == nil {
+			cfg.BuildEnabled = b
+		}
+	}
+	if v := os.Getenv("BUILD_KANIKO_IMAGE"); v != "" {
+		cfg.BuildKanikoImage = v
+	}
+	if v := os.Getenv("BUILD_REGISTRY_SECRET"); v != "" {
+		cfg.BuildRegistrySecret = v
+	}
+	if v := os.Getenv("BUILD_DEFAULT_TIMEOUT"); v != "" {
+		if d, err := time.ParseDuration(v); err == nil {
+			cfg.BuildDefaultTimeout = d
 		}
 	}
 
