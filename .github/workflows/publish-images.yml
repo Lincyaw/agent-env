@@ -29,7 +29,7 @@ jobs:
           - image: arl-sidecar
             dockerfile: Dockerfile.sidecar
           - image: arl-executor-agent
-            dockerfile: Dockerfile.executor-agent
+            dockerfile: Dockerfile.executor-agent-rs
           - image: arl-image-locality-scheduler
             dockerfile: Dockerfile.image-locality-scheduler
 
