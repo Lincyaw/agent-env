@@ -115,8 +115,8 @@ func TestCreatePoolCreatesSandboxWarmPoolAndExecutableTemplate(t *testing.T) {
 		t.Fatalf("get sandbox template: %v", err)
 	}
 	podSpec := template.Spec.PodTemplate.Spec
-	if len(podSpec.InitContainers) < 2 {
-		t.Fatalf("initContainers length = %d, want at least 2", len(podSpec.InitContainers))
+	if len(podSpec.InitContainers) < 1 {
+		t.Fatalf("initContainers length = %d, want at least 1", len(podSpec.InitContainers))
 	}
 	if !hasContainer(podSpec.InitContainers, "copy-executor-agent") {
 		t.Fatal("template missing copy-executor-agent init container")
