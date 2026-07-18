@@ -377,12 +377,7 @@ fn handle_spawn_pipe(
 ) {
     let mut cmd = Command::new(&params.command[0]);
     cmd.args(&params.command[1..]);
-    // current_dir is set only when checkpoint is disabled; with checkpoint,
-    // the pre_exec chroot + chdir handles it (Command::current_dir runs
-    // before pre_exec in posix_spawn and would use the wrong root).
-    if checkpointer.is_none() {
-        cmd.current_dir(workdir);
-    }
+    cmd.current_dir(workdir);
     cmd.stdout(Stdio::piped());
     cmd.stderr(Stdio::piped());
 
@@ -397,13 +392,14 @@ fn handle_spawn_pipe(
     }
 
     let step = if let Some(ckpt) = checkpointer {
-        match ckpt.wrap_command(&mut cmd, workdir) {
-            Ok(s) => {
-                log::info!("[checkpoint] step={s} wrapping pipe command");
-                Some((s, ckpt.clone()))
+        let step_num = ckpt.next_step();
+        match ckpt.pre_scan() {
+            Ok(snap) => {
+                log::info!("[checkpoint] step={step_num} pre-scan complete for pipe command");
+                Some((step_num, ckpt.clone(), snap))
             }
             Err(e) => {
-                log::warn!("[checkpoint] wrap failed: {e}, running without overlay");
+                log::warn!("[checkpoint] pre_scan failed: {e}, running without checkpoint");
                 None
             }
         }
@@ -498,11 +494,14 @@ fn handle_spawn_pipe(
     };
     thread::spawn(move || {
         wait_and_exit(pt3, &w3, &procs, timeout);
-        if let Some((step_num, ckpt)) = step {
-            if let Err(e) = ckpt.apply_step(step_num) {
-                log::error!("[checkpoint] apply step {step_num} failed: {e}");
-            } else {
-                log::info!("[checkpoint] step={step_num} applied");
+        if let Some((step_num, ckpt, snapshot)) = step {
+            match ckpt.capture_diff(step_num, &snapshot) {
+                Ok(changed) => {
+                    log::info!("[checkpoint] step={step_num} captured {} changes", changed.len());
+                }
+                Err(e) => {
+                    log::error!("[checkpoint] capture_diff step {step_num} failed: {e}");
+                }
             }
         }
     });
@@ -532,9 +531,7 @@ fn handle_spawn_pty(
 
     let mut cmd = Command::new(&params.command[0]);
     cmd.args(&params.command[1..]);
-    if checkpointer.is_none() {
-        cmd.current_dir(workdir);
-    }
+    cmd.current_dir(workdir);
 
     let mut has_term = false;
     for (k, v) in &params.env {
@@ -547,16 +544,15 @@ fn handle_spawn_pty(
         cmd.env("TERM", "xterm-256color");
     }
 
-    // Wrap with overlay checkpoint if enabled. Must happen before the
-    // PTY pre_exec hook because pre_exec closures chain (both run).
     let step = if let Some(ckpt) = checkpointer {
-        match ckpt.wrap_command(&mut cmd, workdir) {
-            Ok(s) => {
-                log::info!("[checkpoint] step={s} wrapping pty command");
-                Some((s, ckpt.clone()))
+        let step_num = ckpt.next_step();
+        match ckpt.pre_scan() {
+            Ok(snap) => {
+                log::info!("[checkpoint] step={step_num} pre-scan complete for pty command");
+                Some((step_num, ckpt.clone(), snap))
             }
             Err(e) => {
-                log::warn!("[checkpoint] wrap failed: {e}, running without overlay");
+                log::warn!("[checkpoint] pre_scan failed: {e}, running without checkpoint");
                 None
             }
         }
@@ -667,11 +663,14 @@ fn handle_spawn_pty(
     };
     thread::spawn(move || {
         wait_and_exit(pt2, &w2, &procs, timeout);
-        if let Some((step_num, ckpt)) = step {
-            if let Err(e) = ckpt.apply_step(step_num) {
-                log::error!("[checkpoint] apply step {step_num} failed: {e}");
-            } else {
-                log::info!("[checkpoint] step={step_num} applied");
+        if let Some((step_num, ckpt, snapshot)) = step {
+            match ckpt.capture_diff(step_num, &snapshot) {
+                Ok(changed) => {
+                    log::info!("[checkpoint] step={step_num} captured {} changes", changed.len());
+                }
+                Err(e) => {
+                    log::error!("[checkpoint] capture_diff step {step_num} failed: {e}");
+                }
             }
         }
     });

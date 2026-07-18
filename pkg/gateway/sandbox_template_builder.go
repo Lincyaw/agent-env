@@ -364,15 +364,6 @@ func (g *Gateway) applyContainerSecurityPolicy(pod *corev1.PodSpec) {
 	}
 	for i := range pod.Containers {
 		apply(&pod.Containers[i])
-		if g.gwConfig.SandboxCheckpointEnabled && pod.Containers[i].Name == "executor" {
-			sc := pod.Containers[i].SecurityContext
-			if sc.Capabilities == nil {
-				sc.Capabilities = &corev1.Capabilities{}
-			}
-			sc.Capabilities.Add = append(sc.Capabilities.Add, "SYS_ADMIN")
-			unconfined := corev1.AppArmorProfileTypeUnconfined
-			sc.AppArmorProfile = &corev1.AppArmorProfile{Type: unconfined}
-		}
 	}
 }
 
