@@ -17,7 +17,7 @@ import (
 	"go.opentelemetry.io/otel/attribute"
 
 	"github.com/Lincyaw/agent-env/pkg/audit"
-	"github.com/Lincyaw/agent-env/pkg/sidecar"
+	"github.com/Lincyaw/agent-env/pkg/interfaces"
 )
 
 func resolveStepTimeoutSeconds(step StepRequest) int32 {
@@ -56,8 +56,8 @@ func (g *Gateway) resolveSessionPodIP(ctx context.Context, sessionID string) (*s
 
 	if resolved.PodIP != info.PodIP {
 		if info.PodIP != "" {
-			if err := g.sidecarClient.CloseConnection(info.PodIP); err != nil {
-				log.Printf("Warning: failed to close stale sidecar connection for pod %s: %v", info.PodName, err)
+			if err := g.executorClient.CloseConnection(info.PodIP); err != nil {
+				log.Printf("Warning: failed to close stale executor connection for pod %s: %v", info.PodName, err)
 			}
 		}
 		s.mu.Lock()
@@ -176,7 +176,7 @@ func (g *Gateway) recordRetainedStepResult(s *session, sessionID string, result 
 	}, sessionID, globalIdx)
 }
 
-// ExecuteSteps executes steps directly via sidecar gRPC.
+// ExecuteSteps executes steps directly via executor agent.
 func (g *Gateway) ExecuteSteps(ctx context.Context, sessionID string, req ExecuteRequest) (*ExecuteResponse, error) {
 	return g.executeStepsWithOperation(ctx, sessionID, req)
 }
@@ -209,24 +209,24 @@ func (g *Gateway) executeStepsNow(ctx context.Context, sessionID string, req Exe
 
 		result := StepResult{Name: step.Name, Input: inputJSON, Timestamp: start}
 
-		execReq := &sidecar.ExecRequest{
+		execReq := &interfaces.ExecRequest{
 			Command:        step.Command,
 			Env:            step.Env,
 			WorkingDir:     step.WorkDir,
 			TimeoutSeconds: resolveStepTimeoutSeconds(step),
 		}
 		grpcStart := time.Now()
-		execResp, err := g.sidecarClient.Execute(ctx, podIP, execReq)
+		execResp, err := g.executorClient.Execute(ctx, podIP, execReq)
 		if g.metrics != nil {
-			g.metrics.RecordSidecarCallDuration("Execute", time.Since(grpcStart))
+			g.metrics.RecordExecutorCallDuration("Execute", time.Since(grpcStart))
 		}
 		if err != nil {
 			result.Output.Stderr = err.Error()
 			result.Output.ExitCode = 1
 		} else {
-			result.Output.Stdout = execResp.GetStdout()
-			result.Output.Stderr = execResp.GetStderr()
-			result.Output.ExitCode = execResp.GetExitCode()
+			result.Output.Stdout = execResp.Stdout
+			result.Output.Stderr = execResp.Stderr
+			result.Output.ExitCode = execResp.ExitCode
 		}
 		g.recordStepResult(s, sessionID, &result, start)
 		resp.Results = append(resp.Results, result)
@@ -290,7 +290,7 @@ func (g *Gateway) ExecuteStepsSSE(w http.ResponseWriter, ctx context.Context, se
 
 		result := StepResult{Name: step.Name, Input: inputJSON, Timestamp: start}
 
-		execReq := &sidecar.ExecRequest{
+		execReq := &interfaces.ExecRequest{
 			Command:        step.Command,
 			Env:            step.Env,
 			WorkingDir:     step.WorkDir,
@@ -298,9 +298,9 @@ func (g *Gateway) ExecuteStepsSSE(w http.ResponseWriter, ctx context.Context, se
 		}
 
 		grpcStart := time.Now()
-		streamCh, err := g.sidecarClient.ExecuteStream(ctx, podIP, execReq)
+		streamCh, err := g.executorClient.ExecuteStream(ctx, podIP, execReq)
 		if g.metrics != nil {
-			g.metrics.RecordSidecarCallDuration("ExecuteStream", time.Since(grpcStart))
+			g.metrics.RecordExecutorCallDuration("ExecuteStream", time.Since(grpcStart))
 		}
 
 		if err != nil {
@@ -309,8 +309,8 @@ func (g *Gateway) ExecuteStepsSSE(w http.ResponseWriter, ctx context.Context, se
 		} else {
 			var stdout, stderr strings.Builder
 			for chunk := range streamCh {
-				stdoutChunk := chunk.GetStdout()
-				stderrChunk := chunk.GetStderr()
+				stdoutChunk := chunk.Stdout
+				stderrChunk := chunk.Stderr
 
 				if stdoutChunk != "" {
 					stdout.WriteString(stdoutChunk)
@@ -326,8 +326,8 @@ func (g *Gateway) ExecuteStepsSSE(w http.ResponseWriter, ctx context.Context, se
 					flusher.Flush()
 				}
 
-				if chunk.IsDone() {
-					result.Output.ExitCode = chunk.GetExitCode()
+				if chunk.Done {
+					result.Output.ExitCode = chunk.ExitCode
 				}
 			}
 			result.Output.Stdout = stdout.String()
@@ -350,7 +350,7 @@ func (g *Gateway) ExecuteStepsSSE(w http.ResponseWriter, ctx context.Context, se
 	}
 }
 
-// persistCheckpointSteps downloads per-step incremental tars from the sidecar
+// persistCheckpointSteps downloads per-step incremental tars from the executor
 // and saves them to the checkpoint store. Runs in a background goroutine;
 // failures are logged and do not affect the execute response.
 func (g *Gateway) persistCheckpointSteps(sessionID, podIP string, stepIndices []int) {
@@ -369,11 +369,11 @@ func (g *Gateway) persistCheckpointSteps(sessionID, podIP string, stepIndices []
 }
 
 func (g *Gateway) persistAllCheckpoints(sessionID, podIP string) {
-	sidecarHTTPPort := g.gwConfig.SidecarHTTPPort
-	if sidecarHTTPPort == 0 {
-		sidecarHTTPPort = 8080
+	executorPort := g.gwConfig.ExecutorPort
+	if executorPort == 0 {
+		executorPort = 9090
 	}
-	listURL := fmt.Sprintf("http://%s:%d/v1/checkpoints", podIP, sidecarHTTPPort)
+	listURL := fmt.Sprintf("http://%s:%d/v1/checkpoints", podIP, executorPort)
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
@@ -418,12 +418,12 @@ func (g *Gateway) persistAllCheckpoints(sessionID, podIP string) {
 }
 
 func (g *Gateway) persistSingleCheckpointStep(sessionID, podIP string, checkpointStep int) error {
-	sidecarHTTPPort := g.gwConfig.SidecarHTTPPort
-	if sidecarHTTPPort == 0 {
-		sidecarHTTPPort = 8080
+	executorPort := g.gwConfig.ExecutorPort
+	if executorPort == 0 {
+		executorPort = 9090
 	}
 	checkpointURL := fmt.Sprintf("http://%s:%d/v1/checkpoints/%d",
-		podIP, sidecarHTTPPort, checkpointStep)
+		podIP, executorPort, checkpointStep)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()

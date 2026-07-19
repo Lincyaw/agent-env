@@ -380,37 +380,10 @@ type GatewaySummary struct {
 	Experiments       int   `json:"experiments"`
 }
 
-// StatResponse is the response for GET /v1/sessions/{id}/stat/{path...}
-type StatResponse struct {
-	Exists   bool   `json:"exists"`
-	IsDir    bool   `json:"is_dir"`
-	Size     int64  `json:"size"`
-	Mode     string `json:"mode"`
-	Modified string `json:"modified"`
-}
-
-// ListDirEntryResponse is a single entry in a directory listing response.
-type ListDirEntryResponse struct {
-	Name  string `json:"name"`
-	IsDir bool   `json:"is_dir"`
-	Size  int64  `json:"size"`
-}
-
-// ListDirResponse is the response for GET /v1/sessions/{id}/ls/{path...}
-type ListDirResponse struct {
-	Entries []ListDirEntryResponse `json:"entries"`
-}
-
 // UpdateNetworkPolicyRequest is the body for PATCH /v1/sessions/{id}/network-policy
 type UpdateNetworkPolicyRequest struct {
 	AllowInternet *bool    `json:"allowInternet,omitempty"`
 	EgressCIDRs   []string `json:"egressCIDRs,omitempty"`
-}
-
-// WriteStdinRequest is the body for POST /v1/sessions/{id}/stdin
-type WriteStdinRequest struct {
-	Handle string `json:"handle"`
-	Data   string `json:"data"`
 }
 
 // BuildRequest is the body for POST /v1/build (multipart form fields).

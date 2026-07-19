@@ -14,11 +14,10 @@ func TestScorePodOnNodePrefersCachedExecutorImage(t *testing.T) {
 	pod.Spec.InitContainers = []corev1.Container{{Name: "copy-executor-agent", Image: "agent-env/executor:latest"}}
 	pod.Spec.Containers = []corev1.Container{
 		{Name: "executor", Image: "python:3.12"},
-		{Name: "sidecar", Image: "agent-env/sidecar:latest"},
 	}
 
 	nodeWithExecutor := nodeWithImages("node-a", "python:3.12")
-	nodeWithoutExecutor := nodeWithImages("node-b", "agent-env/sidecar:latest", "agent-env/executor:latest")
+	nodeWithoutExecutor := nodeWithImages("node-b", "agent-env/executor:latest")
 
 	executorScore := ScorePodOnNode(pod, nodeWithExecutor, ScoreOptions{})
 	otherScore := ScorePodOnNode(pod, nodeWithoutExecutor, ScoreOptions{})
@@ -30,12 +29,11 @@ func TestScorePodOnNodePrefersCachedExecutorImage(t *testing.T) {
 	}
 }
 
-func TestScorePodOnNodeFallsBackToNonSidecarContainer(t *testing.T) {
+func TestScorePodOnNodeFallsBackToFirstContainer(t *testing.T) {
 	pod := &corev1.Pod{
 		Spec: corev1.PodSpec{
 			Containers: []corev1.Container{
 				{Name: "executor", Image: "ubuntu:24.04"},
-				{Name: "sidecar", Image: "agent-env/sidecar:latest"},
 			},
 		},
 	}

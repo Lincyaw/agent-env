@@ -9,7 +9,6 @@ import (
 
 const (
 	executorContainerName = "executor"
-	sidecarContainerName  = "sidecar"
 )
 
 func validatePrivateContainers(containers []PrivateContainerSpec) error {
@@ -22,7 +21,7 @@ func validatePrivateContainers(containers []PrivateContainerSpec) error {
 		if container.Name != name {
 			return fmt.Errorf("privateContainers[%d].name must not contain leading or trailing whitespace", i)
 		}
-		if name == executorContainerName || name == sidecarContainerName {
+		if name == executorContainerName {
 			return fmt.Errorf("private container name %q is reserved", name)
 		}
 		if errs := validation.IsDNS1123Label(name); len(errs) > 0 {

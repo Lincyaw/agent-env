@@ -1,21 +1,29 @@
-"""Async sandbox session management for ARL via Gateway API.
+"""Async sandbox session management for ARL via Gateway API (primary implementation).
 
-Mirrors :class:`SandboxSession` and :class:`ManagedSession` with native
-``async``/``await`` so callers in an async event loop can avoid
-``asyncio.to_thread``.
+The synchronous session classes in ``session.py`` are thin wrappers that
+delegate every call to these async implementations.
 """
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Callable, Iterable
+import inspect
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, BinaryIO
 
+from arl._base import (
+    build_iroh_execute_response,
+    parse_iroh_step_result,
+    prepare_iroh_step,
+    read_content,
+)
 from arl.async_client import AsyncGatewayClient
 from arl.configenv import ConfigEnvSpec
+from arl.exceptions import SessionNotInitializedError
 from arl.types import (
     ContainerExecuteResponse,
     DevboxConfig,
+    ExecuteOperationInfo,
     ExecuteResponse,
     LogEntry,
     PrivateContainerSpec,
@@ -23,7 +31,7 @@ from arl.types import (
     ResourceRequirements,
     RestoreResponse,
     SessionInfo,
-    StepOutput,
+    StepRequest,
     StepResult,
     ToolsSpec,
     UploadFileResponse,
@@ -31,6 +39,7 @@ from arl.types import (
 
 if TYPE_CHECKING:
     from arl.iroh_transport import IrohTransport
+
 
 class AsyncSandboxSession:
     """Async high-level sandbox session manager via the Gateway API.
@@ -74,6 +83,7 @@ class AsyncSandboxSession:
         api_key: str | None = None,
         private_containers: Iterable[PrivateContainerSpec | dict[str, Any]] | None = None,
         iroh_addr: str | None = None,
+        allow_internet: bool | None = None,
     ) -> None:
         self.image = image or ""
         self.mode = mode
@@ -82,11 +92,10 @@ class AsyncSandboxSession:
         self.idle_timeout_seconds = idle_timeout_seconds
         self.allocation_timeout_seconds = allocation_timeout_seconds
         self.private_containers = private_containers
+        self.allow_internet = allow_internet
 
         self._client = AsyncGatewayClient(
-            base_url=gateway_url,
-            timeout=timeout,
-            api_key=api_key,
+            base_url=gateway_url, timeout=timeout, api_key=api_key,
         )
         self._api_key = api_key
         self._session_id: str | None = None
@@ -106,12 +115,8 @@ class AsyncSandboxSession:
     ) -> AsyncSandboxSession:
         """Attach to an existing session by session ID."""
         instance = cls(
-            image=None,
-            profile=None,
-            gateway_url=gateway_url,
-            timeout=timeout,
-            api_key=api_key,
-            iroh_addr=iroh_addr,
+            image=None, profile=None, gateway_url=gateway_url,
+            timeout=timeout, api_key=api_key, iroh_addr=iroh_addr,
         )
         try:
             info = await instance._client.get_session(session_id)
@@ -143,6 +148,7 @@ class AsyncSandboxSession:
             idle_timeout_seconds=self.idle_timeout_seconds,
             allocation_timeout_seconds=self.allocation_timeout_seconds,
             private_containers=self.private_containers,
+            allow_internet=self.allow_internet,
         )
         self._session_id = info.id
         self._session_info = info
@@ -161,114 +167,71 @@ class AsyncSandboxSession:
             await self._iroh.connect()
         return self._iroh
 
-    @staticmethod
-    def _read_content(content: str | bytes | Iterable[bytes] | BinaryIO) -> bytes:
-        """Materialize mixed content types into a single bytes object."""
-        if isinstance(content, str):
-            return content.encode()
-        if isinstance(content, bytes):
-            return content
-        read_fn = getattr(content, "read", None)
-        if callable(read_fn):
-            result: bytes = read_fn()
-            return result
-        return b"".join(content)
-
     async def _execute_via_iroh(
         self,
-        steps: list[dict[str, Any]],
-        on_output: Callable[[str, str], None] | None = None,
+        steps: list[StepRequest | dict[str, Any]],
+        on_output: Callable[[str, str], None | Awaitable[None]] | None = None,
     ) -> ExecuteResponse:
         """Execute steps directly via iroh QUIC, bypassing the gateway."""
         if self._iroh is None:
             raise RuntimeError("iroh transport not initialized")
         results: list[StepResult] = []
-        for i, step in enumerate(steps):
-            cmd: list[str] = step.get("command", [])
-            env_raw = step.get("env")
-            env: dict[str, str] | None = (
-                {str(k): str(v) for k, v in env_raw.items()} if isinstance(env_raw, dict) else None
+        for i, raw_step in enumerate(steps):
+            step: dict[str, Any] = (
+                raw_step.model_dump(by_alias=True) if isinstance(raw_step, StepRequest) else raw_step
             )
-            work_dir_raw = step.get("workDir") or step.get("work_dir")
-            work_dir = str(work_dir_raw) if work_dir_raw else None
-            timeout_raw = (
-                step.get("timeoutSeconds") or step.get("timeout_seconds") or step.get("timeout")
-            )
-            timeout_s = int(str(timeout_raw)) if timeout_raw is not None else None
-
+            cmd, env, work_dir, timeout_s = prepare_iroh_step(step)
             raw = await self._iroh.execute(
-                cmd,
-                env=env,
-                work_dir=work_dir,
-                timeout_seconds=timeout_s,
+                cmd, env=env, work_dir=work_dir, timeout_seconds=timeout_s,
             )
-            exit_code_val = raw.get("exit_code", 0)
-            output = StepOutput(
-                stdout=str(raw.get("stdout", "")),
-                stderr=str(raw.get("stderr", "")),
-                exit_code=int(str(exit_code_val)),
-            )
-            results.append(
-                StepResult(index=i, name=step.get("name", ""), output=output),
-            )
+            sr = parse_iroh_step_result(i, step, raw)
+            results.append(sr)
             if on_output is not None:
-                on_output(output.stdout, output.stderr)
-
+                rv = on_output(sr.output.stdout, sr.output.stderr)
+                if inspect.isawaitable(rv):
+                    await rv
         return ExecuteResponse.model_validate(
-            {
-                "sessionID": self._session_id or "",
-                "results": [r.model_dump() for r in results],
-                "totalDurationMs": 0,
-            }
+            build_iroh_execute_response(self._session_id or "", results)
         )
 
     async def execute(
         self,
-        steps: list[dict[str, Any]],
+        steps: list[StepRequest | dict[str, Any]],
         trace_id: str | None = None,
         operation_id: str | None = None,
-        on_output: Callable[[str, str], None] | None = None,
+        on_output: Callable[[str, str], None | Awaitable[None]] | None = None,
         recover: bool = True,
         recover_timeout: float | None = None,
     ) -> ExecuteResponse:
-        """Execute steps in the sandbox.
-
-        See :meth:`arl.session.SandboxSession.execute` for the recovery
-        semantics of ``recover`` and ``recover_timeout``.
-        """
+        """Execute steps in the sandbox."""
         if self._session_id is None:
-            raise RuntimeError("No session created. Call create_sandbox() first.")
+            raise SessionNotInitializedError()
         iroh = await self._get_iroh()
         if iroh is not None:
             return await self._execute_via_iroh(steps, on_output=on_output)
         return await self._client.execute(
-            self._session_id,
-            steps,
-            trace_id,
-            operation_id=operation_id,
-            on_output=on_output,
-            recover=recover,
-            recover_timeout=recover_timeout,
+            self._session_id, steps, trace_id,
+            operation_id=operation_id, on_output=on_output,
+            recover=recover, recover_timeout=recover_timeout,
         )
 
-    async def get_execute_operation(
-        self,
-        operation_id: str,
-    ) -> Any:
+    async def get_execute_operation(self, operation_id: str) -> ExecuteOperationInfo:
         """Get the status of a pending execute operation."""
         if self._session_id is None:
-            raise RuntimeError("No session created. Call create_sandbox() first.")
+            raise SessionNotInitializedError()
         return await self._client.get_execute_operation(self._session_id, operation_id)
 
     async def execute_container(
         self,
         container: str,
-        steps: list[dict[str, Any]],
+        steps: list[StepRequest | dict[str, Any]],
     ) -> ContainerExecuteResponse:
         """Execute steps in a configured private container."""
         if self._session_id is None:
-            raise RuntimeError("No session created. Call create_sandbox() first.")
-        return await self._client.execute_container(self._session_id, container, steps)
+            raise SessionNotInitializedError()
+        return await self._client.execute_container(
+            self._session_id, container, steps,
+        )
 
     async def restore(
         self,
@@ -279,12 +242,10 @@ class AsyncSandboxSession:
     ) -> RestoreResponse:
         """Restore workspace to a previous step's snapshot."""
         if self._session_id is None:
-            raise RuntimeError("No session created. Call create_sandbox() first.")
+            raise SessionNotInitializedError()
         return await self._client.restore(
-            self._session_id,
-            snapshot_id,
-            operation_id=operation_id,
-            recover=recover,
+            self._session_id, snapshot_id,
+            operation_id=operation_id, recover=recover,
             recover_timeout=recover_timeout,
         )
 
@@ -298,14 +259,11 @@ class AsyncSandboxSession:
     ) -> ReplayResponse:
         """Replay another session's history into this session."""
         if self._session_id is None:
-            raise RuntimeError("No session created. Call create_sandbox() first.")
+            raise SessionNotInitializedError()
         return await self._client.replay_from(
-            self._session_id,
-            source_session_id=source_session_id,
-            up_to_step=up_to_step,
-            operation_id=operation_id,
-            recover=recover,
-            recover_timeout=recover_timeout,
+            self._session_id, source_session_id=source_session_id,
+            up_to_step=up_to_step, operation_id=operation_id,
+            recover=recover, recover_timeout=recover_timeout,
         )
 
     async def upload_file(
@@ -316,30 +274,29 @@ class AsyncSandboxSession:
     ) -> UploadFileResponse:
         """Upload one file into the session workspace."""
         if self._session_id is None:
-            raise RuntimeError("No session created. Call create_sandbox() first.")
+            raise SessionNotInitializedError()
         iroh = await self._get_iroh()
         if iroh is not None:
-            raw = self._read_content(content)
-            result = await iroh.upload_file(path, raw)
-            bw = result.get("bytes_written", len(raw))
+            raw_bytes = read_content(content)
+            result = await iroh.upload_file(path, raw_bytes)
+            actual_sha = str(result.get("sha256", ""))
+            if sha256 and actual_sha and actual_sha != sha256:
+                raise RuntimeError(
+                    f"upload sha256 mismatch: expected {sha256}, got {actual_sha}"
+                )
+            bw = result.get("bytes_written", len(raw_bytes))
             return UploadFileResponse.model_validate(
-                {
-                    "path": str(result.get("path", path)),
-                    "bytesWritten": int(str(bw)),
-                    "sha256": str(result.get("sha256", "")),
-                }
+                {"path": str(result.get("path", path)), "bytesWritten": int(str(bw)),
+                 "sha256": actual_sha}
             )
         return await self._client.upload_file(
-            self._session_id,
-            path=path,
-            content=content,
-            sha256=sha256,
+            self._session_id, path=path, content=content, sha256=sha256,
         )
 
     async def download_file(self, path: str) -> bytes:
         """Download one file from the session workspace into memory."""
         if self._session_id is None:
-            raise RuntimeError("No session created. Call create_sandbox() first.")
+            raise SessionNotInitializedError()
         iroh = await self._get_iroh()
         if iroh is not None:
             return await iroh.download_file(path)
@@ -353,77 +310,66 @@ class AsyncSandboxSession:
     ) -> UploadFileResponse:
         """Stream a local file into the session workspace."""
         if self._session_id is None:
-            raise RuntimeError("No session created. Call create_sandbox() first.")
+            raise SessionNotInitializedError()
         return await self._client.upload_path(
-            self._session_id,
-            local_path=local_path,
-            remote_path=remote_path,
-            sha256=sha256,
+            self._session_id, local_path=local_path,
+            remote_path=remote_path, sha256=sha256,
         )
 
     async def download_path(self, remote_path: str, local_path: str | Path) -> None:
         """Stream a session file to a local path."""
         if self._session_id is None:
-            raise RuntimeError("No session created. Call create_sandbox() first.")
+            raise SessionNotInitializedError()
         await self._client.download_path(self._session_id, remote_path, local_path)
 
     def iter_download(
-        self,
-        path: str,
-        chunk_size: int = 1024 * 1024,
+        self, path: str, chunk_size: int = 1024 * 1024,
     ) -> AsyncIterator[bytes]:
         """Iterate over a session file as byte chunks."""
         if self._session_id is None:
-            raise RuntimeError("No session created. Call create_sandbox() first.")
+            raise SessionNotInitializedError()
         return self._client.iter_download_file(
-            self._session_id,
-            path,
-            chunk_size=chunk_size,
+            self._session_id, path, chunk_size=chunk_size,
         )
 
     async def get_history(self) -> list[StepResult]:
         """Get complete execution history for this session."""
         if self._session_id is None:
-            raise RuntimeError("No session created. Call create_sandbox() first.")
+            raise SessionNotInitializedError()
         return await self._client.get_history(self._session_id)
 
     async def export_trajectory(self) -> str:
         """Export execution history as JSONL trajectory (for RL/SFT)."""
         if self._session_id is None:
-            raise RuntimeError("No session created. Call create_sandbox() first.")
+            raise SessionNotInitializedError()
         return await self._client.get_trajectory(self._session_id)
 
     def iter_logs(
-        self,
-        *,
-        follow: bool = False,
-        tail: int = 100,
+        self, *, follow: bool = False, tail: int = 100,
     ) -> AsyncIterator[LogEntry]:
-        """Iterate over session sidecar log entries."""
+        """Iterate over session log entries."""
         if self._session_id is None:
-            raise RuntimeError("No session created. Call create_sandbox() first.")
+            raise SessionNotInitializedError()
         return self._client.iter_session_logs(
-            self._session_id,
-            follow=follow,
-            tail=tail,
+            self._session_id, follow=follow, tail=tail,
         )
 
     async def get_logs(self, *, tail: int = 100) -> list[LogEntry]:
-        """Return recent session sidecar log entries."""
+        """Return recent session log entries."""
         if self._session_id is None:
-            raise RuntimeError("No session created. Call create_sandbox() first.")
+            raise SessionNotInitializedError()
         return await self._client.list_session_logs(self._session_id, tail=tail)
 
     async def suspend(self) -> None:
         """Suspend the devbox session (keeps storage, terminates pod)."""
         if self._session_id is None:
-            raise RuntimeError("No session created. Call create_sandbox() first.")
+            raise SessionNotInitializedError()
         await self._client.suspend_session(self._session_id)
 
     async def resume(self) -> None:
         """Resume a suspended devbox session."""
         if self._session_id is None:
-            raise RuntimeError("No session created. Call create_sandbox() first.")
+            raise SessionNotInitializedError()
         await self._client.resume_session(self._session_id)
 
     async def delete_sandbox(self) -> None:
@@ -467,11 +413,6 @@ class AsyncManagedSession(AsyncSandboxSession):
         ...     image="python:3.11-slim", experiment_id="my-exp",
         ... ) as s:
         ...     result = await s.execute([{"name": "hello", "command": ["echo", "hi"]}])
-
-        Batch cleanup by experiment:
-
-        >>> async with AsyncGatewayClient(base_url="http://localhost:8080") as client:
-        ...     await client.delete_experiment("my-exp")
     """
 
     def __init__(
@@ -492,18 +433,14 @@ class AsyncManagedSession(AsyncSandboxSession):
         mode: str | None = None,
         devbox: DevboxConfig | dict[str, Any] | None = None,
         iroh_addr: str | None = None,
+        allow_internet: bool | None = None,
     ) -> None:
         super().__init__(
-            image=image,
-            mode=mode,
-            devbox=devbox,
-            profile=profile,
-            gateway_url=gateway_url,
-            timeout=timeout,
-            api_key=api_key,
+            image=image, mode=mode, devbox=devbox, profile=profile,
+            gateway_url=gateway_url, timeout=timeout, api_key=api_key,
             allocation_timeout_seconds=allocation_timeout_seconds,
-            private_containers=private_containers,
-            iroh_addr=iroh_addr,
+            private_containers=private_containers, iroh_addr=iroh_addr,
+            allow_internet=allow_internet,
         )
         self._image = image
         self._profile = profile
@@ -536,6 +473,7 @@ class AsyncManagedSession(AsyncSandboxSession):
             idle_timeout_seconds=self._idle_timeout_seconds,
             allocation_timeout_seconds=self._allocation_timeout_seconds,
             private_containers=self._private_containers,
+            allow_internet=self.allow_internet,
         )
         self._session_id = info.id
         self._session_info = info
@@ -547,8 +485,8 @@ class AsyncManagedSession(AsyncSandboxSession):
 class AsyncDevboxSession(AsyncSandboxSession):
     """Async long-lived development sandbox session.
 
-    Creates a devbox-mode session with extended lifecycle defaults:
-    - 4-hour idle timeout (vs 10 minutes for regular sessions)
+    Creates a devbox-mode session with extended lifecycle defaults
+    (4-hour idle timeout vs 10 minutes for regular sessions).
 
     Examples:
         >>> async with AsyncDevboxSession(image="ubuntu:22.04") as devbox:
@@ -571,15 +509,10 @@ class AsyncDevboxSession(AsyncSandboxSession):
         iroh_addr: str | None = None,
     ) -> None:
         super().__init__(
-            image=image,
-            mode="devbox",
-            devbox=devbox,
-            profile=profile,
-            gateway_url=gateway_url,
-            timeout=timeout,
+            image=image, mode="devbox", devbox=devbox, profile=profile,
+            gateway_url=gateway_url, timeout=timeout,
             idle_timeout_seconds=idle_timeout_seconds,
             allocation_timeout_seconds=allocation_timeout_seconds,
-            api_key=api_key,
-            private_containers=private_containers,
+            api_key=api_key, private_containers=private_containers,
             iroh_addr=iroh_addr,
         )

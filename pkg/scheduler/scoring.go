@@ -101,9 +101,6 @@ func executorImageForPod(pod *corev1.Pod) string {
 		return image
 	}
 	for _, container := range pod.Spec.Containers {
-		if container.Name == "sidecar" {
-			continue
-		}
 		if image := strings.TrimSpace(container.Image); image != "" {
 			return image
 		}

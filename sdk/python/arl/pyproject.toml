@@ -32,6 +32,10 @@ shell = [
 direct = [
     "iroh>=1.0",
 ]
+harbor = [
+    "harbor>=0.19.0",
+    "dockerfile-parse>=2.0",
+]
 dev = [
     "ruff>=0.8.0",
     "mypy>=1.13.0",

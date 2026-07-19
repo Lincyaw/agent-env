@@ -13,10 +13,7 @@ import (
 
 // Config holds the gateway configuration.
 type Config struct {
-	// Sidecar configuration
-	SidecarImage      string
-	SidecarHTTPPort   int
-	SidecarGRPCPort   int
+	// HTTP client timeout for executor calls
 	HTTPClientTimeout time.Duration
 
 	// ClickHouse configuration
@@ -35,22 +32,20 @@ type Config struct {
 	FullObservationEnabled  bool
 	ObservationPreviewBytes int
 
-	// gRPC authentication token (shared between gateway and sidecar)
+	// gRPC authentication token (shared between gateway and executor)
 	GRPCAuthToken      string
 	GRPCAuthSecretName string
 
 	// Executor agent configuration
-	ExecutorAgentImage   string
-	ExecutorProtocol     string
+	ExecutorAgentImage string
+	ExecutorPort       int
 	IrohRelayURL         string
 	IrohRelayExternalURL string
 
-	// ImagePullPolicy is applied to the gateway-injected sidecar and
-	// executor-agent init containers. Defaults to "Always" (production:
-	// always fetch the latest pushed sidecar). Set to "IfNotPresent" for
+	// ImagePullPolicy is applied to the gateway-injected executor-agent
+	// init container. Defaults to "Always". Set to "IfNotPresent" for
 	// local clusters (kind/minikube) where images are side-loaded and never
-	// pushed to a registry — otherwise kubelet ignores the local image and
-	// fails with ImagePullBackOff. Env: IMAGE_PULL_POLICY.
+	// pushed to a registry. Env: IMAGE_PULL_POLICY.
 	ImagePullPolicy string
 
 	// Gateway configuration
@@ -130,7 +125,7 @@ type Config struct {
 	// SandboxCheckpointEnabled enables overlayfs-based filesystem
 	// checkpointing in the executor-agent. When true, the executor
 	// container receives CAP_SYS_ADMIN and a checkpoint-scratch emptyDir
-	// is mounted in both executor and sidecar containers.
+	// is mounted in the executor container.
 	// Env: SANDBOX_CHECKPOINT_ENABLED.
 	SandboxCheckpointEnabled bool
 
@@ -142,7 +137,7 @@ type Config struct {
 	CheckpointStorePath string
 
 	// CheckpointStorePVC is the PVC name mounted at CheckpointStorePath on
-	// the gateway pod and (optionally) on sidecar containers.
+	// the gateway pod.
 	// Env: CHECKPOINT_STORE_PVC, default "checkpoint-store".
 	CheckpointStorePVC string
 
@@ -183,9 +178,6 @@ type Config struct {
 // DefaultConfig returns the default configuration
 func DefaultConfig() *Config {
 	return &Config{
-		SidecarImage:            "arl-sidecar:latest",
-		SidecarHTTPPort:         8080,
-		SidecarGRPCPort:         9090,
 		HTTPClientTimeout:       5 * time.Minute,
 		ClickHouseEnabled:       false,
 		ClickHouseAddr:          "localhost:9000",
@@ -197,8 +189,8 @@ func DefaultConfig() *Config {
 		TrajectoryEnabled:       false,
 		TrajectoryDebug:         false,
 		ObservationPreviewBytes: 4096,
-		ExecutorAgentImage:      "arl-executor-agent:latest",
-		ExecutorProtocol:        "v2",
+		ExecutorAgentImage: "arl-executor-agent:latest",
+		ExecutorPort:       9090,
 		ImagePullPolicy:         "Always",
 		GatewayPort:             8080,
 		GatewayNamespace:        "default",
@@ -263,22 +255,6 @@ func DefaultConfig() *Config {
 func LoadFromEnv() *Config {
 	cfg := DefaultConfig()
 
-	if image := os.Getenv("SIDECAR_IMAGE"); image != "" {
-		cfg.SidecarImage = image
-	}
-
-	if port := os.Getenv("SIDECAR_HTTP_PORT"); port != "" {
-		if p, err := strconv.Atoi(port); err == nil {
-			cfg.SidecarHTTPPort = p
-		}
-	}
-
-	if port := os.Getenv("SIDECAR_GRPC_PORT"); port != "" {
-		if p, err := strconv.Atoi(port); err == nil {
-			cfg.SidecarGRPCPort = p
-		}
-	}
-
 	if timeout := os.Getenv("HTTP_CLIENT_TIMEOUT"); timeout != "" {
 		if d, err := time.ParseDuration(timeout); err == nil {
 			cfg.HTTPClientTimeout = d
@@ -336,8 +312,10 @@ func LoadFromEnv() *Config {
 	if image := os.Getenv("EXECUTOR_AGENT_IMAGE"); image != "" {
 		cfg.ExecutorAgentImage = image
 	}
-	if v := os.Getenv("EXECUTOR_PROTOCOL"); v != "" {
-		cfg.ExecutorProtocol = v
+	if v := os.Getenv("EXECUTOR_PORT"); v != "" {
+		if p, err := strconv.Atoi(v); err == nil {
+			cfg.ExecutorPort = p
+		}
 	}
 	if v := os.Getenv("IROH_RELAY_URL"); v != "" {
 		cfg.IrohRelayURL = v
@@ -616,15 +594,6 @@ func LoadFromEnv() *Config {
 
 // Validate validates the configuration
 func (c *Config) Validate() error {
-	// Validate port ranges
-	if c.SidecarHTTPPort < 1 || c.SidecarHTTPPort > 65535 {
-		return fmt.Errorf("invalid sidecar HTTP port: %d (must be 1-65535)", c.SidecarHTTPPort)
-	}
-
-	if c.SidecarGRPCPort < 1 || c.SidecarGRPCPort > 65535 {
-		return fmt.Errorf("invalid sidecar gRPC port: %d (must be 1-65535)", c.SidecarGRPCPort)
-	}
-
 	// Validate timeouts
 	if c.HTTPClientTimeout <= 0 {
 		return fmt.Errorf("HTTP client timeout must be positive: %v", c.HTTPClientTimeout)

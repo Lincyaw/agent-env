@@ -15,7 +15,7 @@
 //   - arl_gateway_execute_operation_result_total: Idempotent execute operation outcomes.
 //   - arl_gateway_step_duration_seconds: Execute step latency.
 //   - arl_gateway_step_result_total: Execute step result counter.
-//   - arl_gateway_sidecar_call_seconds: Sidecar gRPC call latency.
+//   - arl_gateway_executor_call_seconds: Executor call latency.
 //   - arl_gateway_active_sessions: Current session count.
 //   - arl_gateway_session_deletion_total: Session tombstones by deletion reason.
 //   - arl_sandbox_pool_saturation: Warm pool allocated/desired ratio.

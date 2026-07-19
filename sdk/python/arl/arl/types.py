@@ -307,7 +307,7 @@ class GatewaySummary(BaseModel):
 
 
 class LogEntry(BaseModel):
-    """A single NDJSON log entry from a session sidecar."""
+    """A single NDJSON log entry from a session executor."""
 
     timestamp: str = ""
     level: str = ""
@@ -321,17 +321,6 @@ class PoolLogEntry(LogEntry):
     pod_name: str = Field(alias="podName")
 
     model_config = {"populate_by_name": True}
-
-
-class TrajectoryEntry(BaseModel):
-    """A single trajectory entry for RL/SFT export."""
-
-    session_id: str
-    step: int
-    action: dict[str, object]
-    observation: dict[str, object]
-    snapshot_id: str = ""
-    timestamp: datetime | None = None
 
 
 class BuildResponse(BaseModel):
@@ -503,7 +492,7 @@ class PrivateContainerSpec(BaseModel):
     """Gateway-managed container hidden from the agent-facing executor.
 
     Attributes:
-        name: Kubernetes container name, excluding reserved executor/sidecar names.
+        name: Kubernetes container name, excluding reserved executor names.
         image: Container image containing private evaluator assets or scripts.
         mount_workspace: Whether to mount the session workspace volume.
         workspace_mount_path: Mount path inside the private container.
@@ -540,48 +529,6 @@ class ToolsSpec(BaseModel):
     inline: list[InlineToolSpec] = []
 
     model_config = {"populate_by_name": True}
-
-
-class StatResult(BaseModel):
-    """File metadata returned by the stat endpoint.
-
-    Attributes:
-        exists: Whether the path exists.
-        is_dir: Whether the path is a directory.
-        size: File size in bytes.
-        mode: Unix file mode string (e.g. "0644").
-        modified: Last modification time (ISO 8601).
-    """
-
-    exists: bool
-    is_dir: bool | None = None
-    size: int | None = None
-    mode: str | None = None
-    modified: str | None = None
-
-
-class DirEntry(BaseModel):
-    """A single entry in a directory listing.
-
-    Attributes:
-        name: File or directory name (relative path when recursive).
-        is_dir: Whether this entry is a directory.
-        size: File size in bytes.
-    """
-
-    name: str
-    is_dir: bool
-    size: int
-
-
-class ListDirResult(BaseModel):
-    """Response from a directory listing.
-
-    Attributes:
-        entries: List of directory entries.
-    """
-
-    entries: list[DirEntry]
 
 
 class ExecResult(BaseModel):

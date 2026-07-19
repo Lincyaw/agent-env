@@ -9,7 +9,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/Lincyaw/agent-env/pkg/sidecar"
+	"github.com/Lincyaw/agent-env/pkg/interfaces"
 )
 
 var forkHTTPClient = &http.Client{Timeout: 5 * time.Minute}
@@ -17,7 +17,7 @@ var forkHTTPClient = &http.Client{Timeout: 5 * time.Minute}
 // ForkSession creates a new session from the filesystem state of a source
 // session at a given checkpoint step. The flow:
 //  1. Try to load checkpoint from persistent store (works after source deletion)
-//  2. Fall back to downloading from the source sidecar HTTP endpoint
+//  2. Fall back to downloading from the source executor HTTP endpoint
 //  3. Create a new session with the same image/profile/namespace
 //  4. Upload the tar to the new session and extract it
 //  5. Return the new session info with fork metadata
@@ -54,27 +54,27 @@ func (g *Gateway) ForkSession(ctx context.Context, sourceID string, req ForkSess
 	// Execute returns 0-based step indices; checkpoint dirs are 1-based.
 	checkpointStep := req.Step + 1
 
-	// Try persistent store first (avoids hitting the sidecar)
+	// Try persistent store first (avoids hitting the executor)
 	if g.checkpointStore != nil {
 		tmpPath, err := g.checkpointStore.LoadCombined(sourceID, checkpointStep)
 		if err == nil {
 			defer os.Remove(tmpPath)
 			return g.completeFork(ctx, sourceID, req, tmpPath, sourceImage, sourceProfile, sourceNS, sourceMode)
 		}
-		log.Printf("Fork: persistent store miss for %s step %d, falling back to sidecar: %v", sourceID, checkpointStep, err)
+		log.Printf("Fork: persistent store miss for %s step %d, falling back to executor: %v", sourceID, checkpointStep, err)
 	}
 
 	if sourcePodIP == "" {
 		return nil, fmt.Errorf("source session %s has no pod IP", sourceID)
 	}
 
-	// Download combined checkpoint tar from source sidecar
-	sidecarHTTPPort := g.gwConfig.SidecarHTTPPort
-	if sidecarHTTPPort == 0 {
-		sidecarHTTPPort = 8080
+	// Download combined checkpoint tar from source executor
+	executorPort := g.gwConfig.ExecutorPort
+	if executorPort == 0 {
+		executorPort = 9090
 	}
 	checkpointURL := fmt.Sprintf("http://%s:%d/v1/checkpoints/combined?through=%d",
-		sourcePodIP, sidecarHTTPPort, checkpointStep)
+		sourcePodIP, executorPort, checkpointStep)
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, checkpointURL, nil)
 	if err != nil {
@@ -181,7 +181,7 @@ func (g *Gateway) completeFork(ctx context.Context, sourceID string, req ForkSes
 }
 
 // applyCheckpointToSession uploads a checkpoint tar to a session and extracts
-// it, restoring filesystem state. Uses the sidecar gRPC client for file upload
+// it, restoring filesystem state. Uses the executor client for file upload
 // and command execution.
 func (g *Gateway) applyCheckpointToSession(ctx context.Context, sessionID, tarPath string) error {
 	sess, ok := g.store.Get(sessionID)
@@ -196,8 +196,8 @@ func (g *Gateway) applyCheckpointToSession(ctx context.Context, sessionID, tarPa
 	if podIP == "" {
 		return fmt.Errorf("session %s has no pod IP", sessionID)
 	}
-	if g.sidecarClient == nil {
-		return fmt.Errorf("sidecar client not configured")
+	if g.executorClient == nil {
+		return fmt.Errorf("executor client not configured")
 	}
 
 	tarFile, err := os.Open(tarPath)
@@ -206,31 +206,31 @@ func (g *Gateway) applyCheckpointToSession(ctx context.Context, sessionID, tarPa
 	}
 	defer tarFile.Close()
 
-	// Upload tar via sidecar WriteFile RPC (streams, no full-file memory alloc)
+	// Upload tar via executor WriteFile (streams, no full-file memory alloc)
 	const restorePath = "/tmp/arl-restore.tar"
-	if _, err := g.sidecarClient.WriteFile(ctx, podIP, restorePath, tarFile, ""); err != nil {
+	if _, err := g.executorClient.WriteFile(ctx, podIP, restorePath, tarFile, ""); err != nil {
 		return fmt.Errorf("upload checkpoint tar: %w", err)
 	}
 
 	// Extract tar to root filesystem
-	extractReq := &sidecar.ExecRequest{
+	extractReq := &interfaces.ExecRequest{
 		Command:        []string{"tar", "xf", restorePath, "-C", "/"},
 		TimeoutSeconds: 120,
 	}
-	result, err := g.sidecarClient.Execute(ctx, podIP, extractReq)
+	result, err := g.executorClient.Execute(ctx, podIP, extractReq)
 	if err != nil {
 		return fmt.Errorf("extract checkpoint: %w", err)
 	}
-	if result.GetExitCode() != 0 {
-		return fmt.Errorf("checkpoint extraction failed (exit %d): %s", result.GetExitCode(), result.GetStderr())
+	if result.ExitCode != 0 {
+		return fmt.Errorf("checkpoint extraction failed (exit %d): %s", result.ExitCode, result.Stderr)
 	}
 
 	// Cleanup the temp tar
-	cleanupReq := &sidecar.ExecRequest{
+	cleanupReq := &interfaces.ExecRequest{
 		Command:        []string{"rm", "-f", restorePath},
 		TimeoutSeconds: 10,
 	}
-	g.sidecarClient.Execute(ctx, podIP, cleanupReq) //nolint:errcheck
+	g.executorClient.Execute(ctx, podIP, cleanupReq) //nolint:errcheck
 
 	return nil
 }

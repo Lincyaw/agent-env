@@ -44,14 +44,14 @@ struct WatchState {
     fs_shutdowns: Vec<Arc<AtomicBool>>,
 }
 
-/// V2 executor agent.
-pub struct AgentV2 {
+/// Executor agent.
+pub struct Agent {
     socket_path: String,
     workspace_dir: String,
     checkpointer: Option<Arc<Checkpointer>>,
 }
 
-impl AgentV2 {
+impl Agent {
     pub fn new(socket_path: String, workspace_dir: String, checkpointer: Option<Arc<Checkpointer>>) -> Self {
         Self {
             socket_path,
@@ -64,7 +64,7 @@ impl AgentV2 {
         let _ = fs::remove_file(&self.socket_path);
         let listener = UnixListener::bind(&self.socket_path)?;
         set_socket_permissions(&self.socket_path)?;
-        log::info!("executor-agent v2 listening on {}", self.socket_path);
+        log::info!("executor-agent listening on {}", self.socket_path);
 
         listener.set_nonblocking(true)?;
 
@@ -192,13 +192,25 @@ fn handle_conn(
 ) -> io::Result<()> {
     let reader = stream.try_clone()?;
     let writer: SharedWriter = Arc::new(Mutex::new(Box::new(stream)));
-    handle_v2_session(reader, writer, workspace, None, checkpointer)
+    handle_session(reader, writer, workspace, None, checkpointer)
 }
 
-/// Transport-agnostic V2 session handler. Called from both Unix socket and iroh QUIC paths.
+/// Handle a TCP connection the same way as a Unix socket connection.
+pub fn handle_conn_tcp(
+    stream: std::net::TcpStream,
+    workspace: &str,
+    _shutdown: watch::Receiver<bool>,
+    checkpointer: Option<Arc<Checkpointer>>,
+) -> io::Result<()> {
+    let reader = stream.try_clone()?;
+    let writer: SharedWriter = Arc::new(Mutex::new(Box::new(stream)));
+    handle_session(reader, writer, workspace, None, checkpointer)
+}
+
+/// Transport-agnostic session handler. Called from Unix socket, TCP, and iroh QUIC paths.
 /// When `tunnel_registry` is Some, tunnel requests register targets for data-stream forwarding.
 /// When None (Unix socket), tunnel requests return an error.
-pub fn handle_v2_session(
+pub fn handle_session(
     reader: impl io::Read,
     writer: SharedWriter,
     workspace: &str,
@@ -277,11 +289,11 @@ fn handle_messages(
 
         match kind {
             proto::request::Kind::Ping(_) => {
-                log::info!("[v2:ping] tag={tag}");
+                log::info!("[ping] tag={tag}");
                 let _ = send_response(&writer, tag, proto::response::Kind::Ping(proto::PingResponse {}));
             }
             proto::request::Kind::Spawn(params) => {
-                log::info!("[v2:spawn] tag={tag} cmd={:?}", params.command);
+                log::info!("[spawn] tag={tag} cmd={:?}", params.command);
                 handle_spawn(tag, params, workspace, &writer, processes, checkpointer);
             }
             proto::request::Kind::WriteIn(params) => {
@@ -294,39 +306,31 @@ fn handle_messages(
                 handle_resize(tag, params, &writer, processes);
             }
             proto::request::Kind::Read(params) => {
-                log::info!("[v2:read] tag={tag} path={}", params.path);
+                log::info!("[read] tag={tag} path={}", params.path);
                 handle_read(tag, params, &writer);
             }
             proto::request::Kind::Write(params) => {
-                log::info!("[v2:write] tag={tag} path={}", params.path);
+                log::info!("[write] tag={tag} path={}", params.path);
                 handle_write(tag, params, &writer, &mut reader, checkpointer);
             }
-            proto::request::Kind::Stat(params) => {
-                log::info!("[v2:stat] tag={tag} path={}", params.path);
-                handle_stat(tag, params, &writer);
-            }
-            proto::request::Kind::List(params) => {
-                log::info!("[v2:list] tag={tag} path={}", params.path);
-                handle_list(tag, params, &writer);
-            }
             proto::request::Kind::Tunnel(params) => {
-                log::info!("[v2:tunnel] tag={tag} host={} port={}", params.host, params.port);
+                log::info!("[tunnel] tag={tag} host={} port={}", params.host, params.port);
                 handle_tunnel(tag, params, &writer, tunnels);
             }
             proto::request::Kind::CloseTunnel(params) => {
-                log::info!("[v2:close_tunnel] tag={tag} tunnel_tag={}", params.tunnel_tag);
+                log::info!("[close_tunnel] tag={tag} tunnel_tag={}", params.tunnel_tag);
                 handle_close_tunnel(tag, params, &writer, tunnels);
             }
             proto::request::Kind::ListTunnels(_) => {
-                log::info!("[v2:list_tunnels] tag={tag}");
+                log::info!("[list_tunnels] tag={tag}");
                 handle_list_tunnels(tag, &writer, tunnels);
             }
             proto::request::Kind::Watch(params) => {
-                log::info!("[v2:watch] tag={tag} path={}", params.path);
+                log::info!("[watch] tag={tag} path={}", params.path);
                 handle_watch(tag, params, workspace, &writer, watches, watch_counter);
             }
             proto::request::Kind::Unwatch(params) => {
-                log::info!("[v2:unwatch] tag={tag} watch_id={}", params.watch_id);
+                log::info!("[unwatch] tag={tag} watch_id={}", params.watch_id);
                 handle_unwatch(tag, params, &writer, watches);
             }
         }
@@ -732,7 +736,7 @@ fn wait_and_exit(
         procs.remove(&process_tag);
     }
 
-    log::info!("[v2:exit] process_tag={process_tag} exit_code={exit_code}");
+    log::info!("[exit] process_tag={process_tag} exit_code={exit_code}");
     let _ = send_event(
         writer,
         0,
@@ -904,7 +908,7 @@ fn handle_read(
     writer: &SharedWriter,
 ) {
     if let Err(e) = handle_read_inner(tag, params, writer) {
-        log::error!("[v2:read] tag={tag} error: {e}");
+        log::error!("[read] tag={tag} error: {e}");
     }
 }
 
@@ -1086,84 +1090,6 @@ fn record_write_checkpoint(ckpt: &Checkpointer, target: &std::path::Path) -> io:
 }
 
 // ---------------------------------------------------------------------------
-// stat
-// ---------------------------------------------------------------------------
-
-fn handle_stat(
-    tag: u32,
-    params: proto::StatRequest,
-    writer: &SharedWriter,
-) {
-    let target = match sanitize_path(&params.path) {
-        Ok(p) => p,
-        Err(e) => {
-            let _ = send_error(writer, tag, 7, e);
-            return;
-        }
-    };
-
-    match fs::metadata(&target) {
-        Ok(meta) => {
-            use std::os::unix::fs::MetadataExt;
-            let mod_time = meta
-                .modified()
-                .ok()
-                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-                .map(|d| d.as_secs() as i64)
-                .unwrap_or(0);
-            let mode_val = meta.mode();
-            let _ = send_response(
-                writer,
-                tag,
-                proto::response::Kind::Stat(proto::StatResponse {
-                    path: params.path,
-                    is_dir: meta.is_dir(),
-                    size_bytes: meta.len() as i64,
-                    mode: format!("{:04o}", mode_val & 0o7777),
-                    mod_time_unix: mod_time,
-                }),
-            );
-        }
-        Err(e) if e.kind() == io::ErrorKind::NotFound => {
-            let _ = send_error(writer, tag, 10, format!("not found: {}", params.path));
-        }
-        Err(e) => {
-            let _ = send_error(writer, tag, 10, format!("{e}"));
-        }
-    }
-}
-
-// ---------------------------------------------------------------------------
-// list (directory)
-// ---------------------------------------------------------------------------
-
-fn handle_list(
-    tag: u32,
-    params: proto::ListRequest,
-    writer: &SharedWriter,
-) {
-    let target = match sanitize_path(&params.path) {
-        Ok(p) => p,
-        Err(e) => {
-            let _ = send_error(writer, tag, 7, e);
-            return;
-        }
-    };
-
-    let mut entries = Vec::new();
-    if let Err(e) = collect_entries(&target, &mut entries, params.recursive) {
-        let _ = send_error(writer, tag, 11, format!("{e}"));
-        return;
-    }
-
-    let _ = send_response(
-        writer,
-        tag,
-        proto::response::Kind::List(proto::ListResponse { entries }),
-    );
-}
-
-// ---------------------------------------------------------------------------
 // tunnel
 // ---------------------------------------------------------------------------
 
@@ -1180,12 +1106,12 @@ fn handle_tunnel(
     match tunnels.lock() {
         Ok(mut reg) => { reg.insert(tag, target); }
         Err(e) => {
-            log::error!("[v2:tunnel] registry lock poisoned: {e}");
+            log::error!("[tunnel] registry lock poisoned: {e}");
             let _ = send_error(writer, tag, 13, "internal error".to_string());
             return;
         }
     }
-    log::info!("[v2:tunnel] registered tag={tag} -> {}:{}", params.host, params.port);
+    log::info!("[tunnel] registered tag={tag} -> {}:{}", params.host, params.port);
     let _ = send_response(
         writer,
         tag,
@@ -1202,13 +1128,13 @@ fn handle_close_tunnel(
     let mut reg = match tunnels.lock() {
         Ok(g) => g,
         Err(e) => {
-            log::error!("[v2:close_tunnel] registry lock poisoned: {e}");
+            log::error!("[close_tunnel] registry lock poisoned: {e}");
             let _ = send_error(writer, tag, 13, "internal error".to_string());
             return;
         }
     };
     if reg.remove(&params.tunnel_tag).is_some() {
-        log::info!("[v2:close_tunnel] removed tunnel_tag={}", params.tunnel_tag);
+        log::info!("[close_tunnel] removed tunnel_tag={}", params.tunnel_tag);
         let _ = send_response(
             writer,
             tag,
@@ -1232,7 +1158,7 @@ fn handle_list_tunnels(
     let reg = match tunnels.lock() {
         Ok(g) => g,
         Err(e) => {
-            log::error!("[v2:list_tunnels] registry lock poisoned: {e}");
+            log::error!("[list_tunnels] registry lock poisoned: {e}");
             let _ = send_error(writer, tag, 13, "internal error".to_string());
             return;
         }
@@ -1475,40 +1401,6 @@ fn mask_to_event_type(mask: EventMask) -> Option<&'static str> {
     }
 }
 
-fn collect_entries(
-    dir: &std::path::Path,
-    entries: &mut Vec<proto::DirEntry>,
-    recursive: bool,
-) -> io::Result<()> {
-    for entry in fs::read_dir(dir)? {
-        let entry = entry?;
-        let meta = entry.metadata()?;
-        let name = if meta.is_dir() {
-            format!("{}/", entry.file_name().to_string_lossy())
-        } else {
-            entry.file_name().to_string_lossy().into_owned()
-        };
-        use std::os::unix::fs::MetadataExt;
-        let mod_time = meta
-            .modified()
-            .ok()
-            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
-            .map(|d| d.as_secs() as i64)
-            .unwrap_or(0);
-        entries.push(proto::DirEntry {
-            name,
-            is_dir: meta.is_dir(),
-            size_bytes: meta.len() as i64,
-            mode: format!("{:04o}", meta.mode() & 0o7777),
-            mod_time_unix: mod_time,
-        });
-        if recursive && meta.is_dir() {
-            collect_entries(&entry.path(), entries, true)?;
-        }
-    }
-    Ok(())
-}
-
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -1528,7 +1420,7 @@ mod tests {
         let ws = workspace.to_string();
         let sp = sock_path.clone();
         thread::spawn(move || {
-            let agent = AgentV2::new(sp, ws, None);
+            let agent = Agent::new(sp, ws, None);
             agent.run(rx).ok();
         });
 
@@ -1735,79 +1627,6 @@ mod tests {
 
         assert!(got_output, "expected cat to echo our stdin data");
         assert!(got_exit, "expected exit event");
-    }
-
-    #[test]
-    fn test_stat_existing_file() {
-        let ws = tempfile::tempdir().unwrap();
-        let file_path = ws.path().join("hello.txt");
-        fs::write(&file_path, "content").unwrap();
-        let (sock, _tx) = start_test_agent(ws.path().to_str().unwrap());
-
-        let mut stream = UnixStream::connect(&sock).unwrap();
-
-        send_request_pb(&mut stream, 30, proto::request::Kind::Stat(proto::StatRequest {
-            path: file_path.to_str().unwrap().into(),
-        }));
-
-        let resp = read_response(&mut stream);
-        assert_eq!(resp.tag, 30);
-        match &resp.kind {
-            Some(proto::response::Kind::Stat(s)) => {
-                assert!(!s.is_dir);
-                assert_eq!(s.size_bytes, 7);
-            }
-            _ => panic!("expected stat response"),
-        }
-    }
-
-    #[test]
-    fn test_stat_nonexistent() {
-        let ws = tempfile::tempdir().unwrap();
-        let (sock, _tx) = start_test_agent(ws.path().to_str().unwrap());
-
-        let mut stream = UnixStream::connect(&sock).unwrap();
-
-        let abs_path = ws.path().join("nope.txt");
-        send_request_pb(&mut stream, 31, proto::request::Kind::Stat(proto::StatRequest {
-            path: abs_path.to_str().unwrap().into(),
-        }));
-
-        let resp = read_response(&mut stream);
-        assert_eq!(resp.tag, 31);
-        match &resp.kind {
-            Some(proto::response::Kind::Error(e)) => {
-                assert!(e.message.contains("not found"));
-            }
-            _ => panic!("expected error response for nonexistent file"),
-        }
-    }
-
-    #[test]
-    fn test_list_dir() {
-        let ws = tempfile::tempdir().unwrap();
-        let sub = ws.path().join("mydir");
-        fs::create_dir(&sub).unwrap();
-        fs::write(sub.join("c.txt"), "ccc").unwrap();
-
-        let (sock, _tx) = start_test_agent(ws.path().to_str().unwrap());
-
-        let mut stream = UnixStream::connect(&sock).unwrap();
-
-        send_request_pb(&mut stream, 40, proto::request::Kind::List(proto::ListRequest {
-            path: sub.to_str().unwrap().into(),
-            recursive: false,
-        }));
-
-        let resp = read_response(&mut stream);
-        assert_eq!(resp.tag, 40);
-        match &resp.kind {
-            Some(proto::response::Kind::List(ld)) => {
-                assert_eq!(ld.entries.len(), 1);
-                assert_eq!(ld.entries[0].name, "c.txt");
-            }
-            _ => panic!("expected list response"),
-        }
     }
 
     #[test]

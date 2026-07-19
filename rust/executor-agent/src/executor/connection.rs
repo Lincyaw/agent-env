@@ -1,4 +1,4 @@
-use super::agent::{handle_v2_session, SharedWriter, TunnelRegistry};
+use super::agent::{handle_session, SharedWriter, TunnelRegistry};
 use super::streams;
 use iroh::endpoint::Connection;
 use log::{error, info, warn};
@@ -45,8 +45,8 @@ impl ConnectionHandler {
             let writer: SharedWriter =
                 Arc::new(Mutex::new(Box::new(SyncSendStream::new(send_stream, handle))));
 
-            if let Err(e) = handle_v2_session(reader, writer, &workspace, Some(tunnels_for_control), None) {
-                error!("iroh v2 session error: {e}");
+            if let Err(e) = handle_session(reader, writer, &workspace, Some(tunnels_for_control), None) {
+                error!("iroh session error: {e}");
             }
         });
 

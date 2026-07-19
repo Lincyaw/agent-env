@@ -15,6 +15,7 @@ download operations to ARL gRPC calls, and tears the session down on stop.
 from __future__ import annotations
 
 import io
+import ipaddress
 import logging
 import os
 import shlex
@@ -22,7 +23,7 @@ import tarfile
 from pathlib import Path, PurePosixPath
 from typing import Any
 
-from harbor.environments.base import BaseEnvironment, ExecResult
+from harbor.environments.base import BaseEnvironment, ExecResult, NetworkPolicy
 from harbor.environments.capabilities import (
     EnvironmentCapabilities,
     EnvironmentResourceCapabilities,
@@ -39,7 +40,7 @@ from harbor.models.trial.paths import TrialPaths
 
 from arl.async_client import AsyncGatewayClient
 from arl.configenv import ConfigEnvSpec
-from arl.types import ExecuteResponse, ResourceRequirements
+from arl.types import ExecuteResponse, StepRequest
 
 
 class ArlEnvironment(BaseEnvironment):
@@ -137,8 +138,35 @@ class ArlEnvironment(BaseEnvironment):
             memory_request=True,
         )
 
-    async def _apply_network_policy(self, network_policy: Any) -> None:
-        pass
+    async def _apply_network_policy(self, network_policy: NetworkPolicy) -> None:
+        if not self._arl_session_id:
+            raise RuntimeError("ARL session not started.")
+        client = self._get_client()
+
+        if network_policy.network_mode == NetworkMode.PUBLIC:
+            await client.update_network_policy(self._arl_session_id, allow_internet=True)
+            return
+
+        # NO_NETWORK and ALLOWLIST both deny internet; ALLOWLIST additionally
+        # permits egress to the resolvable IP/CIDR entries. Hostname entries
+        # cannot be expressed as Kubernetes NetworkPolicy egress rules.
+        egress_cidrs: list[str] = []
+        for host in network_policy.allowed_hosts:
+            cidr = _host_to_cidr(host)
+            if cidr is None:
+                self.logger.warning(
+                    "Ignoring non-CIDR allowlist host %r: dynamic network "
+                    "policy can only enforce IP/CIDR egress rules",
+                    host,
+                )
+                continue
+            egress_cidrs.append(cidr)
+
+        await client.update_network_policy(
+            self._arl_session_id,
+            allow_internet=False,
+            egress_cidrs=egress_cidrs,
+        )
 
     def _validate_definition(self) -> None:
         if self.task_env_config.docker_image:
@@ -234,43 +262,6 @@ class ArlEnvironment(BaseEnvironment):
         buf.seek(0)
         return buf, content_hash
 
-    def _build_resources(self) -> ResourceRequirements | None:
-        """Build Kubernetes ResourceRequirements from task_env_config."""
-        requests: dict[str, str] = {}
-        limits: dict[str, str] = {}
-
-        cpus = self._effective_cpus
-        if cpus is not None:
-            cpu_str = str(cpus)
-            req_cpus = self._resource_request_value("cpu", auto_mode=_AUTO_CPU_MODE)
-            lim_cpus = self._resource_limit_value("cpu", auto_mode=_AUTO_CPU_MODE)
-            if req_cpus is not None:
-                requests["cpu"] = cpu_str
-            if lim_cpus is not None:
-                limits["cpu"] = cpu_str
-
-        memory_mb = self._effective_memory_mb
-        if memory_mb is not None:
-            mem_str = f"{memory_mb}Mi"
-            req_mem = self._resource_request_value("memory", auto_mode=_AUTO_MEM_MODE)
-            lim_mem = self._resource_limit_value("memory", auto_mode=_AUTO_MEM_MODE)
-            if req_mem is not None:
-                requests["memory"] = mem_str
-            if lim_mem is not None:
-                limits["memory"] = mem_str
-
-        storage_mb = self._effective_storage_mb
-        if storage_mb is not None:
-            requests["ephemeral-storage"] = f"{storage_mb}Mi"
-
-        gpus = self._effective_gpus
-        if gpus > 0:
-            limits["nvidia.com/gpu"] = str(gpus)
-
-        if not requests and not limits:
-            return None
-        return ResourceRequirements(requests=requests, limits=limits)
-
     def _initial_allow_internet(self) -> bool | None:
         """Map the startup network policy to the gateway's allowInternet flag."""
         if self._network_policy.network_mode == NetworkMode.NO_NETWORK:
@@ -292,7 +283,6 @@ class ArlEnvironment(BaseEnvironment):
         if startup_env:
             config_env = ConfigEnvSpec(vars=startup_env)
 
-        resources = self._build_resources()
         allow_internet = self._initial_allow_internet()
 
         info = await client.create_session(
@@ -305,10 +295,9 @@ class ArlEnvironment(BaseEnvironment):
         )
         self._arl_session_id = info.id
         self.logger.info(
-            "ARL session %s created (image=%s, resources=%s)",
+            "ARL session %s created (image=%s)",
             self._arl_session_id,
             image,
-            resources,
         )
 
         await self.ensure_dirs(self._mount_targets(writable_only=True))
@@ -364,25 +353,17 @@ class ArlEnvironment(BaseEnvironment):
         if user is not None and str(user) != "root":
             shell_cmd = f"su -s /bin/bash {shlex.quote(str(user))} -c {shlex.quote(shell_cmd)}"
 
-        if merged_env is None:
-            merged_env = {}
-        if "LD_LIBRARY_PATH" not in merged_env:
-            merged_env["LD_LIBRARY_PATH"] = "/usr/local/lib:/usr/lib/x86_64-linux-gnu:/lib/x86_64-linux-gnu"
-
-        step: dict[str, object] = {
-            "name": "exec",
-            "command": ["bash", "-lc", shell_cmd],
-        }
-        if work_dir:
-            step["workDir"] = work_dir
-        if timeout_sec:
-            step["timeoutSeconds"] = timeout_sec
-        if merged_env:
-            step["env"] = merged_env
+        step = StepRequest(
+            name="exec",
+            command=["bash", "-c", shell_cmd],
+            workDir=work_dir or None,
+            timeoutSeconds=timeout_sec or None,
+            env=merged_env or None,
+        )
 
         resp: ExecuteResponse = await client.execute(
             self._arl_session_id,
-            [step],  # type: ignore[arg-type]
+            [step.model_dump(by_alias=True, exclude_none=True)],
             recover_timeout=(timeout_sec or 300) + 120,
         )
 
@@ -399,16 +380,14 @@ class ArlEnvironment(BaseEnvironment):
     async def upload_file(self, source_path: Path | str, target_path: str) -> None:
         if not self._arl_session_id:
             raise RuntimeError("ARL session not started.")
-        client = self._get_client()
         if not target_path.startswith("/"):
             target_path = f"/app/{target_path}"
-        with open(source_path, "rb") as fh:
-            await client.upload_file(self._arl_session_id, target_path, fh)
+        client = self._get_client()
+        await client.upload_path(self._arl_session_id, source_path, target_path)
 
     async def upload_dir(self, source_dir: Path | str, target_dir: str) -> None:
         if not self._arl_session_id:
             raise RuntimeError("ARL session not started.")
-        client = self._get_client()
         source = Path(source_dir)
         for file_path in source.rglob("*"):
             if not file_path.is_file():
@@ -417,17 +396,13 @@ class ArlEnvironment(BaseEnvironment):
             remote = str(PurePosixPath(target_dir) / rel)
             if not remote.startswith("/"):
                 remote = f"/{remote}"
-            with open(file_path, "rb") as fh:
-                await client.upload_file(self._arl_session_id, remote, fh)
+            await self.upload_file(file_path, remote)
 
     async def download_file(self, source_path: str, target_path: Path | str) -> None:
         if not self._arl_session_id:
             raise RuntimeError("ARL session not started.")
         client = self._get_client()
-        data = await client.download_file(self._arl_session_id, source_path)
-        target = Path(target_path)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_bytes(data)
+        await client.download_path(self._arl_session_id, source_path, target_path)
 
     async def download_dir(self, source_dir: str, target_dir: Path | str) -> None:
         await self.download_dir_with_exclusions(
@@ -437,9 +412,22 @@ class ArlEnvironment(BaseEnvironment):
         )
 
 
-# ARL sandboxes use Kubernetes resource semantics: AUTO maps CPU to request
-# (burstable) and memory to limit (OOM-kill boundary).
-from harbor.models.trial.config import ResourceMode as _ResourceMode  # noqa: E402
+def _host_to_cidr(host: str) -> str | None:
+    """Normalize an allowlist host to CIDR notation, or None if not an IP/CIDR.
 
-_AUTO_CPU_MODE = _ResourceMode.REQUEST
-_AUTO_MEM_MODE = _ResourceMode.LIMIT
+    Bare IPs become single-host CIDRs (``/32`` or ``/128``); hostnames return
+    None since Kubernetes NetworkPolicy egress rules cannot match them.
+    """
+    host = host.strip()
+    if not host:
+        return None
+    if "/" in host:
+        try:
+            return str(ipaddress.ip_network(host, strict=False))
+        except ValueError:
+            return None
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return None
+    return f"{host}/32" if ip.version == 4 else f"{host}/128"

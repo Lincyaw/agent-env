@@ -33,7 +33,7 @@ func (g *Gateway) ExecuteContainerSteps(
 	if container == "" {
 		return nil, fmt.Errorf("container is required")
 	}
-	if container == executorContainerName || container == sidecarContainerName {
+	if container == executorContainerName {
 		return nil, fmt.Errorf("container %q is not a private container", container)
 	}
 

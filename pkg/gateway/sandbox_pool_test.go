@@ -86,11 +86,9 @@ func TestCreatePoolCreatesSandboxWarmPoolAndExecutableTemplate(t *testing.T) {
 	gw := &Gateway{
 		k8sClient: k8sClient,
 		gwConfig: GatewayConfig{
-			SidecarImage:                    "arl-sidecar:orbstack",
 			ExecutorAgentImage:              "arl-executor-agent:orbstack",
 			ImagePullPolicy:                 string(corev1.PullIfNotPresent),
-			SidecarHTTPPort:                 8080,
-			SidecarGRPCPort:                 9090,
+			ExecutorPort:                    9090,
 			GRPCAuthToken:                   "test-token",
 			SandboxNetworkPolicyManagement:  string(extensionsv1beta1.NetworkPolicyManagementManaged),
 			SandboxRuntimeClassName:         "kata",
@@ -124,29 +122,16 @@ func TestCreatePoolCreatesSandboxWarmPoolAndExecutableTemplate(t *testing.T) {
 	if !hasContainer(podSpec.Containers, "executor") {
 		t.Fatal("template missing executor container")
 	}
-	if !hasContainer(podSpec.Containers, "sidecar") {
-		t.Fatal("template missing sidecar container")
-	}
 	executor := findContainer(podSpec.Containers, "executor")
 	assertResourceQuantity(t, executor.Resources.Requests[corev1.ResourceCPU], "500m")
 	assertResourceQuantity(t, executor.Resources.Requests[corev1.ResourceMemory], "512Mi")
 	assertResourceQuantity(t, executor.Resources.Limits[corev1.ResourceCPU], "8")
 	assertResourceQuantity(t, executor.Resources.Limits[corev1.ResourceMemory], "32Gi")
-	sidecar := findContainer(podSpec.Containers, "sidecar")
-	if got := sidecar.Command; len(got) != 1 || got[0] != "/sidecar" {
-		t.Fatalf("sidecar command = %#v, want /sidecar", got)
+	if executor.StartupProbe == nil || executor.StartupProbe.TCPSocket == nil {
+		t.Fatalf("executor startup probe = %#v, want TCP probe", executor.StartupProbe)
 	}
-	if hasVolumeMountName(sidecar.VolumeMounts, "workspace") {
-		t.Fatalf("sidecar workspace mounts = %#v, want no workspace mount", sidecar.VolumeMounts)
-	}
-	if !hasVolumeMount(sidecar.VolumeMounts, "arl-socket", "/var/run/arl") {
-		t.Fatalf("sidecar mounts = %#v, want arl-socket mounted at /var/run/arl", sidecar.VolumeMounts)
-	}
-	if sidecar.StartupProbe == nil || sidecar.StartupProbe.HTTPGet == nil || sidecar.StartupProbe.HTTPGet.Path != "/healthz" {
-		t.Fatalf("sidecar startup probe = %#v, want HTTP /healthz", sidecar.StartupProbe)
-	}
-	if sidecar.ReadinessProbe == nil || sidecar.ReadinessProbe.HTTPGet == nil || sidecar.ReadinessProbe.HTTPGet.Path != "/readyz" {
-		t.Fatalf("sidecar readiness probe = %#v, want HTTP /readyz", sidecar.ReadinessProbe)
+	if executor.ReadinessProbe == nil || executor.ReadinessProbe.TCPSocket == nil {
+		t.Fatalf("executor readiness probe = %#v, want TCP probe", executor.ReadinessProbe)
 	}
 	if template.Spec.NetworkPolicyManagement != extensionsv1beta1.NetworkPolicyManagementManaged {
 		t.Fatalf("NetworkPolicyManagement = %q, want Managed", template.Spec.NetworkPolicyManagement)

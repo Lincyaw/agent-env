@@ -23,7 +23,7 @@ type PrometheusCollector struct {
 	executeOperation    *prometheus.CounterVec
 	gatewayStepDuration *prometheus.HistogramVec
 	gatewayStepResult   *prometheus.CounterVec
-	sidecarCallDuration *prometheus.HistogramVec
+	executorCallDuration *prometheus.HistogramVec
 	restoreDuration     prometheus.Histogram
 	restoreResult       *prometheus.CounterVec
 
@@ -122,10 +122,10 @@ func NewPrometheusCollector() interfaces.MetricsCollector {
 			},
 			[]string{"step_type", "result"},
 		),
-		sidecarCallDuration: prometheus.NewHistogramVec(
+		executorCallDuration: prometheus.NewHistogramVec(
 			prometheus.HistogramOpts{
-				Name:    "arl_gateway_sidecar_call_seconds",
-				Help:    "gRPC round-trip latency from gateway to sidecar, by method.",
+				Name:    "arl_gateway_executor_call_seconds",
+				Help:    "Round-trip latency from gateway to executor, by method.",
 				Buckets: []float64{0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2, 5},
 			},
 			[]string{"method"},
@@ -217,7 +217,7 @@ func NewPrometheusCollector() interfaces.MetricsCollector {
 		c.executeOperation,
 		c.gatewayStepDuration,
 		c.gatewayStepResult,
-		c.sidecarCallDuration,
+		c.executorCallDuration,
 		c.restoreDuration,
 		c.restoreResult,
 		c.gatewayGoroutines,
@@ -281,8 +281,8 @@ func (c *PrometheusCollector) IncrementGatewayStepResult(stepType, result string
 	c.gatewayStepResult.WithLabelValues(stepType, result).Inc()
 }
 
-func (c *PrometheusCollector) RecordSidecarCallDuration(method string, duration time.Duration) {
-	c.sidecarCallDuration.WithLabelValues(method).Observe(duration.Seconds())
+func (c *PrometheusCollector) RecordExecutorCallDuration(method string, duration time.Duration) {
+	c.executorCallDuration.WithLabelValues(method).Observe(duration.Seconds())
 }
 
 func (c *PrometheusCollector) RecordRestoreDuration(duration time.Duration) {
@@ -361,8 +361,6 @@ func imageMetricClass(image string) string {
 	switch {
 	case strings.Contains(image, "arl-gateway"):
 		return "arl-gateway"
-	case strings.Contains(image, "arl-sidecar"):
-		return "arl-sidecar"
 	case strings.Contains(image, "arl-executor-agent"):
 		return "arl-executor-agent"
 	case strings.Contains(image, "arl-image-locality-scheduler"):

@@ -1,8 +1,8 @@
 syntax = "proto3";
 
-package arl.executor.v2;
+package arl.executor;
 
-option go_package = "github.com/Lincyaw/agent-env/pkg/pb/executorv2";
+option go_package = "github.com/Lincyaw/agent-env/pkg/pb/executor";
 
 // Request is the top-level multiplexed client-to-server frame.
 // Each request carries a correlation tag returned verbatim in the
@@ -17,8 +17,6 @@ message Request {
     ResizeRequest       resize        = 6;
     ReadRequest         read          = 7;
     WriteRequest        write         = 8;
-    StatRequest         stat          = 9;
-    ListRequest         list          = 10;
     TunnelRequest       tunnel        = 11;
     WatchRequest        watch         = 12;
     UnwatchRequest      unwatch       = 13;
@@ -38,8 +36,6 @@ message Response {
     ResizeResponse       resize        = 6;
     ReadResponse         read          = 7;
     WriteResponse        write         = 8;
-    StatResponse         stat          = 9;
-    ListResponse         list          = 10;
     TunnelResponse       tunnel        = 11;
     WatchResponse        watch         = 12;
     UnwatchResponse      unwatch       = 13;
@@ -163,44 +159,7 @@ message WriteResponse {
 }
 
 // ---------------------------------------------------------------------------
-// 8. stat — file metadata
-// ---------------------------------------------------------------------------
-
-message StatRequest {
-  string path = 1;
-}
-
-message StatResponse {
-  string path = 1;
-  int64 size_bytes = 2;
-  string mode = 3;
-  int64 mod_time_unix = 4;
-  bool is_dir = 5;
-}
-
-// ---------------------------------------------------------------------------
-// 9. list — directory contents
-// ---------------------------------------------------------------------------
-
-message ListRequest {
-  string path = 1;
-  bool recursive = 2;
-}
-
-message ListResponse {
-  repeated DirEntry entries = 1;
-}
-
-message DirEntry {
-  string name = 1;
-  int64 size_bytes = 2;
-  string mode = 3;
-  int64 mod_time_unix = 4;
-  bool is_dir = 5;
-}
-
-// ---------------------------------------------------------------------------
-// 10. tunnel — TCP proxy (bidirectional stream)
+// 8. tunnel — TCP proxy (bidirectional stream)
 //
 // After TunnelResponse, raw bidirectional bytes flow on the transport:
 //   QUIC  — bidi stream tagged [0x05][tag:4B]
@@ -215,7 +174,7 @@ message TunnelRequest {
 message TunnelResponse {}
 
 // ---------------------------------------------------------------------------
-// 11. watch — subscribe to filesystem change events
+// 9. watch — subscribe to filesystem change events
 // ---------------------------------------------------------------------------
 
 message WatchRequest {
@@ -229,7 +188,7 @@ message WatchResponse {
 }
 
 // ---------------------------------------------------------------------------
-// 12. unwatch — unsubscribe from filesystem events
+// 10. unwatch — unsubscribe from filesystem events
 // ---------------------------------------------------------------------------
 
 message UnwatchRequest {
@@ -239,7 +198,7 @@ message UnwatchRequest {
 message UnwatchResponse {}
 
 // ---------------------------------------------------------------------------
-// 13. close_tunnel — close an active tunnel
+// 11. close_tunnel — close an active tunnel
 // ---------------------------------------------------------------------------
 
 message CloseTunnelRequest {
@@ -249,7 +208,7 @@ message CloseTunnelRequest {
 message CloseTunnelResponse {}
 
 // ---------------------------------------------------------------------------
-// 14. list_tunnels — list active tunnels
+// 12. list_tunnels — list active tunnels
 // ---------------------------------------------------------------------------
 
 message ListTunnelsRequest {}

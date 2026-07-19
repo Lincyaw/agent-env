@@ -5,7 +5,7 @@ use std::io;
 use std::path::PathBuf;
 use tokio::runtime::Handle;
 
-pub const ALPN: &[u8] = b"arl/executor/v2";
+pub const ALPN: &[u8] = b"arl/executor";
 
 const SECRET_KEY_FILE: &str = "/var/run/arl/iroh-secret-key";
 

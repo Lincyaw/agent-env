@@ -125,9 +125,8 @@ Redis address (host:port) — auto-resolves to the in-cluster Service when deplo
 {{- end }}
 
 {{/*
-Resolve the shared gRPC auth token. The sidecar refuses to start without one,
-so a token must always exist. Precedence: explicit value -> existing secret
-(preserved across upgrades) -> freshly generated random token.
+Resolve the shared gRPC auth token. Precedence: explicit value -> existing
+secret (preserved across upgrades) -> freshly generated random token.
 */}}
 {{- define "agent-env.grpcTokenSecretName" -}}
 {{ include "agent-env.fullname" . }}-grpc-token

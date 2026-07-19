@@ -22,20 +22,6 @@ func TestConfigValidate(t *testing.T) {
 			name: "valid default config",
 		},
 		{
-			name: "invalid sidecar HTTP port",
-			mutate: func(cfg *Config) {
-				cfg.SidecarHTTPPort = 0
-			},
-			wantErr: "invalid sidecar HTTP port",
-		},
-		{
-			name: "invalid sidecar gRPC port",
-			mutate: func(cfg *Config) {
-				cfg.SidecarGRPCPort = -1
-			},
-			wantErr: "invalid sidecar gRPC port",
-		},
-		{
 			name: "invalid HTTP client timeout",
 			mutate: func(cfg *Config) {
 				cfg.HTTPClientTimeout = 0
@@ -211,12 +197,6 @@ func TestConfigValidate(t *testing.T) {
 func TestDefaultConfig(t *testing.T) {
 	cfg := DefaultConfig()
 
-	if cfg.SidecarHTTPPort != 8080 {
-		t.Errorf("SidecarHTTPPort = %d, want 8080", cfg.SidecarHTTPPort)
-	}
-	if cfg.SidecarGRPCPort != 9090 {
-		t.Errorf("SidecarGRPCPort = %d, want 9090", cfg.SidecarGRPCPort)
-	}
 	if cfg.HTTPClientTimeout != 5*time.Minute {
 		t.Errorf("HTTPClientTimeout = %v, want 5m", cfg.HTTPClientTimeout)
 	}

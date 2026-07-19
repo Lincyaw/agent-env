@@ -7,7 +7,6 @@ PLATFORM ?= linux/amd64
 DEFAULT_IMAGE_TAG := $(shell git rev-parse --short HEAD)-$(shell date +%Y%m%d%H%M%S)
 IMAGE_TAG ?= $(DEFAULT_IMAGE_TAG)
 GATEWAY_TAG ?= $(IMAGE_TAG)
-SIDECAR_TAG ?= v0.15.6
 EXECUTOR_AGENT_TAG ?= v0.15.6
 IMAGE_LOCALITY_SCHEDULER_TAG ?= v0.15.6
 
@@ -74,8 +73,6 @@ push-gateway-image: ## Build and push the gateway image
 
 .PHONY: push-images
 push-images: ## Build and push all deployable images
-	docker build --platform $(PLATFORM) -t $(REGISTRY)/arl-sidecar:$(SIDECAR_TAG) -f Dockerfile.sidecar .
-	docker push $(REGISTRY)/arl-sidecar:$(SIDECAR_TAG)
 	docker build --platform $(PLATFORM) -t $(REGISTRY)/arl-gateway:$(GATEWAY_TAG) -f Dockerfile.gateway .
 	docker push $(REGISTRY)/arl-gateway:$(GATEWAY_TAG)
 	docker build --platform $(PLATFORM) -t $(REGISTRY)/arl-image-locality-scheduler:$(IMAGE_LOCALITY_SCHEDULER_TAG) -f Dockerfile.image-locality-scheduler .
@@ -109,8 +106,6 @@ deploy-agent-env: ## Deploy chart using existing namespace secrets
 		--set image.injectedPullPolicy=Always \
 		--set gateway.image.repository=$(REGISTRY)/arl-gateway \
 		--set gateway.image.tag=$(GATEWAY_TAG) \
-		--set sidecar.image.repository=$(REGISTRY)/arl-sidecar \
-		--set sidecar.image.tag=$(SIDECAR_TAG) \
 		--set executorAgent.image.repository=$(REGISTRY)/arl-executor-agent \
 		--set executorAgent.image.tag=$(EXECUTOR_AGENT_TAG) \
 		--set imageLocalityScheduler.image.repository=$(REGISTRY)/arl-image-locality-scheduler \
@@ -131,7 +126,6 @@ deploy-arl1-all: DEPLOY_RELEASE=agent-env
 deploy-arl1-all: DEPLOY_FULLNAME=agent-env
 deploy-arl1-all: DEPLOY_NAME=agent-env
 deploy-arl1-all: DEPLOY_SECRET_PREFIX=agent-env
-deploy-arl1-all: SIDECAR_TAG=$(IMAGE_TAG)
 deploy-arl1-all: EXECUTOR_AGENT_TAG=$(IMAGE_TAG)
 deploy-arl1-all: IMAGE_LOCALITY_SCHEDULER_TAG=$(IMAGE_TAG)
 deploy-arl1-all: push-images deploy-agent-env ## Build all images and deploy the arl1 stack
@@ -146,10 +140,6 @@ build: ## Build all Go binaries
 .PHONY: build-gateway
 build-gateway: ## Build gateway binary
 	CGO_ENABLED=0 go build -o bin/gateway cmd/gateway/main.go
-
-.PHONY: build-sidecar
-build-sidecar: ## Build sidecar binary
-	CGO_ENABLED=0 go build -o bin/sidecar cmd/sidecar/main.go
 
 .PHONY: build-cli
 build-cli: ## Build arl CLI binary
@@ -191,18 +181,10 @@ check: fmt vet tidy ## Run all code quality checks
 ##@ Code Generation
 
 .PHONY: generate
-generate: proto-go proto-executor-v2 ## Generate all code
+generate: proto-executor ## Generate all code
 
-.PHONY: proto-go
-proto-go: ## Generate Go gRPC code from proto files
-	@mkdir -p pkg/pb
-	protoc --go_out=. --go_opt=paths=source_relative \
-		--go-grpc_out=. --go-grpc_opt=paths=source_relative \
-		proto/agent.proto
-	@mv proto/*.pb.go pkg/pb/ 2>/dev/null || true
-
-.PHONY: proto-executor-v2
-proto-executor-v2: ## Generate Go code from executor V2 proto
+.PHONY: proto-executor
+proto-executor: ## Generate Go code from executor V2 proto
 	@mkdir -p pkg/pb/executorv2
 	protoc --go_out=. --go_opt=paths=source_relative \
 		proto/executor_v2.proto

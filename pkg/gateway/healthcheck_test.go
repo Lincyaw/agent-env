@@ -94,7 +94,7 @@ func (m *recordingMetricsCollector) IncrementExecuteOperationResult(result strin
 func (m *recordingMetricsCollector) RecordGatewayStepDuration(stepType string, duration time.Duration) {
 }
 func (m *recordingMetricsCollector) IncrementGatewayStepResult(stepType, result string) {}
-func (m *recordingMetricsCollector) RecordSidecarCallDuration(method string, duration time.Duration) {
+func (m *recordingMetricsCollector) RecordExecutorCallDuration(method string, duration time.Duration) {
 }
 func (m *recordingMetricsCollector) RecordRestoreDuration(duration time.Duration) {}
 func (m *recordingMetricsCollector) IncrementRestoreResult(result string)         {}

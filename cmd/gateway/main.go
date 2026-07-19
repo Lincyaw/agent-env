@@ -42,13 +42,9 @@ func init() {
 }
 
 func main() {
-	var (
-		port     int
-		grpcPort int
-	)
+	var port int
 
 	flag.IntVar(&port, "port", 8080, "HTTP gateway port")
-	flag.IntVar(&grpcPort, "sidecar-grpc-port", 9090, "Sidecar gRPC port")
 	flag.Parse()
 
 	cfg := config.LoadFromEnv()
@@ -79,8 +75,8 @@ func main() {
 		log.Fatalf("Failed to create K8s client: %v", err)
 	}
 
-	// Create sidecar gRPC client
-	sidecarClient := client.NewGRPCSidecarClient(grpcPort, cfg.HTTPClientTimeout, cfg.GRPCAuthToken)
+	// Create executor client (TCP framed protocol, direct to executor agent)
+	executorClient := client.NewExecutorClient(cfg.ExecutorPort, cfg.HTTPClientTimeout)
 
 	// Create the sandbox runtime allocator backed by agent-sandbox CRDs.
 	metricsCollector := metrics.NewPrometheusCollector()
@@ -127,17 +123,14 @@ func main() {
 		}
 	}
 
-	gw := gateway.New(k8sClient, runtimeAllocator, sidecarClient, metricsCollector, nil, gateway.GatewayConfig{
+	gw := gateway.New(k8sClient, runtimeAllocator, executorClient, metricsCollector, nil, gateway.GatewayConfig{
 		IdleTimeout:                     cfg.GatewayIdleTimeout,
 		DevboxIdleTimeout:               cfg.DevboxIdleTimeout,
 		DevboxStorageClassName:          cfg.DevboxStorageClassName,
 		SweepInterval:                   cfg.GatewaySweepInterval,
 		Namespace:                       cfg.GatewayNamespace,
-		SidecarImage:                    cfg.SidecarImage,
-		SidecarHTTPPort:                 cfg.SidecarHTTPPort,
-		SidecarGRPCPort:                 cfg.SidecarGRPCPort,
 		ExecutorAgentImage:              cfg.ExecutorAgentImage,
-		ExecutorProtocol:                cfg.ExecutorProtocol,
+		ExecutorPort:                    cfg.ExecutorPort,
 		IrohRelayURL:                    cfg.IrohRelayURL,
 		IrohRelayExternalURL:            cfg.IrohRelayExternalURL,
 		ImagePullPolicy:                 cfg.ImagePullPolicy,
@@ -296,7 +289,7 @@ func main() {
 	internalRouter := gateway.SetupInternalRoutes(healthChecker)
 
 	internalServer := &http.Server{
-		Addr:         fmt.Sprintf(":%d", cfg.InternalPort),
+		Addr:         fmt.Sprintf("127.0.0.1:%d", cfg.InternalPort),
 		Handler:      internalRouter,
 		ReadTimeout:  10 * time.Second,
 		WriteTimeout: 30 * time.Second,
@@ -340,7 +333,7 @@ func main() {
 	allocCancel() // Stop runtime allocator cache
 	runtimeAllocator.Stop()
 	gw.StopTrajectoryWorker()
-	sidecarClient.Close()
+	executorClient.Close()
 	if sessionStore != nil {
 		sessionStore.Close()
 	}

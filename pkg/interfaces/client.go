@@ -8,14 +8,6 @@ import (
 // FileTransferChunkSize is the standard chunk size for streaming file operations.
 const FileTransferChunkSize = 1024 * 1024
 
-// LogEntry represents a single log line from the sidecar.
-type LogEntry struct {
-	Timestamp string
-	Level     string
-	Message   string
-	Source    string
-}
-
 // FileWriteResult describes a streamed file upload result.
 type FileWriteResult struct {
 	Path         string
@@ -46,13 +38,21 @@ type DirEntry struct {
 	Size  uint64
 }
 
-// SidecarClient defines the interface for communicating with sidecar containers
-type SidecarClient interface {
-	// Execute sends command execution request to sidecar and returns aggregated result
-	Execute(ctx context.Context, podIP string, req ExecRequest) (ExecResponse, error)
+// LogEntry represents a single log line.
+type LogEntry struct {
+	Timestamp string
+	Level     string
+	Message   string
+	Source    string
+}
+
+// ExecutorClient defines the interface for communicating with executor agents.
+type ExecutorClient interface {
+	// Execute sends command execution request to executor and returns aggregated result
+	Execute(ctx context.Context, podIP string, req *ExecRequest) (*ExecResponse, error)
 
 	// ExecuteStream sends command execution request and streams output via channel
-	ExecuteStream(ctx context.Context, podIP string, req ExecRequest) (<-chan ExecResponse, error)
+	ExecuteStream(ctx context.Context, podIP string, req *ExecRequest) (<-chan ExecResponse, error)
 
 	// WriteFile streams one file into the container filesystem.
 	WriteFile(ctx context.Context, podIP string, path string, content io.Reader, expectedSHA256 string) (*FileWriteResult, error)
@@ -60,35 +60,23 @@ type SidecarClient interface {
 	// ReadFile streams one file from the container filesystem.
 	ReadFile(ctx context.Context, podIP string, path string, dst io.Writer) (*FileReadResult, error)
 
-	// Stat returns file metadata for a path in the container filesystem.
-	Stat(ctx context.Context, podIP string, path string) (*StatResult, error)
-
-	// ListDir lists directory contents in the container filesystem.
-	ListDir(ctx context.Context, podIP string, path string, recursive bool) ([]DirEntry, error)
-
-	// WriteStdin sends data to the stdin of a running process.
-	WriteStdin(ctx context.Context, podIP string, handle string, data []byte) error
-
 	// InteractiveShell opens a bidirectional shell session
 	InteractiveShell(ctx context.Context, podIP string) (ShellStream, error)
 
-	// StreamLogs streams log entries from the sidecar ring buffer.
-	StreamLogs(ctx context.Context, podIP string, follow bool, tailLines int32) (<-chan LogEntry, error)
-
-	// GetIrohAddr returns the iroh endpoint address from the sidecar.
-	// Returns empty string if the executor is not running with v2 protocol.
+	// GetIrohAddr returns the iroh endpoint address from the executor.
+	// Returns empty string if iroh is not configured.
 	GetIrohAddr(ctx context.Context, podIP string) (string, error)
 
-	// HealthCheck checks if sidecar is healthy
+	// HealthCheck checks if executor is healthy
 	HealthCheck(ctx context.Context, podIP string) error
 
-	// CloseConnection closes and removes a single gRPC connection by pod IP
+	// CloseConnection closes and removes a single connection by pod IP
 	CloseConnection(podIP string) error
 
-	// CleanupStale removes connections in Shutdown or TransientFailure state
+	// CleanupStale removes connections that are no longer usable
 	CleanupStale() int
 
-	// Close cleans up any resources (e.g., gRPC connections)
+	// Close cleans up any resources (e.g., TCP connections)
 	Close() error
 }
 
@@ -118,18 +106,18 @@ type ShellOutput struct {
 	Closed   bool   // true when shell has ended
 }
 
-// ExecRequest represents a command execution request
-type ExecRequest interface {
-	GetCommand() []string
-	GetEnv() map[string]string
-	GetWorkingDir() string
-	GetTimeout() int32
+// ExecRequest represents a command execution request.
+type ExecRequest struct {
+	Command        []string
+	Env            map[string]string
+	WorkingDir     string
+	TimeoutSeconds int32
 }
 
-// ExecResponse represents the response from command execution
-type ExecResponse interface {
-	GetStdout() string
-	GetStderr() string
-	GetExitCode() int32
-	IsDone() bool
+// ExecResponse represents the response from command execution.
+type ExecResponse struct {
+	Stdout   string
+	Stderr   string
+	ExitCode int32
+	Done     bool
 }

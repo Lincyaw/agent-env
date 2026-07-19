@@ -97,7 +97,7 @@ data:
               severity: warning
             annotations:
               summary: "Clients are disconnecting while execute operations are still running"
-              description: "Check client timeout settings and gateway/sidecar execution latency."
+              description: "Check client timeout settings and gateway/executor execution latency."
 
           - alert: ExecuteOperationErrorRateHigh
             expr: |

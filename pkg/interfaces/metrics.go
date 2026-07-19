@@ -15,7 +15,7 @@ type MetricsCollector interface {
 	IncrementExecuteOperationResult(result string)
 	RecordGatewayStepDuration(stepType string, duration time.Duration)
 	IncrementGatewayStepResult(stepType, result string)
-	RecordSidecarCallDuration(method string, duration time.Duration)
+	RecordExecutorCallDuration(method string, duration time.Duration)
 	RecordRestoreDuration(duration time.Duration)
 	IncrementRestoreResult(result string)
 	SetGatewayGoroutines(count int)
@@ -43,7 +43,7 @@ func (n *NoOpMetricsCollector) IncrementExecuteOperationResult(result string)   
 func (n *NoOpMetricsCollector) RecordGatewayStepDuration(stepType string, duration time.Duration) {
 }
 func (n *NoOpMetricsCollector) IncrementGatewayStepResult(stepType, result string) {}
-func (n *NoOpMetricsCollector) RecordSidecarCallDuration(method string, duration time.Duration) {
+func (n *NoOpMetricsCollector) RecordExecutorCallDuration(method string, duration time.Duration) {
 }
 func (n *NoOpMetricsCollector) RecordRestoreDuration(duration time.Duration) {}
 func (n *NoOpMetricsCollector) IncrementRestoreResult(result string)         {}

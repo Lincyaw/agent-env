@@ -94,14 +94,15 @@ func requireAuth(authCfg *AuthConfig, minRole Role, next http.HandlerFunc) http.
 
 // CheckSessionOwnership returns an error if the caller is not the session owner
 // and does not have the admin role. Returns nil when auth is disabled (no key
-// hash in context) or for recovered sessions with empty ownerKeyHash.
+// hash in context). When auth is enabled and the session has no owner
+// (empty ownerKeyHash), access is denied to prevent fail-open.
 func CheckSessionOwnership(ctx context.Context, ownerKeyHash string) error {
 	callerHash, ok := KeyHashFromContext(ctx)
 	if !ok {
 		return nil
 	}
 	if ownerKeyHash == "" {
-		return nil
+		return fmt.Errorf("access denied: session has no owner")
 	}
 	role, _ := RoleFromContext(ctx)
 	if role == RoleAdmin {

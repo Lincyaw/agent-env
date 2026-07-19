@@ -139,9 +139,9 @@ func (hc *HealthChecker) collect() {
 		cancel()
 	}
 
-	// 4. Cleanup stale gRPC connections (Shutdown/TransientFailure)
+	// 4. Cleanup stale executor connections
 	if cleaned := hc.gw.CleanupStaleConnections(); cleaned > 0 {
-		log.Printf("Cleaned up %d stale sidecar connections", cleaned)
+		log.Printf("Cleaned up %d stale executor connections", cleaned)
 	}
 }
 

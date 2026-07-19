@@ -59,7 +59,7 @@ type wsMessage struct {
 	ExitCode int32  `json:"exit_code,omitempty"` // exit code
 }
 
-// handleShell upgrades to WebSocket and proxies to sidecar InteractiveShell gRPC stream.
+// handleShell upgrades to WebSocket and proxies to executor InteractiveShell stream.
 func handleShell(gw *Gateway, authCfg *AuthConfig) http.HandlerFunc {
 	upgrader := newUpgrader(authCfg)
 
@@ -81,11 +81,11 @@ func handleShell(gw *Gateway, authCfg *AuthConfig) http.HandlerFunc {
 		}
 		defer ws.Close()
 
-		// Open gRPC bidi stream to sidecar with cancellable context
+		// Open bidi stream to executor with cancellable context
 		ctx, cancel := context.WithCancel(r.Context())
 		defer cancel()
 
-		shellStream, err := gw.sidecarClient.InteractiveShell(ctx, podIP)
+		shellStream, err := gw.executorClient.InteractiveShell(ctx, podIP)
 		if err != nil {
 			writeWSError(ws, "failed to open shell: "+err.Error())
 			return
@@ -94,7 +94,7 @@ func handleShell(gw *Gateway, authCfg *AuthConfig) http.HandlerFunc {
 
 		done := make(chan struct{})
 
-		// gRPC -> WebSocket: read from sidecar, send to client
+		// Executor -> WebSocket: read from executor, send to client
 		go func() {
 			defer close(done)
 			for {
@@ -124,7 +124,7 @@ func handleShell(gw *Gateway, authCfg *AuthConfig) http.HandlerFunc {
 			}
 		}()
 
-		// WebSocket -> gRPC: read from client, send to sidecar
+		// WebSocket -> Executor: read from client, send to executor
 		go func() {
 			for {
 				_, rawMsg, readErr := ws.ReadMessage()

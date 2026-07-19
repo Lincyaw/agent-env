@@ -7,9 +7,6 @@ build:
   local:
     useBuildkit: true
   artifacts:
-    - image: arl-sidecar
-      docker:
-        dockerfile: Dockerfile.sidecar
     - image: arl-gateway
       docker:
         dockerfile: Dockerfile.gateway
@@ -30,8 +27,6 @@ manifests:
         namespace: arl
         createNamespace: true
         setValueTemplates:
-          sidecar.image.repository: "{{.IMAGE_REPO_arl_sidecar}}"
-          sidecar.image.tag: "{{.IMAGE_TAG_arl_sidecar}}"
           gateway.image.repository: "{{.IMAGE_REPO_arl_gateway}}"
           gateway.image.tag: "{{.IMAGE_TAG_arl_gateway}}"
           executorAgent.image.repository: "{{.IMAGE_REPO_arl_executor_agent}}"
@@ -52,15 +47,6 @@ profiles:
       - command: dev
     build:
       artifacts:
-        - image: arl-sidecar
-          docker:
-            dockerfile: Dockerfile.sidecar
-          sync:
-            manual:
-              - src: "cmd/sidecar/**/*.go"
-                dest: /app
-              - src: "pkg/sidecar/**/*.go"
-                dest: /app
         - image: arl-gateway
           docker:
             dockerfile: Dockerfile.gateway
@@ -84,8 +70,6 @@ profiles:
             namespace: arl
             createNamespace: true
             setValueTemplates:
-              sidecar.image.repository: "{{.IMAGE_REPO_arl_sidecar}}"
-              sidecar.image.tag: "{{.IMAGE_TAG_arl_sidecar}}"
               gateway.image.repository: "{{.IMAGE_REPO_arl_gateway}}"
               gateway.image.tag: "{{.IMAGE_TAG_arl_gateway}}"
               executorAgent.image.repository: "{{.IMAGE_REPO_arl_executor_agent}}"

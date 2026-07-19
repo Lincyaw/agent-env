@@ -10,7 +10,6 @@ import (
 
 	mockclient "github.com/Lincyaw/agent-env/pkg/client"
 	"github.com/Lincyaw/agent-env/pkg/interfaces"
-	"github.com/Lincyaw/agent-env/pkg/sidecar"
 )
 
 func TestExecuteStepsOperationIsIdempotent(t *testing.T) {
@@ -41,13 +40,13 @@ func TestExecuteStepsOperationIsIdempotent(t *testing.T) {
 	store.IncrCount(1)
 
 	var executeCalls atomic.Int32
-	sidecarClient := &mockclient.MockSidecarClient{
-		ExecuteFunc: func(ctx context.Context, podIP string, req interfaces.ExecRequest) (interfaces.ExecResponse, error) {
+	executorClient := &mockclient.MockExecutorClient{
+		ExecuteFunc: func(ctx context.Context, podIP string, req *interfaces.ExecRequest) (*interfaces.ExecResponse, error) {
 			executeCalls.Add(1)
-			return &sidecar.ExecLog{Stdout: "ok\n", Stderr: "", ExitCode: 0, Done: true}, nil
+			return &interfaces.ExecResponse{Stdout: "ok\n", Stderr: "", ExitCode: 0, Done: true}, nil
 		},
 	}
-	gw := New(nil, &operationRuntimeAllocator{}, sidecarClient, nil, nil, GatewayConfig{}, store)
+	gw := New(nil, &operationRuntimeAllocator{}, executorClient, nil, nil, GatewayConfig{}, store)
 	req := ExecuteRequest{
 		OperationID: "op-1",
 		Steps: []StepRequest{{
@@ -65,7 +64,7 @@ func TestExecuteStepsOperationIsIdempotent(t *testing.T) {
 		t.Fatalf("second ExecuteSteps returned error: %v", err)
 	}
 	if executeCalls.Load() != 1 {
-		t.Fatalf("sidecar execute calls = %d, want 1", executeCalls.Load())
+		t.Fatalf("executor execute calls = %d, want 1", executeCalls.Load())
 	}
 	if first.Results[0].Output.Stdout != second.Results[0].Output.Stdout {
 		t.Fatalf("second operation did not reuse first result: first=%#v second=%#v", first, second)
@@ -107,12 +106,12 @@ func TestExecuteStepsOperationReturnsFullOutput(t *testing.T) {
 	})
 	store.IncrCount(1)
 
-	sidecarClient := &mockclient.MockSidecarClient{
-		ExecuteFunc: func(ctx context.Context, podIP string, req interfaces.ExecRequest) (interfaces.ExecResponse, error) {
-			return &sidecar.ExecLog{Stdout: "abcdef", Stderr: "UVWXYZ", ExitCode: 0, Done: true}, nil
+	executorClient := &mockclient.MockExecutorClient{
+		ExecuteFunc: func(ctx context.Context, podIP string, req *interfaces.ExecRequest) (*interfaces.ExecResponse, error) {
+			return &interfaces.ExecResponse{Stdout: "abcdef", Stderr: "UVWXYZ", ExitCode: 0, Done: true}, nil
 		},
 	}
-	gw := New(nil, &operationRuntimeAllocator{}, sidecarClient, nil, nil, GatewayConfig{ObservationPreviewBytes: 4}, store)
+	gw := New(nil, &operationRuntimeAllocator{}, executorClient, nil, nil, GatewayConfig{ObservationPreviewBytes: 4}, store)
 
 	resp, err := gw.ExecuteSteps(context.Background(), sessionID, ExecuteRequest{
 		OperationID: "op-full",
@@ -192,12 +191,12 @@ func TestExecuteStepsStoresObservationPreviewByDefault(t *testing.T) {
 	})
 	store.IncrCount(1)
 
-	sidecarClient := &mockclient.MockSidecarClient{
-		ExecuteFunc: func(ctx context.Context, podIP string, req interfaces.ExecRequest) (interfaces.ExecResponse, error) {
-			return &sidecar.ExecLog{Stdout: "abcdef", Stderr: "UVWXYZ", ExitCode: 0, Done: true}, nil
+	executorClient := &mockclient.MockExecutorClient{
+		ExecuteFunc: func(ctx context.Context, podIP string, req *interfaces.ExecRequest) (*interfaces.ExecResponse, error) {
+			return &interfaces.ExecResponse{Stdout: "abcdef", Stderr: "UVWXYZ", ExitCode: 0, Done: true}, nil
 		},
 	}
-	gw := New(nil, &operationRuntimeAllocator{}, sidecarClient, nil, nil, GatewayConfig{ObservationPreviewBytes: 4}, store)
+	gw := New(nil, &operationRuntimeAllocator{}, executorClient, nil, nil, GatewayConfig{ObservationPreviewBytes: 4}, store)
 
 	resp, err := gw.ExecuteSteps(context.Background(), sessionID, ExecuteRequest{
 		Steps: []StepRequest{{

@@ -1,7 +1,7 @@
 FROM rust:alpine AS builder
 RUN apk add --no-cache musl-dev protobuf-dev
 WORKDIR /build
-COPY proto/executor_v2.proto proto/
+COPY proto/executor.proto proto/
 COPY rust/executor-agent/ rust/executor-agent/
 WORKDIR /build/rust/executor-agent
 RUN rm -f .cargo/config.toml && cargo build --release

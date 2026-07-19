@@ -38,12 +38,12 @@ func (g *Gateway) StopSessionSweep() {
 	g.sweepWg.Wait()
 }
 
-// CleanupStaleConnections removes gRPC connections in Shutdown or TransientFailure state.
+// CleanupStaleConnections removes stale executor connections.
 func (g *Gateway) CleanupStaleConnections() int {
-	if g.sidecarClient == nil {
+	if g.executorClient == nil {
 		return 0
 	}
-	return g.sidecarClient.CleanupStale()
+	return g.executorClient.CleanupStale()
 }
 
 func (g *Gateway) sessionSweepLoop() {

@@ -1,6 +1,6 @@
 use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
-use executor_agent::v2::agent::{MSG_TYPE_REQUEST, MSG_TYPE_RESPONSE, MSG_TYPE_EVENT};
-use executor_agent::v2::proto;
+use executor_agent::executor::agent::{MSG_TYPE_REQUEST, MSG_TYPE_RESPONSE, MSG_TYPE_EVENT};
+use executor_agent::executor::proto;
 use prost::Message;
 use std::io::{Read, Write};
 use std::os::unix::net::UnixStream;
@@ -14,7 +14,7 @@ fn start_agent(workspace: &str) -> String {
     let sp = sock_path.clone();
     let ws = workspace.to_string();
     thread::spawn(move || {
-        let agent = executor_agent::v2::agent::AgentV2::new(sp, ws);
+        let agent = executor_agent::executor::agent::Agent::new(sp, ws, None);
         let (_tx, rx) = tokio::sync::watch::channel(false);
         agent.run(rx).ok();
     });
@@ -70,7 +70,7 @@ fn bench_ping(c: &mut Criterion) {
     let sock = start_agent(ws.path().to_str().unwrap());
     let mut stream = connect(&sock);
 
-    c.bench_function("v2_ping_roundtrip", |b| {
+    c.bench_function("ping_roundtrip", |b| {
         b.iter(|| {
             send_pb(
                 &mut stream,
@@ -88,7 +88,7 @@ fn bench_exec(c: &mut Criterion) {
     let mut stream = connect(&sock);
     let mut tag = 100u32;
 
-    c.bench_function("v2_exec_echo", |b| {
+    c.bench_function("exec_echo", |b| {
         b.iter(|| {
             tag += 1;
             send_pb(
@@ -116,7 +116,7 @@ fn bench_file_write(c: &mut Criterion) {
     let ws = tempfile::tempdir().unwrap();
     let sock = start_agent(ws.path().to_str().unwrap());
 
-    let mut group = c.benchmark_group("v2_file_write");
+    let mut group = c.benchmark_group("file_write");
 
     for size_kb in [1, 64, 256, 1024] {
         let data = vec![0x55u8; size_kb * 1024];
@@ -159,7 +159,7 @@ fn bench_file_read(c: &mut Criterion) {
     let ws = tempfile::tempdir().unwrap();
     let sock = start_agent(ws.path().to_str().unwrap());
 
-    let mut group = c.benchmark_group("v2_file_read");
+    let mut group = c.benchmark_group("file_read");
 
     for size_kb in [1, 64, 256, 1024] {
         let data = vec![0xAAu8; size_kb * 1024];
@@ -200,25 +200,5 @@ fn bench_file_read(c: &mut Criterion) {
     group.finish();
 }
 
-fn bench_stat(c: &mut Criterion) {
-    let ws = tempfile::tempdir().unwrap();
-    std::fs::write(ws.path().join("s.txt"), "x").unwrap();
-    let sock = start_agent(ws.path().to_str().unwrap());
-    let mut stream = connect(&sock);
-
-    c.bench_function("v2_stat", |b| {
-        b.iter(|| {
-            send_pb(
-                &mut stream,
-                1,
-                proto::request::Kind::Stat(proto::StatRequest {
-                    path: "s.txt".into(),
-                }),
-            );
-            recv_response(&mut stream);
-        });
-    });
-}
-
-criterion_group!(benches, bench_ping, bench_exec, bench_file_write, bench_file_read, bench_stat);
+criterion_group!(benches, bench_ping, bench_exec, bench_file_write, bench_file_read);
 criterion_main!(benches);

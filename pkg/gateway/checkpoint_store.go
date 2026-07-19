@@ -105,7 +105,7 @@ func (s *CheckpointStore) ListSteps(sessionID string) ([]int, error) {
 // LoadCombined merges per-step tars for steps 1..throughStep into a single
 // tar file and returns the path to a temp file containing the result.
 // Later steps override earlier entries for the same path, matching the
-// sidecar's handleCombinedCheckpoint semantics. The caller must remove the
+// combined checkpoint semantics. The caller must remove the
 // returned file when done.
 func (s *CheckpointStore) LoadCombined(sessionID string, throughStep int) (string, error) {
 	steps, err := s.ListSteps(sessionID)

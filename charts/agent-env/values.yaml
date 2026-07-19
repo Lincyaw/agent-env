@@ -31,8 +31,8 @@ agentSandbox:
     extensions: true
 
 image:
-  # ImagePullPolicy applied to gateway-INJECTED containers (the sidecar and
-  # the copy-executor-agent init container) in every sandbox pod.
+  # ImagePullPolicy applied to gateway-INJECTED containers (the
+  # copy-executor-agent init container) in every sandbox pod.
   # "Always" (default) keeps production pulling the latest pushed images.
   # Set "IfNotPresent" on local kind/minikube where images are side-loaded and
   # never pushed to a registry, else kubelet ignores the local image and the
@@ -65,14 +65,6 @@ imageLocalityScheduler:
       cpu: "2"
       memory: 2Gi
 
-sidecar:
-  image:
-    repository: arl-sidecar
-    pullPolicy: IfNotPresent
-    tag: ""
-  httpPort: 8080
-  grpcPort: 9090
-
 # Executor agent configuration
 executorAgent:
   image:
@@ -102,7 +94,6 @@ gateway:
     tag: ""
   port: 8080
   internalPort: 9091        # Metrics, debug, AlertManager webhook (no auth)
-  sidecarGrpcPort: 9090
   service:
     type: LoadBalancer
     port: ""      # external service port; defaults to gateway.port (8080) if empty
@@ -119,7 +110,6 @@ gateway:
   # Session lifecycle defaults
   idleTimeout: "600s"       # Max idle time before session is reaped
   sweepInterval: "30s"      # How often to check for expired sessions
-  sidecarClientTimeout: "300s" # Gateway -> sidecar gRPC call timeout
   writeTimeout: "0s"        # Public HTTP write timeout; 0 disables it for long streaming execs
   startupProbe:
     enabled: true
@@ -244,9 +234,9 @@ auth:
   # Allowed WebSocket origins (comma-separated host:port). Empty = reject
   # browser origins when auth is enabled.
   allowedOrigins: ""
-  # gRPC shared token for gateway ↔ sidecar authentication. Mandatory: the
-  # sidecar refuses to start without it. Leave empty to auto-generate a random
-  # token (preserved across upgrades); set explicitly to pin a known value.
+  # gRPC shared token for gateway ↔ executor authentication. Leave empty to
+  # auto-generate a random token (preserved across upgrades); set explicitly
+  # to pin a known value.
   grpcToken: ""
 
 # Redis configuration (for HA session state persistence across gateway replicas)
@@ -433,15 +423,15 @@ metrics:
     # e.g. release: kube-prometheus-stack
     additionalLabels: {}
 
-# OpenTelemetry tracing. When enabled, the gateway and every injected sidecar
-# export OTLP/gRPC spans to the configured collector.
+# OpenTelemetry tracing. When enabled, the gateway exports OTLP/gRPC spans
+# to the configured collector.
 # Disabled by default so traces only flow when explicitly opted in.
 otel:
   enabled: false
   # OTLP/gRPC endpoint, host:port form (no scheme).
   # Common defaults:
   #   in-cluster collector:  otel-collector.observability.svc:4317
-  #   sidecar collector:     localhost:4317
+  #   local collector:       localhost:4317
   endpoint: "otel-collector.observability.svc:4317"
   # Set to false when the collector terminates TLS in front of the workload.
   insecure: true

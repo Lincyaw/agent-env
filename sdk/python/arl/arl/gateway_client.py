@@ -1,27 +1,47 @@
-"""Gateway HTTP client for ARL SDK."""
+"""Synchronous Gateway HTTP client for ARL SDK.
+
+Thin wrapper around :class:`~arl.async_client.AsyncGatewayClient`; every
+public method blocks until the underlying async call completes.  A dedicated
+background event loop thread ensures correct ``httpx.AsyncClient`` connection
+pooling and safe use from Jupyter / existing event loops.
+"""
 
 from __future__ import annotations
 
-import json
-import os
-import time
-import uuid
 from collections.abc import Callable, Iterable, Iterator
 from pathlib import Path
 from typing import Any, BinaryIO, TypeVar
 
 import httpx
-from pydantic import BaseModel
 
-from arl.auth import resolve_auth
-from arl.config import resolve_from_config
+from arl._base import (
+    OPERATION_POLL_INTERVAL_SECONDS as _OPERATION_POLL_INTERVAL_SECONDS,  # noqa: F401
+)
+from arl._base import (
+    OPERATION_STATUS_DONE as _OPERATION_STATUS_DONE,  # noqa: F401
+)
+from arl._base import (
+    OPERATION_STATUS_ERROR as _OPERATION_STATUS_ERROR,  # noqa: F401
+)
+from arl._base import (
+    GatewayError,
+    GatewayOperationTimeout,
+    LoopThread,
+    PoolNotReadyError,
+)
+from arl._base import (
+    serialize_config_env as _serialize_config_env,  # noqa: F401
+)
+from arl._base import (
+    serialize_private_containers as _serialize_private_containers,  # noqa: F401
+)
+from arl.async_client import AsyncGatewayClient
 from arl.configenv import ConfigEnvSpec
 from arl.types import (
     BuildResponse,
     ContainerExecuteResponse,
     DeleteExperimentResponse,
     DevboxConfig,
-    ErrorResponse,
     ExecuteOperationInfo,
     ExecuteResponse,
     ExperimentSummary,
@@ -29,7 +49,6 @@ from arl.types import (
     GatewaySummary,
     LogEntry,
     ManagedSessionInfo,
-    PoolCondition,
     PoolInfo,
     PoolLogEntry,
     PrivateContainerSpec,
@@ -38,81 +57,43 @@ from arl.types import (
     RestoreResponse,
     SessionInfo,
     SessionListItem,
+    StepRequest,
     StepResult,
     ToolsSpec,
     UploadFileResponse,
 )
 
-_ModelT = TypeVar("_ModelT", bound=BaseModel)
+_T = TypeVar("_T")
 
-_OPERATION_POLL_INTERVAL_SECONDS = 2.0
-_OPERATION_STATUS_DONE = "done"
-_OPERATION_STATUS_ERROR = "error"
-
-
-def _serialize_config_env(
-    config_env: ConfigEnvSpec | dict[str, Any] | None,
-) -> dict[str, Any] | None:
-    if config_env is None:
-        return None
-    if isinstance(config_env, ConfigEnvSpec):
-        return config_env.to_request_payload()
-    return config_env
+# Re-export everything that used to live here so downstream ``from arl.gateway_client import ...``
+# keeps working.
+__all__ = [
+    "GatewayClient",
+    "GatewayError",
+    "GatewayOperationTimeout",
+    "PoolNotReadyError",
+]
 
 
-def _serialize_private_containers(
-    private_containers: Iterable[PrivateContainerSpec | dict[str, Any]] | None,
-) -> list[dict[str, Any]] | None:
-    if private_containers is None:
-        return None
-    payload: list[dict[str, Any]] = []
-    for container in private_containers:
-        if isinstance(container, PrivateContainerSpec):
-            payload.append(container.model_dump(by_alias=True, exclude_none=True))
-        else:
-            payload.append(container)
-    return payload
+# ---------------------------------------------------------------------------
+# Sync runner -- persistent background event loop
+# ---------------------------------------------------------------------------
 
 
-class GatewayError(Exception):
-    """Error from gateway API."""
-
-    def __init__(self, status_code: int, error: str, detail: str = "") -> None:
-        self.status_code = status_code
-        self.error = error
-        self.detail = detail
-        super().__init__(
-            f"Gateway error ({status_code}): {error}" + (f" - {detail}" if detail else "")
-        )
+_SyncRunner = LoopThread  # alias kept for internal readability
 
 
-class GatewayOperationTimeout(TimeoutError):
-    """Raised when an idempotent execute operation outlives the HTTP request."""
-
-    def __init__(self, operation_id: str, message: str) -> None:
-        self.operation_id = operation_id
-        super().__init__(f"{message}; operation_id={operation_id}")
-
-
-class PoolNotReadyError(Exception):
-    """Raised when a WarmPool has failing pods or cannot become ready.
-
-    Attributes:
-        pool_name: Name of the pool.
-        conditions: List of PoolCondition objects from the pool status.
-        message: Human-readable description of the failure.
-    """
-
-    def __init__(
-        self, pool_name: str, message: str, conditions: list[PoolCondition] | None = None
-    ) -> None:
-        self.pool_name = pool_name
-        self.conditions = conditions or []
-        super().__init__(f"Pool '{pool_name}' not ready: {message}")
+# ---------------------------------------------------------------------------
+# GatewayClient (sync facade)
+# ---------------------------------------------------------------------------
 
 
 class GatewayClient:
-    """HTTP client for the ARL Gateway API."""
+    """Synchronous HTTP client for the ARL Gateway API.
+
+    Wraps :class:`AsyncGatewayClient`; every method blocks until the
+    underlying async call completes.
+    """
 
     def __init__(
         self,
@@ -121,52 +102,11 @@ class GatewayClient:
         api_key: str | None = None,
         auth: httpx.Auth | None = None,
     ) -> None:
-        # Resolve gateway_url and api_key from the config-file fallback chain
-        # (arg > env var > ~/.config/arl/config.yaml active context > default).
-        cfg_url, cfg_key = resolve_from_config(
-            gateway_url=base_url,
-            api_key=api_key or "",
+        self._async = AsyncGatewayClient(
+            base_url=base_url, timeout=timeout, api_key=api_key, auth=auth,
         )
-        self._base_url = cfg_url.rstrip("/")
-        resolved_auth = resolve_auth(auth, cfg_key)
-        # Use explicit timeout configuration with longer connect timeout
-        timeout_config = httpx.Timeout(
-            connect=30.0,  # 30s for TCP connection (fail fast, rely on retries)
-            read=timeout,  # Use provided timeout for read operations
-            write=timeout,  # Use provided timeout for write operations
-            pool=timeout,  # Use provided timeout for pool operations
-        )
-        # Respect standard HTTP proxy environment variables.
-        # httpx does not auto-detect proxies when a custom transport is provided,
-        # so we read them explicitly and forward to HTTPTransport.
-        # `or None` so an empty-string proxy var (a real environment quirk)
-        # falls through instead of crashing httpx with "Unknown scheme for ''".
-        proxy_url = os.environ.get("http_proxy") or os.environ.get("HTTP_PROXY") or None
-        # Configure transport with retries and keepalive management to avoid
-        # stale connections causing ConnectTimeout during long polling loops.
-        transport = httpx.HTTPTransport(
-            retries=3,  # TCP-level retries on connection failure
-            proxy=proxy_url,
-            limits=httpx.Limits(
-                max_connections=20,
-                max_keepalive_connections=5,
-                keepalive_expiry=30.0,  # Close idle connections before LB/NAT timeout
-            ),
-        )
-        self._client = httpx.Client(
-            base_url=self._base_url,
-            timeout=timeout_config,
-            transport=transport,
-            auth=resolved_auth,
-        )
-
-    def _handle_error(self, response: httpx.Response) -> None:
-        if response.status_code >= 400:
-            try:
-                err = ErrorResponse.model_validate(response.json())
-                raise GatewayError(response.status_code, err.error, err.detail)
-            except (ValueError, KeyError):
-                raise GatewayError(response.status_code, response.text) from None
+        self._runner = _SyncRunner()
+        self._base_url = self._async._base_url
 
     # --- Session APIs ---
 
@@ -183,309 +123,73 @@ class GatewayClient:
         private_containers: Iterable[PrivateContainerSpec | dict[str, Any]] | None = None,
         allow_internet: bool | None = None,
     ) -> SessionInfo:
-        if not image and not profile:
-            raise ValueError("image or profile is required")
-        body: dict[str, Any] = {}
-        if image:
-            body["image"] = image
-        if profile:
-            body["profile"] = profile
-        if mode:
-            body["mode"] = mode
-        if devbox is not None:
-            if isinstance(devbox, DevboxConfig):
-                body["devbox"] = devbox.model_dump(by_alias=True, exclude_none=True)
-            else:
-                body["devbox"] = devbox
-        config_env_payload = _serialize_config_env(config_env)
-        if config_env_payload is not None:
-            body["configEnv"] = config_env_payload
-        if idle_timeout_seconds is not None:
-            body["idleTimeoutSeconds"] = idle_timeout_seconds
-        if allocation_timeout_seconds is not None:
-            body["allocationTimeoutSeconds"] = allocation_timeout_seconds
-        private_container_payload = _serialize_private_containers(private_containers)
-        if private_container_payload is not None:
-            body["privateContainers"] = private_container_payload
-        if allow_internet is not None:
-            body["allowInternet"] = allow_internet
-        resp = self._client.post("/v1/sessions", json=body)
-        self._handle_error(resp)
-        return SessionInfo.model_validate(resp.json())
+        return self._runner.run(self._async.create_session(
+            image, profile=profile, mode=mode, devbox=devbox,
+            config_env=config_env, idle_timeout_seconds=idle_timeout_seconds,
+            allocation_timeout_seconds=allocation_timeout_seconds,
+            private_containers=private_containers, allow_internet=allow_internet,
+        ))
 
     def get_session(self, session_id: str) -> SessionInfo:
-        resp = self._client.get(f"/v1/sessions/{session_id}")
-        self._handle_error(resp)
-        return SessionInfo.model_validate(resp.json())
+        return self._runner.run(self._async.get_session(session_id))
 
     def delete_session(self, session_id: str) -> None:
-        resp = self._client.delete(f"/v1/sessions/{session_id}")
-        self._handle_error(resp)
+        self._runner.run(self._async.delete_session(session_id))
 
     def fork_session(self, session_id: str, step: int) -> ForkSessionResponse:
-        """Fork a session from a historical checkpoint step.
-
-        Creates a new session with the filesystem state of the source
-        session at the given step. ``step`` is the 0-based index returned
-        in ``StepResult.index`` from :meth:`execute`. Requires checkpoint
-        to be enabled on the gateway (SANDBOX_CHECKPOINT_ENABLED=true).
-        """
-        resp = self._client.post(f"/v1/sessions/{session_id}/fork", json={"step": step})
-        self._handle_error(resp)
-        return ForkSessionResponse.model_validate(resp.json())
+        """Fork a session from a historical checkpoint step."""
+        return self._runner.run(self._async.fork_session(session_id, step))
 
     def suspend_session(self, session_id: str) -> None:
-        resp = self._client.post(f"/v1/sessions/{session_id}/suspend")
-        self._handle_error(resp)
+        self._runner.run(self._async.suspend_session(session_id))
 
     def resume_session(self, session_id: str) -> None:
-        resp = self._client.post(f"/v1/sessions/{session_id}/resume")
-        self._handle_error(resp)
+        self._runner.run(self._async.resume_session(session_id))
+
+    def update_network_policy(
+        self,
+        session_id: str,
+        *,
+        allow_internet: bool,
+        egress_cidrs: list[str] | None = None,
+    ) -> None:
+        self._runner.run(self._async.update_network_policy(
+            session_id, allow_internet=allow_internet, egress_cidrs=egress_cidrs,
+        ))
 
     def execute(
         self,
         session_id: str,
-        steps: list[dict[str, Any]],
+        steps: list[StepRequest | dict[str, Any]],
         trace_id: str | None = None,
         operation_id: str | None = None,
         on_output: Callable[[str, str], None] | None = None,
         recover: bool = True,
         recover_timeout: float | None = None,
     ) -> ExecuteResponse:
-        """Execute steps in a session.
-
-        Non-streaming calls are idempotent: an operationID is always attached,
-        so a dropped connection (timeout, peer reset, gateway restart) does not
-        lose the execution. With ``recover=True`` (default) the client polls
-        the operation after a transport failure — resubmitting the identical
-        request if the gateway never saw it — and returns the result as if the
-        connection had never broken. ``recover_timeout`` bounds the total
-        recovery wait; when exceeded, GatewayOperationTimeout is raised with
-        the operation_id.
-
-        With ``recover=False``, a timeout raises GatewayOperationTimeout
-        immediately and other transport errors propagate unchanged.
-
-        Streaming calls (``on_output``) bypass operation tracking and are not
-        recoverable.
-        """
-        body: dict[str, Any] = {"steps": steps}
-        if trace_id is not None:
-            body["traceID"] = trace_id
-
-        if on_output is not None:
-            headers = {"Accept": "text/event-stream"}
-            return self._execute_sse(session_id, body, headers, on_output)
-
-        op_id = operation_id or str(uuid.uuid4())
-        body["operationID"] = op_id
-        deadline = time.monotonic() + recover_timeout if recover_timeout is not None else None
-        try:
-            resp = self._client.post(f"/v1/sessions/{session_id}/execute", json=body)
-        except httpx.TransportError as exc:
-            if recover:
-                return self._poll_execute_operation(
-                    session_id, op_id, deadline=deadline, resubmit_body=body
-                )
-            if isinstance(exc, httpx.TimeoutException):
-                raise GatewayOperationTimeout(op_id, "execute operation is still pending") from exc
-            raise
-        if resp.status_code == 202:
-            return self._poll_execute_operation(session_id, op_id, deadline=deadline)
-        self._handle_error(resp)
-        result = ExecuteResponse.model_validate(resp.json())
-        if not result.operation_id:
-            result.operation_id = op_id
-        return result
+        return self._runner.run(self._async.execute(
+            session_id, steps, trace_id, operation_id=operation_id,
+            on_output=on_output, recover=recover, recover_timeout=recover_timeout,
+        ))
 
     def get_execute_operation(
-        self,
-        session_id: str,
-        operation_id: str,
+        self, session_id: str, operation_id: str,
     ) -> ExecuteOperationInfo:
-        resp = self._client.get(f"/v1/sessions/{session_id}/operations/{operation_id}")
-        self._handle_error(resp)
-        return ExecuteOperationInfo.model_validate(resp.json())
-
-    def _poll_operation(
-        self,
-        session_id: str,
-        operation_id: str,
-        *,
-        deadline: float | None,
-        resubmit_url: str | None = None,
-        resubmit_body: dict[str, Any] | None = None,
-    ) -> dict[str, object]:
-        """Poll an operation to completion, tolerating transient transport errors.
-
-        When ``resubmit_body`` is given and the gateway does not know the
-        operation (never received or already expired), the identical request is
-        resubmitted under the same operationID — the gateway dedupes by ID and
-        request hash, so this never runs the steps twice concurrently.
-
-        Returns the raw result dict from the operation.
-        """
-        url = resubmit_url or f"/v1/sessions/{session_id}/execute"
-        while True:
-            op: ExecuteOperationInfo | None = None
-            try:
-                op = self.get_execute_operation(session_id, operation_id)
-            except httpx.TransportError:
-                pass
-            except GatewayError as exc:
-                if exc.status_code != 404 or "operation" not in exc.error:
-                    raise
-                if resubmit_body is not None:
-                    try:
-                        resp = self._client.post(url, json=resubmit_body)
-                    except httpx.TransportError:
-                        pass
-                    else:
-                        self._handle_error(resp)
-                        result: dict[str, object] = resp.json()
-                        return result
-                else:
-                    raise
-            if op is not None:
-                status = op.status.lower()
-                if status == _OPERATION_STATUS_ERROR:
-                    raise GatewayError(500, op.error or f"operation {operation_id} failed")
-                if op.result is not None:
-                    return op.result
-                if status == _OPERATION_STATUS_DONE:
-                    raise GatewayError(500, f"operation {operation_id} finished without result")
-            sleep_for = _OPERATION_POLL_INTERVAL_SECONDS
-            if deadline is not None:
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    raise GatewayOperationTimeout(operation_id, "operation is still pending")
-                sleep_for = min(sleep_for, remaining)
-            time.sleep(sleep_for)
-
-    def _poll_execute_operation(
-        self,
-        session_id: str,
-        operation_id: str,
-        *,
-        deadline: float | None,
-        resubmit_body: dict[str, Any] | None = None,
-    ) -> ExecuteResponse:
-        """Poll an execute operation to completion. Returns ExecuteResponse."""
-        raw = self._poll_operation(
-            session_id,
-            operation_id,
-            deadline=deadline,
-            resubmit_url=f"/v1/sessions/{session_id}/execute",
-            resubmit_body=resubmit_body,
+        return self._runner.run(
+            self._async.get_execute_operation(session_id, operation_id)
         )
-        result = ExecuteResponse.model_validate(raw)
-        if not result.operation_id:
-            result.operation_id = operation_id
-        return result
 
     def execute_container(
         self,
         session_id: str,
         container: str,
-        steps: list[dict[str, Any]],
+        steps: list[StepRequest | dict[str, Any]],
     ) -> ContainerExecuteResponse:
-        body: dict[str, Any] = {"steps": steps}
-        resp = self._client.post(
-            f"/v1/sessions/{session_id}/containers/{container}/execute",
-            json=body,
-        )
-        self._handle_error(resp)
-        return ContainerExecuteResponse.model_validate(resp.json())
-
-    def _execute_sse(
-        self,
-        session_id: str,
-        body: dict[str, Any],
-        headers: dict[str, str],
-        on_output: Callable[[str, str], None] | None,
-    ) -> ExecuteResponse:
-        results: list[StepResult] = []
-        with self._client.stream(
-            "POST",
-            f"/v1/sessions/{session_id}/execute",
-            json=body,
-            headers=headers,
-        ) as response:
-            if response.status_code >= 400:
-                # Read the full body for error handling
-                response.read()
-                try:
-                    err = ErrorResponse.model_validate(response.json())
-                    raise GatewayError(response.status_code, err.error, err.detail)
-                except (ValueError, KeyError):
-                    raise GatewayError(response.status_code, response.text) from None
-
-            content_type = response.headers.get("content-type", "")
-            if "text/event-stream" not in content_type:
-                # Server responded with JSON (old version), parse directly
-                response.read()
-                return ExecuteResponse.model_validate(response.json())
-
-            # Parse SSE stream
-            event_type = ""
-            data_buf = ""
-            for line in response.iter_lines():
-                if line.startswith("event: "):
-                    event_type = line[7:]
-                    data_buf = ""
-                elif line.startswith("data: "):
-                    data_buf = line[6:]
-                elif line == "":
-                    # Empty line = end of event
-                    if event_type and data_buf:
-                        self._handle_sse_event(event_type, data_buf, results, on_output)
-                    event_type = ""
-                    data_buf = ""
-
-            # Handle any trailing event without final blank line
-            if event_type and data_buf:
-                self._handle_sse_event(event_type, data_buf, results, on_output)
-
-        total_ms = sum(r.duration_ms for r in results)
-        return ExecuteResponse.model_validate(
-            {
-                "sessionID": session_id,
-                "results": results,
-                "totalDurationMs": total_ms,
-            }
+        return self._runner.run(
+            self._async.execute_container(session_id, container, steps)
         )
 
-    @staticmethod
-    def _handle_sse_event(
-        event_type: str,
-        data: str,
-        results: list[StepResult],
-        on_output: Callable[[str, str], None] | None,
-    ) -> None:
-        if event_type == "output":
-            if on_output is not None:
-                try:
-                    parsed = json.loads(data)
-                    on_output(parsed.get("stdout", ""), parsed.get("stderr", ""))
-                except (json.JSONDecodeError, TypeError):
-                    pass
-        elif event_type == "result":
-            try:
-                result = StepResult.model_validate(json.loads(data))
-                results.append(result)
-            except (json.JSONDecodeError, ValueError):
-                pass
-
-    @staticmethod
-    def _iter_ndjson_models(
-        response: httpx.Response,
-        model: type[_ModelT],
-    ) -> Iterator[_ModelT]:
-        for line in response.iter_lines():
-            line = line.strip()
-            if not line:
-                continue
-            yield model.model_validate(json.loads(line))
+    # --- File APIs ---
 
     def upload_file(
         self,
@@ -494,31 +198,12 @@ class GatewayClient:
         content: str | bytes | Iterable[bytes] | BinaryIO,
         sha256: str | None = None,
     ) -> UploadFileResponse:
-        headers: dict[str, str] = {
-            "Content-Type": "application/octet-stream",
-            "X-ARL-Path": path,
-        }
-        if sha256:
-            headers["X-ARL-SHA256"] = sha256
-        resp = self._client.post(
-            f"/v1/sessions/{session_id}/upload-file",
-            content=content,
-            headers=headers,
+        return self._runner.run(
+            self._async.upload_file(session_id, path, content, sha256=sha256)
         )
-        self._handle_error(resp)
-        return UploadFileResponse.model_validate(resp.json())
 
-    def download_file(
-        self,
-        session_id: str,
-        path: str,
-    ) -> bytes:
-        resp = self._client.post(
-            f"/v1/sessions/{session_id}/download-file",
-            json={"path": path},
-        )
-        self._handle_error(resp)
-        return resp.content
+    def download_file(self, session_id: str, path: str) -> bytes:
+        return self._runner.run(self._async.download_file(session_id, path))
 
     def iter_download_file(
         self,
@@ -526,15 +211,9 @@ class GatewayClient:
         path: str,
         chunk_size: int = 1024 * 1024,
     ) -> Iterator[bytes]:
-        with self._client.stream(
-            "POST",
-            f"/v1/sessions/{session_id}/download-file",
-            json={"path": path},
-        ) as resp:
-            self._handle_error(resp)
-            for chunk in resp.iter_bytes(chunk_size=chunk_size):
-                if chunk:
-                    yield chunk
+        return self._runner.iter(
+            self._async.iter_download_file(session_id, path, chunk_size)
+        )
 
     def upload_path(
         self,
@@ -543,8 +222,9 @@ class GatewayClient:
         remote_path: str,
         sha256: str | None = None,
     ) -> UploadFileResponse:
-        with Path(local_path).open("rb") as file:
-            return self.upload_file(session_id, remote_path, file, sha256=sha256)
+        return self._runner.run(self._async.upload_path(
+            session_id, local_path, remote_path, sha256=sha256,
+        ))
 
     def download_path(
         self,
@@ -552,51 +232,12 @@ class GatewayClient:
         remote_path: str,
         local_path: str | Path,
     ) -> None:
-        target = Path(local_path)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        with target.open("wb") as file:
-            for chunk in self.iter_download_file(session_id, remote_path):
-                file.write(chunk)
+        self._runner.run(self._async.download_path(session_id, remote_path, local_path))
 
     def send_stdin(self, session_id: str, handle: str, data: str) -> None:
-        """Send stdin data to a running process."""
-        resp = self._client.post(
-            f"/v1/sessions/{session_id}/stdin",
-            json={"handle": handle, "data": data},
-        )
-        self._handle_error(resp)
+        self._runner.run(self._async.send_stdin(session_id, handle, data))
 
-    def _submit_operation(
-        self,
-        session_id: str,
-        url: str,
-        body: dict[str, Any],
-        operation_id: str,
-        response_model: type[_ModelT],
-        recover: bool = True,
-        recover_timeout: float | None = None,
-    ) -> _ModelT:
-        deadline = time.monotonic() + recover_timeout if recover_timeout is not None else None
-        try:
-            resp = self._client.post(url, json=body)
-        except httpx.TransportError as exc:
-            if recover:
-                raw = self._poll_operation(
-                    session_id,
-                    operation_id,
-                    deadline=deadline,
-                    resubmit_url=url,
-                    resubmit_body=body,
-                )
-                return response_model.model_validate(raw)
-            if isinstance(exc, httpx.TimeoutException):
-                raise GatewayOperationTimeout(operation_id, "operation is still pending") from exc
-            raise
-        if resp.status_code == 202:
-            raw = self._poll_operation(session_id, operation_id, deadline=deadline)
-            return response_model.model_validate(raw)
-        self._handle_error(resp)
-        return response_model.model_validate(resp.json())
+    # --- Long-running operations ---
 
     def replay_from(
         self,
@@ -607,20 +248,10 @@ class GatewayClient:
         recover: bool = True,
         recover_timeout: float | None = None,
     ) -> ReplayResponse:
-        body: dict[str, Any] = {"sourceSessionID": source_session_id}
-        if up_to_step is not None:
-            body["upToStep"] = up_to_step
-        op_id = operation_id or str(uuid.uuid4())
-        body["operationID"] = op_id
-        return self._submit_operation(
-            session_id,
-            f"/v1/sessions/{session_id}/replay",
-            body,
-            op_id,
-            ReplayResponse,
-            recover,
-            recover_timeout,
-        )
+        return self._runner.run(self._async.replay_from(
+            session_id, source_session_id, up_to_step=up_to_step,
+            operation_id=operation_id, recover=recover, recover_timeout=recover_timeout,
+        ))
 
     def restore(
         self,
@@ -630,31 +261,18 @@ class GatewayClient:
         recover: bool = True,
         recover_timeout: float | None = None,
     ) -> RestoreResponse:
-        body: dict[str, Any] = {"snapshotID": snapshot_id}
-        op_id = operation_id or str(uuid.uuid4())
-        body["operationID"] = op_id
-        return self._submit_operation(
-            session_id,
-            f"/v1/sessions/{session_id}/restore",
-            body,
-            op_id,
-            RestoreResponse,
-            recover,
-            recover_timeout,
-        )
+        return self._runner.run(self._async.restore(
+            session_id, snapshot_id, operation_id=operation_id,
+            recover=recover, recover_timeout=recover_timeout,
+        ))
+
+    # --- History / trajectory ---
 
     def get_history(self, session_id: str) -> list[StepResult]:
-        resp = self._client.get(f"/v1/sessions/{session_id}/history")
-        self._handle_error(resp)
-        data = resp.json()
-        if isinstance(data, list):
-            return [StepResult.model_validate(item) for item in data]
-        return []
+        return self._runner.run(self._async.get_history(session_id))
 
     def get_trajectory(self, session_id: str) -> str:
-        resp = self._client.get(f"/v1/sessions/{session_id}/trajectory")
-        self._handle_error(resp)
-        return resp.text
+        return self._runner.run(self._async.get_trajectory(session_id))
 
     def list_sessions(
         self,
@@ -665,23 +283,10 @@ class GatewayClient:
         limit: int | None = None,
         cursor: str | None = None,
     ) -> list[SessionListItem]:
-        params: dict[str, str | int] = {}
-        if profile:
-            params["profile"] = profile
-        if experiment_id:
-            params["experiment"] = experiment_id
-        if status:
-            params["status"] = status
-        if limit is not None:
-            params["limit"] = limit
-        if cursor:
-            params["cursor"] = cursor
-        resp = self._client.get("/v1/sessions", params=params)
-        self._handle_error(resp)
-        data = resp.json()
-        if isinstance(data, list):
-            return [SessionListItem.model_validate(item) for item in data]
-        return []
+        return self._runner.run(self._async.list_sessions(
+            profile=profile, experiment_id=experiment_id,
+            status=status, limit=limit, cursor=cursor,
+        ))
 
     def iter_session_logs(
         self,
@@ -690,24 +295,16 @@ class GatewayClient:
         follow: bool = False,
         tail: int = 100,
     ) -> Iterator[LogEntry]:
-        params = {"follow": str(follow).lower(), "tail": str(tail)}
-        with self._client.stream(
-            "GET",
-            f"/v1/sessions/{session_id}/logs",
-            params=params,
-        ) as resp:
-            if resp.status_code >= 400:
-                resp.read()
-                self._handle_error(resp)
-            yield from self._iter_ndjson_models(resp, LogEntry)
+        return self._runner.iter(
+            self._async.iter_session_logs(session_id, follow=follow, tail=tail)
+        )
 
     def list_session_logs(
-        self,
-        session_id: str,
-        *,
-        tail: int = 100,
+        self, session_id: str, *, tail: int = 100,
     ) -> list[LogEntry]:
-        return list(self.iter_session_logs(session_id, follow=False, tail=tail))
+        return self._runner.run(
+            self._async.list_session_logs(session_id, tail=tail)
+        )
 
     # --- Pool APIs ---
 
@@ -724,54 +321,28 @@ class GatewayClient:
         image_locality: dict[str, Any] | bool | None = None,
         private_containers: Iterable[PrivateContainerSpec | dict[str, Any]] | None = None,
     ) -> None:
-        body: dict[str, Any] = {
-            "name": name,
-            "image": image,
-            "profile": profile,
-            "replicas": replicas,
-            "workspaceDir": workspace_dir,
-        }
-        config_env_payload = _serialize_config_env(config_env)
-        if config_env_payload is not None:
-            body["configEnv"] = config_env_payload
-        if tools is not None:
-            body["tools"] = tools.model_dump(by_alias=True, exclude_none=True)
-        if resources is not None:
-            body["resources"] = resources.model_dump(exclude_none=True)
-        if image_locality is not None:
-            body["imageLocality"] = image_locality
-        private_container_payload = _serialize_private_containers(private_containers)
-        if private_container_payload is not None:
-            body["privateContainers"] = private_container_payload
-        resp = self._client.post("/v1/pools", json=body)
-        self._handle_error(resp)
+        self._runner.run(self._async.create_pool(
+            name, image, replicas, profile, tools=tools, resources=resources,
+            workspace_dir=workspace_dir, config_env=config_env,
+            image_locality=image_locality, private_containers=private_containers,
+        ))
 
     def list_pools(self, *, include_stopped: bool = False) -> list[PoolInfo]:
-        params = {"includeStopped": "true"} if include_stopped else None
-        resp = self._client.get("/v1/pools", params=params)
-        self._handle_error(resp)
-        data = resp.json()
-        if isinstance(data, list):
-            return [PoolInfo.model_validate(item) for item in data]
-        return []
+        return self._runner.run(
+            self._async.list_pools(include_stopped=include_stopped)
+        )
 
     def summary(self) -> GatewaySummary:
-        resp = self._client.get("/v1/summary")
-        self._handle_error(resp)
-        return GatewaySummary.model_validate(resp.json())
+        return self._runner.run(self._async.summary())
 
     def get_pool(self, name: str) -> PoolInfo:
-        resp = self._client.get(f"/v1/pools/{name}")
-        self._handle_error(resp)
-        return PoolInfo.model_validate(resp.json())
+        return self._runner.run(self._async.get_pool(name))
 
     def delete_pool(self, name: str) -> None:
-        resp = self._client.delete(f"/v1/pools/{name}")
-        self._handle_error(resp)
+        self._runner.run(self._async.delete_pool(name))
 
     def destroy_pool(self, name: str) -> None:
-        resp = self._client.post(f"/v1/pools/{name}/destroy")
-        self._handle_error(resp)
+        self._runner.run(self._async.destroy_pool(name))
 
     def scale_pool(
         self,
@@ -779,22 +350,9 @@ class GatewayClient:
         replicas: int,
         resources: ResourceRequirements | None = None,
     ) -> PoolInfo:
-        """Scale a WarmPool and optionally update resource requirements.
-
-        Args:
-            name: Name of the WarmPool.
-            replicas: Desired number of replicas (non-negative).
-            resources: Optional resource requirements (CPU/memory requests and limits).
-
-        Returns:
-            Updated PoolInfo.
-        """
-        body: dict[str, Any] = {"replicas": replicas}
-        if resources is not None:
-            body["resources"] = resources.model_dump(exclude_none=True)
-        resp = self._client.patch(f"/v1/pools/{name}", json=body)
-        self._handle_error(resp)
-        return PoolInfo.model_validate(resp.json())
+        return self._runner.run(
+            self._async.scale_pool(name, replicas, resources=resources)
+        )
 
     def iter_pool_logs(
         self,
@@ -803,24 +361,12 @@ class GatewayClient:
         follow: bool = False,
         tail: int = 100,
     ) -> Iterator[PoolLogEntry]:
-        params = {"follow": str(follow).lower(), "tail": str(tail)}
-        with self._client.stream(
-            "GET",
-            f"/v1/pools/{name}/logs",
-            params=params,
-        ) as resp:
-            if resp.status_code >= 400:
-                resp.read()
-                self._handle_error(resp)
-            yield from self._iter_ndjson_models(resp, PoolLogEntry)
+        return self._runner.iter(
+            self._async.iter_pool_logs(name, follow=follow, tail=tail)
+        )
 
-    def list_pool_logs(
-        self,
-        name: str,
-        *,
-        tail: int = 100,
-    ) -> list[PoolLogEntry]:
-        return list(self.iter_pool_logs(name, follow=False, tail=tail))
+    def list_pool_logs(self, name: str, *, tail: int = 100) -> list[PoolLogEntry]:
+        return self._runner.run(self._async.list_pool_logs(name, tail=tail))
 
     # --- Managed Session APIs ---
 
@@ -840,113 +386,34 @@ class GatewayClient:
         private_containers: Iterable[PrivateContainerSpec | dict[str, Any]] | None = None,
         allow_internet: bool | None = None,
     ) -> ManagedSessionInfo:
-        """Create a managed session with automatic pool management.
-
-        The server automatically creates a sandbox-backed pool when needed.
-
-        Args:
-            image: Container image for the executor.
-            experiment_id: Experiment identifier for grouping and management.
-            profile: Resource profile for pool selection.
-            resources: Optional CPU/memory requirements (used on first pool creation).
-            tools: Optional tools specification (used on first pool creation).
-            workspace_dir: Workspace mount path.
-            idle_timeout_seconds: Per-session idle TTL. The gateway deletes the
-                session after this many seconds without execute/file activity.
-
-        Returns:
-            ManagedSessionInfo with session details and experiment metadata.
-        """
-        body: dict[str, Any] = {
-            "image": image,
-            "experimentId": experiment_id,
-            "profile": profile,
-            "workspaceDir": workspace_dir,
-        }
-        if mode:
-            body["mode"] = mode
-        if devbox is not None:
-            if isinstance(devbox, DevboxConfig):
-                body["devbox"] = devbox.model_dump(by_alias=True, exclude_none=True)
-            else:
-                body["devbox"] = devbox
-        config_env_payload = _serialize_config_env(config_env)
-        if config_env_payload is not None:
-            body["configEnv"] = config_env_payload
-        if resources is not None:
-            body["resources"] = resources.model_dump(exclude_none=True)
-        if tools is not None:
-            body["tools"] = tools.model_dump(by_alias=True, exclude_none=True)
-        if idle_timeout_seconds is not None:
-            body["idleTimeoutSeconds"] = idle_timeout_seconds
-        if allocation_timeout_seconds is not None:
-            body["allocationTimeoutSeconds"] = allocation_timeout_seconds
-        private_container_payload = _serialize_private_containers(private_containers)
-        if private_container_payload is not None:
-            body["privateContainers"] = private_container_payload
-        if allow_internet is not None:
-            body["allowInternet"] = allow_internet
-        resp = self._client.post("/v1/managed/sessions", json=body)
-        self._handle_error(resp)
-        return ManagedSessionInfo.model_validate(resp.json())
+        return self._runner.run(self._async.create_managed_session(
+            image, experiment_id, profile, mode=mode, devbox=devbox,
+            resources=resources, tools=tools, workspace_dir=workspace_dir,
+            idle_timeout_seconds=idle_timeout_seconds,
+            allocation_timeout_seconds=allocation_timeout_seconds,
+            config_env=config_env, private_containers=private_containers,
+            allow_internet=allow_internet,
+        ))
 
     def list_experiment_sessions(
-        self,
-        experiment_id: str,
+        self, experiment_id: str,
     ) -> list[ManagedSessionInfo]:
-        """List all active sessions for an experiment.
-
-        Args:
-            experiment_id: Experiment identifier.
-
-        Returns:
-            List of ManagedSessionInfo for the experiment.
-        """
-        resp = self._client.get(f"/v1/managed/experiments/{experiment_id}/sessions")
-        self._handle_error(resp)
-        data = resp.json()
-        if isinstance(data, list):
-            return [ManagedSessionInfo.model_validate(item) for item in data]
-        return []
+        return self._runner.run(
+            self._async.list_experiment_sessions(experiment_id)
+        )
 
     def list_experiments(self) -> list[ExperimentSummary]:
-        """List managed-session experiment summaries."""
-        resp = self._client.get("/v1/managed/experiments")
-        self._handle_error(resp)
-        data = resp.json()
-        if isinstance(data, list):
-            return [ExperimentSummary.model_validate(item) for item in data]
-        return []
+        return self._runner.run(self._async.list_experiments())
 
     def delete_experiment_info(
-        self,
-        experiment_id: str,
+        self, experiment_id: str,
     ) -> DeleteExperimentResponse:
-        """Delete all sessions for an experiment and return the full response.
+        return self._runner.run(
+            self._async.delete_experiment_info(experiment_id)
+        )
 
-        Args:
-            experiment_id: Experiment identifier.
-
-        Returns:
-            DeleteExperimentResponse with deletion count and optional error.
-        """
-        resp = self._client.delete(f"/v1/managed/experiments/{experiment_id}")
-        self._handle_error(resp)
-        result = DeleteExperimentResponse.model_validate(resp.json())
-        if result.error:
-            raise GatewayError(resp.status_code, result.error)
-        return result
-
-    def delete_experiment(
-        self,
-        experiment_id: str,
-    ) -> int:
-        """Delete all sessions for an experiment.
-
-        Returns:
-            Number of sessions deleted.
-        """
-        return self.delete_experiment_info(experiment_id).deleted
+    def delete_experiment(self, experiment_id: str) -> int:
+        return self._runner.run(self._async.delete_experiment(experiment_id))
 
     # --- Build API ---
 
@@ -959,72 +426,23 @@ class GatewayClient:
         timeout: int | None = None,
         cache: bool = True,
     ) -> BuildResponse:
-        """Build a container image via the gateway's Kaniko build API.
+        return self._runner.run(self._async.build_image(
+            image, context, build_args=build_args, timeout=timeout, cache=cache,
+        ))
 
-        Args:
-            image: Target image reference (e.g. "registry/org/name:tag").
-            context: Build context as a tar.gz file object or bytes.
-            build_args: Optional Docker build arguments.
-            timeout: Build timeout in seconds.
-            cache: Enable Kaniko layer caching (default True).
-
-        Returns:
-            BuildResponse with image ref, digest, status, and build log.
-
-        Raises:
-            GatewayError: On HTTP error or build failure.
-        """
-        data: dict[str, str] = {"image": image, "cache": str(cache).lower()}
-        if build_args is not None:
-            data["build_args"] = json.dumps(build_args)
-        if timeout is not None:
-            data["timeout"] = str(timeout)
-
-        files = {"context": ("context.tar.gz", context, "application/gzip")}
-
-        build_timeout = httpx.Timeout(
-            connect=30.0,
-            read=float(timeout or 1800),
-            write=300.0,
-            pool=float(timeout or 1800),
-        )
-        resp = self._client.post(
-            "/v1/build",
-            data=data,
-            files=files,
-            timeout=build_timeout,
-        )
-        self._handle_error(resp)
-        result = BuildResponse.model_validate(resp.json())
-        if result.status == "failed":
-            raise GatewayError(422, f"image build failed: {result.log}")
-        return result
-
-    # --- Iroh direct-connect ---
+    # --- Iroh ---
 
     def get_iroh_addr(self, session_id: str) -> str:
-        """Fetch the iroh direct-connect endpoint address for a session.
-
-        Returns an empty string if the executor is not running with v2
-        protocol or the address is not yet available.
-        """
-        resp = self._client.get(f"/v1/sessions/{session_id}/iroh-addr")
-        self._handle_error(resp)
-        data = resp.json()
-        addr: str = data.get("addr", "")
-        return addr
+        return self._runner.run(self._async.get_iroh_addr(session_id))
 
     # --- Health ---
 
     def health(self) -> bool:
-        try:
-            resp = self._client.get("/healthz")
-            return resp.status_code == 200
-        except httpx.HTTPError:
-            return False
+        return self._runner.run(self._async.health())
 
     def close(self) -> None:
-        self._client.close()
+        self._runner.run(self._async.aclose())
+        self._runner.close()
 
     def __enter__(self) -> GatewayClient:
         return self

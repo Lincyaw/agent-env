@@ -21,12 +21,11 @@ iroh resolves the full address via DNS/PKARR automatically.
 
 from __future__ import annotations
 
-import asyncio
 import struct
-import threading
-from collections.abc import Coroutine
 from contextlib import suppress
 from typing import TypeVar
+
+from arl._base import LoopThread
 
 _T = TypeVar("_T")
 
@@ -538,29 +537,16 @@ STREAM_TYPE_TUNNEL = 0x05
 class SyncIrohBridge:
     """Synchronous wrapper running :class:`IrohTransport` in a background thread."""
 
-    def __init__(self, addr_str: str) -> None:
+    def __init__(self, addr_str: str, loop_thread: LoopThread | None = None) -> None:
         self._transport = IrohTransport(addr_str)
-        self._loop = asyncio.new_event_loop()
-        self._thread = threading.Thread(target=self._run_loop, daemon=True, name="iroh-bridge")
-        self._thread.start()
+        self._owns_loop = loop_thread is None
+        self._lt = loop_thread or LoopThread(name="iroh-bridge")
         try:
-            self._run_coro(self._transport.connect())
+            self._lt.run(self._transport.connect())
         except Exception:
-            self._stop_loop()
+            if self._owns_loop:
+                self._lt.close()
             raise
-
-    def _run_loop(self) -> None:
-        asyncio.set_event_loop(self._loop)
-        self._loop.run_forever()
-
-    def _run_coro(self, coro: Coroutine[object, object, _T], timeout: float | None = None) -> _T:
-        fut = asyncio.run_coroutine_threadsafe(coro, self._loop)
-        return fut.result(timeout=timeout)
-
-    def _stop_loop(self) -> None:
-        self._loop.call_soon_threadsafe(self._loop.stop)
-        self._thread.join(timeout=5)
-        self._loop.close()
 
     @property
     def is_connected(self) -> bool:
@@ -574,32 +560,32 @@ class SyncIrohBridge:
         work_dir: str | None = None,
         timeout_seconds: int | None = None,
     ) -> dict[str, object]:
-        return self._run_coro(
+        return self._lt.run(
             self._transport.execute(
                 cmd, env=env, work_dir=work_dir, timeout_seconds=timeout_seconds
             )
         )
 
     def upload_file(self, path: str, data: bytes) -> dict[str, object]:
-        return self._run_coro(self._transport.upload_file(path, data))
+        return self._lt.run(self._transport.upload_file(path, data))
 
     def download_file(self, path: str) -> bytes:
-        return self._run_coro(self._transport.download_file(path))
+        return self._lt.run(self._transport.download_file(path))
 
     def stat(self, path: str) -> dict[str, object]:
-        return self._run_coro(self._transport.stat(path))
+        return self._lt.run(self._transport.stat(path))
 
     def ping(self) -> bool:
-        return self._run_coro(self._transport.ping())
+        return self._lt.run(self._transport.ping())
 
     def tunnel_open(self, remote_host: str, remote_port: int) -> int:
-        return self._run_coro(self._transport.tunnel_open(remote_host, remote_port))
+        return self._lt.run(self._transport.tunnel_open(remote_host, remote_port))
 
     def tunnel_close(self, tunnel_tag: int) -> None:
-        self._run_coro(self._transport.tunnel_close(tunnel_tag))
+        self._lt.run(self._transport.tunnel_close(tunnel_tag))
 
     def tunnel_list(self) -> list[dict[str, object]]:
-        return self._run_coro(self._transport.tunnel_list())
+        return self._lt.run(self._transport.tunnel_list())
 
     def tunnel_forward(
         self,
@@ -608,20 +594,21 @@ class SyncIrohBridge:
         local_port: int,
         local_host: str = "127.0.0.1",
     ) -> int:
-        return self._run_coro(
+        return self._lt.run(
             self._transport.tunnel_forward(remote_host, remote_port, local_port, local_host)
         )
 
     def tunnel_stop(self, tunnel_tag: int) -> None:
-        self._run_coro(self._transport.tunnel_stop(tunnel_tag))
+        self._lt.run(self._transport.tunnel_stop(tunnel_tag))
 
     def close(self) -> None:
         try:
-            self._run_coro(self._transport.close())
+            self._lt.run(self._transport.close())
         except Exception:
             pass
         finally:
-            self._stop_loop()
+            if self._owns_loop:
+                self._lt.close()
 
     def __enter__(self) -> SyncIrohBridge:
         return self

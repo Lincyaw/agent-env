@@ -40,29 +40,28 @@ func SetupRoutes(gw *Gateway, authCfg *AuthConfig) chi.Router {
 
 	r.Route("/v1", func(r chi.Router) {
 		// Session creation (user role, no ownership)
-		r.With(authUser).Post("/sessions", handleCreateSession(gw))
+		r.With(authUser, maxBodySize(10*1024*1024)).Post("/sessions", handleCreateSession(gw))
 
 		// Session-scoped endpoints
 		r.Route("/sessions/{id}", func(r chi.Router) {
 			r.Use(authUser)
 			// GET/fork have custom ownership logic (historical/deleted sessions)
 			r.Get("/", handleGetSession(gw))
-			r.Post("/fork", handleForkSession(gw))
+			r.With(maxBodySize(10 * 1024 * 1024)).Post("/fork", handleForkSession(gw))
 
 			// All other operations require session ownership
 			r.Group(func(r chi.Router) {
 				r.Use(sessionOwnership(gw))
 				r.Delete("/", handleDeleteSession(gw))
-				r.Patch("/network-policy", handleUpdateNetworkPolicy(gw))
+				r.With(maxBodySize(10 * 1024 * 1024)).Patch("/network-policy", handleUpdateNetworkPolicy(gw))
 				r.Post("/suspend", handleSuspendSession(gw))
 				r.Post("/resume", handleResumeSession(gw))
 				r.Get("/iroh-addr", handleGetIrohAddr(gw))
-				r.Post("/execute", handleExecute(gw))
-				r.Post("/containers/{container}/execute", handleExecuteContainer(gw))
+				r.With(maxBodySize(10 * 1024 * 1024)).Post("/execute", handleExecute(gw))
+				r.With(maxBodySize(10 * 1024 * 1024)).Post("/containers/{container}/execute", handleExecuteContainer(gw))
 				r.Get("/operations/{operationID}", handleGetExecuteOperation(gw))
 				r.Post("/upload-file", handleUploadFile(gw))
-				r.Post("/download-file", handleDownloadFile(gw))
-				r.Post("/stdin", handleWriteStdin(gw))
+				r.With(maxBodySize(10 * 1024 * 1024)).Post("/download-file", handleDownloadFile(gw))
 				r.Post("/restore", handleRestore(gw))
 				r.Post("/replay", handleReplay(gw))
 				r.Get("/shell", handleShell(gw, authCfg))
@@ -102,6 +101,16 @@ func SetupRoutes(gw *Gateway, authCfg *AuthConfig) chi.Router {
 }
 
 func noopMiddleware(next http.Handler) http.Handler { return next }
+
+// maxBodySize returns a middleware that limits the size of request bodies.
+func maxBodySize(maxBytes int64) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			r.Body = http.MaxBytesReader(w, r.Body, maxBytes)
+			next.ServeHTTP(w, r)
+		})
+	}
+}
 
 func requireAuthMiddleware(authCfg *AuthConfig, minRole Role) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
@@ -557,30 +566,6 @@ func pathBaseForHeader(filePath string) string {
 	return strings.ReplaceAll(base, "\x00", "")
 }
 
-func handleWriteStdin(gw *Gateway) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		id := chi.URLParam(r, "id")
-
-		var req WriteStdinRequest
-		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-			writeError(w, http.StatusBadRequest, err.Error())
-			return
-		}
-
-		if req.Handle == "" {
-			writeError(w, http.StatusBadRequest, "handle is required")
-			return
-		}
-
-		if err := gw.WriteStdin(r.Context(), id, req.Handle, req.Data); err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
-			return
-		}
-
-		writeJSON(w, http.StatusOK, map[string]bool{"ok": true})
-	}
-}
-
 func handleReplay(gw *Gateway) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := chi.URLParam(r, "id")
@@ -986,6 +971,32 @@ func handleListExperimentSessions(gw *Gateway) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		id := chi.URLParam(r, "id")
 		sessions := gw.ListExperimentSessions(id)
+
+		// Filter by ownership: non-admin callers only see their own sessions.
+		callerHash, authEnabled := KeyHashFromContext(r.Context())
+		if authEnabled {
+			role, _ := RoleFromContext(r.Context())
+			if role != RoleAdmin {
+				filtered := make([]ManagedSessionInfo, 0, len(sessions))
+				for _, s := range sessions {
+					sess, ok := gw.store.Get(s.ID)
+					if !ok {
+						sess, ok = gw.store.GetHistorical(s.ID)
+					}
+					if !ok {
+						continue
+					}
+					sess.mu.RLock()
+					ownerHash := sess.ownerKeyHash
+					sess.mu.RUnlock()
+					if ownerHash == callerHash {
+						filtered = append(filtered, s)
+					}
+				}
+				sessions = filtered
+			}
+		}
+
 		writeJSON(w, http.StatusOK, sessions)
 	}
 }

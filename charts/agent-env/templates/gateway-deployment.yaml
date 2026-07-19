@@ -42,7 +42,6 @@ spec:
           imagePullPolicy: {{ .Values.gateway.image.pullPolicy }}
           args:
             - --port={{ .Values.gateway.port }}
-            - --sidecar-grpc-port={{ .Values.gateway.sidecarGrpcPort }}
           env:
             - name: INTERNAL_PORT
               value: "{{ .Values.gateway.internalPort }}"
@@ -71,10 +70,6 @@ spec:
                   key: token
             - name: GRPC_AUTH_SECRET_NAME
               value: {{ include "agent-env.grpcTokenSecretName" . | quote }}
-            - name: SIDECAR_IMAGE
-              value: "{{ include "agent-env.repo" (dict "repo" .Values.sidecar.image.repository "global" .Values.global) }}:{{ .Values.sidecar.image.tag | default .Chart.AppVersion }}"
-            - name: SIDECAR_HTTP_PORT
-              value: "{{ .Values.sidecar.httpPort }}"
             - name: EXECUTOR_AGENT_IMAGE
               value: "{{ include "agent-env.repo" (dict "repo" .Values.executorAgent.image.repository "global" .Values.global) }}:{{ .Values.executorAgent.image.tag | default .Chart.AppVersion }}"
             {{- if .Values.executorAgent.protocol }}
@@ -92,7 +87,7 @@ spec:
             - name: GATEWAY_SWEEP_INTERVAL
               value: "{{ .Values.gateway.sweepInterval }}"
             - name: HTTP_CLIENT_TIMEOUT
-              value: "{{ .Values.gateway.sidecarClientTimeout }}"
+              value: "300s"
             - name: GATEWAY_WRITE_TIMEOUT
               value: "{{ .Values.gateway.writeTimeout }}"
             - name: ADMISSION_QUEUE_TIMEOUT

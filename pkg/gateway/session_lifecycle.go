@@ -188,8 +188,8 @@ func (g *Gateway) CreateSession(ctx context.Context, req CreateSessionRequest) (
 	if req.Mode == SessionModeDevbox {
 		info.ConnectionInfo = buildConnectionInfo(sessionID, allocation.PodIP, req.Devbox)
 	}
-	if strings.EqualFold(g.gwConfig.ExecutorProtocol, "v2") && allocation.PodIP != "" && g.sidecarClient != nil {
-		if addr, err := g.sidecarClient.GetIrohAddr(ctx, allocation.PodIP); err == nil && addr != "" {
+	if allocation.PodIP != "" && g.executorClient != nil {
+		if addr, err := g.executorClient.GetIrohAddr(ctx, allocation.PodIP); err == nil && addr != "" {
 			info.IrohAddr = g.rewriteIrohAddr(addr)
 		}
 	}
@@ -222,9 +222,9 @@ func (g *Gateway) CreateSession(ctx context.Context, req CreateSessionRequest) (
 	return &info, nil
 }
 
-// GetIrohAddr retrieves the iroh endpoint address from the sidecar for the
-// given session. Returns empty string if the executor is not running v2 or
-// the address file is not yet available.
+// GetIrohAddr retrieves the iroh endpoint address from the executor for the
+// given session. Returns empty string if the executor does not provide iroh
+// or the address is not yet available.
 func (g *Gateway) GetIrohAddr(ctx context.Context, sessionID string) (string, error) {
 	s, ok := g.store.Get(sessionID)
 	if !ok {
@@ -234,12 +234,12 @@ func (g *Gateway) GetIrohAddr(ctx context.Context, sessionID string) (string, er
 	podIP := s.Info.PodIP
 	s.mu.RUnlock()
 
-	if podIP == "" || g.sidecarClient == nil {
+	if podIP == "" || g.executorClient == nil {
 		return "", nil
 	}
-	addr, err := g.sidecarClient.GetIrohAddr(ctx, podIP)
+	addr, err := g.executorClient.GetIrohAddr(ctx, podIP)
 	if err != nil {
-		return "", fmt.Errorf("get iroh addr from sidecar: %w", err)
+		return "", fmt.Errorf("get iroh addr from executor: %w", err)
 	}
 	return g.rewriteIrohAddr(addr), nil
 }
@@ -438,9 +438,9 @@ func (g *Gateway) deleteSession(ctx context.Context, sessionID string, reason st
 
 	g.DeleteSessionNetworkPolicy(ctx, sessionID, allocation.Namespace)
 
-	if podIP != "" && g.sidecarClient != nil {
-		if err := g.sidecarClient.CloseConnection(podIP); err != nil {
-			log.Printf("Warning: failed to close sidecar connection for pod %s: %v", podName, err)
+	if podIP != "" && g.executorClient != nil {
+		if err := g.executorClient.CloseConnection(podIP); err != nil {
+			log.Printf("Warning: failed to close executor connection for pod %s: %v", podName, err)
 		}
 	}
 
@@ -502,9 +502,9 @@ func (g *Gateway) dropSession(sessionID string, s *session) {
 	}
 
 	if info.PodIP != "" {
-		if g.sidecarClient != nil {
-			if err := g.sidecarClient.CloseConnection(info.PodIP); err != nil {
-				log.Printf("Warning: failed to close sidecar connection for dropped session %s: %v", sessionID, err)
+		if g.executorClient != nil {
+			if err := g.executorClient.CloseConnection(info.PodIP); err != nil {
+				log.Printf("Warning: failed to close executor connection for dropped session %s: %v", sessionID, err)
 			}
 		}
 	}

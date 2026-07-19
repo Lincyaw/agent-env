@@ -46,7 +46,7 @@ func TestUploadFileStreamsContentAndRecordsHistory(t *testing.T) {
 			SandboxName: "sandbox-1",
 		}},
 		store: store,
-		sidecarClient: &client.MockSidecarClient{
+		executorClient: &client.MockExecutorClient{
 			WriteFileFunc: func(ctx context.Context, podIP string, path string, content io.Reader, expectedSHA256 string) (*interfaces.FileWriteResult, error) {
 				gotPodIP = podIP
 				gotPath = path
@@ -127,7 +127,7 @@ func TestDownloadFileStreamsToWriter(t *testing.T) {
 			SandboxName: "sandbox-1",
 		}},
 		store: store,
-		sidecarClient: &client.MockSidecarClient{
+		executorClient: &client.MockExecutorClient{
 			ReadFileFunc: func(ctx context.Context, podIP string, path string, dst io.Writer) (*interfaces.FileReadResult, error) {
 				if podIP != "10.0.0.1" {
 					t.Fatalf("podIP = %q, want 10.0.0.1", podIP)

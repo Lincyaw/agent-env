@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/Lincyaw/agent-env/pkg/audit"
-	"github.com/Lincyaw/agent-env/pkg/sidecar"
+	"github.com/Lincyaw/agent-env/pkg/interfaces"
 )
 
 // ReplayFrom replays steps from a source session, optionally as an async operation.
@@ -68,13 +68,13 @@ func (g *Gateway) replayNow(ctx context.Context, targetSessionID string, req Rep
 			errors++
 			continue
 		}
-		execReq := &sidecar.ExecRequest{
+		execReq := &interfaces.ExecRequest{
 			Command:        step.Command,
 			Env:            step.Env,
 			WorkingDir:     step.WorkDir,
 			TimeoutSeconds: resolveStepTimeoutSeconds(step),
 		}
-		if _, err := g.sidecarClient.Execute(ctx, podIP, execReq); err != nil {
+		if _, err := g.executorClient.Execute(ctx, podIP, execReq); err != nil {
 			log.Printf("Warning: replay exec step %d failed on %s: %v", record.Index, podIP, err)
 			errors++
 			continue
@@ -148,7 +148,7 @@ func (g *Gateway) replayUpload(ctx context.Context, podIP string, record StepRec
 	if err != nil {
 		return fmt.Errorf("retrieve blob %s: %w", upload.SHA256[:12], err)
 	}
-	_, err = g.sidecarClient.WriteFile(ctx, podIP, upload.Path, bytes.NewReader(content), upload.SHA256)
+	_, err = g.executorClient.WriteFile(ctx, podIP, upload.Path, bytes.NewReader(content), upload.SHA256)
 	if err != nil {
 		return fmt.Errorf("write to %s path %s: %w", podIP, upload.Path, err)
 	}
@@ -258,13 +258,13 @@ func (g *Gateway) restoreNow(ctx context.Context, sessionID string, snapshotID s
 		if restoreTimeout < 600 {
 			restoreTimeout = 600
 		}
-		execReq := &sidecar.ExecRequest{
+		execReq := &interfaces.ExecRequest{
 			Command:        step.Command,
 			Env:            step.Env,
 			WorkingDir:     step.WorkDir,
 			TimeoutSeconds: restoreTimeout,
 		}
-		if _, err := g.sidecarClient.Execute(ctx, newAllocation.PodIP, execReq); err != nil {
+		if _, err := g.executorClient.Execute(ctx, newAllocation.PodIP, execReq); err != nil {
 			if err := g.releaseRestoreAllocation(*newAllocation); err != nil {
 				log.Printf("Warning: failed to release runtime %s after restore failure: %v", newAllocation.PodName, err)
 			}
@@ -295,9 +295,9 @@ func (g *Gateway) restoreNow(ctx context.Context, sessionID string, snapshotID s
 		if err := g.runtimeAllocator.Release(bgCtx, oldAllocation); err != nil {
 			log.Printf("Warning: failed to release old runtime %s: %v", oldAllocation.PodName, err)
 		}
-		if oldAllocation.PodIP != "" && g.sidecarClient != nil {
-			if err := g.sidecarClient.CloseConnection(oldAllocation.PodIP); err != nil {
-				log.Printf("Warning: failed to close sidecar connection for old runtime %s: %v", oldAllocation.PodName, err)
+		if oldAllocation.PodIP != "" && g.executorClient != nil {
+			if err := g.executorClient.CloseConnection(oldAllocation.PodIP); err != nil {
+				log.Printf("Warning: failed to close executor connection for old runtime %s: %v", oldAllocation.PodName, err)
 			}
 		}
 	}()

@@ -26,11 +26,8 @@ type GatewayConfig struct {
 	DevboxStorageClassName          string
 	SweepInterval                   time.Duration
 	Namespace                       string
-	SidecarImage                    string
-	SidecarHTTPPort                 int
-	SidecarGRPCPort                 int
-	ExecutorAgentImage              string
-	ExecutorProtocol                string
+	ExecutorAgentImage string
+	ExecutorPort       int
 	IrohRelayURL                    string
 	IrohRelayExternalURL            string
 	ImagePullPolicy                 string
@@ -123,14 +120,14 @@ func (s *session) runtimeAllocation() RuntimeAllocation {
 	return allocation
 }
 
-// Gateway manages sessions and forwards execution to sidecars.
+// Gateway manages sessions and forwards execution to executor agents.
 type Gateway struct {
 	k8sClient             client.Client
 	k8sRESTConfig         *rest.Config
 	runtimeAllocator      RuntimeAllocator
 	poolSelector          PoolSelector
 	admissionController   AdmissionController
-	sidecarClient         interfaces.SidecarClient
+	executorClient        interfaces.ExecutorClient
 	metrics               interfaces.MetricsCollector
 	trajectoryWriter      *audit.TrajectoryWriter
 	store                 SessionStore
@@ -161,7 +158,7 @@ type Gateway struct {
 
 // New creates a new gateway. metrics and trajectoryWriter may be nil.
 // If store is nil, a default MemoryStore is used.
-func New(k8sClient client.Client, runtimeAllocator RuntimeAllocator, sidecarClient interfaces.SidecarClient, metrics interfaces.MetricsCollector, trajectoryWriter *audit.TrajectoryWriter, gwConfig GatewayConfig, store SessionStore) *Gateway {
+func New(k8sClient client.Client, runtimeAllocator RuntimeAllocator, executorClient interfaces.ExecutorClient, metrics interfaces.MetricsCollector, trajectoryWriter *audit.TrajectoryWriter, gwConfig GatewayConfig, store SessionStore) *Gateway {
 	if store == nil {
 		store = NewMemoryStore()
 	}
@@ -184,7 +181,7 @@ func New(k8sClient client.Client, runtimeAllocator RuntimeAllocator, sidecarClie
 		runtimeAllocator:    runtimeAllocator,
 		poolSelector:        DefaultPoolSelector{},
 		admissionController: NewDefaultAdmissionController(),
-		sidecarClient:       sidecarClient,
+		executorClient:      executorClient,
 		metrics:             metrics,
 		trajectoryWriter:    trajectoryWriter,
 		store:               store,

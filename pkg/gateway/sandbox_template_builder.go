@@ -121,9 +121,7 @@ func denyInternetEgressPolicy(allowCIDRs []string) *extensionsv1beta1.NetworkPol
 
 func primarySandboxTemplateImage(template *extensionsv1beta1.SandboxTemplate) string {
 	for _, container := range template.Spec.PodTemplate.Spec.Containers {
-		if container.Name != "sidecar" {
-			return container.Image
-		}
+		return container.Image
 	}
 	return ""
 }
@@ -133,25 +131,18 @@ func (g *Gateway) sandboxPodSpec(
 	resources corev1.ResourceRequirements,
 	privateContainers []PrivateContainerSpec,
 ) corev1.PodSpec {
-	sidecarHTTPPort := g.gwConfig.SidecarHTTPPort
-	if sidecarHTTPPort == 0 {
-		sidecarHTTPPort = 8080
-	}
-	sidecarGRPCPort := g.gwConfig.SidecarGRPCPort
-	if sidecarGRPCPort == 0 {
-		sidecarGRPCPort = 9090
-	}
-	sidecarImage := g.gwConfig.SidecarImage
-	if sidecarImage == "" {
-		sidecarImage = "arl-sidecar:latest"
-	}
 	executorAgentImage := g.gwConfig.ExecutorAgentImage
 	if executorAgentImage == "" {
 		executorAgentImage = "arl-executor-agent:latest"
 	}
 
+	executorPort := g.gwConfig.ExecutorPort
+	if executorPort == 0 {
+		executorPort = 9090
+	}
+
 	automount := false
-	executorCommand := "exec /arl-bin/executor-agent --socket=/var/run/arl/exec.sock --workspace=/"
+	executorCommand := fmt.Sprintf("exec /arl-bin/executor-agent --socket=/var/run/arl/exec.sock --workspace=/ --tcp-port=%d", executorPort)
 	pod := corev1.PodSpec{
 		AutomountServiceAccountToken: &automount,
 		InitContainers: []corev1.Container{
@@ -173,46 +164,30 @@ func (g *Gateway) sandboxPodSpec(
 				Command:         []string{"/bin/sh", "-c", executorCommand},
 				Env:             g.executorEnv(),
 				Resources:       g.ensureEphemeralStorage(resources),
+				Ports: []corev1.ContainerPort{
+					{Name: "executor", ContainerPort: int32(executorPort), Protocol: corev1.ProtocolTCP},
+				},
 				VolumeMounts: []corev1.VolumeMount{
 					{Name: "arl-bin", MountPath: "/arl-bin"},
 					{Name: "arl-socket", MountPath: "/var/run/arl"},
 				},
-			},
-			{
-				Name:            "sidecar",
-				Image:           sidecarImage,
-				ImagePullPolicy: g.injectedPullPolicy(),
-				Command:         []string{"/sidecar"},
-				Args: []string{
-					"--workspace=/",
-					fmt.Sprintf("--http-port=%d", sidecarHTTPPort),
-					fmt.Sprintf("--grpc-port=%d", sidecarGRPCPort),
-				},
-				Env: g.sidecarEnv(),
-				Ports: []corev1.ContainerPort{
-					{Name: "http", ContainerPort: int32(sidecarHTTPPort), Protocol: corev1.ProtocolTCP},
-					{Name: "grpc", ContainerPort: int32(sidecarGRPCPort), Protocol: corev1.ProtocolTCP},
-				},
-				VolumeMounts: []corev1.VolumeMount{
-					{Name: "arl-socket", MountPath: "/var/run/arl"},
-				},
 				StartupProbe: &corev1.Probe{
 					ProbeHandler: corev1.ProbeHandler{
-						HTTPGet: &corev1.HTTPGetAction{Path: "/healthz", Port: intstr.FromInt32(int32(sidecarHTTPPort))},
+						TCPSocket: &corev1.TCPSocketAction{Port: intstr.FromInt32(int32(executorPort))},
 					},
 					PeriodSeconds:    2,
 					FailureThreshold: 30,
 				},
 				ReadinessProbe: &corev1.Probe{
 					ProbeHandler: corev1.ProbeHandler{
-						HTTPGet: &corev1.HTTPGetAction{Path: "/readyz", Port: intstr.FromInt32(int32(sidecarHTTPPort))},
+						TCPSocket: &corev1.TCPSocketAction{Port: intstr.FromInt32(int32(executorPort))},
 					},
 					PeriodSeconds:    5,
 					FailureThreshold: 3,
 				},
 				LivenessProbe: &corev1.Probe{
 					ProbeHandler: corev1.ProbeHandler{
-						TCPSocket: &corev1.TCPSocketAction{Port: intstr.FromInt32(int32(sidecarGRPCPort))},
+						TCPSocket: &corev1.TCPSocketAction{Port: intstr.FromInt32(int32(executorPort))},
 					},
 					PeriodSeconds:    10,
 					FailureThreshold: 3,
@@ -230,8 +205,7 @@ func (g *Gateway) sandboxPodSpec(
 			VolumeSource: corev1.VolumeSource{EmptyDir: &corev1.EmptyDirVolumeSource{}},
 		})
 		for i := range pod.Containers {
-			switch pod.Containers[i].Name {
-			case "executor":
+			if pod.Containers[i].Name == "executor" {
 				pod.Containers[i].VolumeMounts = append(pod.Containers[i].VolumeMounts, corev1.VolumeMount{
 					Name:      "checkpoint-scratch",
 					MountPath: "/mnt/arl-checkpoint",
@@ -239,15 +213,6 @@ func (g *Gateway) sandboxPodSpec(
 				pod.Containers[i].Env = append(pod.Containers[i].Env, corev1.EnvVar{
 					Name:  "ARL_CHECKPOINT_ENABLED",
 					Value: "1",
-				})
-			case "sidecar":
-				pod.Containers[i].VolumeMounts = append(pod.Containers[i].VolumeMounts, corev1.VolumeMount{
-					Name:      "checkpoint-scratch",
-					MountPath: "/mnt/arl-checkpoint",
-				})
-				pod.Containers[i].Env = append(pod.Containers[i].Env, corev1.EnvVar{
-					Name:  "ARL_CHECKPOINT_DIR",
-					Value: "/mnt/arl-checkpoint",
 				})
 			}
 		}
@@ -385,34 +350,8 @@ func (g *Gateway) grpcAuthSecretName() string {
 	return defaultGRPCAuthSecretName
 }
 
-func (g *Gateway) sidecarEnv() []corev1.EnvVar {
-	protocol := g.gwConfig.ExecutorProtocol
-	if protocol == "" {
-		protocol = "v1"
-	}
-	return []corev1.EnvVar{
-		{
-			Name: "GRPC_AUTH_TOKEN",
-			ValueFrom: &corev1.EnvVarSource{
-				SecretKeyRef: &corev1.SecretKeySelector{
-					LocalObjectReference: corev1.LocalObjectReference{Name: g.grpcAuthSecretName()},
-					Key:                  "token",
-					Optional:             boolPtr(false),
-				},
-			},
-		},
-		{Name: "EXECUTOR_PROTOCOL", Value: protocol},
-	}
-}
-
 func (g *Gateway) executorEnv() []corev1.EnvVar {
-	protocol := g.gwConfig.ExecutorProtocol
-	if protocol == "" {
-		protocol = "v1"
-	}
-	envs := []corev1.EnvVar{
-		{Name: "EXECUTOR_PROTOCOL", Value: protocol},
-	}
+	var envs []corev1.EnvVar
 	if g.gwConfig.IrohRelayURL != "" {
 		envs = append(envs, corev1.EnvVar{Name: "IROH_RELAY_URL", Value: g.gwConfig.IrohRelayURL})
 	}
@@ -441,9 +380,6 @@ func (g *Gateway) injectProxyEnv(pod *corev1.PodSpec) {
 		}
 	}
 	for i := range pod.Containers {
-		if pod.Containers[i].Name == "sidecar" {
-			continue
-		}
 		for _, ev := range envVars {
 			upsertEnv(&pod.Containers[i].Env, ev)
 		}
