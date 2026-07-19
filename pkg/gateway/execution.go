@@ -203,7 +203,7 @@ func (g *Gateway) executeStepsNow(ctx context.Context, sessionID string, req Exe
 	}
 	totalStart := time.Now()
 
-	for _, step := range req.Steps {
+	for i, step := range req.Steps {
 		start := time.Now()
 		inputJSON, _ := json.Marshal(step)
 
@@ -215,15 +215,21 @@ func (g *Gateway) executeStepsNow(ctx context.Context, sessionID string, req Exe
 			WorkingDir:     step.WorkDir,
 			TimeoutSeconds: resolveStepTimeoutSeconds(step),
 		}
-		grpcStart := time.Now()
+		log.Printf("Exec %s [%d/%d] step=%q cmd=%v workdir=%q timeout=%ds pod=%s",
+			sessionID, i+1, len(req.Steps), step.Name, step.Command, step.WorkDir, execReq.TimeoutSeconds, podIP)
+		execStart := time.Now()
 		execResp, err := g.executorClient.Execute(ctx, podIP, execReq)
+		execDur := time.Since(execStart)
 		if g.metrics != nil {
-			g.metrics.RecordExecutorCallDuration("Execute", time.Since(grpcStart))
+			g.metrics.RecordExecutorCallDuration("Execute", execDur)
 		}
 		if err != nil {
+			log.Printf("Exec %s step=%q failed after %s: %v", sessionID, step.Name, execDur, err)
 			result.Output.Stderr = err.Error()
 			result.Output.ExitCode = 1
 		} else {
+			log.Printf("Exec %s step=%q exit=%d duration=%s stdout=%d stderr=%d",
+				sessionID, step.Name, execResp.ExitCode, execDur, len(execResp.Stdout), len(execResp.Stderr))
 			result.Output.Stdout = execResp.Stdout
 			result.Output.Stderr = execResp.Stderr
 			result.Output.ExitCode = execResp.ExitCode
@@ -284,7 +290,7 @@ func (g *Gateway) ExecuteStepsSSE(w http.ResponseWriter, ctx context.Context, se
 	flusher.Flush()
 
 	var persistSteps []int
-	for _, step := range req.Steps {
+	for i, step := range req.Steps {
 		start := time.Now()
 		inputJSON, _ := json.Marshal(step)
 
@@ -297,13 +303,17 @@ func (g *Gateway) ExecuteStepsSSE(w http.ResponseWriter, ctx context.Context, se
 			TimeoutSeconds: resolveStepTimeoutSeconds(step),
 		}
 
-		grpcStart := time.Now()
+		log.Printf("ExecSSE %s [%d/%d] step=%q cmd=%v workdir=%q timeout=%ds pod=%s",
+			sessionID, i+1, len(req.Steps), step.Name, step.Command, step.WorkDir, execReq.TimeoutSeconds, podIP)
+		execStart := time.Now()
 		streamCh, err := g.executorClient.ExecuteStream(ctx, podIP, execReq)
 		if g.metrics != nil {
-			g.metrics.RecordExecutorCallDuration("ExecuteStream", time.Since(grpcStart))
+			g.metrics.RecordExecutorCallDuration("ExecuteStream", time.Since(execStart))
 		}
 
+		execDur := time.Since(execStart)
 		if err != nil {
+			log.Printf("ExecSSE %s step=%q failed after %s: %v", sessionID, step.Name, execDur, err)
 			result.Output.Stderr = err.Error()
 			result.Output.ExitCode = 1
 		} else {
@@ -332,6 +342,8 @@ func (g *Gateway) ExecuteStepsSSE(w http.ResponseWriter, ctx context.Context, se
 			}
 			result.Output.Stdout = stdout.String()
 			result.Output.Stderr = stderr.String()
+			log.Printf("ExecSSE %s step=%q exit=%d duration=%s stdout=%d stderr=%d",
+				sessionID, step.Name, result.Output.ExitCode, time.Since(start), len(result.Output.Stdout), len(result.Output.Stderr))
 		}
 
 		g.recordStepResult(s, sessionID, &result, start)

@@ -189,7 +189,6 @@ class ArlEnvironment(BaseEnvironment):
         if self._client is None:
             self._client = AsyncGatewayClient(
                 base_url=self._gateway_url,
-                timeout=3600.0,
             )
         return self._client
 

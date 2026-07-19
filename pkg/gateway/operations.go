@@ -96,17 +96,20 @@ func (op *operation) info() *ExecuteOperationInfo {
 	}
 }
 
-func awaitOperation[T any](ctx context.Context, op *operation) (*T, error) {
+// resolveOperation returns the result if the operation already completed,
+// or OperationPending immediately if it is still running. The caller never
+// blocks — the SDK polls GET /operations/{id} for completion.
+func resolveOperation[T any](op *operation) (*T, error) {
 	select {
 	case <-op.done:
-	case <-ctx.Done():
+		if op.err != nil {
+			return nil, op.err
+		}
+		result, _ := op.result.(*T)
+		return result, nil
+	default:
 		return nil, &OperationPending{OperationID: op.id, SessionID: op.sessionID}
 	}
-	if op.err != nil {
-		return nil, op.err
-	}
-	result, _ := op.result.(*T)
-	return result, nil
 }
 
 func (g *Gateway) executeStepsWithOperation(ctx context.Context, sessionID string, req ExecuteRequest) (*ExecuteResponse, error) {
@@ -125,7 +128,8 @@ func (g *Gateway) executeStepsWithOperation(ctx context.Context, sessionID strin
 	if err != nil {
 		return nil, err
 	}
-	return awaitOperation[ExecuteResponse](ctx, op)
+
+	return resolveOperation[ExecuteResponse](op)
 }
 
 func (g *Gateway) getOrStartOperation(sessionID, operationID, requestHash string, workFn func(context.Context) (any, error)) (*operation, bool, error) {

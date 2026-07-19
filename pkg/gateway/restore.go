@@ -30,7 +30,7 @@ func (g *Gateway) replayWithOperation(ctx context.Context, targetSessionID strin
 	if err != nil {
 		return nil, err
 	}
-	return awaitOperation[ReplayResponse](ctx, op)
+	return resolveOperation[ReplayResponse](op)
 }
 
 // replayNow replays steps synchronously.
@@ -171,7 +171,7 @@ func (g *Gateway) restoreWithOperation(ctx context.Context, sessionID string, re
 	if err != nil {
 		return nil, err
 	}
-	return awaitOperation[RestoreResponse](ctx, op)
+	return resolveOperation[RestoreResponse](op)
 }
 
 // restoreNow restores a session synchronously, returning a RestoreResponse.
