@@ -160,7 +160,7 @@ gateway:
   # Security policy applied to generated sandbox templates.
   sandboxSecurity:
     # Supported values: Managed, Unmanaged.
-    networkPolicyManagement: "Unmanaged"
+    networkPolicyManagement: "Managed"
     # Comma-separated CIDRs allowed when allowInternet=false (DNS is always permitted).
     egressAllowCIDRs: "10.0.0.0/8,172.16.0.0/12"
     runtimeClassName: ""
@@ -175,7 +175,7 @@ gateway:
 # to build and push a container image. Requires the checkpoint PVC for context
 # staging.
 build:
-  enabled: false
+  enabled: true
   kaniko:
     image:
       repository: gcr.io/kaniko-project/executor
@@ -192,7 +192,7 @@ build:
 # insecure (HTTP) registry in their container runtime config (containerd
 # certs.d/<IP>:<port>/hosts.toml).
 registry:
-  enabled: false
+  enabled: true
   image:
     repository: docker.io/library/registry
     tag: "2"

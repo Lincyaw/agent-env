@@ -143,30 +143,30 @@ class ArlEnvironment(BaseEnvironment):
             raise RuntimeError("ARL session not started.")
         client = self._get_client()
 
-        if network_policy.network_mode == NetworkMode.PUBLIC:
-            await client.update_network_policy(self._arl_session_id, allow_internet=True)
-            return
+        try:
+            if network_policy.network_mode == NetworkMode.PUBLIC:
+                await client.update_network_policy(self._arl_session_id, allow_internet=True)
+                return
 
-        # NO_NETWORK and ALLOWLIST both deny internet; ALLOWLIST additionally
-        # permits egress to the resolvable IP/CIDR entries. Hostname entries
-        # cannot be expressed as Kubernetes NetworkPolicy egress rules.
-        egress_cidrs: list[str] = []
-        for host in network_policy.allowed_hosts:
-            cidr = _host_to_cidr(host)
-            if cidr is None:
-                self.logger.warning(
-                    "Ignoring non-CIDR allowlist host %r: dynamic network "
-                    "policy can only enforce IP/CIDR egress rules",
-                    host,
-                )
-                continue
-            egress_cidrs.append(cidr)
+            egress_cidrs: list[str] = []
+            for host in network_policy.allowed_hosts:
+                cidr = _host_to_cidr(host)
+                if cidr is None:
+                    self.logger.warning(
+                        "Ignoring non-CIDR allowlist host %r: dynamic network "
+                        "policy can only enforce IP/CIDR egress rules",
+                        host,
+                    )
+                    continue
+                egress_cidrs.append(cidr)
 
-        await client.update_network_policy(
-            self._arl_session_id,
-            allow_internet=False,
-            egress_cidrs=egress_cidrs,
-        )
+            await client.update_network_policy(
+                self._arl_session_id,
+                allow_internet=False,
+                egress_cidrs=egress_cidrs,
+            )
+        except Exception as exc:
+            self.logger.warning("Dynamic network policy not applied: %s", exc)
 
     def _validate_definition(self) -> None:
         if self.task_env_config.docker_image:
