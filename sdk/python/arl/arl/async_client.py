@@ -306,8 +306,8 @@ class AsyncGatewayClient:
         remote_path: str,
         sha256: str | None = None,
     ) -> UploadFileResponse:
-        with Path(local_path).open("rb") as file:
-            return await self.upload_file(session_id, remote_path, file, sha256=sha256)
+        data = Path(local_path).read_bytes()
+        return await self.upload_file(session_id, remote_path, data, sha256=sha256)
 
     async def download_path(
         self,
