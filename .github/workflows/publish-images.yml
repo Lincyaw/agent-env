@@ -26,8 +26,6 @@ jobs:
         include:
           - image: arl-gateway
             dockerfile: Dockerfile.gateway
-          - image: arl-sidecar
-            dockerfile: Dockerfile.sidecar
           - image: arl-executor-agent
             dockerfile: Dockerfile.executor-agent-rs
           - image: arl-image-locality-scheduler
