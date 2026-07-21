@@ -217,6 +217,7 @@ message TunnelInfo {
 
 message CheckpointDownloadRequest {
   int32 through = 1;
+  bool single_step = 2;
 }
 
 message CheckpointDownloadResponse {

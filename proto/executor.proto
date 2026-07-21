@@ -235,7 +235,8 @@ message TunnelInfo {
 // ---------------------------------------------------------------------------
 
 message CheckpointDownloadRequest {
-  int32 through = 1;  // combine steps 1..through into a single tar
+  int32 through = 1;      // combine steps 1..through into a single tar
+  bool single_step = 2;   // if true, only tar the step specified by `through`
 }
 
 message CheckpointDownloadResponse {

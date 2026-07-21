@@ -70,6 +70,9 @@ type ExecutorClient interface {
 	// DownloadCheckpoint downloads a combined checkpoint tar for steps 1..through.
 	DownloadCheckpoint(ctx context.Context, podIP string, through int, dst io.Writer) error
 
+	// DownloadCheckpointStep downloads a single step's incremental checkpoint tar.
+	DownloadCheckpointStep(ctx context.Context, podIP string, step int, dst io.Writer) error
+
 	// ListCheckpointSteps lists available checkpoint step numbers.
 	ListCheckpointSteps(ctx context.Context, podIP string) ([]int, error)
 

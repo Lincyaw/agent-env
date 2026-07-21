@@ -1927,6 +1927,7 @@ func (x *TunnelInfo) GetPort() uint32 {
 type CheckpointDownloadRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Through       int32                  `protobuf:"varint,1,opt,name=through,proto3" json:"through,omitempty"`
+	SingleStep    bool                   `protobuf:"varint,2,opt,name=single_step,json=singleStep,proto3" json:"single_step,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1966,6 +1967,13 @@ func (x *CheckpointDownloadRequest) GetThrough() int32 {
 		return x.Through
 	}
 	return 0
+}
+
+func (x *CheckpointDownloadRequest) GetSingleStep() bool {
+	if x != nil {
+		return x.SingleStep
+	}
+	return false
 }
 
 type CheckpointDownloadResponse struct {
@@ -2480,9 +2488,11 @@ const file_proto_executor_v2_proto_rawDesc = "" +
 	"TunnelInfo\x12\x10\n" +
 	"\x03tag\x18\x01 \x01(\rR\x03tag\x12\x12\n" +
 	"\x04host\x18\x02 \x01(\tR\x04host\x12\x12\n" +
-	"\x04port\x18\x03 \x01(\rR\x04port\"5\n" +
+	"\x04port\x18\x03 \x01(\rR\x04port\"V\n" +
 	"\x19CheckpointDownloadRequest\x12\x18\n" +
-	"\athrough\x18\x01 \x01(\x05R\athrough\";\n" +
+	"\athrough\x18\x01 \x01(\x05R\athrough\x12\x1f\n" +
+	"\vsingle_step\x18\x02 \x01(\bR\n" +
+	"singleStep\";\n" +
 	"\x1aCheckpointDownloadResponse\x12\x1d\n" +
 	"\n" +
 	"size_bytes\x18\x01 \x01(\x03R\tsizeBytes\"\x17\n" +

@@ -55,6 +55,11 @@ func (m *MockExecutorClient) DownloadCheckpoint(_ context.Context, _ string, _ i
 	return fmt.Errorf("not implemented")
 }
 
+// DownloadCheckpointStep mocks single-step checkpoint download
+func (m *MockExecutorClient) DownloadCheckpointStep(_ context.Context, _ string, _ int, _ io.Writer) error {
+	return fmt.Errorf("not implemented")
+}
+
 // ListCheckpointSteps mocks checkpoint step listing
 func (m *MockExecutorClient) ListCheckpointSteps(_ context.Context, _ string) ([]int, error) {
 	return nil, fmt.Errorf("not implemented")

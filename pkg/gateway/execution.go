@@ -422,7 +422,7 @@ func (g *Gateway) persistSingleCheckpointStep(sessionID, podIP string, checkpoin
 	pr, pw := io.Pipe()
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- g.executorClient.DownloadCheckpoint(ctx, podIP, checkpointStep, pw)
+		errCh <- g.executorClient.DownloadCheckpointStep(ctx, podIP, checkpointStep, pw)
 		pw.Close()
 	}()
 

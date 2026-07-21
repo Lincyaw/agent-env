@@ -1429,8 +1429,13 @@ fn handle_checkpoint_download(
 
     let through = params.through as u32;
     let mut buf = Vec::new();
-    if let Err(e) = ckpt.write_combined_tar(through, &mut buf) {
-        let _ = send_error(writer, tag, 15, format!("write combined tar: {e}"));
+    let result = if params.single_step {
+        ckpt.write_single_step_tar(through, &mut buf)
+    } else {
+        ckpt.write_combined_tar(through, &mut buf)
+    };
+    if let Err(e) = result {
+        let _ = send_error(writer, tag, 15, format!("write checkpoint tar: {e}"));
         return;
     }
 

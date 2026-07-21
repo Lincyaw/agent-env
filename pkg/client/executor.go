@@ -493,6 +493,14 @@ func (c *TCPExecutorClient) ReadFile(ctx context.Context, podIP string, path str
 // ---------------------------------------------------------------------------
 
 func (c *TCPExecutorClient) DownloadCheckpoint(ctx context.Context, podIP string, through int, dst io.Writer) error {
+	return c.downloadCheckpoint(ctx, podIP, through, false, dst)
+}
+
+func (c *TCPExecutorClient) DownloadCheckpointStep(ctx context.Context, podIP string, step int, dst io.Writer) error {
+	return c.downloadCheckpoint(ctx, podIP, step, true, dst)
+}
+
+func (c *TCPExecutorClient) downloadCheckpoint(ctx context.Context, podIP string, through int, singleStep bool, dst io.Writer) error {
 	conn, err := c.dial(podIP)
 	if err != nil {
 		return err
@@ -504,7 +512,8 @@ func (c *TCPExecutorClient) DownloadCheckpoint(ctx context.Context, podIP string
 	if err := sendRequest(conn, &pb.Request{
 		Tag: 0,
 		Kind: &pb.Request_CheckpointDownload{CheckpointDownload: &pb.CheckpointDownloadRequest{
-			Through: int32(through),
+			Through:    int32(through),
+			SingleStep: singleStep,
 		}},
 	}); err != nil {
 		return fmt.Errorf("send checkpoint download request: %w", err)

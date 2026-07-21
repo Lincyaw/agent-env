@@ -158,6 +158,49 @@ impl Checkpointer {
         Ok(())
     }
 
+    /// Create a tar of a single step's upper dir, writing to `out`.
+    pub fn write_single_step_tar<W: io::Write>(&self, step: u32, out: &mut W) -> io::Result<()> {
+        let mut builder = tar::Builder::new(out);
+        let upper = self.step_upper_dir(step);
+        if !upper.exists() {
+            builder.finish()?;
+            return Ok(());
+        }
+        for entry in walkdir::WalkDir::new(&upper).follow_links(false) {
+            let entry = match entry {
+                Ok(e) => e,
+                Err(_) => continue,
+            };
+            let path = entry.path();
+            if path == upper {
+                continue;
+            }
+            let rel = path.strip_prefix(&upper).unwrap();
+            let meta = match fs::symlink_metadata(path) {
+                Ok(m) => m,
+                Err(_) => continue,
+            };
+            if meta.is_file() {
+                if let Err(e) = builder.append_path_with_name(path, rel) {
+                    log::warn!("[checkpoint] tar append file {:?}: {e}", rel);
+                }
+            } else if meta.file_type().is_symlink() {
+                let mut header = tar::Header::new_gnu();
+                header.set_entry_type(tar::EntryType::Symlink);
+                let target = match fs::read_link(path) {
+                    Ok(t) => t,
+                    Err(_) => continue,
+                };
+                header.set_size(0);
+                if let Err(e) = builder.append_link(&mut header, rel, target) {
+                    log::warn!("[checkpoint] tar append symlink {:?}: {e}", rel);
+                }
+            }
+        }
+        builder.finish()?;
+        Ok(())
+    }
+
     /// List available checkpoint step numbers.
     pub fn list_steps(&self) -> Vec<u32> {
         let mut steps = Vec::new();

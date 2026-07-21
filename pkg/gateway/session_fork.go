@@ -50,18 +50,6 @@ func (g *Gateway) ForkSession(ctx context.Context, sourceID string, req ForkSess
 	// Execute returns 0-based step indices; checkpoint dirs are 1-based.
 	checkpointStep := req.Step + 1
 
-	// Try persistent store first (avoids hitting the executor).
-	// Only use PVC data if the requested step has been persisted;
-	// otherwise the async persist goroutine may not have saved it yet.
-	if g.checkpointStore != nil && g.checkpointStore.HasStep(sourceID, checkpointStep) {
-		tmpPath, err := g.checkpointStore.LoadCombined(sourceID, checkpointStep)
-		if err == nil {
-			defer os.Remove(tmpPath)
-			return g.completeFork(ctx, sourceID, req, tmpPath, sourceImage, sourceProfile, sourceNS, sourceMode)
-		}
-		log.Printf("Fork: persistent store miss for %s step %d, falling back to executor: %v", sourceID, checkpointStep, err)
-	}
-
 	if sourcePodIP == "" {
 		return nil, fmt.Errorf("source session %s has no pod IP", sourceID)
 	}
@@ -70,7 +58,9 @@ func (g *Gateway) ForkSession(ctx context.Context, sourceID string, req ForkSess
 		return nil, fmt.Errorf("executor client not configured")
 	}
 
-	// Download combined checkpoint tar via executor protocol
+	// Download combined checkpoint tar directly from executor.
+	// The PVC persistent store is only used when the source session
+	// has been deleted (handled by forkFromStore above).
 	tmpFile, err := os.CreateTemp("", "arl-fork-checkpoint-*.tar")
 	if err != nil {
 		return nil, fmt.Errorf("create temp file: %w", err)
