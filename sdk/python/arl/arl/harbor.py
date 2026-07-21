@@ -20,6 +20,7 @@ import logging
 import os
 import shlex
 import tarfile
+from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -43,6 +44,40 @@ from arl.configenv import ConfigEnvSpec
 from arl.types import ExecuteResponse, StepRequest
 
 
+@dataclass
+class ArlStepSnapshot:
+    """Record of an exec step with its ARL checkpoint metadata."""
+
+    step_index: int
+    snapshot_id: str
+    name: str
+    exit_code: int
+    duration_ms: int
+
+
+@dataclass
+class ArlSessionInfo:
+    """ARL session metadata exposed to agents.
+
+    Agents can read ``environment.arl`` to discover the session ID,
+    gateway URL, and per-step checkpoint snapshots for fork/resume.
+    """
+
+    session_id: str = ""
+    gateway_url: str = ""
+    parent_session_id: str = ""
+    fork_step: int = 0
+    steps: list[ArlStepSnapshot] = field(default_factory=list)
+
+    @property
+    def last_snapshot_id(self) -> str:
+        return self.steps[-1].snapshot_id if self.steps else ""
+
+    @property
+    def step_count(self) -> int:
+        return len(self.steps)
+
+
 class ArlEnvironment(BaseEnvironment):
     """ARL-backed Harbor environment.
 
@@ -57,6 +92,12 @@ class ArlEnvironment(BaseEnvironment):
     * ``build_registry`` -- registry to push images built from Dockerfile
       (default: ``$ARL_BUILD_REGISTRY``).  Falls back to ``image_registry``.
     * ``build_timeout`` -- timeout in seconds for image builds (default 900).
+    * ``fork_from`` -- source session ID for forking from a checkpoint.
+    * ``fork_step`` -- step number to fork from (default 0).
+    * ``resume_from`` -- suspended session ID to resume.
+
+    Agents can access ``environment.arl`` (an :class:`ArlSessionInfo`) to
+    read the session ID, gateway URL, and per-step snapshot history.
     """
 
     def __init__(
@@ -77,6 +118,9 @@ class ArlEnvironment(BaseEnvironment):
         image_tag: str = "v1",
         build_registry: str = "",
         build_timeout: int = 900,
+        fork_from: str = "",
+        fork_step: int = 0,
+        resume_from: str = "",
         logger: logging.Logger | None = None,
         **kwargs: Any,
     ) -> None:
@@ -92,9 +136,13 @@ class ArlEnvironment(BaseEnvironment):
         self._image_tag = image_tag
         self._build_registry = build_registry or os.environ.get("ARL_BUILD_REGISTRY", "")
         self._build_timeout = build_timeout
+        self._fork_from = fork_from or os.environ.get("ARL_FORK_FROM", "")
+        self._fork_step = int(fork_step or os.environ.get("ARL_FORK_STEP", "0"))
+        self._resume_from = resume_from or os.environ.get("ARL_RESUME_FROM", "")
 
         self._client: AsyncGatewayClient | None = None
         self._arl_session_id: str | None = None
+        self.arl = ArlSessionInfo(gateway_url=self._gateway_url)
 
         # Cache Dockerfile WORKDIR for exec cwd resolution
         dockerfile_path = environment_dir / DOCKERFILE_NAME
@@ -275,9 +323,37 @@ class ArlEnvironment(BaseEnvironment):
 
     async def start(self, force_build: bool) -> None:
         client = self._get_client()
+
+        if self._resume_from:
+            await client.resume_session(self._resume_from)
+            info = await client.get_session(self._resume_from)
+            self._arl_session_id = info.id
+            self.arl.session_id = info.id
+            self.arl.parent_session_id = info.parent_session_id
+            self.arl.fork_step = info.fork_step
+            self.logger.info(
+                "ARL session %s resumed",
+                self._arl_session_id,
+            )
+            return
+
+        if self._fork_from:
+            fork_resp = await client.fork_session(self._fork_from, self._fork_step)
+            self._arl_session_id = fork_resp.session.id
+            self.arl.session_id = fork_resp.session.id
+            self.arl.parent_session_id = fork_resp.parent_id
+            self.arl.fork_step = fork_resp.fork_step
+            self.logger.info(
+                "ARL session %s forked from %s at step %d",
+                self._arl_session_id,
+                self._fork_from,
+                self._fork_step,
+            )
+            await self.ensure_dirs(self._mount_targets(writable_only=True))
+            return
+
         image = await self._resolve_image_or_build(force_build)
 
-        # Collect startup env vars for injection into the container
         startup_env = self._startup_env()
         config_env: ConfigEnvSpec | None = None
         if startup_env:
@@ -294,6 +370,7 @@ class ArlEnvironment(BaseEnvironment):
             allow_internet=allow_internet,
         )
         self._arl_session_id = info.id
+        self.arl.session_id = info.id
         self.logger.info(
             "ARL session %s created (image=%s)",
             self._arl_session_id,
@@ -370,6 +447,14 @@ class ArlEnvironment(BaseEnvironment):
         result = resp.results[0] if resp.results else None
         if result is None:
             return ExecResult(stdout="", stderr="", return_code=-1)
+
+        self.arl.steps.append(ArlStepSnapshot(
+            step_index=result.index,
+            snapshot_id=result.snapshot_id,
+            name=result.name,
+            exit_code=result.output.exit_code,
+            duration_ms=result.duration_ms,
+        ))
 
         return ExecResult(
             stdout=result.output.stdout,
