@@ -50,8 +50,10 @@ func (g *Gateway) ForkSession(ctx context.Context, sourceID string, req ForkSess
 	// Execute returns 0-based step indices; checkpoint dirs are 1-based.
 	checkpointStep := req.Step + 1
 
-	// Try persistent store first (avoids hitting the executor)
-	if g.checkpointStore != nil {
+	// Try persistent store first (avoids hitting the executor).
+	// Only use PVC data if the requested step has been persisted;
+	// otherwise the async persist goroutine may not have saved it yet.
+	if g.checkpointStore != nil && g.checkpointStore.HasStep(sourceID, checkpointStep) {
 		tmpPath, err := g.checkpointStore.LoadCombined(sourceID, checkpointStep)
 		if err == nil {
 			defer os.Remove(tmpPath)
