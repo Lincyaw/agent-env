@@ -67,9 +67,11 @@ func init() {
 	rootCmd.AddCommand(expCmd)
 	rootCmd.AddCommand(poolCmd)
 	rootCmd.AddCommand(sessionCmd)
+	rootCmd.AddCommand(devboxCmd)
 	rootCmd.AddCommand(statusCmd)
 	rootCmd.AddCommand(metricsCmd)
 	rootCmd.AddCommand(configCmd)
+	rootCmd.AddCommand(updateCmd)
 }
 
 func fileOrDefault(fileVal, def string) string {

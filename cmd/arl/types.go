@@ -6,15 +6,34 @@ import (
 )
 
 type SessionInfo struct {
-	ID          string    `json:"id"`
-	SandboxName string    `json:"sandboxName"`
-	Namespace   string    `json:"namespace"`
-	Image       string    `json:"image,omitempty"`
-	Profile     string    `json:"profile,omitempty"`
-	PodIP       string    `json:"podIP"`
-	PodName     string    `json:"podName"`
-	CreatedAt   time.Time `json:"createdAt"`
-	Status      string    `json:"status,omitempty"`
+	ID             string          `json:"id"`
+	SandboxName    string          `json:"sandboxName"`
+	Namespace      string          `json:"namespace"`
+	Image          string          `json:"image,omitempty"`
+	Profile        string          `json:"profile,omitempty"`
+	Mode           string          `json:"mode,omitempty"`
+	PodIP          string          `json:"podIP"`
+	PodName        string          `json:"podName"`
+	CreatedAt      time.Time       `json:"createdAt"`
+	Status         string          `json:"status,omitempty"`
+	ConnectionInfo *ConnectionInfo `json:"connectionInfo,omitempty"`
+}
+
+type ConnectionInfo struct {
+	Shell string     `json:"shell"`
+	SSH   *SSHInfo   `json:"ssh,omitempty"`
+	Ports []PortInfo `json:"ports,omitempty"`
+}
+
+type SSHInfo struct {
+	Host string `json:"host"`
+	Port int32  `json:"port"`
+}
+
+type PortInfo struct {
+	Name          string `json:"name"`
+	ContainerPort int32  `json:"containerPort"`
+	Protocol      string `json:"protocol"`
 }
 
 type SessionListItem struct {
@@ -26,9 +45,29 @@ type SessionListItem struct {
 type CreateSessionRequest struct {
 	Image                    string                 `json:"image,omitempty"`
 	Profile                  string                 `json:"profile,omitempty"`
+	Mode                     string                 `json:"mode,omitempty"`
+	Devbox                   *DevboxConfig          `json:"devbox,omitempty"`
 	IdleTimeoutSeconds       int                    `json:"idleTimeoutSeconds,omitempty"`
 	AllocationTimeoutSeconds *int                   `json:"allocationTimeoutSeconds,omitempty"`
 	PrivateContainers        []PrivateContainerSpec `json:"privateContainers,omitempty"`
+}
+
+type DevboxConfig struct {
+	Ports         []DevboxPort `json:"ports,omitempty"`
+	SSHPublicKeys []string     `json:"sshPublicKeys,omitempty"`
+	GitConfig     *GitConfig   `json:"gitConfig,omitempty"`
+	StorageSize   string       `json:"storageSize,omitempty"`
+}
+
+type DevboxPort struct {
+	Port     int32  `json:"port"`
+	Protocol string `json:"protocol,omitempty"`
+	Name     string `json:"name,omitempty"`
+}
+
+type GitConfig struct {
+	Name  string `json:"name,omitempty"`
+	Email string `json:"email,omitempty"`
 }
 
 type ManagedSessionInfo struct {
