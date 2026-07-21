@@ -489,6 +489,87 @@ func (c *TCPExecutorClient) ReadFile(ctx context.Context, podIP string, path str
 }
 
 // ---------------------------------------------------------------------------
+// DownloadCheckpoint
+// ---------------------------------------------------------------------------
+
+func (c *TCPExecutorClient) DownloadCheckpoint(ctx context.Context, podIP string, through int, dst io.Writer) error {
+	conn, err := c.dial(podIP)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+
+	conn.SetDeadline(time.Now().Add(5 * time.Minute))
+
+	if err := sendRequest(conn, &pb.Request{
+		Tag: 0,
+		Kind: &pb.Request_CheckpointDownload{CheckpointDownload: &pb.CheckpointDownloadRequest{
+			Through: int32(through),
+		}},
+	}); err != nil {
+		return fmt.Errorf("send checkpoint download request: %w", err)
+	}
+
+	resp, err := readResponse(conn)
+	if err != nil {
+		return fmt.Errorf("read checkpoint download response: %w", err)
+	}
+
+	switch result := resp.GetKind().(type) {
+	case *pb.Response_Error:
+		return fmt.Errorf("checkpoint download error: [%d] %s", result.Error.GetCode(), result.Error.GetMessage())
+	case *pb.Response_CheckpointDownload:
+		_ = result.CheckpointDownload.GetSizeBytes()
+		if _, err := readDataFrames(conn, dst); err != nil {
+			return fmt.Errorf("read checkpoint data: %w", err)
+		}
+		return nil
+	default:
+		return fmt.Errorf("unexpected checkpoint download response: %T", result)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// ListCheckpointSteps
+// ---------------------------------------------------------------------------
+
+func (c *TCPExecutorClient) ListCheckpointSteps(ctx context.Context, podIP string) ([]int, error) {
+	conn, err := c.dial(podIP)
+	if err != nil {
+		return nil, err
+	}
+	defer conn.Close()
+
+	conn.SetDeadline(time.Now().Add(30 * time.Second))
+
+	if err := sendRequest(conn, &pb.Request{
+		Tag:  0,
+		Kind: &pb.Request_CheckpointList{CheckpointList: &pb.CheckpointListRequest{}},
+	}); err != nil {
+		return nil, fmt.Errorf("send checkpoint list request: %w", err)
+	}
+
+	resp, err := readResponse(conn)
+	if err != nil {
+		return nil, fmt.Errorf("read checkpoint list response: %w", err)
+	}
+
+	switch result := resp.GetKind().(type) {
+	case *pb.Response_Error:
+		return nil, fmt.Errorf("checkpoint list error: [%d] %s", result.Error.GetCode(), result.Error.GetMessage())
+	case *pb.Response_CheckpointList:
+		pbSteps := result.CheckpointList.GetSteps()
+		steps := make([]int, len(pbSteps))
+		for i, s := range pbSteps {
+			steps[i] = int(s)
+		}
+		return steps, nil
+	default:
+		return nil, fmt.Errorf("unexpected checkpoint list response: %T", result)
+	}
+}
+
+// ---------------------------------------------------------------------------
 // InteractiveShell
 // ---------------------------------------------------------------------------
 

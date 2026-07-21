@@ -333,6 +333,14 @@ fn handle_messages(
                 log::info!("[unwatch] tag={tag} watch_id={}", params.watch_id);
                 handle_unwatch(tag, params, &writer, watches);
             }
+            proto::request::Kind::CheckpointDownload(params) => {
+                log::info!("[checkpoint_download] tag={tag} through={}", params.through);
+                handle_checkpoint_download(tag, params, &writer, checkpointer);
+            }
+            proto::request::Kind::CheckpointList(_) => {
+                log::info!("[checkpoint_list] tag={tag}");
+                handle_checkpoint_list(tag, &writer, checkpointer);
+            }
         }
     }
 }
@@ -1399,6 +1407,91 @@ fn mask_to_event_type(mask: EventMask) -> Option<&'static str> {
     } else {
         None
     }
+}
+
+// ---------------------------------------------------------------------------
+// checkpoint_download
+// ---------------------------------------------------------------------------
+
+fn handle_checkpoint_download(
+    tag: u32,
+    params: proto::CheckpointDownloadRequest,
+    writer: &SharedWriter,
+    checkpointer: &Option<Arc<Checkpointer>>,
+) {
+    let ckpt = match checkpointer {
+        Some(c) => c,
+        None => {
+            let _ = send_error(writer, tag, 15, "checkpointing not enabled".into());
+            return;
+        }
+    };
+
+    let through = params.through as u32;
+    let mut buf = Vec::new();
+    if let Err(e) = ckpt.write_combined_tar(through, &mut buf) {
+        let _ = send_error(writer, tag, 15, format!("write combined tar: {e}"));
+        return;
+    }
+
+    let resp = proto::Response {
+        tag,
+        kind: Some(proto::response::Kind::CheckpointDownload(
+            proto::CheckpointDownloadResponse {
+                size_bytes: buf.len() as i64,
+            },
+        )),
+    };
+    let encoded = resp.encode_to_vec();
+
+    let mut w = match writer.lock() {
+        Ok(w) => w,
+        Err(e) => {
+            log::error!("[checkpoint_download] writer lock: {e}");
+            return;
+        }
+    };
+
+    if let Err(e) = (|| -> io::Result<()> {
+        w.write_all(&[MSG_TYPE_RESPONSE])?;
+        w.write_all(&(encoded.len() as u32).to_be_bytes())?;
+        w.write_all(&encoded)?;
+
+        // Stream tar bytes using the same raw-data framing as ReadFile
+        let mut offset = 0;
+        while offset < buf.len() {
+            let end = std::cmp::min(offset + FILE_CHUNK_SIZE, buf.len());
+            let chunk = &buf[offset..end];
+            w.write_all(&(chunk.len() as u32).to_be_bytes())?;
+            w.write_all(chunk)?;
+            offset = end;
+        }
+        // Zero-length terminator
+        w.write_all(&0u32.to_be_bytes())?;
+        w.flush()
+    })() {
+        log::error!("[checkpoint_download] tag={tag} write error: {e}");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// checkpoint_list
+// ---------------------------------------------------------------------------
+
+fn handle_checkpoint_list(
+    tag: u32,
+    writer: &SharedWriter,
+    checkpointer: &Option<Arc<Checkpointer>>,
+) {
+    let steps = match checkpointer {
+        Some(c) => c.list_steps().into_iter().map(|s| s as i32).collect(),
+        None => Vec::new(),
+    };
+    let _ = send_response(
+        writer,
+        tag,
+        proto::response::Kind::CheckpointList(proto::CheckpointListResponse { steps }),
+    );
 }
 
 // ---------------------------------------------------------------------------

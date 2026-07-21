@@ -3,16 +3,12 @@ package gateway
 import (
 	"context"
 	"fmt"
-	"io"
 	"log"
-	"net/http"
 	"os"
 	"time"
 
 	"github.com/Lincyaw/agent-env/pkg/interfaces"
 )
-
-var forkHTTPClient = &http.Client{Timeout: 5 * time.Minute}
 
 // ForkSession creates a new session from the filesystem state of a source
 // session at a given checkpoint step. The flow:
@@ -68,29 +64,11 @@ func (g *Gateway) ForkSession(ctx context.Context, sourceID string, req ForkSess
 		return nil, fmt.Errorf("source session %s has no pod IP", sourceID)
 	}
 
-	// Download combined checkpoint tar from source executor
-	executorPort := g.gwConfig.ExecutorPort
-	if executorPort == 0 {
-		executorPort = 9090
-	}
-	checkpointURL := fmt.Sprintf("http://%s:%d/v1/checkpoints/combined?through=%d",
-		sourcePodIP, executorPort, checkpointStep)
-
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, checkpointURL, nil)
-	if err != nil {
-		return nil, fmt.Errorf("build checkpoint request: %w", err)
-	}
-	httpResp, err := forkHTTPClient.Do(httpReq)
-	if err != nil {
-		return nil, fmt.Errorf("download checkpoint from source: %w", err)
-	}
-	defer httpResp.Body.Close()
-
-	if httpResp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(httpResp.Body, 1024))
-		return nil, fmt.Errorf("checkpoint download failed (%s): %s", httpResp.Status, string(body))
+	if g.executorClient == nil {
+		return nil, fmt.Errorf("executor client not configured")
 	}
 
+	// Download combined checkpoint tar via executor protocol
 	tmpFile, err := os.CreateTemp("", "arl-fork-checkpoint-*.tar")
 	if err != nil {
 		return nil, fmt.Errorf("create temp file: %w", err)
@@ -98,9 +76,9 @@ func (g *Gateway) ForkSession(ctx context.Context, sourceID string, req ForkSess
 	tmpPath := tmpFile.Name()
 	defer os.Remove(tmpPath)
 
-	if _, err := io.Copy(tmpFile, httpResp.Body); err != nil {
+	if err := g.executorClient.DownloadCheckpoint(ctx, sourcePodIP, checkpointStep, tmpFile); err != nil {
 		tmpFile.Close()
-		return nil, fmt.Errorf("save checkpoint tar: %w", err)
+		return nil, fmt.Errorf("download checkpoint from executor: %w", err)
 	}
 	tmpFile.Close()
 

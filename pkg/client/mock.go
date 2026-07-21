@@ -50,6 +50,16 @@ func (m *MockExecutorClient) ReadFile(ctx context.Context, podIP string, path st
 	return nil, fmt.Errorf("not implemented")
 }
 
+// DownloadCheckpoint mocks checkpoint download
+func (m *MockExecutorClient) DownloadCheckpoint(_ context.Context, _ string, _ int, _ io.Writer) error {
+	return fmt.Errorf("not implemented")
+}
+
+// ListCheckpointSteps mocks checkpoint step listing
+func (m *MockExecutorClient) ListCheckpointSteps(_ context.Context, _ string) ([]int, error) {
+	return nil, fmt.Errorf("not implemented")
+}
+
 // GetIrohAddr mocks iroh address retrieval
 func (m *MockExecutorClient) GetIrohAddr(_ context.Context, _ string) (string, error) {
 	return "", nil

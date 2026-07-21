@@ -67,6 +67,12 @@ type ExecutorClient interface {
 	// Returns empty string if iroh is not configured.
 	GetIrohAddr(ctx context.Context, podIP string) (string, error)
 
+	// DownloadCheckpoint downloads a combined checkpoint tar for steps 1..through.
+	DownloadCheckpoint(ctx context.Context, podIP string, through int, dst io.Writer) error
+
+	// ListCheckpointSteps lists available checkpoint step numbers.
+	ListCheckpointSteps(ctx context.Context, podIP string) ([]int, error)
+
 	// HealthCheck checks if executor is healthy
 	HealthCheck(ctx context.Context, podIP string) error
 

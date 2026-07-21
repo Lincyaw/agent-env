@@ -114,6 +114,67 @@ impl Checkpointer {
         Ok(changed)
     }
 
+    /// Create a combined tar of steps 1..=through, writing to `out`.
+    pub fn write_combined_tar<W: io::Write>(&self, through: u32, out: &mut W) -> io::Result<()> {
+        let mut builder = tar::Builder::new(out);
+        for step in 1..=through {
+            let upper = self.step_upper_dir(step);
+            if !upper.exists() {
+                continue;
+            }
+            for entry in walkdir::WalkDir::new(&upper).follow_links(false) {
+                let entry = match entry {
+                    Ok(e) => e,
+                    Err(_) => continue,
+                };
+                let path = entry.path();
+                if path == upper {
+                    continue;
+                }
+                let rel = path.strip_prefix(&upper).unwrap();
+                let meta = match fs::symlink_metadata(path) {
+                    Ok(m) => m,
+                    Err(_) => continue,
+                };
+                if meta.is_file() {
+                    if let Err(e) = builder.append_path_with_name(path, rel) {
+                        log::warn!("[checkpoint] tar append file {:?}: {e}", rel);
+                    }
+                } else if meta.file_type().is_symlink() {
+                    let mut header = tar::Header::new_gnu();
+                    header.set_entry_type(tar::EntryType::Symlink);
+                    let target = match fs::read_link(path) {
+                        Ok(t) => t,
+                        Err(_) => continue,
+                    };
+                    header.set_size(0);
+                    if let Err(e) = builder.append_link(&mut header, rel, target) {
+                        log::warn!("[checkpoint] tar append symlink {:?}: {e}", rel);
+                    }
+                }
+            }
+        }
+        builder.finish()?;
+        Ok(())
+    }
+
+    /// List available checkpoint step numbers.
+    pub fn list_steps(&self) -> Vec<u32> {
+        let mut steps = Vec::new();
+        if let Ok(entries) = fs::read_dir(&self.base_dir) {
+            for entry in entries.flatten() {
+                let name = entry.file_name();
+                if let Some(n) = name.to_str().and_then(|s| s.strip_prefix("step-")) {
+                    if let Ok(step) = n.parse::<u32>() {
+                        steps.push(step);
+                    }
+                }
+            }
+        }
+        steps.sort();
+        steps
+    }
+
     #[cfg(test)]
     fn with_scan_root(mut self, root: PathBuf) -> Self {
         self.scan_root = root;

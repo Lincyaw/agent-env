@@ -381,40 +381,22 @@ func (g *Gateway) persistCheckpointSteps(sessionID, podIP string, stepIndices []
 }
 
 func (g *Gateway) persistAllCheckpoints(sessionID, podIP string) {
-	executorPort := g.gwConfig.ExecutorPort
-	if executorPort == 0 {
-		executorPort = 9090
+	if g.executorClient == nil {
+		log.Printf("Checkpoint persist-all %s: executor client not configured", sessionID)
+		return
 	}
-	listURL := fmt.Sprintf("http://%s:%d/v1/checkpoints", podIP, executorPort)
+
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, listURL, nil)
-	if err != nil {
-		log.Printf("Checkpoint persist-all %s: build list request: %v", sessionID, err)
-		return
-	}
-	resp, err := (&http.Client{Timeout: 30 * time.Second}).Do(req)
+	steps, err := g.executorClient.ListCheckpointSteps(ctx, podIP)
 	if err != nil {
 		log.Printf("Checkpoint persist-all %s: list: %v", sessionID, err)
 		return
 	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		log.Printf("Checkpoint persist-all %s: list HTTP %s", sessionID, resp.Status)
-		return
-	}
-
-	var listResp struct {
-		Steps []int `json:"steps"`
-	}
-	if err := json.NewDecoder(resp.Body).Decode(&listResp); err != nil {
-		log.Printf("Checkpoint persist-all %s: decode: %v", sessionID, err)
-		return
-	}
 
 	persisted := 0
-	for _, step := range listResp.Steps {
+	for _, step := range steps {
 		if g.checkpointStore.HasStep(sessionID, step) {
 			continue
 		}
@@ -425,36 +407,30 @@ func (g *Gateway) persistAllCheckpoints(sessionID, podIP string) {
 		}
 	}
 	if persisted > 0 {
-		log.Printf("Checkpoint persist-all %s: saved %d/%d steps", sessionID, persisted, len(listResp.Steps))
+		log.Printf("Checkpoint persist-all %s: saved %d/%d steps", sessionID, persisted, len(steps))
 	}
 }
 
 func (g *Gateway) persistSingleCheckpointStep(sessionID, podIP string, checkpointStep int) error {
-	executorPort := g.gwConfig.ExecutorPort
-	if executorPort == 0 {
-		executorPort = 9090
+	if g.executorClient == nil {
+		return fmt.Errorf("executor client not configured")
 	}
-	checkpointURL := fmt.Sprintf("http://%s:%d/v1/checkpoints/%d",
-		podIP, executorPort, checkpointStep)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, checkpointURL, nil)
-	if err != nil {
-		return fmt.Errorf("build request: %w", err)
-	}
-	client := &http.Client{Timeout: 5 * time.Minute}
-	resp, err := client.Do(req)
-	if err != nil {
-		return fmt.Errorf("download: %w", err)
-	}
-	defer resp.Body.Close()
+	pr, pw := io.Pipe()
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- g.executorClient.DownloadCheckpoint(ctx, podIP, checkpointStep, pw)
+		pw.Close()
+	}()
 
-	if resp.StatusCode != http.StatusOK {
-		body, _ := io.ReadAll(io.LimitReader(resp.Body, 1024))
-		return fmt.Errorf("HTTP %s: %s", resp.Status, string(body))
-	}
+	saveErr := g.checkpointStore.Save(sessionID, checkpointStep, pr)
+	dlErr := <-errCh
 
-	return g.checkpointStore.Save(sessionID, checkpointStep, resp.Body)
+	if dlErr != nil {
+		return fmt.Errorf("download: %w", dlErr)
+	}
+	return saveErr
 }

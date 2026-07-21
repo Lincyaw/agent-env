@@ -1,8 +1,8 @@
 syntax = "proto3";
 
-package arl.executor;
+package arl.executor.v2;
 
-option go_package = "github.com/Lincyaw/agent-env/pkg/pb/executor";
+option go_package = "github.com/Lincyaw/agent-env/pkg/pb/executorv2";
 
 // Request is the top-level multiplexed client-to-server frame.
 // Each request carries a correlation tag returned verbatim in the
@@ -50,8 +50,6 @@ message Response {
 }
 
 // Event is a server-pushed frame for asynchronous notifications.
-// Four event types only; tunnel and file data flow as raw bytes on
-// dedicated streams, not as protobuf Events.
 message Event {
   uint32 tag = 1;
   oneof kind {
@@ -63,7 +61,7 @@ message Event {
 }
 
 // ---------------------------------------------------------------------------
-// 1. ping — health check
+// 1. ping
 // ---------------------------------------------------------------------------
 
 message PingRequest {}
@@ -71,7 +69,7 @@ message PingRequest {}
 message PingResponse {}
 
 // ---------------------------------------------------------------------------
-// 2. spawn — create a process
+// 2. spawn
 // ---------------------------------------------------------------------------
 
 message SpawnRequest {
@@ -91,7 +89,7 @@ message SpawnResponse {
 }
 
 // ---------------------------------------------------------------------------
-// 3. write_in — write bytes to process stdin
+// 3. write_in
 // ---------------------------------------------------------------------------
 
 message WriteInRequest {
@@ -102,7 +100,7 @@ message WriteInRequest {
 message WriteInResponse {}
 
 // ---------------------------------------------------------------------------
-// 4. signal — send signal to process
+// 4. signal
 // ---------------------------------------------------------------------------
 
 message SignalRequest {
@@ -113,7 +111,7 @@ message SignalRequest {
 message SignalResponse {}
 
 // ---------------------------------------------------------------------------
-// 5. resize — change PTY window size
+// 5. resize
 // ---------------------------------------------------------------------------
 
 message ResizeRequest {
@@ -125,12 +123,7 @@ message ResizeRequest {
 message ResizeResponse {}
 
 // ---------------------------------------------------------------------------
-// 6. read — read file contents
-//
-// The ReadResponse confirms the request. Actual file bytes follow on the
-// underlying transport:
-//   QUIC  — uni stream tagged [0x03][tag:4B], raw bytes after header
-//   Unix  — [4B big-endian length][raw bytes] chunks, [4B zero] terminator
+// 6. read
 // ---------------------------------------------------------------------------
 
 message ReadRequest {
@@ -143,12 +136,7 @@ message ReadResponse {
 }
 
 // ---------------------------------------------------------------------------
-// 7. write — write file contents
-//
-// The client sends WriteRequest, then pushes file bytes on the transport:
-//   QUIC  — uni stream tagged [0x04][tag:4B], raw bytes after header
-//   Unix  — [4B big-endian length][raw bytes] chunks, [4B zero] terminator
-// The server replies with WriteResponse after all bytes are received.
+// 7. write
 // ---------------------------------------------------------------------------
 
 message WriteRequest {
@@ -163,11 +151,7 @@ message WriteResponse {
 }
 
 // ---------------------------------------------------------------------------
-// 8. tunnel — TCP proxy (bidirectional stream)
-//
-// After TunnelResponse, raw bidirectional bytes flow on the transport:
-//   QUIC  — bidi stream tagged [0x05][tag:4B]
-//   Unix  — [4B big-endian length][raw bytes] framed, closing = [4B zero]
+// 8. tunnel
 // ---------------------------------------------------------------------------
 
 message TunnelRequest {
@@ -178,7 +162,7 @@ message TunnelRequest {
 message TunnelResponse {}
 
 // ---------------------------------------------------------------------------
-// 9. watch — subscribe to filesystem change events
+// 9. watch
 // ---------------------------------------------------------------------------
 
 message WatchRequest {
@@ -192,7 +176,7 @@ message WatchResponse {
 }
 
 // ---------------------------------------------------------------------------
-// 10. unwatch — unsubscribe from filesystem events
+// 10. unwatch
 // ---------------------------------------------------------------------------
 
 message UnwatchRequest {
@@ -202,7 +186,7 @@ message UnwatchRequest {
 message UnwatchResponse {}
 
 // ---------------------------------------------------------------------------
-// 11. close_tunnel — close an active tunnel
+// 11. close_tunnel
 // ---------------------------------------------------------------------------
 
 message CloseTunnelRequest {
@@ -212,7 +196,7 @@ message CloseTunnelRequest {
 message CloseTunnelResponse {}
 
 // ---------------------------------------------------------------------------
-// 12. list_tunnels — list active tunnels
+// 12. list_tunnels
 // ---------------------------------------------------------------------------
 
 message ListTunnelsRequest {}
@@ -228,22 +212,19 @@ message TunnelInfo {
 }
 
 // ---------------------------------------------------------------------------
-// 13. checkpoint_download — download combined checkpoint tar
-//
-// After CheckpointDownloadResponse, the tar bytes flow as raw binary:
-//   Unix  — [4B big-endian length][raw bytes] chunks, [4B zero] terminator
+// 13. checkpoint_download
 // ---------------------------------------------------------------------------
 
 message CheckpointDownloadRequest {
-  int32 through = 1;  // combine steps 1..through into a single tar
+  int32 through = 1;
 }
 
 message CheckpointDownloadResponse {
-  int64 size_bytes = 1;  // total tar size (-1 if unknown/streamed)
+  int64 size_bytes = 1;
 }
 
 // ---------------------------------------------------------------------------
-// 14. checkpoint_list — list available checkpoint steps
+// 14. checkpoint_list
 // ---------------------------------------------------------------------------
 
 message CheckpointListRequest {}
@@ -253,7 +234,7 @@ message CheckpointListResponse {
 }
 
 // ---------------------------------------------------------------------------
-// ErrorResponse — returned in the Response.error slot on failure
+// ErrorResponse
 // ---------------------------------------------------------------------------
 
 message ErrorResponse {
@@ -262,7 +243,7 @@ message ErrorResponse {
 }
 
 // ---------------------------------------------------------------------------
-// Events (server → client, pushed asynchronously)
+// Events
 // ---------------------------------------------------------------------------
 
 message StdoutEvent {
