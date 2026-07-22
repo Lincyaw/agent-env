@@ -426,7 +426,7 @@ func (g *Gateway) persistSingleCheckpointStep(sessionID, podIP string, checkpoin
 	tmpPath := tmpFile.Name()
 	defer os.Remove(tmpPath)
 
-	if err := g.executorClient.DownloadCheckpointStep(ctx, podIP, checkpointStep, tmpFile); err != nil {
+	if err := g.executorClient.DownloadCheckpoint(ctx, podIP, checkpointStep, tmpFile); err != nil {
 		tmpFile.Close()
 		return fmt.Errorf("download step %d: %w", checkpointStep, err)
 	}

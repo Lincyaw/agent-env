@@ -1,7 +1,6 @@
 package gateway
 
 import (
-	"archive/tar"
 	"fmt"
 	"io"
 	"os"
@@ -112,59 +111,23 @@ func (s *CheckpointStore) LoadCombined(sessionID string, throughStep int) (strin
 	if err != nil {
 		return "", fmt.Errorf("list steps: %w", err)
 	}
-	var relevant []int
+	// Each step-N.tar is already a combined tar (steps 1..N), so use the
+	// highest available step that is <= throughStep directly.
+	bestStep := -1
 	for _, step := range steps {
-		if step <= throughStep {
-			relevant = append(relevant, step)
+		if step <= throughStep && step > bestStep {
+			bestStep = step
 		}
 	}
-	if len(relevant) == 0 {
+	if bestStep < 0 {
 		return "", fmt.Errorf("no checkpoint steps found for session %s through step %d", sessionID, throughStep)
 	}
 
-	type mergedEntry struct {
-		header *tar.Header
-		data   []byte
+	src, err := s.Load(sessionID, bestStep)
+	if err != nil {
+		return "", fmt.Errorf("open step %d: %w", bestStep, err)
 	}
-	merged := make(map[string]mergedEntry)
-
-	for _, step := range relevant {
-		f, err := s.Load(sessionID, step)
-		if err != nil {
-			return "", fmt.Errorf("open step %d: %w", step, err)
-		}
-		tr := tar.NewReader(f)
-		for {
-			hdr, err := tr.Next()
-			if err == io.EOF {
-				break
-			}
-			if err != nil {
-				f.Close()
-				return "", fmt.Errorf("read step %d tar: %w", step, err)
-			}
-			var data []byte
-			if hdr.Typeflag == tar.TypeReg && hdr.Size > 0 {
-				data, err = io.ReadAll(tr)
-				if err != nil {
-					f.Close()
-					return "", fmt.Errorf("read step %d entry %s: %w", step, hdr.Name, err)
-				}
-			}
-			merged[hdr.Name] = mergedEntry{header: hdr, data: data}
-		}
-		f.Close()
-	}
-
-	if len(merged) == 0 {
-		return "", fmt.Errorf("no files in checkpoint range for session %s", sessionID)
-	}
-
-	paths := make([]string, 0, len(merged))
-	for p := range merged {
-		paths = append(paths, p)
-	}
-	sort.Strings(paths)
+	defer src.Close()
 
 	tmpFile, err := os.CreateTemp("", "arl-checkpoint-combined-*.tar")
 	if err != nil {
@@ -172,33 +135,22 @@ func (s *CheckpointStore) LoadCombined(sessionID string, throughStep int) (strin
 	}
 	tmpPath := tmpFile.Name()
 
-	tw := tar.NewWriter(tmpFile)
-	for _, p := range paths {
-		e := merged[p]
-		if err := tw.WriteHeader(e.header); err != nil {
-			tw.Close()
-			tmpFile.Close()
-			os.Remove(tmpPath)
-			return "", fmt.Errorf("write combined tar header %s: %w", p, err)
-		}
-		if len(e.data) > 0 {
-			if _, err := tw.Write(e.data); err != nil {
-				tw.Close()
-				tmpFile.Close()
-				os.Remove(tmpPath)
-				return "", fmt.Errorf("write combined tar data %s: %w", p, err)
-			}
-		}
-	}
-	if err := tw.Close(); err != nil {
+	if _, err := io.Copy(tmpFile, src); err != nil {
 		tmpFile.Close()
 		os.Remove(tmpPath)
-		return "", fmt.Errorf("close combined tar: %w", err)
+		return "", fmt.Errorf("copy checkpoint tar: %w", err)
 	}
 	if err := tmpFile.Close(); err != nil {
 		os.Remove(tmpPath)
 		return "", fmt.Errorf("close combined temp file: %w", err)
 	}
+
+	fi, _ := os.Stat(tmpPath)
+	if fi != nil && fi.Size() < 1536 {
+		os.Remove(tmpPath)
+		return "", fmt.Errorf("checkpoint tar for step %d is empty", bestStep)
+	}
+
 	return tmpPath, nil
 }
 
