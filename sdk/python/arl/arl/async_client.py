@@ -136,15 +136,32 @@ class AsyncGatewayClient:
         resp = await self._client.delete(f"/v1/sessions/{session_id}")
         handle_error(resp)
 
-    async def fork_session(self, session_id: str, step: int) -> ForkSessionResponse:
+    async def fork_session(
+        self,
+        session_id: str,
+        step: int,
+        *,
+        image: str | None = None,
+        profile: str | None = None,
+    ) -> ForkSessionResponse:
         """Fork a session from a historical checkpoint step.
 
         Creates a new session with the filesystem state of the source
         session at the given step.  Requires checkpoint to be enabled on the
         gateway (SANDBOX_CHECKPOINT_ENABLED=true).
+
+        When the source session has been deleted and its metadata is no
+        longer in the gateway store, pass ``image`` (and optionally
+        ``profile``) so the fork can create a new session with the correct
+        container image.
         """
+        body: dict[str, object] = {"step": step}
+        if image:
+            body["image"] = image
+        if profile:
+            body["profile"] = profile
         resp = await self._client.post(
-            f"/v1/sessions/{session_id}/fork", json={"step": step}
+            f"/v1/sessions/{session_id}/fork", json=body
         )
         handle_error(resp)
         return ForkSessionResponse.model_validate(resp.json())
