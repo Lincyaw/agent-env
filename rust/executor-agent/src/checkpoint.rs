@@ -435,3 +435,51 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+mod integration_tests {
+    use super::*;
+    
+    #[test]
+    fn test_write_combined_tar_produces_nonempty() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ckpt = Checkpointer::new(tmp.path().join("ckpt")).with_scan_root(tmp.path().to_path_buf());
+        
+        // Simulate: create file, pre_scan, capture_diff
+        let f1 = tmp.path().join("test.txt");
+        fs::write(&f1, "hello").unwrap();
+        let snap = ckpt.pre_scan().unwrap();
+        
+        // Create a new file after scan
+        let f2 = tmp.path().join("new_file.txt");
+        fs::write(&f2, "world").unwrap();
+        
+        let step = ckpt.next_step();
+        let changed = ckpt.capture_diff(step, &snap).unwrap();
+        assert!(!changed.is_empty(), "should detect new file");
+        
+        // Now write_combined_tar should include the new file
+        let mut buf = Vec::new();
+        ckpt.write_combined_tar(step, &mut buf).unwrap();
+        
+        eprintln!("combined tar size: {} bytes", buf.len());
+        eprintln!("step upper dir: {:?}", ckpt.step_upper_dir(step));
+        eprintln!("upper contents: {:?}", fs::read_dir(ckpt.step_upper_dir(step))
+            .unwrap()
+            .map(|e| e.unwrap().path())
+            .collect::<Vec<_>>());
+        
+        // Verify tar is non-empty (> 1024 which is just the end-of-archive blocks)
+        assert!(buf.len() > 1024, "combined tar should be non-empty, got {} bytes", buf.len());
+        
+        // Verify we can read the tar
+        let cursor = std::io::Cursor::new(&buf);
+        let mut archive = tar::Archive::new(cursor);
+        let entries: Vec<_> = archive.entries().unwrap()
+            .filter_map(|e| e.ok())
+            .map(|e| e.path().unwrap().to_path_buf())
+            .collect();
+        eprintln!("tar entries: {:?}", entries);
+        assert!(!entries.is_empty(), "tar should have entries");
+    }
+}

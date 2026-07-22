@@ -505,7 +505,7 @@ fn handle_spawn_pipe(
         None
     };
     thread::spawn(move || {
-        wait_and_exit(pt3, &w3, &procs, timeout);
+        let exit_code = wait_for_exit(&procs, pt3, timeout);
         if let Some((step_num, ckpt, snapshot)) = step {
             match ckpt.capture_diff(step_num, &snapshot) {
                 Ok(changed) => {
@@ -516,6 +516,7 @@ fn handle_spawn_pipe(
                 }
             }
         }
+        send_exit_event(pt3, exit_code, &w3, &procs);
     });
 }
 
@@ -674,7 +675,7 @@ fn handle_spawn_pty(
         None
     };
     thread::spawn(move || {
-        wait_and_exit(pt2, &w2, &procs, timeout);
+        let exit_code = wait_for_exit(&procs, pt2, timeout);
         if let Some((step_num, ckpt, snapshot)) = step {
             match ckpt.capture_diff(step_num, &snapshot) {
                 Ok(changed) => {
@@ -685,23 +686,23 @@ fn handle_spawn_pty(
                 }
             }
         }
+        send_exit_event(pt2, exit_code, &w2, &procs);
     });
 }
 
-fn wait_and_exit(
-    process_tag: u32,
-    writer: &SharedWriter,
+fn wait_for_exit(
     processes: &Arc<Mutex<HashMap<u32, ProcessHandle>>>,
+    process_tag: u32,
     timeout: Option<u64>,
-) {
+) -> i32 {
     let mut child = {
         let mut procs = processes.lock().unwrap();
         match procs.get_mut(&process_tag) {
             Some(ph) => match ph.child.take() {
                 Some(c) => c,
-                None => return,
+                None => return 1,
             },
-            None => return,
+            None => return 1,
         }
     };
 
@@ -734,7 +735,15 @@ fn wait_and_exit(
     };
 
     thread::sleep(std::time::Duration::from_millis(50));
+    exit_code
+}
 
+fn send_exit_event(
+    process_tag: u32,
+    exit_code: i32,
+    writer: &SharedWriter,
+    processes: &Arc<Mutex<HashMap<u32, ProcessHandle>>>,
+) {
     {
         let mut procs = processes.lock().unwrap();
         if let Some(ph) = procs.get_mut(&process_tag) {
@@ -753,6 +762,16 @@ fn wait_and_exit(
             exit_code,
         }),
     );
+}
+
+fn wait_and_exit(
+    process_tag: u32,
+    writer: &SharedWriter,
+    processes: &Arc<Mutex<HashMap<u32, ProcessHandle>>>,
+    timeout: Option<u64>,
+) {
+    let exit_code = wait_for_exit(processes, process_tag, timeout);
+    send_exit_event(process_tag, exit_code, writer, processes);
 }
 
 // ---------------------------------------------------------------------------
