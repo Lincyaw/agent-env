@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log"
+	"os"
 	"net/http"
 	"strings"
 	"sync"
@@ -419,18 +419,29 @@ func (g *Gateway) persistSingleCheckpointStep(sessionID, podIP string, checkpoin
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
 	defer cancel()
 
-	pr, pw := io.Pipe()
-	errCh := make(chan error, 1)
-	go func() {
-		errCh <- g.executorClient.DownloadCheckpointStep(ctx, podIP, checkpointStep, pw)
-		pw.Close()
-	}()
-
-	saveErr := g.checkpointStore.Save(sessionID, checkpointStep, pr)
-	dlErr := <-errCh
-
-	if dlErr != nil {
-		return fmt.Errorf("download: %w", dlErr)
+	tmpFile, err := os.CreateTemp("", "arl-persist-*.tar")
+	if err != nil {
+		return fmt.Errorf("create temp file: %w", err)
 	}
-	return saveErr
+	tmpPath := tmpFile.Name()
+	defer os.Remove(tmpPath)
+
+	if err := g.executorClient.DownloadCheckpointStep(ctx, podIP, checkpointStep, tmpFile); err != nil {
+		tmpFile.Close()
+		return fmt.Errorf("download step %d: %w", checkpointStep, err)
+	}
+	tmpFile.Close()
+
+	fi, _ := os.Stat(tmpPath)
+	if fi != nil {
+		log.Printf("Checkpoint persist %s step %d: downloaded %d bytes", sessionID, checkpointStep, fi.Size())
+	}
+
+	f, err := os.Open(tmpPath)
+	if err != nil {
+		return fmt.Errorf("open downloaded tar: %w", err)
+	}
+	defer f.Close()
+
+	return g.checkpointStore.Save(sessionID, checkpointStep, f)
 }

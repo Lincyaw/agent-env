@@ -129,9 +129,13 @@ type CreateManagedSessionRequest struct {
 	AllowInternet            *bool                        `json:"allowInternet,omitempty"`
 }
 
-// ForkSessionRequest is the body for POST /v1/sessions/{id}/fork
+// ForkSessionRequest is the body for POST /v1/sessions/{id}/fork.
+// Image and Profile are optional overrides used when the source session's
+// metadata is no longer available (e.g. after GC with in-memory store).
 type ForkSessionRequest struct {
-	Step int `json:"step"`
+	Step    int    `json:"step"`
+	Image   string `json:"image,omitempty"`
+	Profile string `json:"profile,omitempty"`
 }
 
 // ForkSessionResponse is the response for POST /v1/sessions/{id}/fork

@@ -78,21 +78,30 @@ func (g *Gateway) ForkSession(ctx context.Context, sourceID string, req ForkSess
 }
 
 // forkFromStore handles fork when the source session has been deleted from the
-// store entirely. Session metadata must come from the historical record or the
-// request will fail.
+// store entirely. Session metadata comes from the historical record, or from
+// the request's Image/Profile fields as a fallback (e.g. after gateway restart
+// with in-memory store).
 func (g *Gateway) forkFromStore(ctx context.Context, sourceID string, req ForkSessionRequest) (*ForkSessionResponse, error) {
 	historical, ok := g.GetHistoricalSession(sourceID)
-	if !ok {
-		return nil, fmt.Errorf("source session %s not found (no historical record)", sourceID)
+	if ok {
+		historical.mu.RLock()
+		image := historical.Info.Image
+		profile := historical.Info.Profile
+		ns := historical.Info.Namespace
+		mode := historical.Info.Mode
+		historical.mu.RUnlock()
+		return g.forkFromStoreWithMeta(ctx, sourceID, req, image, profile, ns, mode)
 	}
-	historical.mu.RLock()
-	image := historical.Info.Image
-	profile := historical.Info.Profile
-	ns := historical.Info.Namespace
-	mode := historical.Info.Mode
-	historical.mu.RUnlock()
 
-	return g.forkFromStoreWithMeta(ctx, sourceID, req, image, profile, ns, mode)
+	if req.Image == "" {
+		return nil, fmt.Errorf("source session %s not found and no image specified in fork request", sourceID)
+	}
+	profile := req.Profile
+	if profile == "" {
+		profile = "default"
+	}
+	log.Printf("Fork: no historical record for %s, using request-provided image=%s profile=%s", sourceID, req.Image, profile)
+	return g.forkFromStoreWithMeta(ctx, sourceID, req, req.Image, profile, "", "")
 }
 
 func (g *Gateway) forkFromStoreWithMeta(ctx context.Context, sourceID string, req ForkSessionRequest, image, profile, ns, mode string) (*ForkSessionResponse, error) {
