@@ -180,11 +180,14 @@ class AsyncGatewayClient:
         *,
         allow_internet: bool,
         egress_cidrs: list[str] | None = None,
+        egress_fqdns: list[str] | None = None,
     ) -> None:
         """Toggle a running session's egress network policy."""
         body: dict[str, Any] = {"allowInternet": allow_internet}
         if egress_cidrs:
             body["egressCIDRs"] = egress_cidrs
+        if egress_fqdns:
+            body["egressFQDNs"] = egress_fqdns
         resp = await self._client.patch(
             f"/v1/sessions/{session_id}/network-policy", json=body
         )

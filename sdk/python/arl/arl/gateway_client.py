@@ -152,9 +152,11 @@ class GatewayClient:
         *,
         allow_internet: bool,
         egress_cidrs: list[str] | None = None,
+        egress_fqdns: list[str] | None = None,
     ) -> None:
         self._runner.run(self._async.update_network_policy(
             session_id, allow_internet=allow_internet, egress_cidrs=egress_cidrs,
+            egress_fqdns=egress_fqdns,
         ))
 
     def execute(

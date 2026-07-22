@@ -388,6 +388,7 @@ type GatewaySummary struct {
 type UpdateNetworkPolicyRequest struct {
 	AllowInternet *bool    `json:"allowInternet,omitempty"`
 	EgressCIDRs   []string `json:"egressCIDRs,omitempty"`
+	EgressFQDNs   []string `json:"egressFQDNs,omitempty"`
 }
 
 // BuildRequest is the body for POST /v1/build (multipart form fields).

@@ -197,21 +197,19 @@ class ArlEnvironment(BaseEnvironment):
                 return
 
             egress_cidrs: list[str] = []
+            egress_fqdns: list[str] = []
             for host in network_policy.allowed_hosts:
                 cidr = _host_to_cidr(host)
-                if cidr is None:
-                    self.logger.warning(
-                        "Ignoring non-CIDR allowlist host %r: dynamic network "
-                        "policy can only enforce IP/CIDR egress rules",
-                        host,
-                    )
-                    continue
-                egress_cidrs.append(cidr)
+                if cidr is not None:
+                    egress_cidrs.append(cidr)
+                else:
+                    egress_fqdns.append(host.strip())
 
             await client.update_network_policy(
                 self._arl_session_id,
                 allow_internet=False,
                 egress_cidrs=egress_cidrs,
+                egress_fqdns=egress_fqdns if egress_fqdns else None,
             )
         except Exception as exc:
             self.logger.warning("Dynamic network policy not applied: %s", exc)
