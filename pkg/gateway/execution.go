@@ -55,11 +55,27 @@ func (g *Gateway) resolveSessionPodIP(ctx context.Context, sessionID string) (*s
 	}
 
 	if resolved.PodIP != info.PodIP {
-		if info.PodIP != "" {
+		// A different sandbox behind the same claim is not a re-resolve, it is
+		// a substitution: the filesystem the session was built on is gone and
+		// the replacement is a fresh warm sandbox. Continuing would serve an
+		// empty workspace while every response still says the session is
+		// healthy, so callers would keep running steps and forks against state
+		// that no longer exists.
+		if info.SandboxName != "" && resolved.SandboxName != "" && resolved.SandboxName != info.SandboxName {
+			log.Printf("Session %s lost its sandbox: %s (pod %s) was replaced by %s (pod %s); "+
+				"the workspace it held is gone, dropping the session rather than serving an empty one",
+				sessionID, info.SandboxName, info.PodName, resolved.SandboxName, resolved.PodName)
+			g.dropSession(sessionID, s)
+			return nil, "", fmt.Errorf("session %s lost its sandbox: %s was replaced by %s",
+				sessionID, info.SandboxName, resolved.SandboxName)
+		}
+		if info.PodIP != "" && g.executorClient != nil {
 			if err := g.executorClient.CloseConnection(info.PodIP); err != nil {
 				log.Printf("Warning: failed to close stale executor connection for pod %s: %v", info.PodName, err)
 			}
 		}
+		log.Printf("Session %s re-resolved to pod %s (%s), same sandbox %s",
+			sessionID, resolved.PodName, resolved.PodIP, resolved.SandboxName)
 		s.mu.Lock()
 		s.Info.PodIP = resolved.PodIP
 		s.Info.PodName = resolved.PodName
