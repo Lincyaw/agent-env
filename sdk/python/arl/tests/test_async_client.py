@@ -281,7 +281,10 @@ class TestAsyncGatewayClient:
     async def test_replay_response_is_typed(self) -> None:
         def handler(request: httpx.Request) -> httpx.Response:
             body = json.loads(request.content)
-            assert body == {"sourceSessionID": "source", "upToStep": 3}
+            assert body["sourceSessionID"] == "source"
+            assert body["upToStep"] == 3
+            # Idempotency key for execute-recovery; generated per call.
+            assert body["operationID"]
             return httpx.Response(200, json={"stepsReplayed": 4, "errors": 1})
 
         async with _async_client_with_handler(handler) as client:

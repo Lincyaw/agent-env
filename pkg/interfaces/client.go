@@ -22,22 +22,6 @@ type FileReadResult struct {
 	SHA256    string
 }
 
-// StatResult describes file metadata returned by Stat.
-type StatResult struct {
-	Exists   bool
-	IsDir    bool
-	Size     uint64
-	Mode     string
-	Modified string
-}
-
-// DirEntry describes a single directory entry.
-type DirEntry struct {
-	Name  string
-	IsDir bool
-	Size  uint64
-}
-
 // LogEntry represents a single log line.
 type LogEntry struct {
 	Timestamp string

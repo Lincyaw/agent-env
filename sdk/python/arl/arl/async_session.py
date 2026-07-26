@@ -7,7 +7,7 @@ delegate every call to these async implementations.
 from __future__ import annotations
 
 import inspect
-from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, BinaryIO
 
@@ -95,7 +95,9 @@ class AsyncSandboxSession:
         self.allow_internet = allow_internet
 
         self._client = AsyncGatewayClient(
-            base_url=gateway_url, timeout=timeout, api_key=api_key,
+            base_url=gateway_url,
+            timeout=timeout,
+            api_key=api_key,
         )
         self._api_key = api_key
         self._session_id: str | None = None
@@ -115,8 +117,12 @@ class AsyncSandboxSession:
     ) -> AsyncSandboxSession:
         """Attach to an existing session by session ID."""
         instance = cls(
-            image=None, profile=None, gateway_url=gateway_url,
-            timeout=timeout, api_key=api_key, iroh_addr=iroh_addr,
+            image=None,
+            profile=None,
+            gateway_url=gateway_url,
+            timeout=timeout,
+            api_key=api_key,
+            iroh_addr=iroh_addr,
         )
         try:
             info = await instance._client.get_session(session_id)
@@ -169,7 +175,7 @@ class AsyncSandboxSession:
 
     async def _execute_via_iroh(
         self,
-        steps: list[StepRequest | dict[str, Any]],
+        steps: Sequence[StepRequest | dict[str, Any]],
         on_output: Callable[[str, str], None | Awaitable[None]] | None = None,
     ) -> ExecuteResponse:
         """Execute steps directly via iroh QUIC, bypassing the gateway."""
@@ -178,11 +184,16 @@ class AsyncSandboxSession:
         results: list[StepResult] = []
         for i, raw_step in enumerate(steps):
             step: dict[str, Any] = (
-                raw_step.model_dump(by_alias=True) if isinstance(raw_step, StepRequest) else raw_step
+                raw_step.model_dump(by_alias=True)
+                if isinstance(raw_step, StepRequest)
+                else raw_step
             )
             cmd, env, work_dir, timeout_s = prepare_iroh_step(step)
             raw = await self._iroh.execute(
-                cmd, env=env, work_dir=work_dir, timeout_seconds=timeout_s,
+                cmd,
+                env=env,
+                work_dir=work_dir,
+                timeout_seconds=timeout_s,
             )
             sr = parse_iroh_step_result(i, step, raw)
             results.append(sr)
@@ -196,7 +207,7 @@ class AsyncSandboxSession:
 
     async def execute(
         self,
-        steps: list[StepRequest | dict[str, Any]],
+        steps: Sequence[StepRequest | dict[str, Any]],
         trace_id: str | None = None,
         operation_id: str | None = None,
         on_output: Callable[[str, str], None | Awaitable[None]] | None = None,
@@ -210,9 +221,13 @@ class AsyncSandboxSession:
         if iroh is not None:
             return await self._execute_via_iroh(steps, on_output=on_output)
         return await self._client.execute(
-            self._session_id, steps, trace_id,
-            operation_id=operation_id, on_output=on_output,
-            recover=recover, recover_timeout=recover_timeout,
+            self._session_id,
+            steps,
+            trace_id,
+            operation_id=operation_id,
+            on_output=on_output,
+            recover=recover,
+            recover_timeout=recover_timeout,
         )
 
     async def get_execute_operation(self, operation_id: str) -> ExecuteOperationInfo:
@@ -224,13 +239,15 @@ class AsyncSandboxSession:
     async def execute_container(
         self,
         container: str,
-        steps: list[StepRequest | dict[str, Any]],
+        steps: Sequence[StepRequest | dict[str, Any]],
     ) -> ContainerExecuteResponse:
         """Execute steps in a configured private container."""
         if self._session_id is None:
             raise SessionNotInitializedError()
         return await self._client.execute_container(
-            self._session_id, container, steps,
+            self._session_id,
+            container,
+            steps,
         )
 
     async def restore(
@@ -244,8 +261,10 @@ class AsyncSandboxSession:
         if self._session_id is None:
             raise SessionNotInitializedError()
         return await self._client.restore(
-            self._session_id, snapshot_id,
-            operation_id=operation_id, recover=recover,
+            self._session_id,
+            snapshot_id,
+            operation_id=operation_id,
+            recover=recover,
             recover_timeout=recover_timeout,
         )
 
@@ -261,9 +280,12 @@ class AsyncSandboxSession:
         if self._session_id is None:
             raise SessionNotInitializedError()
         return await self._client.replay_from(
-            self._session_id, source_session_id=source_session_id,
-            up_to_step=up_to_step, operation_id=operation_id,
-            recover=recover, recover_timeout=recover_timeout,
+            self._session_id,
+            source_session_id=source_session_id,
+            up_to_step=up_to_step,
+            operation_id=operation_id,
+            recover=recover,
+            recover_timeout=recover_timeout,
         )
 
     async def upload_file(
@@ -281,16 +303,20 @@ class AsyncSandboxSession:
             result = await iroh.upload_file(path, raw_bytes)
             actual_sha = str(result.get("sha256", ""))
             if sha256 and actual_sha and actual_sha != sha256:
-                raise RuntimeError(
-                    f"upload sha256 mismatch: expected {sha256}, got {actual_sha}"
-                )
+                raise RuntimeError(f"upload sha256 mismatch: expected {sha256}, got {actual_sha}")
             bw = result.get("bytes_written", len(raw_bytes))
             return UploadFileResponse.model_validate(
-                {"path": str(result.get("path", path)), "bytesWritten": int(str(bw)),
-                 "sha256": actual_sha}
+                {
+                    "path": str(result.get("path", path)),
+                    "bytesWritten": int(str(bw)),
+                    "sha256": actual_sha,
+                }
             )
         return await self._client.upload_file(
-            self._session_id, path=path, content=content, sha256=sha256,
+            self._session_id,
+            path=path,
+            content=content,
+            sha256=sha256,
         )
 
     async def download_file(self, path: str) -> bytes:
@@ -312,8 +338,10 @@ class AsyncSandboxSession:
         if self._session_id is None:
             raise SessionNotInitializedError()
         return await self._client.upload_path(
-            self._session_id, local_path=local_path,
-            remote_path=remote_path, sha256=sha256,
+            self._session_id,
+            local_path=local_path,
+            remote_path=remote_path,
+            sha256=sha256,
         )
 
     async def download_path(self, remote_path: str, local_path: str | Path) -> None:
@@ -323,13 +351,17 @@ class AsyncSandboxSession:
         await self._client.download_path(self._session_id, remote_path, local_path)
 
     def iter_download(
-        self, path: str, chunk_size: int = 1024 * 1024,
+        self,
+        path: str,
+        chunk_size: int = 1024 * 1024,
     ) -> AsyncIterator[bytes]:
         """Iterate over a session file as byte chunks."""
         if self._session_id is None:
             raise SessionNotInitializedError()
         return self._client.iter_download_file(
-            self._session_id, path, chunk_size=chunk_size,
+            self._session_id,
+            path,
+            chunk_size=chunk_size,
         )
 
     async def get_history(self) -> list[StepResult]:
@@ -345,13 +377,18 @@ class AsyncSandboxSession:
         return await self._client.get_trajectory(self._session_id)
 
     def iter_logs(
-        self, *, follow: bool = False, tail: int = 100,
+        self,
+        *,
+        follow: bool = False,
+        tail: int = 100,
     ) -> AsyncIterator[LogEntry]:
         """Iterate over session log entries."""
         if self._session_id is None:
             raise SessionNotInitializedError()
         return self._client.iter_session_logs(
-            self._session_id, follow=follow, tail=tail,
+            self._session_id,
+            follow=follow,
+            tail=tail,
         )
 
     async def get_logs(self, *, tail: int = 100) -> list[LogEntry]:
@@ -436,10 +473,16 @@ class AsyncManagedSession(AsyncSandboxSession):
         allow_internet: bool | None = None,
     ) -> None:
         super().__init__(
-            image=image, mode=mode, devbox=devbox, profile=profile,
-            gateway_url=gateway_url, timeout=timeout, api_key=api_key,
+            image=image,
+            mode=mode,
+            devbox=devbox,
+            profile=profile,
+            gateway_url=gateway_url,
+            timeout=timeout,
+            api_key=api_key,
             allocation_timeout_seconds=allocation_timeout_seconds,
-            private_containers=private_containers, iroh_addr=iroh_addr,
+            private_containers=private_containers,
+            iroh_addr=iroh_addr,
             allow_internet=allow_internet,
         )
         self._image = image
@@ -509,10 +552,15 @@ class AsyncDevboxSession(AsyncSandboxSession):
         iroh_addr: str | None = None,
     ) -> None:
         super().__init__(
-            image=image, mode="devbox", devbox=devbox, profile=profile,
-            gateway_url=gateway_url, timeout=timeout,
+            image=image,
+            mode="devbox",
+            devbox=devbox,
+            profile=profile,
+            gateway_url=gateway_url,
+            timeout=timeout,
             idle_timeout_seconds=idle_timeout_seconds,
             allocation_timeout_seconds=allocation_timeout_seconds,
-            api_key=api_key, private_containers=private_containers,
+            api_key=api_key,
+            private_containers=private_containers,
             iroh_addr=iroh_addr,
         )

@@ -8,7 +8,7 @@ pooling and safe use from Jupyter / existing event loops.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from pathlib import Path
 from typing import Any, BinaryIO, TypeVar
 
@@ -103,7 +103,10 @@ class GatewayClient:
         auth: httpx.Auth | None = None,
     ) -> None:
         self._async = AsyncGatewayClient(
-            base_url=base_url, timeout=timeout, api_key=api_key, auth=auth,
+            base_url=base_url,
+            timeout=timeout,
+            api_key=api_key,
+            auth=auth,
         )
         self._runner = _SyncRunner()
         self._base_url = self._async._base_url
@@ -123,12 +126,19 @@ class GatewayClient:
         private_containers: Iterable[PrivateContainerSpec | dict[str, Any]] | None = None,
         allow_internet: bool | None = None,
     ) -> SessionInfo:
-        return self._runner.run(self._async.create_session(
-            image, profile=profile, mode=mode, devbox=devbox,
-            config_env=config_env, idle_timeout_seconds=idle_timeout_seconds,
-            allocation_timeout_seconds=allocation_timeout_seconds,
-            private_containers=private_containers, allow_internet=allow_internet,
-        ))
+        return self._runner.run(
+            self._async.create_session(
+                image,
+                profile=profile,
+                mode=mode,
+                devbox=devbox,
+                config_env=config_env,
+                idle_timeout_seconds=idle_timeout_seconds,
+                allocation_timeout_seconds=allocation_timeout_seconds,
+                private_containers=private_containers,
+                allow_internet=allow_internet,
+            )
+        )
 
     def get_session(self, session_id: str) -> SessionInfo:
         return self._runner.run(self._async.get_session(session_id))
@@ -154,42 +164,51 @@ class GatewayClient:
         egress_cidrs: list[str] | None = None,
         egress_fqdns: list[str] | None = None,
     ) -> None:
-        self._runner.run(self._async.update_network_policy(
-            session_id, allow_internet=allow_internet, egress_cidrs=egress_cidrs,
-            egress_fqdns=egress_fqdns,
-        ))
+        self._runner.run(
+            self._async.update_network_policy(
+                session_id,
+                allow_internet=allow_internet,
+                egress_cidrs=egress_cidrs,
+                egress_fqdns=egress_fqdns,
+            )
+        )
 
     def execute(
         self,
         session_id: str,
-        steps: list[StepRequest | dict[str, Any]],
+        steps: Sequence[StepRequest | dict[str, Any]],
         trace_id: str | None = None,
         operation_id: str | None = None,
         on_output: Callable[[str, str], None] | None = None,
         recover: bool = True,
         recover_timeout: float | None = None,
     ) -> ExecuteResponse:
-        return self._runner.run(self._async.execute(
-            session_id, steps, trace_id, operation_id=operation_id,
-            on_output=on_output, recover=recover, recover_timeout=recover_timeout,
-        ))
+        return self._runner.run(
+            self._async.execute(
+                session_id,
+                steps,
+                trace_id,
+                operation_id=operation_id,
+                on_output=on_output,
+                recover=recover,
+                recover_timeout=recover_timeout,
+            )
+        )
 
     def get_execute_operation(
-        self, session_id: str, operation_id: str,
+        self,
+        session_id: str,
+        operation_id: str,
     ) -> ExecuteOperationInfo:
-        return self._runner.run(
-            self._async.get_execute_operation(session_id, operation_id)
-        )
+        return self._runner.run(self._async.get_execute_operation(session_id, operation_id))
 
     def execute_container(
         self,
         session_id: str,
         container: str,
-        steps: list[StepRequest | dict[str, Any]],
+        steps: Sequence[StepRequest | dict[str, Any]],
     ) -> ContainerExecuteResponse:
-        return self._runner.run(
-            self._async.execute_container(session_id, container, steps)
-        )
+        return self._runner.run(self._async.execute_container(session_id, container, steps))
 
     # --- File APIs ---
 
@@ -200,9 +219,7 @@ class GatewayClient:
         content: str | bytes | Iterable[bytes] | BinaryIO,
         sha256: str | None = None,
     ) -> UploadFileResponse:
-        return self._runner.run(
-            self._async.upload_file(session_id, path, content, sha256=sha256)
-        )
+        return self._runner.run(self._async.upload_file(session_id, path, content, sha256=sha256))
 
     def download_file(self, session_id: str, path: str) -> bytes:
         return self._runner.run(self._async.download_file(session_id, path))
@@ -213,9 +230,7 @@ class GatewayClient:
         path: str,
         chunk_size: int = 1024 * 1024,
     ) -> Iterator[bytes]:
-        return self._runner.iter(
-            self._async.iter_download_file(session_id, path, chunk_size)
-        )
+        return self._runner.iter(self._async.iter_download_file(session_id, path, chunk_size))
 
     def upload_path(
         self,
@@ -224,9 +239,14 @@ class GatewayClient:
         remote_path: str,
         sha256: str | None = None,
     ) -> UploadFileResponse:
-        return self._runner.run(self._async.upload_path(
-            session_id, local_path, remote_path, sha256=sha256,
-        ))
+        return self._runner.run(
+            self._async.upload_path(
+                session_id,
+                local_path,
+                remote_path,
+                sha256=sha256,
+            )
+        )
 
     def download_path(
         self,
@@ -250,10 +270,16 @@ class GatewayClient:
         recover: bool = True,
         recover_timeout: float | None = None,
     ) -> ReplayResponse:
-        return self._runner.run(self._async.replay_from(
-            session_id, source_session_id, up_to_step=up_to_step,
-            operation_id=operation_id, recover=recover, recover_timeout=recover_timeout,
-        ))
+        return self._runner.run(
+            self._async.replay_from(
+                session_id,
+                source_session_id,
+                up_to_step=up_to_step,
+                operation_id=operation_id,
+                recover=recover,
+                recover_timeout=recover_timeout,
+            )
+        )
 
     def restore(
         self,
@@ -263,10 +289,15 @@ class GatewayClient:
         recover: bool = True,
         recover_timeout: float | None = None,
     ) -> RestoreResponse:
-        return self._runner.run(self._async.restore(
-            session_id, snapshot_id, operation_id=operation_id,
-            recover=recover, recover_timeout=recover_timeout,
-        ))
+        return self._runner.run(
+            self._async.restore(
+                session_id,
+                snapshot_id,
+                operation_id=operation_id,
+                recover=recover,
+                recover_timeout=recover_timeout,
+            )
+        )
 
     # --- History / trajectory ---
 
@@ -285,10 +316,15 @@ class GatewayClient:
         limit: int | None = None,
         cursor: str | None = None,
     ) -> list[SessionListItem]:
-        return self._runner.run(self._async.list_sessions(
-            profile=profile, experiment_id=experiment_id,
-            status=status, limit=limit, cursor=cursor,
-        ))
+        return self._runner.run(
+            self._async.list_sessions(
+                profile=profile,
+                experiment_id=experiment_id,
+                status=status,
+                limit=limit,
+                cursor=cursor,
+            )
+        )
 
     def iter_session_logs(
         self,
@@ -302,11 +338,12 @@ class GatewayClient:
         )
 
     def list_session_logs(
-        self, session_id: str, *, tail: int = 100,
+        self,
+        session_id: str,
+        *,
+        tail: int = 100,
     ) -> list[LogEntry]:
-        return self._runner.run(
-            self._async.list_session_logs(session_id, tail=tail)
-        )
+        return self._runner.run(self._async.list_session_logs(session_id, tail=tail))
 
     # --- Pool APIs ---
 
@@ -323,16 +360,23 @@ class GatewayClient:
         image_locality: dict[str, Any] | bool | None = None,
         private_containers: Iterable[PrivateContainerSpec | dict[str, Any]] | None = None,
     ) -> None:
-        self._runner.run(self._async.create_pool(
-            name, image, replicas, profile, tools=tools, resources=resources,
-            workspace_dir=workspace_dir, config_env=config_env,
-            image_locality=image_locality, private_containers=private_containers,
-        ))
+        self._runner.run(
+            self._async.create_pool(
+                name,
+                image,
+                replicas,
+                profile,
+                tools=tools,
+                resources=resources,
+                workspace_dir=workspace_dir,
+                config_env=config_env,
+                image_locality=image_locality,
+                private_containers=private_containers,
+            )
+        )
 
     def list_pools(self, *, include_stopped: bool = False) -> list[PoolInfo]:
-        return self._runner.run(
-            self._async.list_pools(include_stopped=include_stopped)
-        )
+        return self._runner.run(self._async.list_pools(include_stopped=include_stopped))
 
     def summary(self) -> GatewaySummary:
         return self._runner.run(self._async.summary())
@@ -352,9 +396,7 @@ class GatewayClient:
         replicas: int,
         resources: ResourceRequirements | None = None,
     ) -> PoolInfo:
-        return self._runner.run(
-            self._async.scale_pool(name, replicas, resources=resources)
-        )
+        return self._runner.run(self._async.scale_pool(name, replicas, resources=resources))
 
     def iter_pool_logs(
         self,
@@ -363,9 +405,7 @@ class GatewayClient:
         follow: bool = False,
         tail: int = 100,
     ) -> Iterator[PoolLogEntry]:
-        return self._runner.iter(
-            self._async.iter_pool_logs(name, follow=follow, tail=tail)
-        )
+        return self._runner.iter(self._async.iter_pool_logs(name, follow=follow, tail=tail))
 
     def list_pool_logs(self, name: str, *, tail: int = 100) -> list[PoolLogEntry]:
         return self._runner.run(self._async.list_pool_logs(name, tail=tail))
@@ -388,31 +428,38 @@ class GatewayClient:
         private_containers: Iterable[PrivateContainerSpec | dict[str, Any]] | None = None,
         allow_internet: bool | None = None,
     ) -> ManagedSessionInfo:
-        return self._runner.run(self._async.create_managed_session(
-            image, experiment_id, profile, mode=mode, devbox=devbox,
-            resources=resources, tools=tools, workspace_dir=workspace_dir,
-            idle_timeout_seconds=idle_timeout_seconds,
-            allocation_timeout_seconds=allocation_timeout_seconds,
-            config_env=config_env, private_containers=private_containers,
-            allow_internet=allow_internet,
-        ))
+        return self._runner.run(
+            self._async.create_managed_session(
+                image,
+                experiment_id,
+                profile,
+                mode=mode,
+                devbox=devbox,
+                resources=resources,
+                tools=tools,
+                workspace_dir=workspace_dir,
+                idle_timeout_seconds=idle_timeout_seconds,
+                allocation_timeout_seconds=allocation_timeout_seconds,
+                config_env=config_env,
+                private_containers=private_containers,
+                allow_internet=allow_internet,
+            )
+        )
 
     def list_experiment_sessions(
-        self, experiment_id: str,
+        self,
+        experiment_id: str,
     ) -> list[ManagedSessionInfo]:
-        return self._runner.run(
-            self._async.list_experiment_sessions(experiment_id)
-        )
+        return self._runner.run(self._async.list_experiment_sessions(experiment_id))
 
     def list_experiments(self) -> list[ExperimentSummary]:
         return self._runner.run(self._async.list_experiments())
 
     def delete_experiment_info(
-        self, experiment_id: str,
+        self,
+        experiment_id: str,
     ) -> DeleteExperimentResponse:
-        return self._runner.run(
-            self._async.delete_experiment_info(experiment_id)
-        )
+        return self._runner.run(self._async.delete_experiment_info(experiment_id))
 
     def delete_experiment(self, experiment_id: str) -> int:
         return self._runner.run(self._async.delete_experiment(experiment_id))
@@ -428,9 +475,15 @@ class GatewayClient:
         timeout: int | None = None,
         cache: bool = True,
     ) -> BuildResponse:
-        return self._runner.run(self._async.build_image(
-            image, context, build_args=build_args, timeout=timeout, cache=cache,
-        ))
+        return self._runner.run(
+            self._async.build_image(
+                image,
+                context,
+                build_args=build_args,
+                timeout=timeout,
+                cache=cache,
+            )
+        )
 
     # --- Iroh ---
 
@@ -443,8 +496,13 @@ class GatewayClient:
         return self._runner.run(self._async.health())
 
     def close(self) -> None:
-        self._runner.run(self._async.aclose())
-        self._runner.close()
+        """Close the HTTP client and stop the loop thread. Idempotent."""
+        if self._runner.is_closed:
+            return
+        try:
+            self._runner.run(self._async.aclose())
+        finally:
+            self._runner.close()
 
     def __enter__(self) -> GatewayClient:
         return self

@@ -25,6 +25,7 @@ import statistics
 import subprocess
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Any
 from urllib.parse import urlparse
 
 import typer
@@ -627,7 +628,9 @@ def exec_bench(
     # 3. Batch execution
     for batch_size in [5, 10, 20]:
         console.print(f"[bold cyan]3. Batch of {batch_size} commands (5 iterations)[/bold cyan]")
-        steps = [{"name": f"step-{j}", "command": ["echo", f"step-{j}"]} for j in range(batch_size)]
+        steps: list[dict[str, Any]] = [
+            {"name": f"step-{j}", "command": ["echo", f"step-{j}"]} for j in range(batch_size)
+        ]
         batch_times: list[float] = []
         for _ in range(5):
             t = Timer()

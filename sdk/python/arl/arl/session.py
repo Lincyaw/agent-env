@@ -7,7 +7,7 @@ background event loop (see :class:`~arl.gateway_client._SyncRunner`).
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator, Sequence
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, BinaryIO
 
@@ -86,14 +86,22 @@ class SandboxSession:
         iroh_addr: str | None = None,
         allow_internet: bool | None = None,
     ) -> None:
-        self._init_async(AsyncSandboxSession(
-            image=image, mode=mode, devbox=devbox, profile=profile,
-            gateway_url=gateway_url, timeout=timeout,
-            idle_timeout_seconds=idle_timeout_seconds,
-            allocation_timeout_seconds=allocation_timeout_seconds,
-            api_key=api_key, private_containers=private_containers,
-            iroh_addr=iroh_addr, allow_internet=allow_internet,
-        ))
+        self._init_async(
+            AsyncSandboxSession(
+                image=image,
+                mode=mode,
+                devbox=devbox,
+                profile=profile,
+                gateway_url=gateway_url,
+                timeout=timeout,
+                idle_timeout_seconds=idle_timeout_seconds,
+                allocation_timeout_seconds=allocation_timeout_seconds,
+                api_key=api_key,
+                private_containers=private_containers,
+                iroh_addr=iroh_addr,
+                allow_internet=allow_internet,
+            )
+        )
 
     def _init_async(self, async_session: AsyncSandboxSession) -> None:
         """Wire up the async session and runner (called by subclass constructors too)."""
@@ -113,10 +121,15 @@ class SandboxSession:
         """Attach to an existing session by session ID."""
         runner = _SyncRunner()
         try:
-            async_session = runner.run(AsyncSandboxSession.attach(
-                session_id, gateway_url=gateway_url, timeout=timeout,
-                api_key=api_key, iroh_addr=iroh_addr,
-            ))
+            async_session = runner.run(
+                AsyncSandboxSession.attach(
+                    session_id,
+                    gateway_url=gateway_url,
+                    timeout=timeout,
+                    api_key=api_key,
+                    iroh_addr=iroh_addr,
+                )
+            )
         except Exception:
             runner.close()
             raise
@@ -178,7 +191,7 @@ class SandboxSession:
 
     def execute(
         self,
-        steps: list[StepRequest | dict[str, Any]],
+        steps: Sequence[StepRequest | dict[str, Any]],
         trace_id: str | None = None,
         operation_id: str | None = None,
         on_output: Callable[[str, str], None] | None = None,
@@ -186,26 +199,28 @@ class SandboxSession:
         recover_timeout: float | None = None,
     ) -> ExecuteResponse:
         """Execute steps in the sandbox. Returns synchronously."""
-        return self._runner.run(self._async.execute(
-            steps, trace_id, operation_id=operation_id, on_output=on_output,
-            recover=recover, recover_timeout=recover_timeout,
-        ))
+        return self._runner.run(
+            self._async.execute(
+                steps,
+                trace_id,
+                operation_id=operation_id,
+                on_output=on_output,
+                recover=recover,
+                recover_timeout=recover_timeout,
+            )
+        )
 
     def get_execute_operation(self, operation_id: str) -> ExecuteOperationInfo:
         """Get the status of a pending execute operation."""
-        return self._runner.run(
-            self._async.get_execute_operation(operation_id)
-        )
+        return self._runner.run(self._async.get_execute_operation(operation_id))
 
     def execute_container(
         self,
         container: str,
-        steps: list[StepRequest | dict[str, Any]],
+        steps: Sequence[StepRequest | dict[str, Any]],
     ) -> ContainerExecuteResponse:
         """Execute steps in a configured private container."""
-        return self._runner.run(
-            self._async.execute_container(container, steps)
-        )
+        return self._runner.run(self._async.execute_container(container, steps))
 
     # --- Restore / replay ---
 
@@ -217,10 +232,14 @@ class SandboxSession:
         recover_timeout: float | None = None,
     ) -> RestoreResponse:
         """Restore workspace to a previous step's snapshot."""
-        return self._runner.run(self._async.restore(
-            snapshot_id, operation_id=operation_id,
-            recover=recover, recover_timeout=recover_timeout,
-        ))
+        return self._runner.run(
+            self._async.restore(
+                snapshot_id,
+                operation_id=operation_id,
+                recover=recover,
+                recover_timeout=recover_timeout,
+            )
+        )
 
     def replay_from(
         self,
@@ -231,11 +250,15 @@ class SandboxSession:
         recover_timeout: float | None = None,
     ) -> ReplayResponse:
         """Replay another session's history into this session."""
-        return self._runner.run(self._async.replay_from(
-            source_session_id, up_to_step=up_to_step,
-            operation_id=operation_id, recover=recover,
-            recover_timeout=recover_timeout,
-        ))
+        return self._runner.run(
+            self._async.replay_from(
+                source_session_id,
+                up_to_step=up_to_step,
+                operation_id=operation_id,
+                recover=recover,
+                recover_timeout=recover_timeout,
+            )
+        )
 
     # --- File operations ---
 
@@ -246,9 +269,7 @@ class SandboxSession:
         sha256: str | None = None,
     ) -> UploadFileResponse:
         """Upload one file into the session workspace."""
-        return self._runner.run(
-            self._async.upload_file(path, content, sha256=sha256)
-        )
+        return self._runner.run(self._async.upload_file(path, content, sha256=sha256))
 
     def download_file(self, path: str) -> bytes:
         """Download one file from the session workspace into memory."""
@@ -261,9 +282,7 @@ class SandboxSession:
         sha256: str | None = None,
     ) -> UploadFileResponse:
         """Stream a local file into the session workspace."""
-        return self._runner.run(
-            self._async.upload_path(local_path, remote_path, sha256=sha256)
-        )
+        return self._runner.run(self._async.upload_path(local_path, remote_path, sha256=sha256))
 
     def download_path(self, remote_path: str, local_path: str | Path) -> None:
         """Stream a session file to a local path."""
@@ -275,7 +294,9 @@ class SandboxSession:
             raise SessionNotInitializedError()
         return self._runner.iter(
             self._async._client.iter_download_file(
-                self._async.session_id, path, chunk_size=chunk_size,
+                self._async.session_id,
+                path,
+                chunk_size=chunk_size,
             )
         )
 
@@ -292,14 +313,19 @@ class SandboxSession:
     # --- Logs ---
 
     def iter_logs(
-        self, *, follow: bool = False, tail: int = 100,
+        self,
+        *,
+        follow: bool = False,
+        tail: int = 100,
     ) -> Iterator[LogEntry]:
         """Iterate over session log entries."""
         if self._async.session_id is None:
             raise SessionNotInitializedError()
         return self._runner.iter(
             self._async._client.iter_session_logs(
-                self._async.session_id, follow=follow, tail=tail,
+                self._async.session_id,
+                follow=follow,
+                tail=tail,
             )
         )
 
@@ -341,7 +367,10 @@ class SandboxSession:
         Returns the tunnel tag that can be passed to :meth:`tunnel_stop`.
         """
         return self._get_sync_iroh().tunnel_forward(
-            remote_host, remote_port, local_port, local_host,
+            remote_host,
+            remote_port,
+            local_port,
+            local_host,
         )
 
     def tunnel_stop(self, tunnel_tag: int) -> None:
@@ -410,16 +439,26 @@ class ManagedSession(SandboxSession):
         iroh_addr: str | None = None,
         allow_internet: bool | None = None,
     ) -> None:
-        self._init_async(AsyncManagedSession(
-            image=image, experiment_id=experiment_id,
-            gateway_url=gateway_url, timeout=timeout,
-            resources=resources, tools=tools, workspace_dir=workspace_dir,
-            idle_timeout_seconds=idle_timeout_seconds,
-            allocation_timeout_seconds=allocation_timeout_seconds,
-            config_env=config_env, profile=profile, api_key=api_key,
-            private_containers=private_containers, mode=mode,
-            iroh_addr=iroh_addr, allow_internet=allow_internet,
-        ))
+        self._init_async(
+            AsyncManagedSession(
+                image=image,
+                experiment_id=experiment_id,
+                gateway_url=gateway_url,
+                timeout=timeout,
+                resources=resources,
+                tools=tools,
+                workspace_dir=workspace_dir,
+                idle_timeout_seconds=idle_timeout_seconds,
+                allocation_timeout_seconds=allocation_timeout_seconds,
+                config_env=config_env,
+                profile=profile,
+                api_key=api_key,
+                private_containers=private_containers,
+                mode=mode,
+                iroh_addr=iroh_addr,
+                allow_internet=allow_internet,
+            )
+        )
 
     @property
     def experiment_id(self) -> str:
@@ -454,11 +493,17 @@ class DevboxSession(SandboxSession):
         private_containers: Iterable[PrivateContainerSpec | dict[str, Any]] | None = None,
         iroh_addr: str | None = None,
     ) -> None:
-        self._init_async(AsyncDevboxSession(
-            image=image, devbox=devbox, profile=profile,
-            gateway_url=gateway_url, timeout=timeout,
-            idle_timeout_seconds=idle_timeout_seconds,
-            allocation_timeout_seconds=allocation_timeout_seconds,
-            api_key=api_key, private_containers=private_containers,
-            iroh_addr=iroh_addr,
-        ))
+        self._init_async(
+            AsyncDevboxSession(
+                image=image,
+                devbox=devbox,
+                profile=profile,
+                gateway_url=gateway_url,
+                timeout=timeout,
+                idle_timeout_seconds=idle_timeout_seconds,
+                allocation_timeout_seconds=allocation_timeout_seconds,
+                api_key=api_key,
+                private_containers=private_containers,
+                iroh_addr=iroh_addr,
+            )
+        )

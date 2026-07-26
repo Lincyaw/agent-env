@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import asyncio
 import threading
-from collections.abc import AsyncIterator, Iterable, Iterator
-from typing import Any, BinaryIO, Coroutine, TypeVar
+from collections.abc import AsyncIterator, Coroutine, Iterable, Iterator, Sequence
+from typing import Any, BinaryIO, TypeVar
 
 import httpx
 from pydantic import BaseModel
@@ -46,7 +46,9 @@ class LoopThread:
     def __init__(self, name: str = "arl-sync") -> None:
         self._loop = asyncio.new_event_loop()
         self._thread = threading.Thread(
-            target=self._loop.run_forever, daemon=True, name=name,
+            target=self._loop.run_forever,
+            daemon=True,
+            name=name,
         )
         self._thread.start()
 
@@ -60,14 +62,24 @@ class LoopThread:
 
     def iter(self, ait: AsyncIterator[_T]) -> Iterator[_T]:
         """Bridge an async iterator to a synchronous one."""
-        anext_fn = ait.__anext__
+
+        async def next_item() -> _T:
+            return await ait.__anext__()
+
         while True:
             try:
-                yield asyncio.run_coroutine_threadsafe(anext_fn(), self._loop).result()
+                yield asyncio.run_coroutine_threadsafe(next_item(), self._loop).result()
             except StopAsyncIteration:
                 break
 
+    @property
+    def is_closed(self) -> bool:
+        return self._loop.is_closed()
+
     def close(self) -> None:
+        """Stop the loop thread. Safe to call more than once."""
+        if self._loop.is_closed():
+            return
         self._loop.call_soon_threadsafe(self._loop.stop)
         self._thread.join(timeout=5)
         self._loop.close()
@@ -116,7 +128,7 @@ class PoolNotReadyError(ArlError):
     """
 
     def __init__(
-        self, pool_name: str, message: str, conditions: list[object] | None = None
+        self, pool_name: str, message: str, conditions: Sequence[object] | None = None
     ) -> None:
         self.pool_name = pool_name
         self.conditions = conditions or []
@@ -174,7 +186,7 @@ def serialize_private_containers(
     return payload
 
 
-def serialize_steps(steps: list[StepRequest | dict[str, Any]]) -> list[dict[str, Any]]:
+def serialize_steps(steps: Sequence[StepRequest | dict[str, Any]]) -> list[dict[str, Any]]:
     return [s.model_dump(by_alias=True) if isinstance(s, StepRequest) else s for s in steps]
 
 
@@ -342,9 +354,7 @@ def prepare_iroh_step(
     )
     work_dir_raw = step.get("workDir") or step.get("work_dir")
     work_dir = str(work_dir_raw) if work_dir_raw else None
-    timeout_raw = (
-        step.get("timeoutSeconds") or step.get("timeout_seconds") or step.get("timeout")
-    )
+    timeout_raw = step.get("timeoutSeconds") or step.get("timeout_seconds") or step.get("timeout")
     timeout_s = int(str(timeout_raw)) if timeout_raw is not None else None
     return cmd, env, work_dir, timeout_s
 
@@ -360,9 +370,7 @@ def parse_iroh_step_result(i: int, step: dict[str, Any], raw: dict[str, Any]) ->
     return StepResult(index=i, name=step.get("name", ""), output=output)
 
 
-def build_iroh_execute_response(
-    session_id: str, results: list[StepResult]
-) -> dict[str, Any]:
+def build_iroh_execute_response(session_id: str, results: list[StepResult]) -> dict[str, Any]:
     """Build the dict for ExecuteResponse.model_validate after iroh exec."""
     return {
         "sessionID": session_id,

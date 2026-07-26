@@ -13,7 +13,7 @@ import json
 import os
 import time
 import uuid
-from collections.abc import AsyncIterator, Awaitable, Callable, Iterable
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Sequence
 from pathlib import Path
 from typing import Any, BinaryIO, TypeVar
 
@@ -119,9 +119,15 @@ class AsyncGatewayClient:
         if not image and not profile:
             raise ValueError("image or profile is required")
         body = build_create_session_body(
-            image, profile, mode, devbox, config_env,
-            idle_timeout_seconds, allocation_timeout_seconds,
-            private_containers, allow_internet,
+            image,
+            profile,
+            mode,
+            devbox,
+            config_env,
+            idle_timeout_seconds,
+            allocation_timeout_seconds,
+            private_containers,
+            allow_internet,
         )
         resp = await self._client.post("/v1/sessions", json=body)
         handle_error(resp)
@@ -160,9 +166,7 @@ class AsyncGatewayClient:
             body["image"] = image
         if profile:
             body["profile"] = profile
-        resp = await self._client.post(
-            f"/v1/sessions/{session_id}/fork", json=body
-        )
+        resp = await self._client.post(f"/v1/sessions/{session_id}/fork", json=body)
         handle_error(resp)
         return ForkSessionResponse.model_validate(resp.json())
 
@@ -188,15 +192,13 @@ class AsyncGatewayClient:
             body["egressCIDRs"] = egress_cidrs
         if egress_fqdns:
             body["egressFQDNs"] = egress_fqdns
-        resp = await self._client.patch(
-            f"/v1/sessions/{session_id}/network-policy", json=body
-        )
+        resp = await self._client.patch(f"/v1/sessions/{session_id}/network-policy", json=body)
         handle_error(resp)
 
     async def execute(
         self,
         session_id: str,
-        steps: list[StepRequest | dict[str, Any]],
+        steps: Sequence[StepRequest | dict[str, Any]],
         trace_id: str | None = None,
         operation_id: str | None = None,
         on_output: Callable[[str, str], None | Awaitable[None]] | None = None,
@@ -218,29 +220,33 @@ class AsyncGatewayClient:
 
         if on_output is not None:
             return await self._execute_sse(
-                session_id, body, {"Accept": "text/event-stream"}, on_output,
+                session_id,
+                body,
+                {"Accept": "text/event-stream"},
+                on_output,
             )
 
         op_id = operation_id or str(uuid.uuid4())
         body["operationID"] = op_id
         deadline = time.monotonic() + recover_timeout if recover_timeout is not None else None
         try:
-            resp = await self._client.post(
-                f"/v1/sessions/{session_id}/execute", json=body
-            )
+            resp = await self._client.post(f"/v1/sessions/{session_id}/execute", json=body)
         except httpx.TransportError as exc:
             if recover:
                 return await self._poll_execute_operation(
-                    session_id, op_id, deadline=deadline, resubmit_body=body,
+                    session_id,
+                    op_id,
+                    deadline=deadline,
+                    resubmit_body=body,
                 )
             if isinstance(exc, httpx.TimeoutException):
-                raise GatewayOperationTimeout(
-                    op_id, "execute operation is still pending"
-                ) from exc
+                raise GatewayOperationTimeout(op_id, "execute operation is still pending") from exc
             raise
         if resp.status_code == 202:
             return await self._poll_execute_operation(
-                session_id, op_id, deadline=deadline,
+                session_id,
+                op_id,
+                deadline=deadline,
             )
         handle_error(resp)
         result = ExecuteResponse.model_validate(resp.json())
@@ -249,11 +255,11 @@ class AsyncGatewayClient:
         return result
 
     async def get_execute_operation(
-        self, session_id: str, operation_id: str,
+        self,
+        session_id: str,
+        operation_id: str,
     ) -> ExecuteOperationInfo:
-        resp = await self._client.get(
-            f"/v1/sessions/{session_id}/operations/{operation_id}"
-        )
+        resp = await self._client.get(f"/v1/sessions/{session_id}/operations/{operation_id}")
         handle_error(resp)
         return ExecuteOperationInfo.model_validate(resp.json())
 
@@ -261,7 +267,7 @@ class AsyncGatewayClient:
         self,
         session_id: str,
         container: str,
-        steps: list[StepRequest | dict[str, Any]],
+        steps: Sequence[StepRequest | dict[str, Any]],
     ) -> ContainerExecuteResponse:
         body: dict[str, Any] = {"steps": serialize_steps(steps)}
         resp = await self._client.post(
@@ -298,7 +304,8 @@ class AsyncGatewayClient:
 
     async def download_file(self, session_id: str, path: str) -> bytes:
         resp = await self._client.post(
-            f"/v1/sessions/{session_id}/download-file", json={"path": path},
+            f"/v1/sessions/{session_id}/download-file",
+            json={"path": path},
         )
         handle_error(resp)
         return resp.content
@@ -368,18 +375,21 @@ class AsyncGatewayClient:
         except httpx.TransportError as exc:
             if recover:
                 raw = await self._poll_operation(
-                    session_id, operation_id,
-                    deadline=deadline, resubmit_url=url, resubmit_body=body,
+                    session_id,
+                    operation_id,
+                    deadline=deadline,
+                    resubmit_url=url,
+                    resubmit_body=body,
                 )
                 return response_model.model_validate(raw)
             if isinstance(exc, httpx.TimeoutException):
-                raise GatewayOperationTimeout(
-                    operation_id, "operation is still pending"
-                ) from exc
+                raise GatewayOperationTimeout(operation_id, "operation is still pending") from exc
             raise
         if resp.status_code == 202:
             raw = await self._poll_operation(
-                session_id, operation_id, deadline=deadline,
+                session_id,
+                operation_id,
+                deadline=deadline,
             )
             return response_model.model_validate(raw)
         handle_error(resp)
@@ -400,8 +410,13 @@ class AsyncGatewayClient:
         op_id = operation_id or str(uuid.uuid4())
         body["operationID"] = op_id
         return await self._submit_operation(
-            session_id, f"/v1/sessions/{session_id}/replay",
-            body, op_id, ReplayResponse, recover, recover_timeout,
+            session_id,
+            f"/v1/sessions/{session_id}/replay",
+            body,
+            op_id,
+            ReplayResponse,
+            recover,
+            recover_timeout,
         )
 
     async def restore(
@@ -416,8 +431,13 @@ class AsyncGatewayClient:
         op_id = operation_id or str(uuid.uuid4())
         body["operationID"] = op_id
         return await self._submit_operation(
-            session_id, f"/v1/sessions/{session_id}/restore",
-            body, op_id, RestoreResponse, recover, recover_timeout,
+            session_id,
+            f"/v1/sessions/{session_id}/restore",
+            body,
+            op_id,
+            RestoreResponse,
+            recover,
+            recover_timeout,
         )
 
     # ------------------------------------------------------------------
@@ -467,7 +487,9 @@ class AsyncGatewayClient:
     ) -> AsyncIterator[LogEntry]:
         params = {"follow": str(follow).lower(), "tail": str(tail)}
         async with self._client.stream(
-            "GET", f"/v1/sessions/{session_id}/logs", params=params,
+            "GET",
+            f"/v1/sessions/{session_id}/logs",
+            params=params,
         ) as resp:
             if resp.status_code >= 400:
                 await resp.aread()
@@ -479,12 +501,17 @@ class AsyncGatewayClient:
                 yield LogEntry.model_validate(json.loads(line))
 
     async def list_session_logs(
-        self, session_id: str, *, tail: int = 100,
+        self,
+        session_id: str,
+        *,
+        tail: int = 100,
     ) -> list[LogEntry]:
         return [
             entry
             async for entry in self.iter_session_logs(
-                session_id, follow=False, tail=tail,
+                session_id,
+                follow=False,
+                tail=tail,
             )
         ]
 
@@ -506,8 +533,16 @@ class AsyncGatewayClient:
         private_containers: Iterable[PrivateContainerSpec | dict[str, Any]] | None = None,
     ) -> None:
         body = build_create_pool_body(
-            name, image, replicas, profile, tools, resources,
-            workspace_dir, config_env, image_locality, private_containers,
+            name,
+            image,
+            replicas,
+            profile,
+            tools,
+            resources,
+            workspace_dir,
+            config_env,
+            image_locality,
+            private_containers,
         )
         resp = await self._client.post("/v1/pools", json=body)
         handle_error(resp)
@@ -558,7 +593,9 @@ class AsyncGatewayClient:
     ) -> AsyncIterator[PoolLogEntry]:
         params = {"follow": str(follow).lower(), "tail": str(tail)}
         async with self._client.stream(
-            "GET", f"/v1/pools/{name}/logs", params=params,
+            "GET",
+            f"/v1/pools/{name}/logs",
+            params=params,
         ) as resp:
             if resp.status_code >= 400:
                 await resp.aread()
@@ -570,9 +607,7 @@ class AsyncGatewayClient:
                 yield PoolLogEntry.model_validate(json.loads(line))
 
     async def list_pool_logs(self, name: str, *, tail: int = 100) -> list[PoolLogEntry]:
-        return [
-            entry async for entry in self.iter_pool_logs(name, follow=False, tail=tail)
-        ]
+        return [entry async for entry in self.iter_pool_logs(name, follow=False, tail=tail)]
 
     # ------------------------------------------------------------------
     # Managed Session APIs
@@ -595,20 +630,29 @@ class AsyncGatewayClient:
         allow_internet: bool | None = None,
     ) -> ManagedSessionInfo:
         body = build_create_managed_session_body(
-            image, experiment_id, profile, mode, devbox, config_env,
-            resources, tools, workspace_dir, idle_timeout_seconds,
-            allocation_timeout_seconds, private_containers, allow_internet,
+            image,
+            experiment_id,
+            profile,
+            mode,
+            devbox,
+            config_env,
+            resources,
+            tools,
+            workspace_dir,
+            idle_timeout_seconds,
+            allocation_timeout_seconds,
+            private_containers,
+            allow_internet,
         )
         resp = await self._client.post("/v1/managed/sessions", json=body)
         handle_error(resp)
         return ManagedSessionInfo.model_validate(resp.json())
 
     async def list_experiment_sessions(
-        self, experiment_id: str,
+        self,
+        experiment_id: str,
     ) -> list[ManagedSessionInfo]:
-        resp = await self._client.get(
-            f"/v1/managed/experiments/{experiment_id}/sessions"
-        )
+        resp = await self._client.get(f"/v1/managed/experiments/{experiment_id}/sessions")
         handle_error(resp)
         return validate_list(resp.json(), ManagedSessionInfo)
 
@@ -618,11 +662,10 @@ class AsyncGatewayClient:
         return validate_list(resp.json(), ExperimentSummary)
 
     async def delete_experiment_info(
-        self, experiment_id: str,
+        self,
+        experiment_id: str,
     ) -> DeleteExperimentResponse:
-        resp = await self._client.delete(
-            f"/v1/managed/experiments/{experiment_id}"
-        )
+        resp = await self._client.delete(f"/v1/managed/experiments/{experiment_id}")
         handle_error(resp)
         result = DeleteExperimentResponse.model_validate(resp.json())
         if result.error:
@@ -659,7 +702,10 @@ class AsyncGatewayClient:
             pool=float(timeout or 1800),
         )
         resp = await self._client.post(
-            "/v1/build", data=data, files=files, timeout=build_timeout,
+            "/v1/build",
+            data=data,
+            files=files,
+            timeout=build_timeout,
         )
         handle_error(resp)
         result = BuildResponse.model_validate(resp.json())
@@ -735,22 +781,16 @@ class AsyncGatewayClient:
             if op is not None:
                 status = op.status.lower()
                 if status == OPERATION_STATUS_ERROR:
-                    raise GatewayError(
-                        500, op.error or f"operation {operation_id} failed"
-                    )
+                    raise GatewayError(500, op.error or f"operation {operation_id} failed")
                 if op.result is not None:
                     return op.result
                 if status == OPERATION_STATUS_DONE:
-                    raise GatewayError(
-                        500, f"operation {operation_id} finished without result"
-                    )
+                    raise GatewayError(500, f"operation {operation_id} finished without result")
             sleep_for = OPERATION_POLL_INTERVAL_SECONDS
             if deadline is not None:
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
-                    raise GatewayOperationTimeout(
-                        operation_id, "operation is still pending"
-                    )
+                    raise GatewayOperationTimeout(operation_id, "operation is still pending")
                 sleep_for = min(sleep_for, remaining)
             await asyncio.sleep(sleep_for)
 
@@ -812,14 +852,20 @@ class AsyncGatewayClient:
                 elif line == "":
                     if event_type and data_buf:
                         await self._dispatch_sse(
-                            event_type, data_buf, results, on_output,
+                            event_type,
+                            data_buf,
+                            results,
+                            on_output,
                         )
                     event_type = ""
                     data_buf = ""
 
             if event_type and data_buf:
                 await self._dispatch_sse(
-                    event_type, data_buf, results, on_output,
+                    event_type,
+                    data_buf,
+                    results,
+                    on_output,
                 )
 
         total_ms = sum(r.duration_ms for r in results)

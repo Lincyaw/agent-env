@@ -735,7 +735,10 @@ def test_send_stdin(args: argparse.Namespace) -> None:
 
 
 def test_iroh_direct_connect(args: argparse.Namespace) -> None:
-    """Test iroh QUIC direct-connect: ping, execute, stat, write, read on a single control stream."""
+    """Test iroh QUIC direct-connect.
+
+    Covers ping, execute, stat, write, and read on a single control stream.
+    """
     import asyncio
     import struct
 
@@ -743,7 +746,7 @@ def test_iroh_direct_connect(args: argparse.Namespace) -> None:
         import iroh
         import iroh.iroh_ffi
 
-        iroh.iroh_ffi.uniffi_set_event_loop(asyncio.get_running_loop())
+        iroh.iroh_ffi.uniffi_set_event_loop(asyncio.get_running_loop())  # type: ignore[arg-type]
 
         from arl.pb import executor_v2_pb2 as pb
 
@@ -754,11 +757,11 @@ def test_iroh_direct_connect(args: argparse.Namespace) -> None:
 
         async def send_typed(send: object, msg_type: int, data: bytes) -> None:
             header = struct.pack(">BI", msg_type, len(data))
-            await send.write_all(header + data)  # type: ignore[union-attr]
+            await send.write_all(header + data)  # type: ignore[attr-defined]
 
         async def recv_typed(recv: object) -> tuple[int, bytes]:
-            header = await recv.read_exact(5)  # type: ignore[union-attr]
-            return header[0], await recv.read_exact(struct.unpack(">I", header[1:5])[0])  # type: ignore[union-attr]
+            header = await recv.read_exact(5)  # type: ignore[attr-defined]
+            return header[0], await recv.read_exact(struct.unpack(">I", header[1:5])[0])  # type: ignore[attr-defined]
 
         experiment_id = f"iroh-dc-{int(time.time())}"
         gw = GatewayClient(base_url=args.gateway_url)
@@ -769,9 +772,7 @@ def test_iroh_direct_connect(args: argparse.Namespace) -> None:
             return tag_counter[0]
 
         try:
-            info = gw.create_managed_session(
-                image=args.pool_image, experiment_id=experiment_id
-            )
+            info = gw.create_managed_session(image=args.pool_image, experiment_id=experiment_id)
             sid = info.id
             iroh_addr = info.iroh_addr
             if not iroh_addr:
@@ -839,20 +840,8 @@ def test_iroh_direct_connect(args: argparse.Namespace) -> None:
                 if not resp.HasField("write"):
                     raise AssertionError(f"write failed: {resp}")
 
-                # Stat
-                tag = next_tag()
-                req = pb.Request(tag=tag)
-                req.stat.CopyFrom(pb.StatRequest(path="dc_test.txt"))
-                await send_typed(send, MSG_REQUEST, req.SerializeToString())
-                _, data = await recv_typed(recv)
-                resp = pb.Response()
-                resp.ParseFromString(data)
-                if not resp.HasField("stat"):
-                    raise AssertionError(f"stat failed: {resp}")
-                if resp.stat.size_bytes != len(content):
-                    raise AssertionError(f"stat size mismatch: {resp.stat.size_bytes}")
-
-                # Read file
+                # Read file. ReadResponse carries the size and digest; the
+                # bytes follow as raw length-prefixed frames.
                 tag = next_tag()
                 req = pb.Request(tag=tag)
                 req.read.CopyFrom(pb.ReadRequest(path="dc_test.txt"))
@@ -862,13 +851,15 @@ def test_iroh_direct_connect(args: argparse.Namespace) -> None:
                 resp.ParseFromString(data)
                 if not resp.HasField("read"):
                     raise AssertionError(f"read failed: {resp}")
+                if resp.read.size_bytes != len(content):
+                    raise AssertionError(f"read size mismatch: {resp.read.size_bytes}")
                 file_data = bytearray()
                 while True:
-                    lb = await recv.read_exact(4)  # type: ignore[union-attr]
+                    lb = await recv.read_exact(4)  # type: ignore[attr-defined]
                     cl = struct.unpack(">I", bytes(lb))[0]
                     if cl == 0:
                         break
-                    file_data.extend(await recv.read_exact(cl))  # type: ignore[union-attr]
+                    file_data.extend(await recv.read_exact(cl))  # type: ignore[attr-defined]
                 if bytes(file_data) != content:
                     raise AssertionError(f"read data mismatch: {file_data!r}")
 
@@ -895,7 +886,7 @@ def test_iroh_tunnel(args: argparse.Namespace) -> None:
         import iroh
         import iroh.iroh_ffi
 
-        iroh.iroh_ffi.uniffi_set_event_loop(asyncio.get_running_loop())
+        iroh.iroh_ffi.uniffi_set_event_loop(asyncio.get_running_loop())  # type: ignore[arg-type]
 
         from arl.pb import executor_v2_pb2 as pb
 
@@ -905,13 +896,13 @@ def test_iroh_tunnel(args: argparse.Namespace) -> None:
 
         async def send_typed(send: object, msg_type: int, data: bytes) -> None:
             header = struct.pack(">BI", msg_type, len(data))
-            await send.write_all(header + data)  # type: ignore[union-attr]
+            await send.write_all(header + data)  # type: ignore[attr-defined]
 
         async def recv_typed(recv: object) -> tuple[int, bytes]:
-            header = await recv.read_exact(5)  # type: ignore[union-attr]
+            header = await recv.read_exact(5)  # type: ignore[attr-defined]
             msg_type = header[0]
             length = struct.unpack(">I", header[1:5])[0]
-            data = await recv.read_exact(length)  # type: ignore[union-attr]
+            data = await recv.read_exact(length)  # type: ignore[attr-defined]
             return msg_type, data
 
         experiment_id = f"iroh-tunnel-{int(time.time())}"
@@ -951,20 +942,25 @@ def test_iroh_tunnel(args: argparse.Namespace) -> None:
                 # Start TCP echo server in sandbox
                 tag = next_tag()
                 req = pb.Request(tag=tag)
-                req.spawn.CopyFrom(pb.SpawnRequest(command=[
-                    "python3", "-c",
-                    "import socket\n"
-                    "s=socket.socket()\n"
-                    "s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)\n"
-                    "s.bind(('0.0.0.0',9999))\n"
-                    "s.listen(1)\n"
-                    "print('LISTENING',flush=True)\n"
-                    "c,_=s.accept()\n"
-                    "d=c.recv(1024)\n"
-                    "c.sendall(b'ECHO:'+d)\n"
-                    "c.close()\n"
-                    "s.close()\n",
-                ]))
+                req.spawn.CopyFrom(
+                    pb.SpawnRequest(
+                        command=[
+                            "python3",
+                            "-c",
+                            "import socket\n"
+                            "s=socket.socket()\n"
+                            "s.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)\n"
+                            "s.bind(('0.0.0.0',9999))\n"
+                            "s.listen(1)\n"
+                            "print('LISTENING',flush=True)\n"
+                            "c,_=s.accept()\n"
+                            "d=c.recv(1024)\n"
+                            "c.sendall(b'ECHO:'+d)\n"
+                            "c.close()\n"
+                            "s.close()\n",
+                        ]
+                    )
+                )
                 await send_typed(send, MSG_REQUEST, req.SerializeToString())
 
                 while True:

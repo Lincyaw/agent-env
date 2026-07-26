@@ -241,7 +241,7 @@ class ArlEnvironment(BaseEnvironment):
     def _resolve_image(self) -> str | None:
         """Resolve a pre-built image reference, or None if unavailable."""
         if self.task_env_config.docker_image:
-            return self.task_env_config.docker_image
+            return str(self.task_env_config.docker_image)
         if self._image_registry:
             name = self.environment_name
             prefix = self._image_prefix
@@ -446,13 +446,15 @@ class ArlEnvironment(BaseEnvironment):
         if result is None:
             return ExecResult(stdout="", stderr="", return_code=-1)
 
-        self.arl.steps.append(ArlStepSnapshot(
-            step_index=result.index,
-            snapshot_id=result.snapshot_id,
-            name=result.name,
-            exit_code=result.output.exit_code,
-            duration_ms=result.duration_ms,
-        ))
+        self.arl.steps.append(
+            ArlStepSnapshot(
+                step_index=result.index,
+                snapshot_id=result.snapshot_id,
+                name=result.name,
+                exit_code=result.output.exit_code,
+                duration_ms=result.duration_ms,
+            )
+        )
 
         return ExecResult(
             stdout=result.output.stdout,

@@ -16,9 +16,11 @@ from arl import (
 
 
 def _client_with_handler(handler: Callable[[httpx.Request], httpx.Response]) -> GatewayClient:
+    # GatewayClient is a sync facade over AsyncGatewayClient, so the mock
+    # transport belongs on the async client it delegates to. Closing the
+    # facade here would tear down the loop thread the tests still need.
     client = GatewayClient(base_url="http://gateway.test")
-    client.close()
-    client._client = httpx.Client(
+    client._async._client = httpx.AsyncClient(
         base_url="http://gateway.test",
         transport=httpx.MockTransport(handler),
     )
@@ -341,7 +343,10 @@ def test_replay_response_is_typed() -> None:
         assert request.method == "POST"
         assert request.url.path == "/v1/sessions/target/replay"
         body = json.loads(request.content)
-        assert body == {"sourceSessionID": "source", "upToStep": 3}
+        assert body["sourceSessionID"] == "source"
+        assert body["upToStep"] == 3
+        # Idempotency key for execute-recovery; generated per call.
+        assert body["operationID"]
         return httpx.Response(200, json={"stepsReplayed": 4, "errors": 1})
 
     with _client_with_handler(handler) as client:

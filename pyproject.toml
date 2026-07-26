@@ -19,7 +19,7 @@ dependencies = [
     "pyyaml>=6.0.3",
     "urllib3>=2.3.0",
     "arl-env",
-    "websockets>=16.0",
+    "websockets>=12.0",
     "typer>=0.16.0",
 ]
 
@@ -61,6 +61,12 @@ select = [
     "SIM",    # flake8-simplify
 ]
 
+[tool.ruff.lint.per-file-ignores]
+# Example scripts spell wire-protocol constants (ALPN, MSG_REQUEST, ...) in
+# caps inside the test function that uses them; that reads better than the
+# lowercase pep8-naming wants for locals.
+"examples/python/*.py" = ["N806"]
+
 [tool.ruff.format]
 quote-style = "double"
 indent-style = "space"
@@ -74,10 +80,23 @@ plugins = ["pydantic.mypy"]
 exclude = [
     ".github/skills/",
     "hack/",
+    # protoc output: the runtime builder injects the message classes, so the
+    # .py reads as undefined names to a static checker. The generated
+    # executor_v2_pb2.pyi beside it is what mypy type-checks callers against.
+    "sdk/python/arl/arl/pb/.*_pb2\\.py$",
 ]
 
 [[tool.mypy.overrides]]
 module = ["kubernetes.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+module = ["google.protobuf.*"]
+ignore_missing_imports = true
+
+# Optional extra: `pip install arl-env[harbor]`. Absent in the default env.
+[[tool.mypy.overrides]]
+module = ["harbor", "harbor.*"]
 ignore_missing_imports = true
 
 [[tool.mypy.overrides]]

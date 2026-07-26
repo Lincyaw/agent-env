@@ -1,8 +1,13 @@
 """Base exception hierarchy for the ARL SDK."""
 
 
-class ArlError(Exception):
-    """Base exception for all ARL SDK errors."""
+class ArlError(RuntimeError):
+    """Base exception for all ARL SDK errors.
+
+    Derives from :class:`RuntimeError` because the SDK raised bare
+    ``RuntimeError`` before this hierarchy existed; callers that still catch
+    ``RuntimeError`` keep working.
+    """
 
 
 class SessionNotInitializedError(ArlError):
