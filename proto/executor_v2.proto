@@ -1,5 +1,9 @@
 syntax = "proto3";
 
+// Single source of truth for the executor wire protocol, shared by the Rust
+// executor agent (server), the Go gateway client, and the Python SDK. All
+// three are generated from this file by `make generate`; there is no second
+// copy to drift against.
 package arl.executor.v2;
 
 option go_package = "github.com/Lincyaw/agent-env/pkg/pb/executorv2";
@@ -24,6 +28,7 @@ message Request {
     ListTunnelsRequest  list_tunnels  = 15;
     CheckpointDownloadRequest checkpoint_download = 16;
     CheckpointListRequest     checkpoint_list     = 17;
+    AuthRequest         auth          = 18;
   }
 }
 
@@ -46,10 +51,13 @@ message Response {
     ListTunnelsResponse  list_tunnels  = 16;
     CheckpointDownloadResponse checkpoint_download = 17;
     CheckpointListResponse     checkpoint_list     = 18;
+    AuthResponse         auth          = 19;
   }
 }
 
 // Event is a server-pushed frame for asynchronous notifications.
+// Four event types only; tunnel and file data flow as raw bytes on
+// dedicated streams, not as protobuf Events.
 message Event {
   uint32 tag = 1;
   oneof kind {
@@ -61,15 +69,20 @@ message Event {
 }
 
 // ---------------------------------------------------------------------------
-// 1. ping
+// 1. ping — health check
 // ---------------------------------------------------------------------------
 
 message PingRequest {}
 
-message PingResponse {}
+message PingResponse {
+  // JSON published by the executor's iroh endpoint:
+  // {"id", "relay_url", "direct_addresses"}. Empty when the endpoint has not
+  // finished binding, or when this executor predates the field.
+  string iroh_addr = 1;
+}
 
 // ---------------------------------------------------------------------------
-// 2. spawn
+// 2. spawn — create a process
 // ---------------------------------------------------------------------------
 
 message SpawnRequest {
@@ -89,7 +102,7 @@ message SpawnResponse {
 }
 
 // ---------------------------------------------------------------------------
-// 3. write_in
+// 3. write_in — write bytes to process stdin
 // ---------------------------------------------------------------------------
 
 message WriteInRequest {
@@ -100,7 +113,7 @@ message WriteInRequest {
 message WriteInResponse {}
 
 // ---------------------------------------------------------------------------
-// 4. signal
+// 4. signal — send signal to process
 // ---------------------------------------------------------------------------
 
 message SignalRequest {
@@ -111,7 +124,7 @@ message SignalRequest {
 message SignalResponse {}
 
 // ---------------------------------------------------------------------------
-// 5. resize
+// 5. resize — change PTY window size
 // ---------------------------------------------------------------------------
 
 message ResizeRequest {
@@ -123,7 +136,12 @@ message ResizeRequest {
 message ResizeResponse {}
 
 // ---------------------------------------------------------------------------
-// 6. read
+// 6. read — read file contents
+//
+// The ReadResponse confirms the request. Actual file bytes follow on the
+// underlying transport:
+//   QUIC  — uni stream tagged [0x03][tag:4B], raw bytes after header
+//   Unix  — [4B big-endian length][raw bytes] chunks, [4B zero] terminator
 // ---------------------------------------------------------------------------
 
 message ReadRequest {
@@ -136,7 +154,12 @@ message ReadResponse {
 }
 
 // ---------------------------------------------------------------------------
-// 7. write
+// 7. write — write file contents
+//
+// The client sends WriteRequest, then pushes file bytes on the transport:
+//   QUIC  — uni stream tagged [0x04][tag:4B], raw bytes after header
+//   Unix  — [4B big-endian length][raw bytes] chunks, [4B zero] terminator
+// The server replies with WriteResponse after all bytes are received.
 // ---------------------------------------------------------------------------
 
 message WriteRequest {
@@ -151,7 +174,11 @@ message WriteResponse {
 }
 
 // ---------------------------------------------------------------------------
-// 8. tunnel
+// 8. tunnel — TCP proxy (bidirectional stream)
+//
+// After TunnelResponse, raw bidirectional bytes flow on the transport:
+//   QUIC  — bidi stream tagged [0x05][tag:4B]
+//   Unix  — [4B big-endian length][raw bytes] framed, closing = [4B zero]
 // ---------------------------------------------------------------------------
 
 message TunnelRequest {
@@ -162,7 +189,7 @@ message TunnelRequest {
 message TunnelResponse {}
 
 // ---------------------------------------------------------------------------
-// 9. watch
+// 9. watch — subscribe to filesystem change events
 // ---------------------------------------------------------------------------
 
 message WatchRequest {
@@ -176,7 +203,7 @@ message WatchResponse {
 }
 
 // ---------------------------------------------------------------------------
-// 10. unwatch
+// 10. unwatch — unsubscribe from filesystem events
 // ---------------------------------------------------------------------------
 
 message UnwatchRequest {
@@ -186,7 +213,7 @@ message UnwatchRequest {
 message UnwatchResponse {}
 
 // ---------------------------------------------------------------------------
-// 11. close_tunnel
+// 11. close_tunnel — close an active tunnel
 // ---------------------------------------------------------------------------
 
 message CloseTunnelRequest {
@@ -196,7 +223,7 @@ message CloseTunnelRequest {
 message CloseTunnelResponse {}
 
 // ---------------------------------------------------------------------------
-// 12. list_tunnels
+// 12. list_tunnels — list active tunnels
 // ---------------------------------------------------------------------------
 
 message ListTunnelsRequest {}
@@ -212,20 +239,23 @@ message TunnelInfo {
 }
 
 // ---------------------------------------------------------------------------
-// 13. checkpoint_download
+// 13. checkpoint_download — download combined checkpoint tar
+//
+// After CheckpointDownloadResponse, the tar bytes flow as raw binary:
+//   Unix  — [4B big-endian length][raw bytes] chunks, [4B zero] terminator
 // ---------------------------------------------------------------------------
 
 message CheckpointDownloadRequest {
-  int32 through = 1;
-  bool single_step = 2;
+  int32 through = 1;      // combine steps 1..through into a single tar
+  bool single_step = 2;   // if true, only tar the step specified by `through`
 }
 
 message CheckpointDownloadResponse {
-  int64 size_bytes = 1;
+  int64 size_bytes = 1;  // total tar size (-1 if unknown/streamed)
 }
 
 // ---------------------------------------------------------------------------
-// 14. checkpoint_list
+// 14. checkpoint_list — list available checkpoint steps
 // ---------------------------------------------------------------------------
 
 message CheckpointListRequest {}
@@ -235,7 +265,27 @@ message CheckpointListResponse {
 }
 
 // ---------------------------------------------------------------------------
-// ErrorResponse
+// 15. auth — authenticate a connection
+//
+// Trust on first use: the first Auth on a fresh executor claims the token,
+// every later Auth must present the same one. A warm sandbox runs no user
+// code (the container command is the agent itself, not the image entrypoint),
+// so the gateway claims the token before anything untrusted can run.
+//
+// Required on remote transports (TCP, QUIC) before any other request. The
+// Unix socket is exempt: its peers are already inside the container.
+
+message AuthRequest {
+  string token = 1;
+}
+
+message AuthResponse {
+  // True when this call claimed the token, false when it matched an existing
+  // claim. Lets the gateway detect a sandbox somebody else claimed first.
+  bool claimed = 1;
+}
+
+// ErrorResponse — returned in the Response.error slot on failure
 // ---------------------------------------------------------------------------
 
 message ErrorResponse {
@@ -244,7 +294,7 @@ message ErrorResponse {
 }
 
 // ---------------------------------------------------------------------------
-// Events
+// Events (server → client, pushed asynchronously)
 // ---------------------------------------------------------------------------
 
 message StdoutEvent {

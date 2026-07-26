@@ -4,6 +4,11 @@
 // 	protoc        v3.21.12
 // source: proto/executor_v2.proto
 
+// Single source of truth for the executor wire protocol, shared by the Rust
+// executor agent (server), the Go gateway client, and the Python SDK. All
+// three are generated from this file by `make generate`; there is no second
+// copy to drift against.
+
 package executorv2
 
 import (
@@ -43,6 +48,7 @@ type Request struct {
 	//	*Request_ListTunnels
 	//	*Request_CheckpointDownload
 	//	*Request_CheckpointList
+	//	*Request_Auth
 	Kind          isRequest_Kind `protobuf_oneof:"kind"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -218,6 +224,15 @@ func (x *Request) GetCheckpointList() *CheckpointListRequest {
 	return nil
 }
 
+func (x *Request) GetAuth() *AuthRequest {
+	if x != nil {
+		if x, ok := x.Kind.(*Request_Auth); ok {
+			return x.Auth
+		}
+	}
+	return nil
+}
+
 type isRequest_Kind interface {
 	isRequest_Kind()
 }
@@ -278,6 +293,10 @@ type Request_CheckpointList struct {
 	CheckpointList *CheckpointListRequest `protobuf:"bytes,17,opt,name=checkpoint_list,json=checkpointList,proto3,oneof"`
 }
 
+type Request_Auth struct {
+	Auth *AuthRequest `protobuf:"bytes,18,opt,name=auth,proto3,oneof"`
+}
+
 func (*Request_Ping) isRequest_Kind() {}
 
 func (*Request_Spawn) isRequest_Kind() {}
@@ -306,6 +325,8 @@ func (*Request_CheckpointDownload) isRequest_Kind() {}
 
 func (*Request_CheckpointList) isRequest_Kind() {}
 
+func (*Request_Auth) isRequest_Kind() {}
+
 // Response is the top-level server-to-client reply frame.
 type Response struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
@@ -327,6 +348,7 @@ type Response struct {
 	//	*Response_ListTunnels
 	//	*Response_CheckpointDownload
 	//	*Response_CheckpointList
+	//	*Response_Auth
 	Kind          isResponse_Kind `protobuf_oneof:"kind"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -511,6 +533,15 @@ func (x *Response) GetCheckpointList() *CheckpointListResponse {
 	return nil
 }
 
+func (x *Response) GetAuth() *AuthResponse {
+	if x != nil {
+		if x, ok := x.Kind.(*Response_Auth); ok {
+			return x.Auth
+		}
+	}
+	return nil
+}
+
 type isResponse_Kind interface {
 	isResponse_Kind()
 }
@@ -575,6 +606,10 @@ type Response_CheckpointList struct {
 	CheckpointList *CheckpointListResponse `protobuf:"bytes,18,opt,name=checkpoint_list,json=checkpointList,proto3,oneof"`
 }
 
+type Response_Auth struct {
+	Auth *AuthResponse `protobuf:"bytes,19,opt,name=auth,proto3,oneof"`
+}
+
 func (*Response_Ping) isResponse_Kind() {}
 
 func (*Response_Spawn) isResponse_Kind() {}
@@ -605,7 +640,11 @@ func (*Response_CheckpointDownload) isResponse_Kind() {}
 
 func (*Response_CheckpointList) isResponse_Kind() {}
 
+func (*Response_Auth) isResponse_Kind() {}
+
 // Event is a server-pushed frame for asynchronous notifications.
+// Four event types only; tunnel and file data flow as raw bytes on
+// dedicated streams, not as protobuf Events.
 type Event struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	Tag   uint32                 `protobuf:"varint,1,opt,name=tag,proto3" json:"tag,omitempty"`
@@ -765,7 +804,11 @@ func (*PingRequest) Descriptor() ([]byte, []int) {
 }
 
 type PingResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// JSON published by the executor's iroh endpoint:
+	// {"id", "relay_url", "direct_addresses"}. Empty when the endpoint has not
+	// finished binding, or when this executor predates the field.
+	IrohAddr      string `protobuf:"bytes,1,opt,name=iroh_addr,json=irohAddr,proto3" json:"iroh_addr,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -798,6 +841,13 @@ func (x *PingResponse) ProtoReflect() protoreflect.Message {
 // Deprecated: Use PingResponse.ProtoReflect.Descriptor instead.
 func (*PingResponse) Descriptor() ([]byte, []int) {
 	return file_proto_executor_v2_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *PingResponse) GetIrohAddr() string {
+	if x != nil {
+		return x.IrohAddr
+	}
+	return ""
 }
 
 type SpawnRequest struct {
@@ -1926,8 +1976,8 @@ func (x *TunnelInfo) GetPort() uint32 {
 
 type CheckpointDownloadRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Through       int32                  `protobuf:"varint,1,opt,name=through,proto3" json:"through,omitempty"`
-	SingleStep    bool                   `protobuf:"varint,2,opt,name=single_step,json=singleStep,proto3" json:"single_step,omitempty"`
+	Through       int32                  `protobuf:"varint,1,opt,name=through,proto3" json:"through,omitempty"`                         // combine steps 1..through into a single tar
+	SingleStep    bool                   `protobuf:"varint,2,opt,name=single_step,json=singleStep,proto3" json:"single_step,omitempty"` // if true, only tar the step specified by `through`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1978,7 +2028,7 @@ func (x *CheckpointDownloadRequest) GetSingleStep() bool {
 
 type CheckpointDownloadResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	SizeBytes     int64                  `protobuf:"varint,1,opt,name=size_bytes,json=sizeBytes,proto3" json:"size_bytes,omitempty"`
+	SizeBytes     int64                  `protobuf:"varint,1,opt,name=size_bytes,json=sizeBytes,proto3" json:"size_bytes,omitempty"` // total tar size (-1 if unknown/streamed)
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2100,6 +2150,96 @@ func (x *CheckpointListResponse) GetSteps() []int32 {
 	return nil
 }
 
+type AuthRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Token         string                 `protobuf:"bytes,1,opt,name=token,proto3" json:"token,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AuthRequest) Reset() {
+	*x = AuthRequest{}
+	mi := &file_proto_executor_v2_proto_msgTypes[32]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AuthRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AuthRequest) ProtoMessage() {}
+
+func (x *AuthRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_executor_v2_proto_msgTypes[32]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AuthRequest.ProtoReflect.Descriptor instead.
+func (*AuthRequest) Descriptor() ([]byte, []int) {
+	return file_proto_executor_v2_proto_rawDescGZIP(), []int{32}
+}
+
+func (x *AuthRequest) GetToken() string {
+	if x != nil {
+		return x.Token
+	}
+	return ""
+}
+
+type AuthResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// True when this call claimed the token, false when it matched an existing
+	// claim. Lets the gateway detect a sandbox somebody else claimed first.
+	Claimed       bool `protobuf:"varint,1,opt,name=claimed,proto3" json:"claimed,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AuthResponse) Reset() {
+	*x = AuthResponse{}
+	mi := &file_proto_executor_v2_proto_msgTypes[33]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AuthResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AuthResponse) ProtoMessage() {}
+
+func (x *AuthResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_proto_executor_v2_proto_msgTypes[33]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AuthResponse.ProtoReflect.Descriptor instead.
+func (*AuthResponse) Descriptor() ([]byte, []int) {
+	return file_proto_executor_v2_proto_rawDescGZIP(), []int{33}
+}
+
+func (x *AuthResponse) GetClaimed() bool {
+	if x != nil {
+		return x.Claimed
+	}
+	return false
+}
+
 type ErrorResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Code          int32                  `protobuf:"varint,1,opt,name=code,proto3" json:"code,omitempty"`
@@ -2110,7 +2250,7 @@ type ErrorResponse struct {
 
 func (x *ErrorResponse) Reset() {
 	*x = ErrorResponse{}
-	mi := &file_proto_executor_v2_proto_msgTypes[32]
+	mi := &file_proto_executor_v2_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2122,7 +2262,7 @@ func (x *ErrorResponse) String() string {
 func (*ErrorResponse) ProtoMessage() {}
 
 func (x *ErrorResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_executor_v2_proto_msgTypes[32]
+	mi := &file_proto_executor_v2_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2135,7 +2275,7 @@ func (x *ErrorResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ErrorResponse.ProtoReflect.Descriptor instead.
 func (*ErrorResponse) Descriptor() ([]byte, []int) {
-	return file_proto_executor_v2_proto_rawDescGZIP(), []int{32}
+	return file_proto_executor_v2_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *ErrorResponse) GetCode() int32 {
@@ -2162,7 +2302,7 @@ type StdoutEvent struct {
 
 func (x *StdoutEvent) Reset() {
 	*x = StdoutEvent{}
-	mi := &file_proto_executor_v2_proto_msgTypes[33]
+	mi := &file_proto_executor_v2_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2174,7 +2314,7 @@ func (x *StdoutEvent) String() string {
 func (*StdoutEvent) ProtoMessage() {}
 
 func (x *StdoutEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_executor_v2_proto_msgTypes[33]
+	mi := &file_proto_executor_v2_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2187,7 +2327,7 @@ func (x *StdoutEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StdoutEvent.ProtoReflect.Descriptor instead.
 func (*StdoutEvent) Descriptor() ([]byte, []int) {
-	return file_proto_executor_v2_proto_rawDescGZIP(), []int{33}
+	return file_proto_executor_v2_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *StdoutEvent) GetProcessTag() uint32 {
@@ -2214,7 +2354,7 @@ type StderrEvent struct {
 
 func (x *StderrEvent) Reset() {
 	*x = StderrEvent{}
-	mi := &file_proto_executor_v2_proto_msgTypes[34]
+	mi := &file_proto_executor_v2_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2226,7 +2366,7 @@ func (x *StderrEvent) String() string {
 func (*StderrEvent) ProtoMessage() {}
 
 func (x *StderrEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_executor_v2_proto_msgTypes[34]
+	mi := &file_proto_executor_v2_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2239,7 +2379,7 @@ func (x *StderrEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StderrEvent.ProtoReflect.Descriptor instead.
 func (*StderrEvent) Descriptor() ([]byte, []int) {
-	return file_proto_executor_v2_proto_rawDescGZIP(), []int{34}
+	return file_proto_executor_v2_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *StderrEvent) GetProcessTag() uint32 {
@@ -2266,7 +2406,7 @@ type ExitEvent struct {
 
 func (x *ExitEvent) Reset() {
 	*x = ExitEvent{}
-	mi := &file_proto_executor_v2_proto_msgTypes[35]
+	mi := &file_proto_executor_v2_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2278,7 +2418,7 @@ func (x *ExitEvent) String() string {
 func (*ExitEvent) ProtoMessage() {}
 
 func (x *ExitEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_executor_v2_proto_msgTypes[35]
+	mi := &file_proto_executor_v2_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2291,7 +2431,7 @@ func (x *ExitEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ExitEvent.ProtoReflect.Descriptor instead.
 func (*ExitEvent) Descriptor() ([]byte, []int) {
-	return file_proto_executor_v2_proto_rawDescGZIP(), []int{35}
+	return file_proto_executor_v2_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *ExitEvent) GetProcessTag() uint32 {
@@ -2319,7 +2459,7 @@ type FsChangeEvent struct {
 
 func (x *FsChangeEvent) Reset() {
 	*x = FsChangeEvent{}
-	mi := &file_proto_executor_v2_proto_msgTypes[36]
+	mi := &file_proto_executor_v2_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2331,7 +2471,7 @@ func (x *FsChangeEvent) String() string {
 func (*FsChangeEvent) ProtoMessage() {}
 
 func (x *FsChangeEvent) ProtoReflect() protoreflect.Message {
-	mi := &file_proto_executor_v2_proto_msgTypes[36]
+	mi := &file_proto_executor_v2_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2344,7 +2484,7 @@ func (x *FsChangeEvent) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use FsChangeEvent.ProtoReflect.Descriptor instead.
 func (*FsChangeEvent) Descriptor() ([]byte, []int) {
-	return file_proto_executor_v2_proto_rawDescGZIP(), []int{36}
+	return file_proto_executor_v2_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *FsChangeEvent) GetWatchId() uint32 {
@@ -2372,7 +2512,7 @@ var File_proto_executor_v2_proto protoreflect.FileDescriptor
 
 const file_proto_executor_v2_proto_rawDesc = "" +
 	"\n" +
-	"\x17proto/executor_v2.proto\x12\x0farl.executor.v2\"\x9f\a\n" +
+	"\x17proto/executor_v2.proto\x12\x0farl.executor.v2\"\xd3\a\n" +
 	"\aRequest\x12\x10\n" +
 	"\x03tag\x18\x01 \x01(\rR\x03tag\x122\n" +
 	"\x04ping\x18\x02 \x01(\v2\x1c.arl.executor.v2.PingRequestH\x00R\x04ping\x125\n" +
@@ -2388,8 +2528,9 @@ const file_proto_executor_v2_proto_rawDesc = "" +
 	"\fclose_tunnel\x18\x0e \x01(\v2#.arl.executor.v2.CloseTunnelRequestH\x00R\vcloseTunnel\x12H\n" +
 	"\flist_tunnels\x18\x0f \x01(\v2#.arl.executor.v2.ListTunnelsRequestH\x00R\vlistTunnels\x12]\n" +
 	"\x13checkpoint_download\x18\x10 \x01(\v2*.arl.executor.v2.CheckpointDownloadRequestH\x00R\x12checkpointDownload\x12Q\n" +
-	"\x0fcheckpoint_list\x18\x11 \x01(\v2&.arl.executor.v2.CheckpointListRequestH\x00R\x0echeckpointListB\x06\n" +
-	"\x04kind\"\xe6\a\n" +
+	"\x0fcheckpoint_list\x18\x11 \x01(\v2&.arl.executor.v2.CheckpointListRequestH\x00R\x0echeckpointList\x122\n" +
+	"\x04auth\x18\x12 \x01(\v2\x1c.arl.executor.v2.AuthRequestH\x00R\x04authB\x06\n" +
+	"\x04kind\"\x9b\b\n" +
 	"\bResponse\x12\x10\n" +
 	"\x03tag\x18\x01 \x01(\rR\x03tag\x123\n" +
 	"\x04ping\x18\x02 \x01(\v2\x1d.arl.executor.v2.PingResponseH\x00R\x04ping\x126\n" +
@@ -2406,7 +2547,8 @@ const file_proto_executor_v2_proto_rawDesc = "" +
 	"\fclose_tunnel\x18\x0f \x01(\v2$.arl.executor.v2.CloseTunnelResponseH\x00R\vcloseTunnel\x12I\n" +
 	"\flist_tunnels\x18\x10 \x01(\v2$.arl.executor.v2.ListTunnelsResponseH\x00R\vlistTunnels\x12^\n" +
 	"\x13checkpoint_download\x18\x11 \x01(\v2+.arl.executor.v2.CheckpointDownloadResponseH\x00R\x12checkpointDownload\x12R\n" +
-	"\x0fcheckpoint_list\x18\x12 \x01(\v2'.arl.executor.v2.CheckpointListResponseH\x00R\x0echeckpointListB\x06\n" +
+	"\x0fcheckpoint_list\x18\x12 \x01(\v2'.arl.executor.v2.CheckpointListResponseH\x00R\x0echeckpointList\x123\n" +
+	"\x04auth\x18\x13 \x01(\v2\x1d.arl.executor.v2.AuthResponseH\x00R\x04authB\x06\n" +
 	"\x04kind\"\x82\x02\n" +
 	"\x05Event\x12\x10\n" +
 	"\x03tag\x18\x01 \x01(\rR\x03tag\x126\n" +
@@ -2415,8 +2557,9 @@ const file_proto_executor_v2_proto_rawDesc = "" +
 	"\x04exit\x18\x04 \x01(\v2\x1a.arl.executor.v2.ExitEventH\x00R\x04exit\x12=\n" +
 	"\tfs_change\x18\x05 \x01(\v2\x1e.arl.executor.v2.FsChangeEventH\x00R\bfsChangeB\x06\n" +
 	"\x04kind\"\r\n" +
-	"\vPingRequest\"\x0e\n" +
-	"\fPingResponse\"\xb4\x02\n" +
+	"\vPingRequest\"+\n" +
+	"\fPingResponse\x12\x1b\n" +
+	"\tiroh_addr\x18\x01 \x01(\tR\birohAddr\"\xb4\x02\n" +
 	"\fSpawnRequest\x12\x18\n" +
 	"\acommand\x18\x01 \x03(\tR\acommand\x128\n" +
 	"\x03env\x18\x02 \x03(\v2&.arl.executor.v2.SpawnRequest.EnvEntryR\x03env\x12\x1f\n" +
@@ -2498,7 +2641,11 @@ const file_proto_executor_v2_proto_rawDesc = "" +
 	"size_bytes\x18\x01 \x01(\x03R\tsizeBytes\"\x17\n" +
 	"\x15CheckpointListRequest\".\n" +
 	"\x16CheckpointListResponse\x12\x14\n" +
-	"\x05steps\x18\x01 \x03(\x05R\x05steps\"=\n" +
+	"\x05steps\x18\x01 \x03(\x05R\x05steps\"#\n" +
+	"\vAuthRequest\x12\x14\n" +
+	"\x05token\x18\x01 \x01(\tR\x05token\"(\n" +
+	"\fAuthResponse\x12\x18\n" +
+	"\aclaimed\x18\x01 \x01(\bR\aclaimed\"=\n" +
 	"\rErrorResponse\x12\x12\n" +
 	"\x04code\x18\x01 \x01(\x05R\x04code\x12\x18\n" +
 	"\amessage\x18\x02 \x01(\tR\amessage\"B\n" +
@@ -2532,7 +2679,7 @@ func file_proto_executor_v2_proto_rawDescGZIP() []byte {
 	return file_proto_executor_v2_proto_rawDescData
 }
 
-var file_proto_executor_v2_proto_msgTypes = make([]protoimpl.MessageInfo, 38)
+var file_proto_executor_v2_proto_msgTypes = make([]protoimpl.MessageInfo, 40)
 var file_proto_executor_v2_proto_goTypes = []any{
 	(*Request)(nil),                    // 0: arl.executor.v2.Request
 	(*Response)(nil),                   // 1: arl.executor.v2.Response
@@ -2566,12 +2713,14 @@ var file_proto_executor_v2_proto_goTypes = []any{
 	(*CheckpointDownloadResponse)(nil), // 29: arl.executor.v2.CheckpointDownloadResponse
 	(*CheckpointListRequest)(nil),      // 30: arl.executor.v2.CheckpointListRequest
 	(*CheckpointListResponse)(nil),     // 31: arl.executor.v2.CheckpointListResponse
-	(*ErrorResponse)(nil),              // 32: arl.executor.v2.ErrorResponse
-	(*StdoutEvent)(nil),                // 33: arl.executor.v2.StdoutEvent
-	(*StderrEvent)(nil),                // 34: arl.executor.v2.StderrEvent
-	(*ExitEvent)(nil),                  // 35: arl.executor.v2.ExitEvent
-	(*FsChangeEvent)(nil),              // 36: arl.executor.v2.FsChangeEvent
-	nil,                                // 37: arl.executor.v2.SpawnRequest.EnvEntry
+	(*AuthRequest)(nil),                // 32: arl.executor.v2.AuthRequest
+	(*AuthResponse)(nil),               // 33: arl.executor.v2.AuthResponse
+	(*ErrorResponse)(nil),              // 34: arl.executor.v2.ErrorResponse
+	(*StdoutEvent)(nil),                // 35: arl.executor.v2.StdoutEvent
+	(*StderrEvent)(nil),                // 36: arl.executor.v2.StderrEvent
+	(*ExitEvent)(nil),                  // 37: arl.executor.v2.ExitEvent
+	(*FsChangeEvent)(nil),              // 38: arl.executor.v2.FsChangeEvent
+	nil,                                // 39: arl.executor.v2.SpawnRequest.EnvEntry
 }
 var file_proto_executor_v2_proto_depIdxs = []int32{
 	3,  // 0: arl.executor.v2.Request.ping:type_name -> arl.executor.v2.PingRequest
@@ -2588,32 +2737,34 @@ var file_proto_executor_v2_proto_depIdxs = []int32{
 	25, // 11: arl.executor.v2.Request.list_tunnels:type_name -> arl.executor.v2.ListTunnelsRequest
 	28, // 12: arl.executor.v2.Request.checkpoint_download:type_name -> arl.executor.v2.CheckpointDownloadRequest
 	30, // 13: arl.executor.v2.Request.checkpoint_list:type_name -> arl.executor.v2.CheckpointListRequest
-	4,  // 14: arl.executor.v2.Response.ping:type_name -> arl.executor.v2.PingResponse
-	6,  // 15: arl.executor.v2.Response.spawn:type_name -> arl.executor.v2.SpawnResponse
-	8,  // 16: arl.executor.v2.Response.write_in:type_name -> arl.executor.v2.WriteInResponse
-	10, // 17: arl.executor.v2.Response.signal:type_name -> arl.executor.v2.SignalResponse
-	12, // 18: arl.executor.v2.Response.resize:type_name -> arl.executor.v2.ResizeResponse
-	14, // 19: arl.executor.v2.Response.read:type_name -> arl.executor.v2.ReadResponse
-	16, // 20: arl.executor.v2.Response.write:type_name -> arl.executor.v2.WriteResponse
-	18, // 21: arl.executor.v2.Response.tunnel:type_name -> arl.executor.v2.TunnelResponse
-	20, // 22: arl.executor.v2.Response.watch:type_name -> arl.executor.v2.WatchResponse
-	22, // 23: arl.executor.v2.Response.unwatch:type_name -> arl.executor.v2.UnwatchResponse
-	32, // 24: arl.executor.v2.Response.error:type_name -> arl.executor.v2.ErrorResponse
-	24, // 25: arl.executor.v2.Response.close_tunnel:type_name -> arl.executor.v2.CloseTunnelResponse
-	26, // 26: arl.executor.v2.Response.list_tunnels:type_name -> arl.executor.v2.ListTunnelsResponse
-	29, // 27: arl.executor.v2.Response.checkpoint_download:type_name -> arl.executor.v2.CheckpointDownloadResponse
-	31, // 28: arl.executor.v2.Response.checkpoint_list:type_name -> arl.executor.v2.CheckpointListResponse
-	33, // 29: arl.executor.v2.Event.stdout:type_name -> arl.executor.v2.StdoutEvent
-	34, // 30: arl.executor.v2.Event.stderr:type_name -> arl.executor.v2.StderrEvent
-	35, // 31: arl.executor.v2.Event.exit:type_name -> arl.executor.v2.ExitEvent
-	36, // 32: arl.executor.v2.Event.fs_change:type_name -> arl.executor.v2.FsChangeEvent
-	37, // 33: arl.executor.v2.SpawnRequest.env:type_name -> arl.executor.v2.SpawnRequest.EnvEntry
-	27, // 34: arl.executor.v2.ListTunnelsResponse.tunnels:type_name -> arl.executor.v2.TunnelInfo
-	35, // [35:35] is the sub-list for method output_type
-	35, // [35:35] is the sub-list for method input_type
-	35, // [35:35] is the sub-list for extension type_name
-	35, // [35:35] is the sub-list for extension extendee
-	0,  // [0:35] is the sub-list for field type_name
+	32, // 14: arl.executor.v2.Request.auth:type_name -> arl.executor.v2.AuthRequest
+	4,  // 15: arl.executor.v2.Response.ping:type_name -> arl.executor.v2.PingResponse
+	6,  // 16: arl.executor.v2.Response.spawn:type_name -> arl.executor.v2.SpawnResponse
+	8,  // 17: arl.executor.v2.Response.write_in:type_name -> arl.executor.v2.WriteInResponse
+	10, // 18: arl.executor.v2.Response.signal:type_name -> arl.executor.v2.SignalResponse
+	12, // 19: arl.executor.v2.Response.resize:type_name -> arl.executor.v2.ResizeResponse
+	14, // 20: arl.executor.v2.Response.read:type_name -> arl.executor.v2.ReadResponse
+	16, // 21: arl.executor.v2.Response.write:type_name -> arl.executor.v2.WriteResponse
+	18, // 22: arl.executor.v2.Response.tunnel:type_name -> arl.executor.v2.TunnelResponse
+	20, // 23: arl.executor.v2.Response.watch:type_name -> arl.executor.v2.WatchResponse
+	22, // 24: arl.executor.v2.Response.unwatch:type_name -> arl.executor.v2.UnwatchResponse
+	34, // 25: arl.executor.v2.Response.error:type_name -> arl.executor.v2.ErrorResponse
+	24, // 26: arl.executor.v2.Response.close_tunnel:type_name -> arl.executor.v2.CloseTunnelResponse
+	26, // 27: arl.executor.v2.Response.list_tunnels:type_name -> arl.executor.v2.ListTunnelsResponse
+	29, // 28: arl.executor.v2.Response.checkpoint_download:type_name -> arl.executor.v2.CheckpointDownloadResponse
+	31, // 29: arl.executor.v2.Response.checkpoint_list:type_name -> arl.executor.v2.CheckpointListResponse
+	33, // 30: arl.executor.v2.Response.auth:type_name -> arl.executor.v2.AuthResponse
+	35, // 31: arl.executor.v2.Event.stdout:type_name -> arl.executor.v2.StdoutEvent
+	36, // 32: arl.executor.v2.Event.stderr:type_name -> arl.executor.v2.StderrEvent
+	37, // 33: arl.executor.v2.Event.exit:type_name -> arl.executor.v2.ExitEvent
+	38, // 34: arl.executor.v2.Event.fs_change:type_name -> arl.executor.v2.FsChangeEvent
+	39, // 35: arl.executor.v2.SpawnRequest.env:type_name -> arl.executor.v2.SpawnRequest.EnvEntry
+	27, // 36: arl.executor.v2.ListTunnelsResponse.tunnels:type_name -> arl.executor.v2.TunnelInfo
+	37, // [37:37] is the sub-list for method output_type
+	37, // [37:37] is the sub-list for method input_type
+	37, // [37:37] is the sub-list for extension type_name
+	37, // [37:37] is the sub-list for extension extendee
+	0,  // [0:37] is the sub-list for field type_name
 }
 
 func init() { file_proto_executor_v2_proto_init() }
@@ -2636,6 +2787,7 @@ func file_proto_executor_v2_proto_init() {
 		(*Request_ListTunnels)(nil),
 		(*Request_CheckpointDownload)(nil),
 		(*Request_CheckpointList)(nil),
+		(*Request_Auth)(nil),
 	}
 	file_proto_executor_v2_proto_msgTypes[1].OneofWrappers = []any{
 		(*Response_Ping)(nil),
@@ -2653,6 +2805,7 @@ func file_proto_executor_v2_proto_init() {
 		(*Response_ListTunnels)(nil),
 		(*Response_CheckpointDownload)(nil),
 		(*Response_CheckpointList)(nil),
+		(*Response_Auth)(nil),
 	}
 	file_proto_executor_v2_proto_msgTypes[2].OneofWrappers = []any{
 		(*Event_Stdout)(nil),
@@ -2666,7 +2819,7 @@ func file_proto_executor_v2_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_proto_executor_v2_proto_rawDesc), len(file_proto_executor_v2_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   38,
+			NumMessages:   40,
 			NumExtensions: 0,
 			NumServices:   0,
 		},

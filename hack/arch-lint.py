@@ -60,6 +60,10 @@ def validate_file_paths(arch_dir: Path, repo_root: Path) -> list[str]:
     components = data.get("components", [])
     for component in components:
         name = component.get("name", "unknown")
+        # External components live in a sibling checkout that is not part of
+        # this repo, so their paths are documentation rather than a contract.
+        if component.get("external"):
+            continue
         paths = component.get("paths", [])
 
         for path_str in paths:

@@ -181,7 +181,7 @@ check: fmt vet tidy ## Run all code quality checks
 ##@ Code Generation
 
 .PHONY: generate
-generate: proto-executor ## Generate all code
+generate: proto-executor proto-python ## Generate all code
 
 .PHONY: proto-executor
 proto-executor: ## Generate Go code from executor V2 proto
@@ -189,6 +189,14 @@ proto-executor: ## Generate Go code from executor V2 proto
 	protoc --go_out=. --go_opt=paths=source_relative \
 		proto/executor_v2.proto
 	@mv proto/executor_v2.pb.go pkg/pb/executorv2/ 2>/dev/null || true
+
+.PHONY: proto-python
+proto-python: ## Generate Python code + type stubs from executor V2 proto
+	@mkdir -p sdk/python/arl/arl/pb
+	protoc --proto_path=proto \
+		--python_out=sdk/python/arl/arl/pb \
+		--pyi_out=sdk/python/arl/arl/pb \
+		proto/executor_v2.proto
 
 ##@ Python SDK
 
