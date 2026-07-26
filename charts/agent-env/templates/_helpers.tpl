@@ -128,6 +128,30 @@ Redis address (host:port) — auto-resolves to the in-cluster Service when deplo
 Resolve the shared gRPC auth token. Precedence: explicit value -> existing
 secret (preserved across upgrades) -> freshly generated random token.
 */}}
+{{- define "agent-env.clickhouseSecretName" -}}
+{{ include "agent-env.fullname" . }}-clickhouse
+{{- end }}
+
+{{/*
+ClickHouse password: an explicit value wins, otherwise reuse whatever the
+namespace already holds so a re-render never rotates it, otherwise generate.
+Same shape as agent-env.grpcToken. Note that `lookup` returns nothing under
+`helm template`, so a rendered-then-applied install must pass the value
+explicitly or it will mint a new one and lock itself out of the database.
+*/}}
+{{- define "agent-env.clickhousePassword" -}}
+{{- if .Values.clickhouse.password -}}
+{{- .Values.clickhouse.password -}}
+{{- else -}}
+{{- $existing := lookup "v1" "Secret" .Release.Namespace (include "agent-env.clickhouseSecretName" .) -}}
+{{- if and $existing $existing.data.password -}}
+{{- $existing.data.password | b64dec -}}
+{{- else -}}
+{{- randAlphaNum 32 -}}
+{{- end -}}
+{{- end -}}
+{{- end }}
+
 {{- define "agent-env.grpcTokenSecretName" -}}
 {{ include "agent-env.fullname" . }}-grpc-token
 {{- end }}

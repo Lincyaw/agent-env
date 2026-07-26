@@ -259,7 +259,9 @@ auth:
 
 # Redis configuration (for HA session state persistence across gateway replicas)
 redis:
-  enabled: false
+  # On by default: the gateway keeps sessions in memory otherwise, so a restart
+  # drops every running session and a second replica is impossible.
+  enabled: true
   # Deploy a single-instance Redis in-cluster. Set to false to use an external Redis.
   deploy: true
   image:
@@ -312,8 +314,12 @@ singBox:
 
 # ClickHouse configuration (for trajectory storage)
 clickhouse:
-  # Enable ClickHouse deployment
-  enabled: false
+  # On by default: trajectories are only queryable for sessions still held in
+  # memory otherwise, so history disappears with the session.
+  # The password is auto-generated and preserved across `helm upgrade` through
+  # a cluster lookup. That lookup does not work under `helm template`; pass the
+  # existing value explicitly there or the render mints a new one.
+  enabled: true
   # Image (use private registry since nodes cannot access Docker Hub)
   image:
     repository: docker.io/clickhouse/clickhouse-server

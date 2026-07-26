@@ -15,16 +15,20 @@
 #     -o jsonpath='{.data.token}' | base64 -d)
 #   GRAFANA_PW=$(kubectl -n $NS get secret agent-env-grafana \
 #     -o jsonpath='{.data.admin-password}' | base64 -d)
+#   CH_PW=$(kubectl -n $NS get secret agent-env-clickhouse \
+#     -o jsonpath='{.data.password}' | base64 -d)
 #
 #   helm template agent-env charts/agent-env -n $NS -f charts/agent-env/values-hk.yaml \
 #     --set auth.grpcToken="$GRPC_TOKEN" \
 #     --set grafana.adminPassword="$GRAFANA_PW" \
+#     --set clickhouse.password="$CH_PW" \
 #     --set gateway.image.tag=vX.Y.Z \
 #     --set executorAgent.image.tag=vX.Y.Z \
 #     --set imageLocalityScheduler.image.tag=vX.Y.Z
 #
 # Rotating auth.grpcToken strands every sandbox that already claimed a token
-# derived from it, so reading the live value is not optional.
+# derived from it, and rotating clickhouse.password locks the gateway out of
+# the trajectory database, so reading the live values is not optional.
 
 global:
   imageRegistry: ""
@@ -68,14 +72,15 @@ checkpoint:
 auth:
   enabled: false
 
-# Deployed but not wired into the gateway. Sessions are held in memory, so a
-# gateway restart drops them, and trajectories are not written to ClickHouse.
-# Left as-is to match the running configuration; turning either on is a
-# behaviour change that should be made deliberately.
+# Both default to enabled now. They had been deployed here since 2026-07-18
+# but never wired to the gateway: a later render dropped the flags, and
+# `kubectl apply` without --prune left the pods running, so the cluster looked
+# like it used them while the gateway kept sessions in memory and wrote no
+# trajectories. Listed explicitly because that history is easy to repeat.
 redis:
-  enabled: false
+  enabled: true
 clickhouse:
-  enabled: false
+  enabled: true
 
 build:
   enabled: false
