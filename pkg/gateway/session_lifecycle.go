@@ -536,6 +536,13 @@ func (g *Gateway) dropSession(sessionID string, s *session) {
 		}
 		cancel()
 	}
+	// deleteSession does this too. Losing a runtime is the other way a session
+	// ends, and skipping it here left one NetworkPolicy behind per dropped
+	// session, selecting a claim UID that no longer exists.
+	npCtx, npCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	g.DeleteSessionNetworkPolicy(npCtx, sessionID, allocation.Namespace)
+	npCancel()
+
 	g.store.Delete(sessionID)
 	activeSessions := g.store.IncrCount(-1)
 	if g.metrics != nil {
