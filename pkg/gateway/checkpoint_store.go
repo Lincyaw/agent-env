@@ -145,10 +145,15 @@ func (s *CheckpointStore) LoadCombined(sessionID string, throughStep int) (strin
 		return "", fmt.Errorf("close combined temp file: %w", err)
 	}
 
+	// A step that changed nothing on disk yields a tar with no members, which
+	// is 1024 bytes of zero blocks and extracts cleanly. Rejecting it treated a
+	// legitimate checkpoint as corruption, so forking such a step worked from a
+	// live sandbox and failed from the store. Only a file with no content at
+	// all is unusable.
 	fi, _ := os.Stat(tmpPath)
-	if fi != nil && fi.Size() < 1536 {
+	if fi != nil && fi.Size() == 0 {
 		os.Remove(tmpPath)
-		return "", fmt.Errorf("checkpoint tar for step %d is empty", bestStep)
+		return "", fmt.Errorf("checkpoint tar for step %d is truncated: zero bytes on disk", bestStep)
 	}
 
 	return tmpPath, nil

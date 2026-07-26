@@ -1,0 +1,89 @@
+# Deployment values for the HK cluster (kube context `hk`, namespace `arl`).
+#
+# This file exists because the cluster's configuration used to live only in
+# whichever --set flags someone happened to type. That is how the gateway ended
+# up with SANDBOX_CHECKPOINT_ENABLED but no CHECKPOINT_STORE_PATH: the flag was
+# applied out of band, checkpoints were written to sandbox-local disk, and
+# forking a stopped session stayed broken until someone read the code. Anything
+# this cluster needs belongs here, where it is diffable and reviewable.
+#
+# Secrets are deliberately absent. Pass them at render time, reading the values
+# already in the cluster so a re-render never rotates them:
+#
+#   NS=arl
+#   GRPC_TOKEN=$(kubectl -n $NS get secret agent-env-grpc-token \
+#     -o jsonpath='{.data.token}' | base64 -d)
+#   GRAFANA_PW=$(kubectl -n $NS get secret agent-env-grafana \
+#     -o jsonpath='{.data.admin-password}' | base64 -d)
+#
+#   helm template agent-env charts/agent-env -n $NS -f charts/agent-env/values-hk.yaml \
+#     --set auth.grpcToken="$GRPC_TOKEN" \
+#     --set grafana.adminPassword="$GRAFANA_PW" \
+#     --set gateway.image.tag=vX.Y.Z \
+#     --set executorAgent.image.tag=vX.Y.Z \
+#     --set imageLocalityScheduler.image.tag=vX.Y.Z
+#
+# Rotating auth.grpcToken strands every sandbox that already claimed a token
+# derived from it, so reading the live value is not optional.
+
+global:
+  imageRegistry: ""
+
+gateway:
+  image:
+    repository: docker.io/opspai/arl-gateway
+  # The sandbox NetworkPolicy is gateway-managed here, which is what lets the
+  # policy name the gateway on the executor port. Without that the policy
+  # admits only the controller's router, and enforcing NetworkPolicy would cut
+  # the gateway off from every sandbox.
+  sandboxNetworkPolicyManagement: Managed
+
+executorAgent:
+  image:
+    repository: docker.io/opspai/arl-executor-agent
+  # Must move in lockstep with the gateway image: executor connections
+  # authenticate, and a new gateway against an older executor creates sessions
+  # and then fails the first exec.
+
+imageLocalityScheduler:
+  enabled: true
+  image:
+    repository: docker.io/opspai/arl-image-locality-scheduler
+
+irohRelay:
+  enabled: true
+
+# Persistent per-step checkpoints. Requires the `checkpoint-store` PVC, which
+# already exists in this namespace (50Gi, ebs-ssd, RWO -- single-replica
+# gateway on the Recreate strategy, so ReadWriteOnce is sufficient).
+#
+# Enabling this switches the gateway to the Recreate strategy. Server-side
+# apply cannot change spec.strategy in place, so the first rollout after
+# turning it on needs `kubectl delete deploy agent-env-gateway` first.
+checkpoint:
+  enabled: true
+
+# Authentication is disabled: the gateway is reachable only from inside the
+# cluster and through an explicit port-forward.
+auth:
+  enabled: false
+
+# Deployed but not wired into the gateway. Sessions are held in memory, so a
+# gateway restart drops them, and trajectories are not written to ClickHouse.
+# Left as-is to match the running configuration; turning either on is a
+# behaviour change that should be made deliberately.
+redis:
+  enabled: false
+clickhouse:
+  enabled: false
+
+build:
+  enabled: false
+registry:
+  enabled: false
+
+# The agent-sandbox controller is installed separately in the
+# agent-sandbox-system namespace. Rendering it here would place its resources
+# in `arl` instead.
+agentSandbox:
+  enabled: false
