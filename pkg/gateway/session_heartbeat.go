@@ -35,11 +35,16 @@ func (g *Gateway) sessionRuntimeLifecycleLocked(s *session, at time.Time) Runtim
 	return g.runtimeLifecycle(createdAt, at, s.idleTimeout)
 }
 
+// runtimePatchInterval is how often a busy session re-extends its runtime
+// lifetime. The claim's ShutdownTime sits idleTimeout in the future and the
+// agent-sandbox controller deletes the sandbox when it passes, so this cadence
+// decides how many refreshes may be lost before a running session is killed
+// underneath itself. A quarter leaves three chances; a half left only one.
 func runtimePatchInterval(idleTimeout time.Duration) time.Duration {
 	if idleTimeout <= 0 {
 		return runtimePatchMaxInterval
 	}
-	interval := idleTimeout / 2
+	interval := idleTimeout / 4
 	if interval < runtimePatchMinInterval {
 		return runtimePatchMinInterval
 	}
@@ -67,7 +72,11 @@ func (g *Gateway) startSessionHeartbeat(sessionID string, s *session) func() {
 			case <-stop:
 				return
 			case <-ticker.C:
-				g.touchLastTaskTime(sessionID)
+				// Forced: the ticker already paces this. Running it through
+				// the throttle as well compares an interval against itself,
+				// and loses the tick whenever scheduling jitter makes the
+				// elapsed time land a hair short.
+				g.touchSessionActivity(sessionID, true)
 			}
 		}
 	}()
@@ -76,9 +85,17 @@ func (g *Gateway) startSessionHeartbeat(sessionID string, s *session) func() {
 	}
 }
 
-// touchLastTaskTime updates the in-memory lastTaskTime for session idle tracking
-// and asynchronously patches runtime last-activity annotations (throttled to at most once per 30s).
+// touchLastTaskTime records activity from a request. The runtime annotation
+// patch is throttled, since requests can arrive far faster than the runtime
+// lifetime needs re-extending.
 func (g *Gateway) touchLastTaskTime(sessionID string) {
+	g.touchSessionActivity(sessionID, false)
+}
+
+// touchSessionActivity updates the in-memory lastTaskTime and, when due,
+// re-extends the runtime lifetime. force skips the throttle for callers that
+// already control their own cadence.
+func (g *Gateway) touchSessionActivity(sessionID string, force bool) {
 	s, ok := g.store.Get(sessionID)
 	if !ok {
 		return
@@ -88,7 +105,7 @@ func (g *Gateway) touchLastTaskTime(sessionID string) {
 	s.mu.Lock()
 	s.lastTaskTime = now
 	lifecycle := g.sessionRuntimeLifecycleLocked(s, now)
-	shouldPatch := now.Sub(s.lastAnnotationPatch) >= runtimePatchInterval(s.idleTimeout)
+	shouldPatch := force || now.Sub(s.lastAnnotationPatch) >= runtimePatchInterval(s.idleTimeout)
 	if shouldPatch {
 		s.lastAnnotationPatch = now
 	}
