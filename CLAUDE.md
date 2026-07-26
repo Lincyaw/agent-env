@@ -87,8 +87,12 @@ After modifying components or interfaces:
 | `build.enabled` | `false` | Enable Kaniko image build API (`POST /v1/build`) |
 | `registry.enabled` | `false` | Deploy in-cluster container registry (distribution/registry:2) |
 | `checkpoint.enabled` | `false` | Persistent per-step checkpoint tars for fork; forces Recreate deploy strategy and auto-configures fsGroup |
+| `executorAgent.logLevel` | `info,iroh=warn,tracing=warn` | `RUST_LOG` for sandbox executor containers. Empty injects nothing, which leaves `kubectl logs` and `arl session logs` blank, since env_logger defaults to error. iroh is pinned to warn because its relay probing at info roughly matches the agent's own output line for line |
+| `auth.grpcToken` | auto-generated | Master secret the gateway derives per-sandbox executor tokens from. See the pinning note below |
 
-When `checkpoint.enabled=true`, the gateway deployment switches to Recreate strategy (no rolling update) because the checkpoint PVC is ReadWriteMany and multiple writers would corrupt state. The template auto-sets `fsGroup` on the pod security context.
+When `checkpoint.enabled=true`, the gateway deployment switches to Recreate strategy (no rolling update) because the checkpoint PVC is ReadWriteMany and multiple writers would corrupt state. The template auto-sets `fsGroup` on the pod security context. Switching an existing release into this mode needs `kubectl delete deploy` first; server-side apply cannot change `spec.strategy` in place.
+
+Setting `SANDBOX_CHECKPOINT_ENABLED` without `CHECKPOINT_STORE_PATH` leaves checkpoints on the sandbox's own disk, so they die with it and only running sessions can be forked. `checkpoint.enabled=true` sets both, so this only happens when the flag is applied out of band. The gateway warns about it at startup.
 
 ## Deployment Tips
 
@@ -108,6 +112,12 @@ When `checkpoint.enabled=true`, the gateway deployment switches to Recreate stra
 - **sing-box**: In-cluster proxy subchart (`charts/sing-box`). Sandbox pods get `HTTP_PROXY` injected automatically when `proxy.url` is set.
 - **replicas=0**: Default. Pre-pulls image only; pods are created on demand when sessions arrive.
 - **Stale pools after image update**: After pushing a new image tag, delete existing `SandboxWarmPool` and `SandboxTemplate` resources that reference the old tag. Warm sandboxes retain the previous image until their pool is recreated.
+- **Gateway and executor move together**: From v0.25.0 executor connections authenticate, so both images must be deployed at the same tag. A new gateway against an older executor creates sessions successfully and then fails the first exec with `executor is too old for connection authentication`. Skaffold sets `gateway.image.tag` and `executorAgent.image.tag` from the same build, so the documented flow is safe; a bare `helm install` is not, because `executorAgent.image.tag` defaults to `.Chart.AppVersion`.
+- **Pin `auth.grpcToken` when using `helm template`**: The gateway derives each sandbox's executor token from this secret, so rotating it makes every already-claimed sandbox unreachable. `helm upgrade` preserves the value through a cluster lookup, but `helm template` cannot look it up and mints a fresh one on every render. With the render-then-apply flow above, read the existing value first:
+  ```bash
+  --set auth.grpcToken="$(kubectl -n arl get secret agent-env-grpc-token \
+    -o jsonpath='{.data.token}' | base64 -d)"
+  ```
 - **Post-deploy checks**: Verify CRDs and controllers first, then gateway health:
   ```bash
   kubectl --context <context> get crd | grep -i sandbox
