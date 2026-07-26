@@ -45,7 +45,7 @@ impl ConnectionHandler {
             let writer: SharedWriter =
                 Arc::new(Mutex::new(Box::new(SyncSendStream::new(send_stream, handle))));
 
-            if let Err(e) = handle_session(reader, writer, &workspace, Some(tunnels_for_control), None) {
+            if let Err(e) = handle_session(reader, writer, &workspace, Some(tunnels_for_control), None, true) {
                 error!("iroh session error: {e}");
             }
         });

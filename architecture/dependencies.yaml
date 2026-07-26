@@ -12,9 +12,17 @@ dependencies:
     description: Uses pods/exec to run evaluator/control-plane commands in configured private containers.
 
   - from: gateway
-    to: sidecar
-    type: grpc
-    description: Executes commands and file operations through the sidecar AgentService.
+    to: executor-agent
+    type: tcp
+    description: >-
+      Executes commands and file operations over the executor V2 framed protobuf
+      protocol, authenticating each connection with a per-sandbox token derived
+      from the gateway-only master secret (pkg/executorauth).
+
+  - from: gateway
+    to: agent-sandbox
+    type: kubernetes-api
+    description: Reads pods/log to stream session and warm-pool executor container logs.
 
   - from: gateway
     to: redis
@@ -26,15 +34,15 @@ dependencies:
     type: tcp
     description: Writes trajectory and audit events when ClickHouse is enabled.
 
-  - from: sidecar
-    to: executor-agent
-    type: unix-socket
-    description: Delegates process execution inside the executor container.
-
-  - from: sidecar
-    to: agent-proto
+  - from: executor-agent
+    to: executor-proto
     type: implements
-    description: Implements AgentService from proto/agent.proto.
+    description: Implements the executor V2 framed protobuf contract.
+
+  - from: gateway
+    to: executor-proto
+    type: implements
+    description: Speaks the executor V2 framed protobuf contract from pkg/client.
 
   - from: python-sdk
     to: gateway

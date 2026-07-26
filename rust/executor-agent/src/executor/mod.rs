@@ -1,3 +1,4 @@
+pub mod auth;
 pub mod proto;
 pub mod agent;
 pub mod iroh_endpoint;

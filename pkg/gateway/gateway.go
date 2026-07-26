@@ -26,8 +26,9 @@ type GatewayConfig struct {
 	DevboxStorageClassName          string
 	SweepInterval                   time.Duration
 	Namespace                       string
-	ExecutorAgentImage string
-	ExecutorPort       int
+	ExecutorAgentImage              string
+	ExecutorPort                    int
+	ExecutorLogLevel                string
 	IrohRelayURL                    string
 	IrohRelayExternalURL            string
 	ImagePullPolicy                 string

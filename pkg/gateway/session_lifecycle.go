@@ -14,6 +14,8 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	sandboxv1beta1 "sigs.k8s.io/agent-sandbox/api/v1beta1"
 	"sigs.k8s.io/controller-runtime/pkg/client"
+
+	"github.com/Lincyaw/agent-env/pkg/executorauth"
 )
 
 // CreateSession allocates a sandbox runtime from the pool and registers a session.
@@ -193,6 +195,7 @@ func (g *Gateway) CreateSession(ctx context.Context, req CreateSessionRequest) (
 			info.IrohAddr = g.rewriteIrohAddr(addr)
 		}
 	}
+	info.ExecutorToken = executorauth.Derive(g.gwConfig.GRPCAuthToken, allocation.PodIP)
 
 	g.store.Set(sessionID, &session{
 		Info:                info,
@@ -254,6 +257,12 @@ func (g *Gateway) rewriteIrohAddr(raw string) string {
 	}
 	var parsed map[string]json.RawMessage
 	if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
+		return raw
+	}
+	// Only translate a relay the executor actually connected to. When it
+	// reports none, advertising one would send clients down a relay path that
+	// cannot reach this sandbox; the direct addresses are the real route.
+	if existing, ok := parsed["relay_url"]; !ok || string(existing) == "null" {
 		return raw
 	}
 	relayBytes, _ := json.Marshal(externalURL)

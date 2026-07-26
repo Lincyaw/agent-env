@@ -39,6 +39,11 @@ type Config struct {
 	// Executor agent configuration
 	ExecutorAgentImage string
 	ExecutorPort       int
+	// ExecutorLogLevel is injected as RUST_LOG into sandbox executor
+	// containers. env_logger defaults to "error", which leaves the container
+	// log empty. iroh is pinned to warn because its info-level relay probing
+	// drowns out the executor's own spawn/exit lines.
+	ExecutorLogLevel     string
 	IrohRelayURL         string
 	IrohRelayExternalURL string
 
@@ -189,8 +194,9 @@ func DefaultConfig() *Config {
 		TrajectoryEnabled:       false,
 		TrajectoryDebug:         false,
 		ObservationPreviewBytes: 4096,
-		ExecutorAgentImage: "arl-executor-agent:latest",
-		ExecutorPort:       9090,
+		ExecutorAgentImage:      "arl-executor-agent:latest",
+		ExecutorPort:            9090,
+		ExecutorLogLevel:        "info,iroh=warn,tracing=warn",
 		ImagePullPolicy:         "Always",
 		GatewayPort:             8080,
 		GatewayNamespace:        "default",
@@ -316,6 +322,9 @@ func LoadFromEnv() *Config {
 		if p, err := strconv.Atoi(v); err == nil {
 			cfg.ExecutorPort = p
 		}
+	}
+	if v, ok := os.LookupEnv("EXECUTOR_LOG_LEVEL"); ok {
+		cfg.ExecutorLogLevel = v
 	}
 	if v := os.Getenv("IROH_RELAY_URL"); v != "" {
 		cfg.IrohRelayURL = v

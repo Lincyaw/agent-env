@@ -3,21 +3,26 @@
 rules:
   - name: proto-change
     trigger:
-      component: agent-proto
+      component: executor-proto
       patterns:
-        - proto/agent.proto
+        - proto/executor_v2.proto
     impacts:
-      - pkg/pb/agent.pb.go
-      - pkg/pb/agent_grpc.pb.go
-      - pkg/sidecar/
+      - pkg/pb/executorv2/
       - pkg/client/
+      - rust/executor-agent/
+      - sdk/python/arl/arl/pb/
+      - sdk/python/arl/arl/iroh_transport.py
     actions:
-      - description: Regenerate Go protobuf code
-        command: make proto-go
+      - description: Regenerate Go and Python protobuf code
+        command: make generate
+      - description: Rebuild the Rust executor agent so prost regenerates
+        command: cargo build --manifest-path rust/executor-agent/Cargo.toml
     validation:
       - go test ./...
-      - go build ./cmd/sidecar/
       - go build ./cmd/gateway/
+      - cargo test --manifest-path rust/executor-agent/Cargo.toml
+      - uv run mypy sdk/python/arl/arl
+      - uv run pytest sdk/python/arl/tests
 
   - name: gateway-change
     trigger:
@@ -37,20 +42,6 @@ rules:
       - go test ./...
       - helm lint charts/agent-env
 
-  - name: sidecar-change
-    trigger:
-      patterns:
-        - pkg/sidecar/*.go
-        - cmd/sidecar/*.go
-    impacts:
-      - Dockerfile.sidecar
-    actions:
-      - description: Rebuild sidecar image
-        command: docker build -f Dockerfile.sidecar -t arl-sidecar:dev .
-    validation:
-      - go test ./...
-      - go build ./cmd/sidecar/
-
   - name: executor-agent-change
     trigger:
       patterns:
@@ -61,7 +52,7 @@ rules:
       - description: Rebuild executor-agent image
         command: docker build -f Dockerfile.executor-agent-rs -t arl-executor-agent:dev .
     validation:
-      - cd executor-agent-rs && cargo test
+      - cargo test --manifest-path rust/executor-agent/Cargo.toml
 
   - name: sdk-python-change
     trigger:

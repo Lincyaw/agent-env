@@ -192,7 +192,7 @@ fn handle_conn(
 ) -> io::Result<()> {
     let reader = stream.try_clone()?;
     let writer: SharedWriter = Arc::new(Mutex::new(Box::new(stream)));
-    handle_session(reader, writer, workspace, None, checkpointer)
+    handle_session(reader, writer, workspace, None, checkpointer, false)
 }
 
 /// Handle a TCP connection the same way as a Unix socket connection.
@@ -204,18 +204,22 @@ pub fn handle_conn_tcp(
 ) -> io::Result<()> {
     let reader = stream.try_clone()?;
     let writer: SharedWriter = Arc::new(Mutex::new(Box::new(stream)));
-    handle_session(reader, writer, workspace, None, checkpointer)
+    handle_session(reader, writer, workspace, None, checkpointer, true)
 }
 
 /// Transport-agnostic session handler. Called from Unix socket, TCP, and iroh QUIC paths.
 /// When `tunnel_registry` is Some, tunnel requests register targets for data-stream forwarding.
 /// When None (Unix socket), tunnel requests return an error.
+///
+/// `remote` marks transports reachable from outside the container (TCP, QUIC).
+/// Those must authenticate before any other request is served.
 pub fn handle_session(
     reader: impl io::Read,
     writer: SharedWriter,
     workspace: &str,
     tunnel_registry: Option<TunnelRegistry>,
     checkpointer: Option<Arc<Checkpointer>>,
+    remote: bool,
 ) -> io::Result<()> {
     let processes: Arc<Mutex<HashMap<u32, ProcessHandle>>> =
         Arc::new(Mutex::new(HashMap::new()));
@@ -233,6 +237,7 @@ pub fn handle_session(
         &watch_counter,
         &tunnels,
         &checkpointer,
+        remote,
     );
 
     // Cleanup on disconnect — kill by pid since wait_and_exit takes the Child.
@@ -271,7 +276,10 @@ fn handle_messages(
     watch_counter: &Arc<AtomicU32>,
     tunnels: &TunnelRegistry,
     checkpointer: &Option<Arc<Checkpointer>>,
+    remote: bool,
 ) -> io::Result<()> {
+    // Remote transports start unauthenticated; the Unix socket never needs to be.
+    let mut authenticated = !(remote && super::auth::auth_required());
     loop {
         let request = match read_request(&mut reader)? {
             Some(r) => r,
@@ -287,10 +295,49 @@ fn handle_messages(
             }
         };
 
+        // Auth is the only request an unauthenticated remote peer may send.
+        if let proto::request::Kind::Auth(params) = &kind {
+            match super::auth::authenticate(&params.token) {
+                super::auth::AuthOutcome::Claimed => {
+                    log::info!("[auth] tag={tag} token claimed");
+                    authenticated = true;
+                    let _ = send_response(
+                        &writer,
+                        tag,
+                        proto::response::Kind::Auth(proto::AuthResponse { claimed: true }),
+                    );
+                }
+                super::auth::AuthOutcome::Matched => {
+                    authenticated = true;
+                    let _ = send_response(
+                        &writer,
+                        tag,
+                        proto::response::Kind::Auth(proto::AuthResponse { claimed: false }),
+                    );
+                }
+                super::auth::AuthOutcome::Rejected => {
+                    log::warn!("[auth] tag={tag} rejected: token does not match this sandbox");
+                    let _ = send_error(&writer, tag, 7, "authentication failed".into());
+                }
+            }
+            continue;
+        }
+        if !authenticated {
+            log::warn!("[auth] tag={tag} rejected unauthenticated request");
+            let _ = send_error(&writer, tag, 7, "authentication required".into());
+            continue;
+        }
+
         match kind {
+            proto::request::Kind::Auth(_) => unreachable!("handled above"),
             proto::request::Kind::Ping(_) => {
                 log::info!("[ping] tag={tag}");
-                let _ = send_response(&writer, tag, proto::response::Kind::Ping(proto::PingResponse {}));
+                let iroh_addr = super::iroh_endpoint::published_addr();
+                let _ = send_response(
+                    &writer,
+                    tag,
+                    proto::response::Kind::Ping(proto::PingResponse { iroh_addr }),
+                );
             }
             proto::request::Kind::Spawn(params) => {
                 log::info!("[spawn] tag={tag} cmd={:?}", params.command);
@@ -1611,6 +1658,41 @@ mod tests {
             MSG_TYPE_EVENT => Some(ServerMsg::Event(proto::Event::decode(&msg_buf[..]).unwrap())),
             _ => None,
         }
+    }
+
+    /// The demonstrated attack was: read your own sandbox's env, then use that
+    /// token against a different sandbox. Each executor claims its own token,
+    /// so a foreign one must be refused.
+    #[test]
+    fn test_remote_transport_rejects_foreign_token() {
+        let ws = tempfile::tempdir().unwrap();
+        let (sock, _tx) = start_test_agent(ws.path().to_str().unwrap());
+
+        // The Unix socket is exempt (peers are already inside the container),
+        // so drive the auth state directly to model a claimed sandbox.
+        super::super::auth::reset_for_test();
+        assert!(matches!(
+            super::super::auth::authenticate("sandbox-a-token"),
+            super::super::auth::AuthOutcome::Claimed
+        ));
+        assert!(matches!(
+            super::super::auth::authenticate("sandbox-b-token"),
+            super::super::auth::AuthOutcome::Rejected
+        ));
+        assert!(matches!(
+            super::super::auth::authenticate("sandbox-a-token"),
+            super::super::auth::AuthOutcome::Matched
+        ));
+        super::super::auth::reset_for_test();
+
+        // The Unix socket still serves without authentication.
+        let mut stream = UnixStream::connect(&sock).unwrap();
+        send_request_pb(&mut stream, 1, proto::request::Kind::Ping(proto::PingRequest {}));
+        let resp = read_response(&mut stream);
+        assert!(
+            matches!(resp.kind, Some(proto::response::Kind::Ping(_))),
+            "unix socket must stay exempt: {resp:?}"
+        );
     }
 
     #[test]

@@ -11,12 +11,17 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Lincyaw/agent-env/pkg/executorauth"
 	"github.com/Lincyaw/agent-env/pkg/interfaces"
 	pb "github.com/Lincyaw/agent-env/pkg/pb/executorv2"
 	"google.golang.org/protobuf/proto"
 )
 
 const fileChunkSize = interfaces.FileTransferChunkSize
+
+// errCodeMissingRequestKind is what the executor returns for a Request whose
+// oneof it cannot decode — the signature of an executor older than the field.
+const errCodeMissingRequestKind = 1
 
 // Wire-level message type bytes, matching the executor agent.
 const (
@@ -30,6 +35,9 @@ const (
 type TCPExecutorClient struct {
 	port    int
 	timeout time.Duration
+	// authSecret derives the per-sandbox token presented on every connection.
+	// Empty disables authentication (local development only).
+	authSecret string
 
 	mu    sync.RWMutex
 	conns map[string]net.Conn
@@ -37,11 +45,12 @@ type TCPExecutorClient struct {
 
 // NewExecutorClient creates a new executor client that connects directly
 // to executor agents over TCP using the framed protobuf protocol.
-func NewExecutorClient(port int, timeout time.Duration) interfaces.ExecutorClient {
+func NewExecutorClient(port int, timeout time.Duration, authSecret string) interfaces.ExecutorClient {
 	return &TCPExecutorClient{
-		port:    port,
-		timeout: timeout,
-		conns:   make(map[string]net.Conn),
+		port:       port,
+		timeout:    timeout,
+		authSecret: authSecret,
+		conns:      make(map[string]net.Conn),
 	}
 }
 
@@ -52,7 +61,56 @@ func (c *TCPExecutorClient) dial(podIP string) (net.Conn, error) {
 	if err != nil {
 		return nil, fmt.Errorf("connect to executor at %s: %w", addr, err)
 	}
+	if err := c.authenticate(conn, podIP); err != nil {
+		conn.Close()
+		return nil, err
+	}
 	return conn, nil
+}
+
+// authenticate presents this sandbox's token before any other request. The
+// executor refuses everything else on a remote transport until it succeeds.
+func (c *TCPExecutorClient) authenticate(conn net.Conn, podIP string) error {
+	token := executorauth.Derive(c.authSecret, podIP)
+	if token == "" {
+		return nil
+	}
+
+	conn.SetDeadline(time.Now().Add(10 * time.Second))
+	defer conn.SetDeadline(time.Time{})
+
+	if err := sendRequest(conn, &pb.Request{
+		Tag:  0,
+		Kind: &pb.Request_Auth{Auth: &pb.AuthRequest{Token: token}},
+	}); err != nil {
+		return fmt.Errorf("send auth to executor at %s: %w", podIP, err)
+	}
+	resp, err := readResponse(conn)
+	if err != nil {
+		return fmt.Errorf("read auth response from executor at %s: %w", podIP, err)
+	}
+	if errResp := resp.GetError(); errResp != nil {
+		// An executor predating the auth request cannot decode the oneof arm
+		// and reports a missing kind. That is a version skew, not a bad token,
+		// and saying so saves a pointless hunt through secrets.
+		if errResp.GetCode() == errCodeMissingRequestKind {
+			return fmt.Errorf(
+				"executor at %s is too old for connection authentication "+
+					"(replied %q); redeploy the sandbox image at the same tag as the "+
+					"gateway and delete stale SandboxTemplates/SandboxWarmPools",
+				podIP, errResp.GetMessage())
+		}
+		// Otherwise the sandbox holds a token derived from a different master
+		// secret, or somebody else claimed it first.
+		return fmt.Errorf(
+			"executor at %s rejected authentication ([%d] %s); "+
+				"the sandbox was claimed with a different auth.grpcToken, or by another caller",
+			podIP, errResp.GetCode(), errResp.GetMessage())
+	}
+	if resp.GetAuth() == nil {
+		return fmt.Errorf("executor at %s returned no auth response", podIP)
+	}
+	return nil
 }
 
 // ---------------------------------------------------------------------------
@@ -661,11 +719,11 @@ func (c *TCPExecutorClient) InteractiveShell(ctx context.Context, podIP string) 
 
 	var tag uint32 = 1
 	spawnReq := &pb.SpawnRequest{
-		Command:    []string{"/bin/bash", "-i"},
-		Stdin:      true,
-		Pty:        true,
-		Rows:       24,
-		Cols:       80,
+		Command: []string{"/bin/bash", "-i"},
+		Stdin:   true,
+		Pty:     true,
+		Rows:    24,
+		Cols:    80,
 	}
 
 	if err := sendRequest(conn, &pb.Request{
@@ -724,10 +782,9 @@ func (c *TCPExecutorClient) GetIrohAddr(ctx context.Context, podIP string) (stri
 	if errResp := resp.GetError(); errResp != nil {
 		return "", fmt.Errorf("ping error: [%d] %s", errResp.GetCode(), errResp.GetMessage())
 	}
-	// The executor's PingResponse does not carry iroh addr;
-	// return empty string. The executor would need to expose it
-	// through a dedicated request type.
-	return "", nil
+	// Empty while the endpoint is still binding, or when the executor
+	// predates the iroh_addr field; callers re-read it later.
+	return resp.GetPing().GetIrohAddr(), nil
 }
 
 // ---------------------------------------------------------------------------

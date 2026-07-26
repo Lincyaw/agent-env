@@ -76,6 +76,8 @@ spec:
             - name: EXECUTOR_PROTOCOL
               value: "{{ .Values.executorAgent.protocol }}"
             {{- end }}
+            - name: EXECUTOR_LOG_LEVEL
+              value: {{ .Values.executorAgent.logLevel | default "" | quote }}
             {{- if .Values.irohRelay.enabled }}
             - name: IROH_RELAY_URL
               value: "http://{{ include "agent-env.fullname" . }}-iroh-relay.{{ .Release.Namespace }}.svc:{{ .Values.irohRelay.port }}"

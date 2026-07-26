@@ -203,9 +203,27 @@ func (g *Gateway) applyCiliumNetworkPolicy(
 	}
 
 	egress := []interface{}{
-		// Allow DNS resolution via the kube-dns entity.
 		map[string]interface{}{
-			"toEntities": []interface{}{"kube-dns"},
+			"toEndpoints": []interface{}{
+				map[string]interface{}{
+					"matchLabels": map[string]interface{}{
+						"k8s:io.kubernetes.pod.namespace": "kube-system",
+						"k8s-app":                         "kube-dns",
+					},
+				},
+			},
+			"toPorts": []interface{}{
+				map[string]interface{}{
+					"ports": []interface{}{
+						map[string]interface{}{"port": "53", "protocol": "ANY"},
+					},
+					"rules": map[string]interface{}{
+						"dns": []interface{}{
+							map[string]interface{}{"matchPattern": "*"},
+						},
+					},
+				},
+			},
 		},
 	}
 
@@ -263,7 +281,12 @@ func (g *Gateway) applyCiliumNetworkPolicy(
 	}
 
 	patch := client.MergeFrom(existing.DeepCopy())
-	existing.Object["metadata"] = obj.Object["metadata"]
+	existingMeta, _ := existing.Object["metadata"].(map[string]interface{})
+	if existingMeta != nil {
+		existingMeta["labels"] = map[string]interface{}{
+			labels.SessionAnnotation: sessionID,
+		}
+	}
 	existing.Object["spec"] = obj.Object["spec"]
 	if err := g.k8sClient.Patch(ctx, existing, patch); err != nil {
 		return fmt.Errorf("update cilium network policy %s/%s: %w", namespace, cnpName, err)

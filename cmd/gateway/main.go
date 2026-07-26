@@ -76,7 +76,7 @@ func main() {
 	}
 
 	// Create executor client (TCP framed protocol, direct to executor agent)
-	executorClient := client.NewExecutorClient(cfg.ExecutorPort, cfg.HTTPClientTimeout)
+	executorClient := client.NewExecutorClient(cfg.ExecutorPort, cfg.HTTPClientTimeout, cfg.GRPCAuthToken)
 
 	// Create the sandbox runtime allocator backed by agent-sandbox CRDs.
 	metricsCollector := metrics.NewPrometheusCollector()
@@ -131,6 +131,7 @@ func main() {
 		Namespace:                       cfg.GatewayNamespace,
 		ExecutorAgentImage:              cfg.ExecutorAgentImage,
 		ExecutorPort:                    cfg.ExecutorPort,
+		ExecutorLogLevel:                cfg.ExecutorLogLevel,
 		IrohRelayURL:                    cfg.IrohRelayURL,
 		IrohRelayExternalURL:            cfg.IrohRelayExternalURL,
 		ImagePullPolicy:                 cfg.ImagePullPolicy,

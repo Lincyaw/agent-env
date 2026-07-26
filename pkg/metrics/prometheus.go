@@ -17,15 +17,15 @@ type PrometheusCollector struct {
 	sandboxReadyDuration      *prometheus.HistogramVec
 	imagePullDuration         *prometheus.HistogramVec
 
-	activeSessions      prometheus.Gauge
-	sessionDeletion     *prometheus.CounterVec
-	sessionDrop         *prometheus.CounterVec
-	executeOperation    *prometheus.CounterVec
-	gatewayStepDuration *prometheus.HistogramVec
-	gatewayStepResult   *prometheus.CounterVec
+	activeSessions       prometheus.Gauge
+	sessionDeletion      *prometheus.CounterVec
+	sessionDrop          *prometheus.CounterVec
+	executeOperation     *prometheus.CounterVec
+	gatewayStepDuration  *prometheus.HistogramVec
+	gatewayStepResult    *prometheus.CounterVec
 	executorCallDuration *prometheus.HistogramVec
-	restoreDuration     prometheus.Histogram
-	restoreResult       *prometheus.CounterVec
+	restoreDuration      prometheus.Histogram
+	restoreResult        *prometheus.CounterVec
 
 	gatewayGoroutines     prometheus.Gauge
 	gatewaySessionsTotal  prometheus.Gauge

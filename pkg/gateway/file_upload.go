@@ -89,7 +89,6 @@ func (g *Gateway) DownloadFile(ctx context.Context, sessionID string, filePath s
 	return result, nil
 }
 
-
 func normalizeSHA256(value string) (string, error) {
 	value = strings.ToLower(strings.TrimSpace(value))
 	if value == "" {

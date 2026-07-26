@@ -47,21 +47,21 @@ func SetupRoutes(gw *Gateway, authCfg *AuthConfig) chi.Router {
 			r.Use(authUser)
 			// GET/fork have custom ownership logic (historical/deleted sessions)
 			r.Get("/", handleGetSession(gw))
-			r.With(maxBodySize(10 * 1024 * 1024)).Post("/fork", handleForkSession(gw))
+			r.With(maxBodySize(10*1024*1024)).Post("/fork", handleForkSession(gw))
 
 			// All other operations require session ownership
 			r.Group(func(r chi.Router) {
 				r.Use(sessionOwnership(gw))
 				r.Delete("/", handleDeleteSession(gw))
-				r.With(maxBodySize(10 * 1024 * 1024)).Patch("/network-policy", handleUpdateNetworkPolicy(gw))
+				r.With(maxBodySize(10*1024*1024)).Patch("/network-policy", handleUpdateNetworkPolicy(gw))
 				r.Post("/suspend", handleSuspendSession(gw))
 				r.Post("/resume", handleResumeSession(gw))
 				r.Get("/iroh-addr", handleGetIrohAddr(gw))
-				r.With(maxBodySize(10 * 1024 * 1024)).Post("/execute", handleExecute(gw))
-				r.With(maxBodySize(10 * 1024 * 1024)).Post("/containers/{container}/execute", handleExecuteContainer(gw))
+				r.With(maxBodySize(10*1024*1024)).Post("/execute", handleExecute(gw))
+				r.With(maxBodySize(10*1024*1024)).Post("/containers/{container}/execute", handleExecuteContainer(gw))
 				r.Get("/operations/{operationID}", handleGetExecuteOperation(gw))
 				r.Post("/upload-file", handleUploadFile(gw))
-				r.With(maxBodySize(10 * 1024 * 1024)).Post("/download-file", handleDownloadFile(gw))
+				r.With(maxBodySize(10*1024*1024)).Post("/download-file", handleDownloadFile(gw))
 				r.Post("/restore", handleRestore(gw))
 				r.Post("/replay", handleReplay(gw))
 				r.Get("/shell", handleShell(gw, authCfg))
@@ -793,7 +793,7 @@ func handleSessionLogs(gw *Gateway) http.HandlerFunc {
 
 		ch, err := gw.StreamSessionLogs(r.Context(), id, follow, tail)
 		if err != nil {
-			writeError(w, http.StatusInternalServerError, err.Error())
+			writeError(w, httpStatusForError(err), err.Error())
 			return
 		}
 
@@ -811,10 +811,22 @@ func handleSessionLogs(gw *Gateway) http.HandlerFunc {
 
 		enc := json.NewEncoder(w)
 		for entry := range ch {
-			enc.Encode(entry)
+			enc.Encode(logJSON{
+				Timestamp: entry.Timestamp,
+				Level:     entry.Level,
+				Message:   entry.Message,
+				Source:    entry.Source,
+			})
 			flusher.Flush()
 		}
 	}
+}
+
+type logJSON struct {
+	Timestamp string `json:"timestamp"`
+	Level     string `json:"level"`
+	Message   string `json:"message"`
+	Source    string `json:"source"`
 }
 
 type poolLogJSON struct {

@@ -95,7 +95,82 @@ func (g *Gateway) egressAllowCIDRs() []string {
 	return cidrs
 }
 
+// sandboxIngressRules allows the traffic the sandbox data path actually needs.
+//
+// Without this the template carries no ingress rules and the controller's
+// router-only default applies, which does not describe how this gateway talks
+// to sandboxes: it dials the executor port on the pod IP directly. A cluster
+// that enforces NetworkPolicy would therefore cut the gateway off from every
+// sandbox, so the policy has to name the gateway explicitly.
+func sandboxIngressRules(executorPort int) []networkingv1.NetworkPolicyIngressRule {
+	tcp := corev1.ProtocolTCP
+	port := intstr.FromInt32(int32(executorPort))
+	return []networkingv1.NetworkPolicyIngressRule{
+		{
+			// The gateway shares the sandbox namespace, so an empty
+			// namespaceSelector (same namespace) plus its labels is enough.
+			From: []networkingv1.NetworkPolicyPeer{
+				{
+					PodSelector: &metav1.LabelSelector{
+						MatchLabels: map[string]string{
+							"app.kubernetes.io/name":      "agent-env",
+							"app.kubernetes.io/component": "gateway",
+						},
+					},
+				},
+			},
+			Ports: []networkingv1.NetworkPolicyPort{
+				{Port: &port, Protocol: &tcp},
+			},
+		},
+		{
+			// Preserve the controller's own path to the sandbox.
+			From: []networkingv1.NetworkPolicyPeer{
+				{
+					NamespaceSelector: &metav1.LabelSelector{
+						MatchLabels: map[string]string{
+							"kubernetes.io/metadata.name": "agent-sandbox-system",
+						},
+					},
+					PodSelector: &metav1.LabelSelector{
+						MatchLabels: map[string]string{"app": "sandbox-router"},
+					},
+				},
+			},
+		},
+	}
+}
+
+// allowInternetEgressPolicy keeps the default posture — reach the internet, not
+// the cluster — while naming the ingress the gateway needs.
+func allowInternetEgressPolicy(executorPort int) *extensionsv1beta1.NetworkPolicySpec {
+	return &extensionsv1beta1.NetworkPolicySpec{
+		Ingress: sandboxIngressRules(executorPort),
+		Egress: []networkingv1.NetworkPolicyEgressRule{
+			{
+				To: []networkingv1.NetworkPolicyPeer{
+					{
+						IPBlock: &networkingv1.IPBlock{
+							CIDR: "0.0.0.0/0",
+							Except: []string{
+								"10.0.0.0/8",
+								"172.16.0.0/12",
+								"192.168.0.0/16",
+								"169.254.0.0/16",
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+}
+
 func denyInternetEgressPolicy(allowCIDRs []string) *extensionsv1beta1.NetworkPolicySpec {
+	return denyInternetEgressPolicyWithPort(allowCIDRs, 9090)
+}
+
+func denyInternetEgressPolicyWithPort(allowCIDRs []string, executorPort int) *extensionsv1beta1.NetworkPolicySpec {
 	udp := corev1.ProtocolUDP
 	tcp := corev1.ProtocolTCP
 	peers := make([]networkingv1.NetworkPolicyPeer, 0, len(allowCIDRs))
@@ -105,6 +180,7 @@ func denyInternetEgressPolicy(allowCIDRs []string) *extensionsv1beta1.NetworkPol
 		})
 	}
 	return &extensionsv1beta1.NetworkPolicySpec{
+		Ingress: sandboxIngressRules(executorPort),
 		Egress: []networkingv1.NetworkPolicyEgressRule{
 			{
 				Ports: []networkingv1.NetworkPolicyPort{
@@ -126,6 +202,15 @@ func primarySandboxTemplateImage(template *extensionsv1beta1.SandboxTemplate) st
 	return ""
 }
 
+// executorPortOrDefault is the port the executor agent listens on, shared by
+// the pod spec and the sandbox network policy so they cannot drift apart.
+func (g *Gateway) executorPortOrDefault() int {
+	if g.gwConfig.ExecutorPort != 0 {
+		return g.gwConfig.ExecutorPort
+	}
+	return 9090
+}
+
 func (g *Gateway) sandboxPodSpec(
 	image string,
 	resources corev1.ResourceRequirements,
@@ -136,10 +221,7 @@ func (g *Gateway) sandboxPodSpec(
 		executorAgentImage = "arl-executor-agent:latest"
 	}
 
-	executorPort := g.gwConfig.ExecutorPort
-	if executorPort == 0 {
-		executorPort = 9090
-	}
+	executorPort := g.executorPortOrDefault()
 
 	automount := false
 	executorCommand := fmt.Sprintf("exec /arl-bin/executor-agent --socket=/var/run/arl/exec.sock --workspace=/ --tcp-port=%d", executorPort)
@@ -354,6 +436,17 @@ func (g *Gateway) executorEnv() []corev1.EnvVar {
 	var envs []corev1.EnvVar
 	if g.gwConfig.IrohRelayURL != "" {
 		envs = append(envs, corev1.EnvVar{Name: "IROH_RELAY_URL", Value: g.gwConfig.IrohRelayURL})
+	}
+	// env_logger defaults to the error level, which silences the agent's own
+	// lifecycle logging and leaves the container log empty.
+	if logLevel := strings.TrimSpace(g.gwConfig.ExecutorLogLevel); logLevel != "" {
+		envs = append(envs, corev1.EnvVar{Name: "RUST_LOG", Value: logLevel})
+	}
+	// Deliberately absent: the auth master secret. The executor claims its own
+	// token on first use, so the sandbox never needs the secret others' tokens
+	// are derived from.
+	if g.gwConfig.GRPCAuthToken == "" {
+		envs = append(envs, corev1.EnvVar{Name: "EXECUTOR_AUTH_REQUIRED", Value: "0"})
 	}
 	return envs
 }

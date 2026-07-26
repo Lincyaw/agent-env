@@ -72,6 +72,16 @@ executorAgent:
     pullPolicy: IfNotPresent
     tag: ""
   protocol: "v2"
+  # Injected as RUST_LOG into every sandbox executor container. The agent uses
+  # env_logger, which defaults to "error" and leaves `kubectl logs` / `arl
+  # session logs` empty.
+  #
+  # iroh and its tracing spans are pinned to warn: at info they emit relay
+  # probe chatter that outnumbers the executor's own lines roughly 1:1, which
+  # buries spawn/exit events. Their warnings still surface real connectivity
+  # failures. Set "" to inject nothing, or "info,executor_agent=debug" (plus
+  # "iroh=info" if you are debugging QUIC transport) for deeper tracing.
+  logLevel: "info,iroh=warn,tracing=warn"
 
 # Iroh relay for QUIC direct-connect (in-cluster, eliminates public relay latency)
 irohRelay:
@@ -234,9 +244,17 @@ auth:
   # Allowed WebSocket origins (comma-separated host:port). Empty = reject
   # browser origins when auth is enabled.
   allowedOrigins: ""
-  # gRPC shared token for gateway ↔ executor authentication. Leave empty to
-  # auto-generate a random token (preserved across upgrades); set explicitly
-  # to pin a known value.
+  # Master secret for gateway → executor authentication. The gateway derives a
+  # distinct per-sandbox token from it (HMAC over the pod IP) and presents that
+  # on every executor connection; the secret itself is never mounted into a
+  # sandbox, so compromising one sandbox does not yield another's token.
+  #
+  # Empty auto-generates a random value, preserved across `helm upgrade` via a
+  # cluster lookup. That lookup does NOT work under `helm template`, which mints
+  # a fresh secret on every render — and rotating the secret makes the gateway
+  # unable to authenticate to sandboxes that already claimed a token from the
+  # old one. If you deploy with `helm template | kubectl apply` (see CLAUDE.md),
+  # pin this to a stable value or read the existing Secret first.
   grpcToken: ""
 
 # Redis configuration (for HA session state persistence across gateway replicas)

@@ -7,10 +7,14 @@ import concurrent.futures
 import json
 import os
 import threading
-from collections.abc import Callable
+from collections.abc import Callable, Coroutine
 from contextlib import suppress
+from typing import Any, TypeVar
 
+from arl.iroh_transport import IrohShellSession, IrohTransport
 from arl.types import ShellMessage
+
+_T = TypeVar("_T")
 
 
 class InteractiveShellClient:
@@ -41,6 +45,8 @@ class InteractiveShellClient:
         api_key: str | None = None,
         *,
         iroh_addr: str | None = None,
+        rows: int = 24,
+        cols: int = 80,
     ) -> None:
         self._gateway_url = gateway_url.rstrip("/")
         ws_url = self._gateway_url.replace("http://", "ws://").replace("https://", "wss://")
@@ -52,9 +58,10 @@ class InteractiveShellClient:
         self._iroh_addr = iroh_addr
         self._iroh_loop: asyncio.AbstractEventLoop | None = None
         self._iroh_thread: threading.Thread | None = None
-        self._iroh_transport: object | None = None
-        self._iroh_send: object | None = None
-        self._iroh_recv: object | None = None
+        self._iroh_transport: IrohTransport | None = None
+        self._iroh_shell: IrohShellSession | None = None
+        self._rows = rows
+        self._cols = cols
 
     def connect(self, session_id: str) -> None:
         """Connect to a session's interactive shell.
@@ -85,9 +92,7 @@ class InteractiveShellClient:
         self._ws = ws_client.connect(url, additional_headers=headers)
 
     def _connect_iroh(self) -> None:
-        """Open an iroh QUIC bidi stream for shell I/O."""
-        from arl.iroh_transport import IrohTransport
-
+        """Open a QUIC connection and spawn a PTY-backed shell on it."""
         loop = asyncio.new_event_loop()
         thread = threading.Thread(
             target=self._run_iroh_loop,
@@ -97,15 +102,15 @@ class InteractiveShellClient:
         )
         thread.start()
 
-        async def _setup() -> tuple[IrohTransport, object, object]:
+        async def _setup() -> tuple[IrohTransport, IrohShellSession]:
             transport = IrohTransport(self._iroh_addr or "")
             await transport.connect()
-            send, recv = await transport.open_shell()
-            return transport, send, recv
+            shell = await transport.open_shell(rows=self._rows, cols=self._cols)
+            return transport, shell
 
         try:
             future = asyncio.run_coroutine_threadsafe(_setup(), loop)
-            transport, send, recv = future.result()
+            transport, shell = future.result()
         except Exception:
             loop.call_soon_threadsafe(loop.stop)
             thread.join(timeout=5)
@@ -115,21 +120,19 @@ class InteractiveShellClient:
         self._iroh_loop = loop
         self._iroh_thread = thread
         self._iroh_transport = transport
-        self._iroh_send = send
-        self._iroh_recv = recv
+        self._iroh_shell = shell
 
     @staticmethod
     def _run_iroh_loop(loop: asyncio.AbstractEventLoop) -> None:
         asyncio.set_event_loop(loop)
         loop.run_forever()
 
-    def _iroh_run(self, coro: object) -> object:
+    def _iroh_run(self, coro: Coroutine[Any, Any, _T]) -> _T:
         """Schedule a coroutine on the iroh background loop and block."""
         if self._iroh_loop is None:
             raise RuntimeError("Iroh shell not connected")
-        future: concurrent.futures.Future[object] = asyncio.run_coroutine_threadsafe(
-            coro,  # type: ignore[arg-type]
-            self._iroh_loop,
+        future: concurrent.futures.Future[_T] = asyncio.run_coroutine_threadsafe(
+            coro, self._iroh_loop
         )
         return future.result()
 
@@ -139,11 +142,8 @@ class InteractiveShellClient:
         Args:
             data: Input data to send.
         """
-        if self._iroh_send is not None:
-            from arl.iroh_transport import FRAME_EVENT, IrohTransport
-
-            payload = json.dumps({"type": "input", "data": data}).encode()
-            self._iroh_run(IrohTransport._send_frame(self._iroh_send, FRAME_EVENT, payload))
+        if self._iroh_shell is not None:
+            self._iroh_run(self._iroh_shell.send_input(data.encode()))
             return
         if self._ws is None:
             raise RuntimeError("Not connected. Call connect() first.")
@@ -156,11 +156,8 @@ class InteractiveShellClient:
         Args:
             sig: Signal name (e.g. ``SIGINT``, ``SIGTERM``, ``SIGKILL``).
         """
-        if self._iroh_send is not None:
-            from arl.iroh_transport import FRAME_EVENT, IrohTransport
-
-            payload = json.dumps({"type": "signal", "signal": sig}).encode()
-            self._iroh_run(IrohTransport._send_frame(self._iroh_send, FRAME_EVENT, payload))
+        if self._iroh_shell is not None:
+            self._iroh_run(self._iroh_shell.send_signal(sig))
             return
         if self._ws is None:
             raise RuntimeError("Not connected. Call connect() first.")
@@ -174,11 +171,9 @@ class InteractiveShellClient:
             cols: Number of columns.
             rows: Number of rows.
         """
-        if self._iroh_send is not None:
-            from arl.iroh_transport import FRAME_EVENT, IrohTransport
-
-            payload = json.dumps({"type": "resize", "cols": cols, "rows": rows}).encode()
-            self._iroh_run(IrohTransport._send_frame(self._iroh_send, FRAME_EVENT, payload))
+        if self._iroh_shell is not None:
+            self._rows, self._cols = rows, cols
+            self._iroh_run(self._iroh_shell.resize(rows, cols))
             return
         if self._ws is None:
             raise RuntimeError("Not connected. Call connect() first.")
@@ -196,7 +191,7 @@ class InteractiveShellClient:
         Returns:
             Parsed :class:`ShellMessage`, or ``None`` on timeout / closed.
         """
-        if self._iroh_recv is not None:
+        if self._iroh_shell is not None:
             return self._read_iroh_message(timeout)
 
         if self._ws is None:
@@ -214,21 +209,25 @@ class InteractiveShellClient:
             return None
 
     def _read_iroh_message(self, timeout: float) -> ShellMessage | None:
-        """Read one shell message from the iroh QUIC stream."""
-        from arl.iroh_transport import IrohTransport
+        """Read one shell event from the QUIC stream as a ShellMessage."""
+        shell = self._iroh_shell
+        if shell is None:
+            return None
 
         async def _recv() -> ShellMessage | None:
             try:
-                _, data = await asyncio.wait_for(
-                    IrohTransport._recv_frame(self._iroh_recv),
-                    timeout=timeout,
-                )
-                msg: dict[str, object] = json.loads(data)
-                return ShellMessage(**msg)  # type: ignore[arg-type]
-            except asyncio.TimeoutError:
+                kind, data, exit_code = await asyncio.wait_for(shell.read_event(), timeout=timeout)
+            except (TimeoutError, asyncio.TimeoutError):
                 return None
             except Exception:
                 return None
+            if kind == "output":
+                return ShellMessage(type="output", data=data.decode("utf-8", errors="replace"))
+            if kind == "exit":
+                return ShellMessage(type="exit", exit_code=exit_code)
+            if kind == "error":
+                return ShellMessage(type="error", data=data.decode("utf-8", errors="replace"))
+            return None
 
         result = self._iroh_run(_recv())
         if isinstance(result, ShellMessage):
@@ -252,18 +251,13 @@ class InteractiveShellClient:
     def close(self) -> None:
         """Close the shell connection (WebSocket or iroh)."""
         # Tear down iroh resources
-        if self._iroh_send is not None:
+        if self._iroh_shell is not None:
             with suppress(Exception):
-                self._iroh_run(
-                    self._iroh_send.finish()  # type: ignore[attr-defined]
-                )
-            self._iroh_send = None
-        self._iroh_recv = None
+                self._iroh_run(self._iroh_shell.close())
+            self._iroh_shell = None
         if self._iroh_transport is not None:
             with suppress(Exception):
-                self._iroh_run(
-                    self._iroh_transport.close()  # type: ignore[attr-defined]
-                )
+                self._iroh_run(self._iroh_transport.close())
             self._iroh_transport = None
         if self._iroh_loop is not None:
             self._iroh_loop.call_soon_threadsafe(self._iroh_loop.stop)
@@ -280,7 +274,7 @@ class InteractiveShellClient:
 
     def is_open(self) -> bool:
         """Check if the connection is open."""
-        return self._ws is not None or self._iroh_send is not None
+        return self._ws is not None or self._iroh_shell is not None
 
     def __enter__(self) -> InteractiveShellClient:
         return self

@@ -9,6 +9,24 @@ pub const ALPN: &[u8] = b"arl/executor";
 
 const SECRET_KEY_FILE: &str = "/var/run/arl/iroh-secret-key";
 
+/// How long to wait for a relay connection before giving up and serving with
+/// direct addresses only. Startup is not blocked by this: the endpoint runs on
+/// its own task while the Unix socket and TCP listeners are already serving.
+const RELAY_ONLINE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
+
+/// Where the endpoint publishes its address, recorded so request handlers can
+/// serve it without threading the path through every call site.
+static ADDR_FILE: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+/// The address JSON this executor has published, or an empty string when the
+/// endpoint has not bound yet (or iroh is disabled). Callers re-read later.
+pub fn published_addr() -> String {
+    ADDR_FILE
+        .get()
+        .and_then(|p| std::fs::read_to_string(p).ok())
+        .unwrap_or_default()
+}
+
 pub struct IrohEndpoint {
     endpoint: Endpoint,
     addr_file: PathBuf,
@@ -16,6 +34,7 @@ pub struct IrohEndpoint {
 
 impl IrohEndpoint {
     pub async fn new(addr_file: PathBuf) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        let _ = ADDR_FILE.set(addr_file.clone());
         let secret_key = load_or_generate_secret_key();
 
         let mut builder = Endpoint::builder(presets::N0)
@@ -38,11 +57,31 @@ impl IrohEndpoint {
 
         let endpoint = builder.bind().await?;
 
-        endpoint.online().await;
-        info!("iroh endpoint online, id={}", endpoint.id());
-
         let ep = IrohEndpoint { endpoint, addr_file };
+
+        // Publish direct addresses immediately. Once bind() returns the
+        // endpoint has local addresses and is dialable by anyone on the same
+        // network, which in-cluster is every client we care about.
         ep.write_addr_file()?;
+
+        // Only then wait for a relay, and never unconditionally: online()
+        // blocks until a relay connects, so an unreachable relay would hang
+        // startup forever and the address file would never be written. The
+        // relay only buys NAT traversal for clients off this network.
+        match tokio::time::timeout(RELAY_ONLINE_TIMEOUT, ep.endpoint.online()).await {
+            Ok(()) => {
+                info!("iroh endpoint online, id={}", ep.endpoint.id());
+                // Re-publish so clients also learn the relay URL.
+                ep.write_addr_file()?;
+            }
+            Err(_) => warn!(
+                "iroh relay not connected after {}s; serving with direct addresses only. \
+                 Clients on this network connect directly; clients behind NAT may not \
+                 reach this sandbox.",
+                RELAY_ONLINE_TIMEOUT.as_secs()
+            ),
+        }
+
         Ok(ep)
     }
 
@@ -106,7 +145,11 @@ impl IrohEndpoint {
             "direct_addresses": direct_addrs,
         });
         let content = serde_json::to_string(&json).expect("json serialize");
-        std::fs::write(&self.addr_file, &content)?;
+        // Write-then-rename: the gateway reads this file concurrently and must
+        // never observe a partially written JSON document.
+        let tmp = self.addr_file.with_extension("tmp");
+        std::fs::write(&tmp, &content)?;
+        std::fs::rename(&tmp, &self.addr_file)?;
         info!("iroh endpoint addr written to {} (id={}, relay={:?}, direct={:?})", self.addr_file.display(), id_str, relay_url, direct_addrs);
         Ok(())
     }
@@ -151,6 +194,43 @@ mod tests {
     use super::super::connection::SyncRecvStream;
     use super::super::proto;
     use prost::Message;
+
+    /// An unreachable relay must not stop the endpoint from publishing its
+    /// address. This is the regression guard for the hang that left
+    /// /var/run/arl/iroh-addr missing and silently disabled QUIC direct
+    /// connect across the whole cluster.
+    #[tokio::test]
+    async fn test_addr_file_written_when_relay_unreachable() {
+        let dir = tempfile::tempdir().unwrap();
+        let addr_file = dir.path().join("iroh-addr");
+
+        // A relay URL that cannot resolve, mirroring a sandbox pod whose DNS
+        // cannot see in-cluster service names.
+        unsafe {
+            std::env::set_var("IROH_RELAY_URL", "http://relay.invalid.unresolvable:3340");
+        }
+        let started = std::time::Instant::now();
+        let ep = IrohEndpoint::new(addr_file.clone()).await;
+        unsafe {
+            std::env::remove_var("IROH_RELAY_URL");
+        }
+
+        let ep = ep.expect("endpoint must bind even when the relay is unreachable");
+        assert!(
+            started.elapsed() < RELAY_ONLINE_TIMEOUT + std::time::Duration::from_secs(15),
+            "startup should give up on the relay, took {:?}",
+            started.elapsed()
+        );
+
+        let content = std::fs::read_to_string(&addr_file)
+            .expect("address file must exist even without a relay");
+        let json: serde_json::Value = serde_json::from_str(&content).unwrap();
+        assert_eq!(json["id"].as_str().unwrap(), ep.endpoint.id().to_string());
+        assert!(
+            !json["direct_addresses"].as_array().unwrap().is_empty(),
+            "direct addresses are what same-network clients dial: {content}"
+        );
+    }
 
     #[tokio::test]
     async fn test_iroh_ping_pong() {
@@ -199,35 +279,58 @@ mod tests {
 
         let (mut send, recv) = conn.open_bi().await.expect("open bi");
 
-        let ping = proto::Request {
-            tag: 1,
-            kind: Some(proto::request::Kind::Ping(proto::PingRequest {})),
-        };
-        let encoded = ping.encode_to_vec();
-        let len = encoded.len() as u32;
-        send.write_all(&[super::super::agent::MSG_TYPE_REQUEST])
-            .await
-            .expect("write type");
-        send.write_all(&len.to_be_bytes())
-            .await
-            .expect("write len");
-        send.write_all(&encoded).await.expect("write ping");
+        // QUIC is a remote transport, so the control stream must authenticate
+        // before anything else is served.
+        super::super::auth::reset_for_test();
+        let frames = [
+            proto::Request {
+                tag: 0,
+                kind: Some(proto::request::Kind::Auth(proto::AuthRequest {
+                    token: "test-token".into(),
+                })),
+            },
+            proto::Request {
+                tag: 1,
+                kind: Some(proto::request::Kind::Ping(proto::PingRequest {})),
+            },
+        ];
+        for frame in &frames {
+            let encoded = frame.encode_to_vec();
+            let len = encoded.len() as u32;
+            send.write_all(&[super::super::agent::MSG_TYPE_REQUEST])
+                .await
+                .expect("write type");
+            send.write_all(&len.to_be_bytes())
+                .await
+                .expect("write len");
+            send.write_all(&encoded).await.expect("write frame");
+        }
 
         let handle = Handle::current();
-        let response = tokio::task::spawn_blocking(move || {
+        let (auth_response, response) = tokio::task::spawn_blocking(move || {
             let mut reader = SyncRecvStream::new(recv, handle);
-            let mut type_buf = [0u8; 1];
-            std::io::Read::read_exact(&mut reader, &mut type_buf).expect("read type");
-            assert_eq!(type_buf[0], MSG_TYPE_RESPONSE);
-            let mut len_buf = [0u8; 4];
-            std::io::Read::read_exact(&mut reader, &mut len_buf).expect("read len");
-            let msg_len = u32::from_be_bytes(len_buf) as usize;
-            let mut msg_buf = vec![0u8; msg_len];
-            std::io::Read::read_exact(&mut reader, &mut msg_buf).expect("read msg");
-            proto::Response::decode(&msg_buf[..]).expect("decode response")
+            let mut read_one = |reader: &mut SyncRecvStream| {
+                let mut type_buf = [0u8; 1];
+                std::io::Read::read_exact(reader, &mut type_buf).expect("read type");
+                assert_eq!(type_buf[0], MSG_TYPE_RESPONSE);
+                let mut len_buf = [0u8; 4];
+                std::io::Read::read_exact(reader, &mut len_buf).expect("read len");
+                let msg_len = u32::from_be_bytes(len_buf) as usize;
+                let mut msg_buf = vec![0u8; msg_len];
+                std::io::Read::read_exact(reader, &mut msg_buf).expect("read msg");
+                proto::Response::decode(&msg_buf[..]).expect("decode response")
+            };
+            let auth = read_one(&mut reader);
+            let ping = read_one(&mut reader);
+            (auth, ping)
         })
         .await
         .expect("blocking read");
+
+        match auth_response.kind {
+            Some(proto::response::Kind::Auth(a)) => assert!(a.claimed, "first auth claims"),
+            other => panic!("expected auth response, got {other:?}"),
+        }
 
         send.finish().expect("finish send");
 

@@ -121,9 +121,17 @@ func (g *Gateway) CreatePool(ctx context.Context, req CreatePoolRequest) error {
 			},
 		},
 	}
-	if req.AllowInternet != nil && !*req.AllowInternet {
+	switch {
+	case req.AllowInternet != nil && !*req.AllowInternet:
 		template.Spec.NetworkPolicyManagement = extensionsv1beta1.NetworkPolicyManagementManaged
-		template.Spec.NetworkPolicy = denyInternetEgressPolicy(g.egressAllowCIDRs())
+		template.Spec.NetworkPolicy = denyInternetEgressPolicyWithPort(g.egressAllowCIDRs(), g.executorPortOrDefault())
+	case g.sandboxNetworkPolicyManagement() == extensionsv1beta1.NetworkPolicyManagementManaged:
+		// Managed mode owns the whole policy. The controller's default admits
+		// only its own router, which would sever the gateway's direct executor
+		// connection on a cluster that enforces NetworkPolicy, so spell out the
+		// real data path while leaving egress as permissive as before.
+		template.Spec.NetworkPolicyManagement = extensionsv1beta1.NetworkPolicyManagementManaged
+		template.Spec.NetworkPolicy = allowInternetEgressPolicy(g.executorPortOrDefault())
 	}
 	createdTemplate := false
 	if err := g.k8sClient.Create(ctx, template); err != nil {
