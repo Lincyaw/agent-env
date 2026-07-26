@@ -182,16 +182,17 @@ func (c *Client) GetExecuteOperation(sessionID, operationID string) (*ExecuteOpe
 }
 
 func (c *Client) UploadFile(sessionID, remotePath string, content io.Reader, sha256 string) (*UploadFileResponse, error) {
-	quotedPath, err := quoteSessionFilePath(remotePath)
+	cleanPath, err := sessionFilePath(remotePath)
 	if err != nil {
 		return nil, err
 	}
 
-	req, err := http.NewRequest("PUT", c.base+"/v1/sessions/"+url.PathEscape(sessionID)+"/files/"+quotedPath, content)
+	req, err := http.NewRequest("POST", c.base+"/v1/sessions/"+url.PathEscape(sessionID)+"/upload-file", content)
 	if err != nil {
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/octet-stream")
+	req.Header.Set("X-ARL-Path", cleanPath)
 	if sha256 != "" {
 		req.Header.Set("X-ARL-SHA256", sha256)
 	}
@@ -217,15 +218,24 @@ func (c *Client) UploadFile(sessionID, remotePath string, content io.Reader, sha
 }
 
 func (c *Client) DownloadFile(sessionID, remotePath string) (*http.Response, error) {
-	quotedPath, err := quoteSessionFilePath(remotePath)
+	cleanPath, err := sessionFilePath(remotePath)
 	if err != nil {
 		return nil, err
 	}
 
-	req, err := http.NewRequest("GET", c.base+"/v1/sessions/"+url.PathEscape(sessionID)+"/files/"+quotedPath, nil)
+	body, err := json.Marshal(map[string]string{"path": cleanPath})
 	if err != nil {
 		return nil, err
 	}
+	req, err := http.NewRequest(
+		"POST",
+		c.base+"/v1/sessions/"+url.PathEscape(sessionID)+"/download-file",
+		bytes.NewReader(body),
+	)
+	if err != nil {
+		return nil, err
+	}
+	req.Header.Set("Content-Type", "application/json")
 	if c.apiKey != "" {
 		req.Header.Set("Authorization", "Bearer "+c.apiKey)
 	}
@@ -241,22 +251,23 @@ func (c *Client) DownloadFile(sessionID, remotePath string) (*http.Response, err
 	return resp, nil
 }
 
-func quoteSessionFilePath(remotePath string) (string, error) {
+// sessionFilePath validates a remote path for the file-transfer endpoints.
+// The path is sent in the X-ARL-Path header or a JSON body, so it is passed
+// through verbatim apart from cleaning; absolute paths stay absolute.
+func sessionFilePath(remotePath string) (string, error) {
 	normalized := strings.TrimSpace(strings.ReplaceAll(remotePath, "\\", "/"))
-	normalized = path.Clean(normalized)
-	normalized = strings.TrimPrefix(normalized, "/")
-	if normalized == "" || normalized == "." {
+	if normalized == "" {
 		return "", usageError("remote path is required")
 	}
-	if normalized == ".." || strings.HasPrefix(normalized, "../") {
+	absolute := strings.HasPrefix(normalized, "/")
+	normalized = path.Clean(normalized)
+	if normalized == "" || normalized == "." || normalized == "/" {
+		return "", usageError("remote path is required")
+	}
+	if !absolute && (normalized == ".." || strings.HasPrefix(normalized, "../")) {
 		return "", usageError("remote path must stay within the session workspace")
 	}
-
-	parts := strings.Split(normalized, "/")
-	for i, part := range parts {
-		parts[i] = url.PathEscape(part)
-	}
-	return strings.Join(parts, "/"), nil
+	return normalized, nil
 }
 
 func (c *Client) Restore(sessionID, snapshotID string) error {
