@@ -11,6 +11,22 @@ import (
 	"github.com/Lincyaw/agent-env/pkg/interfaces"
 )
 
+// errNoCheckpointStore explains why a source that is gone cannot be forked.
+//
+// Both call sites used to report "source session not found", which is wrong
+// twice over: the source may still be on record, and the actual obstacle is
+// that checkpoints were only ever written to the sandbox's own disk, so they
+// died with it. Without CHECKPOINT_STORE_PATH the checkpoint feature can only
+// fork sources that are still running.
+func errNoCheckpointStore(sourceID string) error {
+	return fmt.Errorf(
+		"cannot fork source session %s: it is no longer running and no persistent "+
+			"checkpoint store is configured (set CHECKPOINT_STORE_PATH, or "+
+			"checkpoint.enabled=true in the chart, which also mounts the PVC); "+
+			"only running sources can be forked in this configuration",
+		sourceID)
+}
+
 // forkInherits is what a fork copies from the session it branches off.
 //
 // A fork used to be created from image, profile, namespace, and mode alone,
@@ -87,7 +103,7 @@ func (g *Gateway) ForkSession(ctx context.Context, sourceID string, req ForkSess
 	if !ok {
 		// Source session may be deleted; check persistent store
 		if g.checkpointStore == nil {
-			return nil, fmt.Errorf("source session %s not found", sourceID)
+			return nil, errNoCheckpointStore(sourceID)
 		}
 		return g.forkFromStore(ctx, sourceID, req)
 	}
@@ -102,7 +118,7 @@ func (g *Gateway) ForkSession(ctx context.Context, sourceID string, req ForkSess
 		if g.checkpointStore != nil {
 			return g.forkFromStoreWithMeta(ctx, sourceID, req, inherits)
 		}
-		return nil, fmt.Errorf("source session %s not found", sourceID)
+		return nil, errNoCheckpointStore(sourceID)
 	}
 
 	// Execute returns 0-based step indices; checkpoint dirs are 1-based.

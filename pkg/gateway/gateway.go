@@ -167,6 +167,14 @@ func New(k8sClient client.Client, runtimeAllocator RuntimeAllocator, executorCli
 	if gwConfig.CheckpointStorePath != "" {
 		cpStore = NewCheckpointStore(gwConfig.CheckpointStorePath)
 		log.Printf("Checkpoint store enabled (path=%s)", gwConfig.CheckpointStorePath)
+	} else if gwConfig.SandboxCheckpointEnabled {
+		// Half-configured: checkpoints are taken but only onto the sandbox's
+		// own disk, so they are lost with the pod. Forking a source that has
+		// stopped is impossible, and the failure surfaces far from the cause.
+		log.Printf("WARNING: checkpoints are enabled (SANDBOX_CHECKPOINT_ENABLED=true) but " +
+			"CHECKPOINT_STORE_PATH is unset. Checkpoints stay on the sandbox and are lost " +
+			"when it is reclaimed; only sessions that are still running can be forked. " +
+			"Set checkpoint.enabled=true in the chart to mount the persistent store.")
 	}
 	var clientset kubernetes.Interface
 	if gwConfig.K8sRESTConfig != nil {
