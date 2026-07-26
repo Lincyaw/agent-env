@@ -75,7 +75,9 @@ func (g *Gateway) sweepSessions() {
 		s.mu.RUnlock()
 
 		if idleTimeout > 0 && now.Sub(lastTask) > idleTimeout {
-			log.Printf("Session %s idle for %v (timeout=%v), deleting", sessionID, now.Sub(lastTask), idleTimeout)
+			log.Printf("Session %s idle for %v (timeout=%v, last_activity=%s, active_execs=0), deleting",
+				sessionID, now.Sub(lastTask).Round(time.Second), idleTimeout,
+				lastTask.UTC().Format(time.RFC3339))
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 			if err := g.deleteSession(ctx, sessionID, "idle_timeout"); err != nil {
 				log.Printf("Warning: failed to delete idle session %s: %v", sessionID, err)

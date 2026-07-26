@@ -5,10 +5,71 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"sort"
 	"time"
 
 	"github.com/Lincyaw/agent-env/pkg/interfaces"
 )
+
+// forkInherits is what a fork copies from the session it branches off.
+//
+// A fork used to be created from image, profile, namespace, and mode alone,
+// so everything else fell back to gateway defaults. The idle timeout is the
+// damaging one: a source configured to stay alive for hours produced a fork
+// the sweep reclaimed after GATEWAY_IDLE_TIMEOUT, killing long verifier runs
+// partway through and reporting them as "runtime lost".
+//
+// Not inherited, because the session does not retain them past creation:
+// configEnv and allowInternet. A fork of a session created with either will
+// not reproduce it. Fixing that means persisting them on the session first.
+type forkInherits struct {
+	Image             string
+	Profile           string
+	Namespace         string
+	Mode              string
+	IdleTimeout       time.Duration
+	PrivateContainers []PrivateContainerSpec
+}
+
+// forkInheritsFromSession snapshots the inheritable settings. Takes the read
+// lock itself, so the caller must not hold it.
+func forkInheritsFromSession(s *session) forkInherits {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	inherits := forkInherits{
+		Image:       s.Info.Image,
+		Profile:     s.Info.Profile,
+		Namespace:   s.Info.Namespace,
+		Mode:        s.Info.Mode,
+		IdleTimeout: s.idleTimeout,
+	}
+	if len(s.privateContainers) > 0 {
+		names := make([]string, 0, len(s.privateContainers))
+		for name := range s.privateContainers {
+			names = append(names, name)
+		}
+		sort.Strings(names)
+		inherits.PrivateContainers = make([]PrivateContainerSpec, 0, len(names))
+		for _, name := range names {
+			inherits.PrivateContainers = append(inherits.PrivateContainers, s.privateContainers[name])
+		}
+	}
+	return inherits
+}
+
+func (f forkInherits) createRequest() CreateSessionRequest {
+	req := CreateSessionRequest{
+		Image:             f.Image,
+		Profile:           f.Profile,
+		Namespace:         f.Namespace,
+		Mode:              f.Mode,
+		PrivateContainers: f.PrivateContainers,
+	}
+	if f.IdleTimeout > 0 {
+		req.IdleTimeoutSeconds = int(f.IdleTimeout.Seconds())
+	}
+	return req
+}
 
 // ForkSession creates a new session from the filesystem state of a source
 // session at a given checkpoint step. The flow:
@@ -31,18 +92,15 @@ func (g *Gateway) ForkSession(ctx context.Context, sourceID string, req ForkSess
 		return g.forkFromStore(ctx, sourceID, req)
 	}
 
+	inherits := forkInheritsFromSession(source)
 	source.mu.RLock()
 	sourceClosed := source.closed
-	sourceImage := source.Info.Image
-	sourceProfile := source.Info.Profile
-	sourceNS := source.Info.Namespace
-	sourceMode := source.Info.Mode
 	sourcePodIP := source.Info.PodIP
 	source.mu.RUnlock()
 
 	if sourceClosed {
 		if g.checkpointStore != nil {
-			return g.forkFromStoreWithMeta(ctx, sourceID, req, sourceImage, sourceProfile, sourceNS, sourceMode)
+			return g.forkFromStoreWithMeta(ctx, sourceID, req, inherits)
 		}
 		return nil, fmt.Errorf("source session %s not found", sourceID)
 	}
@@ -68,13 +126,34 @@ func (g *Gateway) ForkSession(ctx context.Context, sourceID string, req ForkSess
 	tmpPath := tmpFile.Name()
 	defer os.Remove(tmpPath)
 
-	if err := g.executorClient.DownloadCheckpoint(ctx, sourcePodIP, checkpointStep, tmpFile); err != nil {
+	// Hold the source busy for the transfer. A checkpoint download can run for
+	// minutes, and without this the source looks idle to the sweep and its
+	// claim's ShutdownTime stops being extended mid-read.
+	_, acquiredPodIP, releaseSource, err := g.acquireSessionPodIP(ctx, sourceID)
+	if err != nil {
 		tmpFile.Close()
-		return nil, fmt.Errorf("download checkpoint from executor: %w", err)
+		return nil, fmt.Errorf("acquire source session %s for checkpoint download: %w", sourceID, err)
+	}
+	if acquiredPodIP != "" {
+		sourcePodIP = acquiredPodIP
+	}
+	downloadStart := time.Now()
+	downloadErr := g.executorClient.DownloadCheckpoint(ctx, sourcePodIP, checkpointStep, tmpFile)
+	releaseSource()
+	downloadDuration := time.Since(downloadStart)
+	if downloadErr != nil {
+		tmpFile.Close()
+		return nil, fmt.Errorf("download checkpoint from executor: %w", downloadErr)
+	}
+	size := int64(-1)
+	if st, statErr := tmpFile.Stat(); statErr == nil {
+		size = st.Size()
 	}
 	tmpFile.Close()
+	log.Printf("Fork: downloaded checkpoint for %s step %d from pod %s (%d bytes in %s, source held active)",
+		sourceID, checkpointStep, sourcePodIP, size, downloadDuration.Round(time.Millisecond))
 
-	return g.completeFork(ctx, sourceID, req, tmpPath, sourceImage, sourceProfile, sourceNS, sourceMode)
+	return g.completeFork(ctx, sourceID, req, tmpPath, inherits)
 }
 
 // forkFromStore handles fork when the source session has been deleted from the
@@ -84,13 +163,7 @@ func (g *Gateway) ForkSession(ctx context.Context, sourceID string, req ForkSess
 func (g *Gateway) forkFromStore(ctx context.Context, sourceID string, req ForkSessionRequest) (*ForkSessionResponse, error) {
 	historical, ok := g.GetHistoricalSession(sourceID)
 	if ok {
-		historical.mu.RLock()
-		image := historical.Info.Image
-		profile := historical.Info.Profile
-		ns := historical.Info.Namespace
-		mode := historical.Info.Mode
-		historical.mu.RUnlock()
-		return g.forkFromStoreWithMeta(ctx, sourceID, req, image, profile, ns, mode)
+		return g.forkFromStoreWithMeta(ctx, sourceID, req, forkInheritsFromSession(historical))
 	}
 
 	if req.Image == "" {
@@ -101,10 +174,10 @@ func (g *Gateway) forkFromStore(ctx context.Context, sourceID string, req ForkSe
 		profile = "default"
 	}
 	log.Printf("Fork: no historical record for %s, using request-provided image=%s profile=%s", sourceID, req.Image, profile)
-	return g.forkFromStoreWithMeta(ctx, sourceID, req, req.Image, profile, "", "")
+	return g.forkFromStoreWithMeta(ctx, sourceID, req, forkInherits{Image: req.Image, Profile: profile})
 }
 
-func (g *Gateway) forkFromStoreWithMeta(ctx context.Context, sourceID string, req ForkSessionRequest, image, profile, ns, mode string) (*ForkSessionResponse, error) {
+func (g *Gateway) forkFromStoreWithMeta(ctx context.Context, sourceID string, req ForkSessionRequest, inherits forkInherits) (*ForkSessionResponse, error) {
 	checkpointStep := req.Step + 1
 	tmpPath, err := g.checkpointStore.LoadCombined(sourceID, checkpointStep)
 	if err != nil {
@@ -112,19 +185,12 @@ func (g *Gateway) forkFromStoreWithMeta(ctx context.Context, sourceID string, re
 	}
 	defer os.Remove(tmpPath)
 
-	return g.completeFork(ctx, sourceID, req, tmpPath, image, profile, ns, mode)
+	return g.completeFork(ctx, sourceID, req, tmpPath, inherits)
 }
 
 // completeFork creates a new session and applies the checkpoint tar.
-func (g *Gateway) completeFork(ctx context.Context, sourceID string, req ForkSessionRequest, tarPath, image, profile, ns, mode string) (*ForkSessionResponse, error) {
-	newReq := CreateSessionRequest{
-		Image:     image,
-		Profile:   profile,
-		Namespace: ns,
-		Mode:      mode,
-	}
-
-	newInfo, err := g.CreateSession(ctx, newReq)
+func (g *Gateway) completeFork(ctx context.Context, sourceID string, req ForkSessionRequest, tarPath string, inherits forkInherits) (*ForkSessionResponse, error) {
+	newInfo, err := g.CreateSession(ctx, inherits.createRequest())
 	if err != nil {
 		return nil, fmt.Errorf("create fork session: %w", err)
 	}
@@ -150,7 +216,12 @@ func (g *Gateway) completeFork(ctx context.Context, sourceID string, req ForkSes
 	newInfo.ParentSessionID = sourceID
 	newInfo.ForkStep = req.Step
 
-	log.Printf("Forked session %s from %s at step %d", newInfo.ID, sourceID, req.Step)
+	idleDesc := "gateway default"
+	if inherits.IdleTimeout > 0 {
+		idleDesc = inherits.IdleTimeout.String()
+	}
+	log.Printf("Forked session %s from %s at step %d (inherited idle_timeout=%s, private_containers=%d, image=%s, profile=%s)",
+		newInfo.ID, sourceID, req.Step, idleDesc, len(inherits.PrivateContainers), inherits.Image, inherits.Profile)
 
 	return &ForkSessionResponse{
 		Session:  newInfo,
@@ -163,22 +234,23 @@ func (g *Gateway) completeFork(ctx context.Context, sourceID string, req ForkSes
 // it, restoring filesystem state. Uses the executor client for file upload
 // and command execution.
 func (g *Gateway) applyCheckpointToSession(ctx context.Context, sessionID, tarPath string) error {
-	sess, ok := g.store.Get(sessionID)
-	if !ok {
-		return fmt.Errorf("session %s not found", sessionID)
-	}
-
-	sess.mu.RLock()
-	podIP := sess.Info.PodIP
-	sess.mu.RUnlock()
-
-	if podIP == "" {
-		return fmt.Errorf("session %s has no pod IP", sessionID)
-	}
 	if g.executorClient == nil {
 		return fmt.Errorf("executor client not configured")
 	}
 
+	// Uploading and extracting the tar is unbounded work; keep the session
+	// marked busy so neither sweep nor the claim deadline reclaims it midway.
+	_, podIP, releaseSession, err := g.acquireSessionPodIP(ctx, sessionID)
+	if err != nil {
+		return err
+	}
+	defer releaseSession()
+
+	if podIP == "" {
+		return fmt.Errorf("session %s has no pod IP", sessionID)
+	}
+
+	applyStart := time.Now()
 	tarFile, err := os.Open(tarPath)
 	if err != nil {
 		return fmt.Errorf("open checkpoint tar: %w", err)
@@ -203,6 +275,8 @@ func (g *Gateway) applyCheckpointToSession(ctx context.Context, sessionID, tarPa
 	if result.ExitCode != 0 {
 		return fmt.Errorf("checkpoint extraction failed (exit %d): %s", result.ExitCode, result.Stderr)
 	}
+	log.Printf("Fork: applied checkpoint to session %s on pod %s in %s (session held active)",
+		sessionID, podIP, time.Since(applyStart).Round(time.Millisecond))
 
 	// Cleanup the temp tar
 	cleanupReq := &interfaces.ExecRequest{

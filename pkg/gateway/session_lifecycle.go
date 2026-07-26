@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"go.opentelemetry.io/otel"
@@ -489,6 +490,12 @@ func (g *Gateway) dropSession(sessionID string, s *session) {
 	}
 	s.closed = true
 	now := time.Now()
+	idleFor := time.Duration(0)
+	if !s.lastTaskTime.IsZero() {
+		idleFor = now.Sub(s.lastTaskTime)
+	}
+	idleTimeout := s.idleTimeout
+	activeExecs := atomic.LoadInt32(&s.activeExecs)
 	s.deletionReason = "runtime_lost"
 	s.deletedAt = &now
 	s.Info.Status = "deleted"
@@ -502,12 +509,17 @@ func (g *Gateway) dropSession(sessionID string, s *session) {
 	diag := g.diagnoseSessionEnd(diagCtx, s, sessionID)
 	diagCancel()
 
+	// idle_for vs idle_timeout is the first thing to check: if idle_for is at
+	// or past idle_timeout the runtime's lifetime simply expired, and the
+	// question becomes which long operation failed to keep it extended.
+	lifetime := fmt.Sprintf("idle_for=%s, idle_timeout=%s, active_execs=%d",
+		idleFor.Round(time.Second), idleTimeout, activeExecs)
 	if diag.TerminationReason != "" {
-		log.Printf("Dropping session %s: runtime lost (pool=%s, pod=%s, reason=%s, exit_code=%d, steps=%d, duration=%ds, image=%s, experiment=%s)",
-			sessionID, allocation.PoolRef, allocation.PodName, diag.TerminationReason, diag.ExitCode, diag.StepCount, diag.DurationSeconds, diag.Image, diag.ExperimentID)
+		log.Printf("Dropping session %s: runtime lost (pool=%s, pod=%s, reason=%s, exit_code=%d, steps=%d, duration=%ds, %s, image=%s, experiment=%s)",
+			sessionID, allocation.PoolRef, allocation.PodName, diag.TerminationReason, diag.ExitCode, diag.StepCount, diag.DurationSeconds, lifetime, diag.Image, diag.ExperimentID)
 	} else {
-		log.Printf("Dropping session %s: runtime lost (pool=%s, pod=%s, steps=%d, duration=%ds, image=%s, experiment=%s)",
-			sessionID, allocation.PoolRef, allocation.PodName, diag.StepCount, diag.DurationSeconds, diag.Image, diag.ExperimentID)
+		log.Printf("Dropping session %s: runtime lost (pool=%s, pod=%s, steps=%d, duration=%ds, %s, image=%s, experiment=%s)",
+			sessionID, allocation.PoolRef, allocation.PodName, diag.StepCount, diag.DurationSeconds, lifetime, diag.Image, diag.ExperimentID)
 	}
 
 	if info.PodIP != "" {
