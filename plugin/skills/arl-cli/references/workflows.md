@@ -123,6 +123,35 @@ The adapter auto-builds images from Dockerfiles when the task image is not
 pre-built, using the `POST /v1/build` endpoint. It supports
 `dynamic_network_policy` via `PATCH /v1/sessions/{id}/network-policy`.
 
+### Starting from an existing session
+
+`--ek` selects one of three origins; they are mutually exclusive:
+
+```bash
+--ek resume_from=<session-id>                        # wake a suspended session
+--ek fork_from=<session-id> --ek fork_step=3         # checkpoint tar, jumps to step 3
+--ek replay_from=<session-id>                        # re-run the whole command log
+--ek replay_from=<session-id> --ek replay_up_to_step=3
+```
+
+`fork_from` needs `SANDBOX_CHECKPOINT_ENABLED` on the gateway and copies
+filesystem state directly. `replay_from` needs no checkpoint support but pays
+for a full re-execution, always starting at the source's step 0 —
+`replay_up_to_step` sets the end, never the start.
+
+Replay only reconstructs the source on a session nothing else has written to,
+so the adapter runs it on a freshly created session and skips the
+environment-dir upload; the source's own bootstrap steps are part of the log
+being replayed. The adapter raises if the gateway reports any step as
+unapplied, because a partially replayed environment would be scored as if it
+were the source.
+
+Replayed steps execute straight on the sandbox and do not enter the new
+session's gateway history, so they get no snapshot IDs and cannot be passed to
+`restore`. Provenance instead lands on `environment.arl.replayed_from` and
+`environment.arl.replayed_steps`; `environment.arl.steps` keeps only this
+session's own restorable steps.
+
 ## Image Build
 
 Build container images via the gateway's Kaniko build API (requires

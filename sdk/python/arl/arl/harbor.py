@@ -69,6 +69,14 @@ class ArlSessionInfo:
     fork_step: int = 0
     steps: list[ArlStepSnapshot] = field(default_factory=list)
 
+    # Replay provenance. Kept separate from ``steps`` because replayed steps
+    # are executed straight on the sandbox and never enter this session's
+    # gateway history, so they have no snapshot_id here and cannot be passed
+    # to restore. ``steps`` stays restorable; these two only say where the
+    # starting state came from.
+    replayed_from: str = ""
+    replayed_steps: int = 0
+
     @property
     def last_snapshot_id(self) -> str:
         return self.steps[-1].snapshot_id if self.steps else ""
@@ -95,6 +103,14 @@ class ArlEnvironment(BaseEnvironment):
     * ``fork_from`` -- source session ID for forking from a checkpoint.
     * ``fork_step`` -- step number to fork from (default 0).
     * ``resume_from`` -- suspended session ID to resume.
+    * ``replay_from`` -- source session ID whose recorded steps are re-executed
+      on a freshly created session.  Unlike ``fork_from`` this needs no
+      checkpoint support on the gateway, but it costs a full re-run of the
+      source's command log.
+    * ``replay_up_to_step`` -- replay through this step index; omit to replay
+      every recorded step.
+
+    ``fork_from``, ``resume_from`` and ``replay_from`` are mutually exclusive.
 
     Agents can access ``environment.arl`` (an :class:`ArlSessionInfo`) to
     read the session ID, gateway URL, and per-step snapshot history.
@@ -121,6 +137,8 @@ class ArlEnvironment(BaseEnvironment):
         fork_from: str = "",
         fork_step: int = 0,
         resume_from: str = "",
+        replay_from: str = "",
+        replay_up_to_step: int | str | None = None,
         logger: logging.Logger | None = None,
         **kwargs: Any,
     ) -> None:
@@ -139,6 +157,12 @@ class ArlEnvironment(BaseEnvironment):
         self._fork_from = fork_from or os.environ.get("ARL_FORK_FROM", "")
         self._fork_step = int(fork_step or os.environ.get("ARL_FORK_STEP", "0"))
         self._resume_from = resume_from or os.environ.get("ARL_RESUME_FROM", "")
+        self._replay_from = replay_from or os.environ.get("ARL_REPLAY_FROM", "")
+        self._replay_up_to_step = _optional_int(
+            replay_up_to_step
+            if replay_up_to_step is not None
+            else os.environ.get("ARL_REPLAY_UP_TO_STEP")
+        )
 
         self._client: AsyncGatewayClient | None = None
         self._arl_session_id: str | None = None
@@ -215,6 +239,22 @@ class ArlEnvironment(BaseEnvironment):
             self.logger.warning("Dynamic network policy not applied: %s", exc)
 
     def _validate_definition(self) -> None:
+        origins = [
+            name
+            for name, value in (
+                ("fork_from", self._fork_from),
+                ("resume_from", self._resume_from),
+                ("replay_from", self._replay_from),
+            )
+            if value
+        ]
+        if len(origins) > 1:
+            raise ValueError(
+                f"{' and '.join(origins)} are mutually exclusive: a session can only "
+                "be started from one origin"
+            )
+        if self._replay_up_to_step is not None and not self._replay_from:
+            raise ValueError("replay_up_to_step requires replay_from")
         if self.task_env_config.docker_image:
             return
         require_agent_environment_definition(
@@ -376,7 +416,45 @@ class ArlEnvironment(BaseEnvironment):
         )
 
         await self.ensure_dirs(self._mount_targets(writable_only=True))
+
+        if self._replay_from:
+            await self._replay_into(info.id)
+            return
+
         await self._upload_environment_dir_after_start()
+
+    async def _replay_into(self, session_id: str) -> None:
+        """Rebuild state by re-executing a source session's recorded steps.
+
+        Replay always restarts the source's command log at step 0 and only
+        appends to whatever is already on disk -- it never resets the target.
+        That reconstructs the source faithfully only on a session nothing else
+        has written to, so this runs immediately after create_session and
+        skips the environment-dir upload: the source's own bootstrap steps are
+        part of the log being replayed, and uploading again first would let a
+        stale file survive a step that the source recorded as a create.
+        """
+        client = self._get_client()
+        resp = await client.replay_from(
+            session_id,
+            self._replay_from,
+            up_to_step=self._replay_up_to_step,
+        )
+        if resp.errors:
+            raise RuntimeError(
+                f"replay from {self._replay_from} into {session_id} left "
+                f"{resp.errors} of {resp.steps_replayed + resp.errors} steps unapplied; "
+                "the environment does not reproduce the source and the trial would "
+                "score against the wrong state"
+            )
+        self.arl.replayed_from = self._replay_from
+        self.arl.replayed_steps = resp.steps_replayed
+        self.logger.info(
+            "ARL session %s replayed %d steps from %s",
+            session_id,
+            resp.steps_replayed,
+            self._replay_from,
+        )
 
     async def stop(self, delete: bool) -> None:
         if self._arl_session_id:
@@ -495,6 +573,13 @@ class ArlEnvironment(BaseEnvironment):
             target_dir=target_dir,
             exclude=[],
         )
+
+
+def _optional_int(value: int | str | None) -> int | None:
+    """Parse a kwarg that Harbor may hand over as a string via ``--ek``."""
+    if value is None or value == "":
+        return None
+    return int(value)
 
 
 def _host_to_cidr(host: str) -> str | None:

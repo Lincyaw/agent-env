@@ -12,7 +12,7 @@
 | Pydantic types | SDK response/request models and validation (includes `BuildResponse`, `ForkSessionResponse`, `UploadFileResponse`) | `sdk/python/arl/arl/types.py` |
 | Auth helpers | API key auth and SSO/OIDC auth plumbing | `sdk/python/arl/arl/auth.py`, `pkg/gateway/auth.go` |
 | Config/tools models | Structured config env, secret/configmap injection, tool specs | `sdk/python/arl/arl/configenv.py`, `sdk/python/arl/arl/types.py` |
-| Harbor adapter | Harbor `BaseEnvironment` backed by ARL sandbox sessions; auto-build from Dockerfile, dynamic network policy | `sdk/python/arl/arl/harbor.py` |
+| Harbor adapter | Harbor `BaseEnvironment` backed by ARL sandbox sessions; auto-build from Dockerfile, dynamic network policy, session origin via `fork_from`/`resume_from`/`replay_from` | `sdk/python/arl/arl/harbor.py` |
 | Package exports | What `from arl import ...` exposes | `sdk/python/arl/arl/__init__.py` |
 
 ## Feature Map
