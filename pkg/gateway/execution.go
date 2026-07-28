@@ -442,7 +442,13 @@ func (g *Gateway) persistSingleCheckpointStep(sessionID, podIP string, checkpoin
 	tmpPath := tmpFile.Name()
 	defer os.Remove(tmpPath)
 
-	if err := g.executorClient.DownloadCheckpoint(ctx, podIP, checkpointStep, tmpFile); err != nil {
+	// Single-step, not combined. DownloadCheckpoint returns steps 1..N in one
+	// tar, so persisting it per step stored every earlier delta once per
+	// later step -- O(N^2) bytes. One session that unpacked a 1.4GB
+	// dependency tree at step 13 carried that 1.4GB in all of steps 13..21
+	// and filled a 50Gi store on its own. LoadCombined reassembles the deltas
+	// at fork time instead.
+	if err := g.executorClient.DownloadCheckpointStep(ctx, podIP, checkpointStep, tmpFile); err != nil {
 		tmpFile.Close()
 		return fmt.Errorf("download step %d: %w", checkpointStep, err)
 	}

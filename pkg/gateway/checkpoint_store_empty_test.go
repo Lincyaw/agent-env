@@ -3,7 +3,9 @@ package gateway
 import (
 	"archive/tar"
 	"bytes"
+	"io"
 	"os"
+	"sort"
 	"strings"
 	"testing"
 )
@@ -65,19 +67,64 @@ func TestLoadCombinedRejectsATruncatedTar(t *testing.T) {
 	}
 }
 
-func TestLoadCombinedPrefersTheHighestStepInRange(t *testing.T) {
-	store := NewCheckpointStore(t.TempDir())
-	for _, step := range []int{1, 2, 5} {
-		var buf bytes.Buffer
-		w := tar.NewWriter(&buf)
-		name := "step"
-		w.WriteHeader(&tar.Header{Name: name, Size: int64(step)})
-		w.Write(bytes.Repeat([]byte("x"), step))
-		w.Close()
-		if err := store.Save("sess-1", step, bytes.NewReader(buf.Bytes())); err != nil {
-			t.Fatalf("save step %d: %v", step, err)
+// saveStep stores a step tar holding one entry per name.
+func saveStep(t *testing.T, store *CheckpointStore, step int, contents map[string]string) {
+	t.Helper()
+	var buf bytes.Buffer
+	w := tar.NewWriter(&buf)
+	names := make([]string, 0, len(contents))
+	for name := range contents {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		body := contents[name]
+		if err := w.WriteHeader(&tar.Header{Name: name, Size: int64(len(body))}); err != nil {
+			t.Fatalf("write header %s: %v", name, err)
+		}
+		if _, err := w.Write([]byte(body)); err != nil {
+			t.Fatalf("write body %s: %v", name, err)
 		}
 	}
+	if err := w.Close(); err != nil {
+		t.Fatalf("close step %d tar: %v", step, err)
+	}
+	if err := store.Save("sess-1", step, bytes.NewReader(buf.Bytes())); err != nil {
+		t.Fatalf("save step %d: %v", step, err)
+	}
+}
+
+func readAll(t *testing.T, path string) map[string]string {
+	t.Helper()
+	f, err := os.Open(path)
+	if err != nil {
+		t.Fatalf("open combined: %v", err)
+	}
+	defer f.Close()
+	got := make(map[string]string)
+	tr := tar.NewReader(f)
+	for {
+		h, err := tr.Next()
+		if err != nil {
+			break
+		}
+		body, _ := io.ReadAll(tr)
+		if _, dup := got[h.Name]; dup {
+			t.Errorf("%s appears twice in the combined tar", h.Name)
+		}
+		got[h.Name] = string(body)
+	}
+	return got
+}
+
+func TestLoadCombinedMergesStepDeltas(t *testing.T) {
+	store := NewCheckpointStore(t.TempDir())
+	// Each step tar holds only that step's overlay delta, so reconstructing
+	// state through step 3 means merging steps 1..3 -- not picking one of them.
+	saveStep(t, store, 1, map[string]string{"a.txt": "a1", "keep.txt": "kept"})
+	saveStep(t, store, 2, map[string]string{"b.txt": "b2"})
+	saveStep(t, store, 3, map[string]string{"a.txt": "a3"})
+	saveStep(t, store, 4, map[string]string{"late.txt": "too-late"})
 
 	path, err := store.LoadCombined("sess-1", 3)
 	if err != nil {
@@ -85,15 +132,30 @@ func TestLoadCombinedPrefersTheHighestStepInRange(t *testing.T) {
 	}
 	defer os.Remove(path)
 
-	f, _ := os.Open(path)
-	defer f.Close()
-	h, err := tar.NewReader(f).Next()
-	if err != nil {
-		t.Fatalf("read archive: %v", err)
+	got := readAll(t, path)
+	want := map[string]string{"a.txt": "a3", "b.txt": "b2", "keep.txt": "kept"}
+	if len(got) != len(want) {
+		t.Fatalf("got %v, want %v", got, want)
 	}
-	// Each step tar is already cumulative, so step 2 is the answer for
-	// "through step 3", not step 5 and not a merge.
-	if h.Size != 2 {
-		t.Errorf("got the step-%d archive, want step 2", h.Size)
+	for name, body := range want {
+		if got[name] != body {
+			t.Errorf("%s = %q, want %q", name, got[name], body)
+		}
+	}
+}
+
+func TestLoadCombinedRejectsAMissingStep(t *testing.T) {
+	store := NewCheckpointStore(t.TempDir())
+	// Step 2 never persisted. Its writes exist in no other tar, so a merge
+	// would silently produce a filesystem missing whatever step 2 wrote.
+	saveStep(t, store, 1, map[string]string{"a.txt": "a1"})
+	saveStep(t, store, 3, map[string]string{"c.txt": "c3"})
+
+	_, err := store.LoadCombined("sess-1", 3)
+	if err == nil {
+		t.Fatal("a gap in the step sequence must be refused")
+	}
+	if !strings.Contains(err.Error(), "missing") {
+		t.Errorf("error should name the missing steps, got: %v", err)
 	}
 }

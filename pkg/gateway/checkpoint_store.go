@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"archive/tar"
 	"fmt"
 	"io"
 	"os"
@@ -111,52 +112,149 @@ func (s *CheckpointStore) LoadCombined(sessionID string, throughStep int) (strin
 	if err != nil {
 		return "", fmt.Errorf("list steps: %w", err)
 	}
-	// Each step-N.tar is already a combined tar (steps 1..N), so use the
-	// highest available step that is <= throughStep directly.
-	bestStep := -1
+	var selected []int
 	for _, step := range steps {
-		if step <= throughStep && step > bestStep {
-			bestStep = step
+		if step <= throughStep {
+			selected = append(selected, step)
 		}
 	}
-	if bestStep < 0 {
+	if len(selected) == 0 {
 		return "", fmt.Errorf("no checkpoint steps found for session %s through step %d", sessionID, throughStep)
 	}
 
-	src, err := s.Load(sessionID, bestStep)
-	if err != nil {
-		return "", fmt.Errorf("open step %d: %w", bestStep, err)
+	// Steps are overlay deltas, so every one of them is load-bearing: a gap
+	// means the files that step wrote are simply absent from the fork. The
+	// store used to hold cumulative tars, where the newest file alone carried
+	// the whole state and a missing step healed itself, so this check has no
+	// predecessor. Persisting is best-effort and asynchronous, which makes
+	// gaps rare but real -- fail loudly rather than fork a filesystem that is
+	// silently missing a step's worth of writes.
+	if missing := missingSteps(selected); len(missing) > 0 {
+		return "", fmt.Errorf(
+			"checkpoint steps %v missing for session %s (have %d of steps 1..%d); "+
+				"cannot reconstruct filesystem state, since each step tar holds only "+
+				"that step's changes",
+			missing, sessionID, len(selected), selected[len(selected)-1])
 	}
-	defer src.Close()
+
+	// A path rewritten on many steps appears in each of their tars. Extraction
+	// would land on the right content either way because later entries
+	// overwrite earlier ones, but emitting every version would put the
+	// per-step redundancy straight back into the fork tar. Resolve the winning
+	// step per path first, then write each path once.
+	winner, err := s.lastWriterPerPath(sessionID, selected)
+	if err != nil {
+		return "", err
+	}
 
 	tmpFile, err := os.CreateTemp("", "arl-checkpoint-combined-*.tar")
 	if err != nil {
 		return "", fmt.Errorf("create combined temp file: %w", err)
 	}
 	tmpPath := tmpFile.Name()
-
-	if _, err := io.Copy(tmpFile, src); err != nil {
+	fail := func(err error) (string, error) {
 		tmpFile.Close()
 		os.Remove(tmpPath)
-		return "", fmt.Errorf("copy checkpoint tar: %w", err)
+		return "", err
+	}
+
+	tw := tar.NewWriter(tmpFile)
+	for _, step := range selected {
+		err := s.forEachEntry(sessionID, step, func(hdr *tar.Header, tr *tar.Reader) error {
+			if winner[hdr.Name] != step {
+				return nil
+			}
+			if err := tw.WriteHeader(hdr); err != nil {
+				return fmt.Errorf("write header %q: %w", hdr.Name, err)
+			}
+			if hdr.Typeflag != tar.TypeReg {
+				return nil
+			}
+			if _, err := io.Copy(tw, tr); err != nil {
+				return fmt.Errorf("copy %q from step %d: %w", hdr.Name, step, err)
+			}
+			return nil
+		})
+		if err != nil {
+			return fail(err)
+		}
+	}
+	if err := tw.Close(); err != nil {
+		return fail(fmt.Errorf("finish combined tar: %w", err))
 	}
 	if err := tmpFile.Close(); err != nil {
 		os.Remove(tmpPath)
 		return "", fmt.Errorf("close combined temp file: %w", err)
 	}
 
-	// A step that changed nothing on disk yields a tar with no members, which
-	// is 1024 bytes of zero blocks and extracts cleanly. Rejecting it treated a
-	// legitimate checkpoint as corruption, so forking such a step worked from a
-	// live sandbox and failed from the store. Only a file with no content at
-	// all is unusable.
-	fi, _ := os.Stat(tmpPath)
-	if fi != nil && fi.Size() == 0 {
-		os.Remove(tmpPath)
-		return "", fmt.Errorf("checkpoint tar for step %d is truncated: zero bytes on disk", bestStep)
+	// Steps that changed nothing on disk merge into a tar with no members.
+	// That is 1024 bytes of zero blocks and extracts cleanly, so it is a
+	// legitimate checkpoint rather than corruption; rejecting it once made
+	// forking such a step work from a live sandbox and fail from the store.
+	return tmpPath, nil
+}
+
+// missingSteps reports which numbers are absent from a sorted, ascending step
+// list that should cover 1..last.
+func missingSteps(steps []int) []int {
+	var missing []int
+	next := 1
+	for _, step := range steps {
+		for ; next < step; next++ {
+			missing = append(missing, next)
+		}
+		next = step + 1
+	}
+	return missing
+}
+
+// lastWriterPerPath maps each archived path to the highest step whose tar
+// contains it.
+func (s *CheckpointStore) lastWriterPerPath(sessionID string, steps []int) (map[string]int, error) {
+	winner := make(map[string]int)
+	for _, step := range steps {
+		err := s.forEachEntry(sessionID, step, func(hdr *tar.Header, _ *tar.Reader) error {
+			winner[hdr.Name] = step
+			return nil
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
+	return winner, nil
+}
+
+// forEachEntry walks the tar members of one step. The reader passed to fn is
+// only valid until fn returns.
+func (s *CheckpointStore) forEachEntry(sessionID string, step int, fn func(*tar.Header, *tar.Reader) error) error {
+	f, err := os.Open(s.stepPath(sessionID, step))
+	if err != nil {
+		return fmt.Errorf("open step %d: %w", step, err)
+	}
+	defer f.Close()
+
+	// A step that changed nothing is a valid 1024-byte archive of zero blocks
+	// and must load. A zero-byte file is a different thing -- an interrupted
+	// write that left no archive terminator -- and tar.Reader reports it as a
+	// clean EOF rather than an error, so it has to be caught here or it passes
+	// as "this step wrote nothing".
+	if fi, err := f.Stat(); err == nil && fi.Size() == 0 {
+		return fmt.Errorf("checkpoint tar for step %d is truncated: zero bytes on disk", step)
 	}
 
-	return tmpPath, nil
+	tr := tar.NewReader(f)
+	for {
+		hdr, err := tr.Next()
+		if err == io.EOF {
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("read step %d tar: %w", step, err)
+		}
+		if err := fn(hdr, tr); err != nil {
+			return err
+		}
+	}
 }
 
 // Cleanup removes all persisted checkpoint data for a session.
