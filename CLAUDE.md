@@ -113,11 +113,25 @@ Setting `SANDBOX_CHECKPOINT_ENABLED` without `CHECKPOINT_STORE_PATH` leaves chec
 - **replicas=0**: Default. Pre-pulls image only; pods are created on demand when sessions arrive.
 - **Stale pools after image update**: After pushing a new image tag, delete existing `SandboxWarmPool` and `SandboxTemplate` resources that reference the old tag. Warm sandboxes retain the previous image until their pool is recreated.
 - **Gateway and executor move together**: From v0.25.0 executor connections authenticate, so both images must be deployed at the same tag. A new gateway against an older executor creates sessions successfully and then fails the first exec with `executor is too old for connection authentication`. Skaffold sets `gateway.image.tag` and `executorAgent.image.tag` from the same build, so the documented flow is safe; a bare `helm install` is not, because `executorAgent.image.tag` defaults to `.Chart.AppVersion`.
-- **Pin `auth.grpcToken` when using `helm template`**: The gateway derives each sandbox's executor token from this secret, so rotating it makes every already-claimed sandbox unreachable. `helm upgrade` preserves the value through a cluster lookup, but `helm template` cannot look it up and mints a fresh one on every render. With the render-then-apply flow above, read the existing value first:
+- **Pin every auto-generated secret when using `helm template`**: Four values are minted randomly when omitted. `helm upgrade` preserves them through a cluster lookup; `helm template` cannot look them up and generates a fresh one on every render, so the render-then-apply flow must pass all four explicitly. Read them from the live cluster first:
   ```bash
-  --set auth.grpcToken="$(kubectl -n arl get secret agent-env-grpc-token \
+  NS=arl
+  --set auth.grpcToken="$(kubectl -n $NS get secret agent-env-grpc-token \
     -o jsonpath='{.data.token}' | base64 -d)"
+  --set auth.apiKeys="$(kubectl -n $NS get secret agent-env-auth \
+    -o jsonpath='{.data.api-keys}' | base64 -d)"
+  --set clickhouse.password="$(kubectl -n $NS get secret agent-env-clickhouse \
+    -o jsonpath='{.data.password}' | base64 -d)"
+  --set grafana.adminPassword="$(kubectl -n $NS get secret agent-env-grafana \
+    -o jsonpath='{.data.admin-password}' | base64 -d)"
   ```
+  Each fails differently and none of them fail loudly: `auth.grpcToken` strands every sandbox that already claimed a derived token, `auth.apiKeys` invalidates every client's key, `clickhouse.password` locks the gateway out of the trajectory database, `grafana.adminPassword` locks you out of the dashboards. Rotating ClickHouse is the quiet one — the server only reads `CLICKHOUSE_PASSWORD` when its entrypoint writes `users.d/default-user.xml` at container start, so a long-running pod keeps the old password while the restarted gateway uses the new one, and the only symptom is a repeating `Authentication failed` warning in the gateway log. Recover by reading what the server actually holds rather than guessing:
+  ```bash
+  kubectl -n $NS exec agent-env-clickhouse-0 -- \
+    grep -oP '(?<=CDATA\[)[^]]+' /etc/clickhouse-server/users.d/default-user.xml
+  ```
+  Before applying, diff the rendered Secrets against the live ones rather than trusting this list to stay complete. `kubectl diff` masks Secret values as `*** (before)/(after)` whenever the object differs at all — including a chart-version label change — so a masked diff is not evidence that a secret changed, and not evidence that it didn't.
+- **Cluster values live in `charts/agent-env/values-hk.yaml`**, not in `--set` flags. It is validated by rendering it and diffing against the live cluster; that diff should be empty apart from image tags and whatever you are intentionally changing. It deliberately contains no secrets and no gateway address.
 - **Post-deploy checks**: Verify CRDs and controllers first, then gateway health:
   ```bash
   kubectl --context <context> get crd | grep -i sandbox

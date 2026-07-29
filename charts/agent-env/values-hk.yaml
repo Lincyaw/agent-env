@@ -7,6 +7,13 @@
 # forking a stopped session stayed broken until someone read the code. Anything
 # this cluster needs belongs here, where it is diffable and reviewable.
 #
+# The gateway address is deliberately absent too. It is a LoadBalancer IP that
+# can be reassigned, and pinning it in the repo invites someone to hardcode it
+# somewhere it does not belong. Read it from the cluster:
+#
+#   kubectl -n arl get svc agent-env-gateway \
+#     -o jsonpath='{.status.loadBalancer.ingress[0].ip}'
+#
 # Secrets are deliberately absent. Pass them at render time, reading the values
 # already in the cluster so a re-render never rotates them:
 #
@@ -17,18 +24,37 @@
 #     -o jsonpath='{.data.admin-password}' | base64 -d)
 #   CH_PW=$(kubectl -n $NS get secret agent-env-clickhouse \
 #     -o jsonpath='{.data.password}' | base64 -d)
+#   API_KEYS=$(kubectl -n $NS get secret agent-env-auth \
+#     -o jsonpath='{.data.api-keys}' | base64 -d)
 #
 #   helm template agent-env charts/agent-env -n $NS -f charts/agent-env/values-hk.yaml \
 #     --set auth.grpcToken="$GRPC_TOKEN" \
+#     --set auth.apiKeys="$API_KEYS" \
 #     --set grafana.adminPassword="$GRAFANA_PW" \
 #     --set clickhouse.password="$CH_PW" \
 #     --set gateway.image.tag=vX.Y.Z \
 #     --set executorAgent.image.tag=vX.Y.Z \
 #     --set imageLocalityScheduler.image.tag=vX.Y.Z
 #
-# Rotating auth.grpcToken strands every sandbox that already claimed a token
-# derived from it, and rotating clickhouse.password locks the gateway out of
-# the trajectory database, so reading the live values is not optional.
+# Every one of those four is auto-generated when omitted, and `helm template`
+# cannot perform the cluster lookup that `helm upgrade` uses to preserve them,
+# so leaving one out silently mints a new value. The consequences differ and
+# none of them are loud:
+#
+#   auth.grpcToken       strands every sandbox that already claimed a token
+#                        derived from it
+#   clickhouse.password  locks the gateway out of the trajectory database. This
+#                        one has already happened: a render on 2026-07-28 pinned
+#                        grpcToken but not this, the gateway restarted onto a
+#                        fresh password, and because the ClickHouse pod had been
+#                        running since 2026-07-18 it still held the original.
+#                        Trajectory writes failed for ~30h and the only symptom
+#                        was a warning in the gateway log
+#   auth.apiKeys         invalidates every client's key at once
+#   grafana.adminPassword locks you out of the dashboards
+#
+# Diff the rendered Secrets against the live ones before applying, rather than
+# trusting that the list above is complete.
 
 global:
   imageRegistry: ""
@@ -64,13 +90,25 @@ irohRelay:
 # Enabling this switches the gateway to the Recreate strategy. Server-side
 # apply cannot change spec.strategy in place, so the first rollout after
 # turning it on needs `kubectl delete deploy agent-env-gateway` first.
+#
+# Each step tar holds only that step's overlay delta as of v0.27.0. A store
+# written by an older gateway holds cumulative tars and cannot be read as
+# deltas, so clear the PVC when upgrading across that boundary.
 checkpoint:
   enabled: true
 
-# Authentication is disabled: the gateway is reachable only from inside the
-# cluster and through an explicit port-forward.
 auth:
-  enabled: false
+  # The gateway is a LoadBalancer with a routable address, so anyone who can
+  # reach it can reach the API. It ran without authentication until
+  # 2026-07-29; this must stay on.
+  enabled: true
+  # Sessions created while auth was off carry no owner, and CheckSessionOwnership
+  # denies access to an ownerless session rather than failing open. Turning this
+  # off and on again therefore strands whatever is running at the time -- those
+  # sessions become unreachable by every API call, including delete, until the
+  # idle sweep reclaims them.
+  rateLimitRPS: 1000
+  rateLimitBurst: 2000
 
 # Both default to enabled now. They had been deployed here since 2026-07-18
 # but never wired to the gateway: a later render dropped the flags, and
@@ -84,11 +122,27 @@ clickhouse:
 
 build:
   enabled: false
-registry:
-  enabled: false
 
-# The agent-sandbox controller is installed separately in the
-# agent-sandbox-system namespace. Rendering it here would place its resources
-# in `arl` instead.
+# In-cluster registry, running since 2026-07-18. Sandbox images are pulled from
+# it by its cluster IP, so disabling it breaks every task image already tagged
+# against that address:
+#
+#   kubectl -n arl get svc agent-env-registry -o jsonpath='{.spec.clusterIP}'
+registry:
+  enabled: true
+
+# The controller's own resources render into agent-sandbox-system regardless of
+# the release namespace, which the upstream CRDs require for their conversion
+# webhooks. The extension CRDs (SandboxClaim, SandboxWarmPool, SandboxTemplate)
+# are what the gateway allocates through, so they are not optional here.
+#
+# The controller image is not built by this repo's skaffold config. Build and
+# push it from the agent-sandbox repo and pin the tag here; leaving it unset
+# points a bundled install at registry.k8s.io.
 agentSandbox:
-  enabled: false
+  enabled: true
+  image:
+    repository: docker.io/opspai/agent-sandbox-controller
+    tag: d0f4371-20260722202937
+  controller:
+    extensions: true
